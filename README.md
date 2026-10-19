@@ -12,7 +12,7 @@ One Obsidian / Markdown vault that every AI can search and write to safely: Clau
 ## Command line
 
 ```
-brainlink setup | init | connect <client|all> | disconnect <client> | clients | license [KEY] | status | sync | serve [--http]
+brainlink setup | init | connect <client|all> | disconnect <client> | clients | license [KEY] | status | sync | ui | demo | serve [--http]
 ```
 
 `connect` also accepts `--all`. `sync` runs one sync pass (local-only by default; choose Drive, iCloud or Dropbox in Setup).
@@ -43,16 +43,20 @@ brainlink setup | init | connect <client|all> | disconnect <client> | clients | 
 ```bash
 npm install               # links the sibling brainlink-store checkout (file:../brainlink-store)
 npm test                  # one test suite, no external dependencies (Node 22+)
-npm run build:mac        # dist/BrainLink-<version>.pkg
+node bin/brainlink.mjs demo   # try the milestone UI on a throwaway sample vault, nothing real touched
+node bin/brainlink.mjs ui     # same UI on the vaults in config.json
+npm run build:mac        # dist/BrainLink-<version>.pkg (unsigned build: packaging/macos/INSTALL-UNSIGNED.md)
 npm run build:win        # dist/BrainLink-Setup-<version>.exe + portable zip (needs makensis)
+npm run build:win-preview # dist/BrainLink-Preview-<version>-windows.zip — no installer, no bundled Node, Node 22+ required
 npm run build:linux      # dist/*.deb + linux tar.gz for x64 and arm64
 node tools/license-issue.mjs issue --email buyer@example.com --plan personal   # vendor only
 ```
 
-Dependency: `brainlink-store` (`../brainlink-store`, this repo's sibling) — the Obsidian-independent store contract. Not vendored; see that repo's README for how the UI (`ui/app/`) resolves the same checkout.
+Dependency: `brainlink-store` (`../brainlink-store`, this repo's sibling) — the Obsidian-independent store contract. Not vendored; see that repo's README for how the UI (`ui/app/`) resolves the same checkout. `src/store/folder-store.mjs` is the real vault backing it: every note is a plain Markdown file in the vault folder (frontmatter is left byte-for-byte untouched until that note is actually edited through the API), with CAS/versions/sessions/snapshots delegated to `brainlink-store`'s reference implementation and search routed through `src/core.mjs` (the same ranking the MCP tools use).
 
-Packaging notes: [Windows](packaging/windows/README.md), [Linux](packaging/linux/README.md). Clean-room code: no code from Obsidian Copilot or Khoj (AGPL).
+Packaging notes: [Windows](packaging/windows/README.md), [macOS unsigned install](packaging/macos/INSTALL-UNSIGNED.md), [Linux](packaging/linux/README.md). Clean-room code: no code from Obsidian Copilot or Khoj (AGPL).
 
 ## Change Log
 
+- 2026-10-19: `brainlink ui` and `brainlink demo` serve the milestone UI (`ui/app/`, unmodified) on 127.0.0.1 with a per-launch token, backed by a real Markdown-folder `BrainStore` (`src/host.mjs`, `src/store/folder-store.mjs`, `src/ui-server.mjs`). `demo` copies `samples/acme-studio` into a throwaway temp vault first, so trying it never touches a real vault or `config.json`. Windows: `packaging/windows/build-portable-zip.sh` (`npm run build:win-preview`) makes a no-installer preview zip for a machine that already has Node. macOS: `packaging/macos/INSTALL-UNSIGNED.md` plus a postinstall fix so a failed `/usr/local/bin` link shows up in the install log instead of silently vanishing.
 - 2026-10-19: Session tools (`session_list`, `session_read`, `session_log`) over a local, private-by-default session store, with read-only importers for Claude Code and Codex (`src/sessions/`, `docs/SESSION-INDEX.md`). `brainlink sync` wires `config.json`'s new optional `sync` key to the sync engine (local by default). `brainlink connect` accepts `--all`; `detect()` now reports ChatGPT honestly as needing a remote HTTPS connector (pending Ian). Depends on `brainlink-store` v0.2 (`search`, `Session.project`/`private`, `SessionRecord`).

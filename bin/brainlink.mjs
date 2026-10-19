@@ -1,20 +1,22 @@
 #!/usr/bin/env node
 // BrainLink command line. AI clients launch `brainlink serve`; people use `brainlink setup`.
 import path from 'node:path';
-import { homedir } from 'node:os';
-import { stat, readFile, writeFile, mkdir } from 'node:fs/promises';
+import { homedir, tmpdir } from 'node:os';
+import { stat, readFile, writeFile, mkdir, cp, mkdtemp } from 'node:fs/promises';
 import { randomBytes } from 'node:crypto';
 import { loadConfig, saveConfig, configPath, appHome } from '../src/config.mjs';
 import { verifyLicense, planFeatures, effectiveLicense } from '../src/license.mjs';
 import { buildPack, scaffold, mergePack, PACKS } from '../src/packs.mjs';
 import { CLIENTS, detect, connectClient, disconnectClient } from '../src/connectors.mjs';
 import { createMcp, serveStdio, serveHttp, VERSION } from '../src/server.mjs';
-import { openContext, launchSpec, logActivity, refreshMap } from '../src/runtime.mjs';
+import { openContext, launchSpec, logActivity, refreshMap, ROOT } from '../src/runtime.mjs';
 import { warmSemantic } from '../src/core.mjs';
 import { brief } from '../src/insights.mjs';
 import { startSetup, openInBrowser } from '../src/setup.mjs';
 import { runSync } from '../src/sync-cli.mjs';
 import { PROVIDER_LABELS } from '../src/sync/settings.mjs';
+import { createConfiguredHost, createFolderHost } from '../src/host.mjs';
+import { serveUi } from '../src/ui-server.mjs';
 
 // `brainlink brief | head` closes the pipe early: exit quietly instead of crashing.
 process.stdout.on('error', (e) => { if (e.code === 'EPIPE') process.exit(0); throw e; });
@@ -47,6 +49,8 @@ const HELP = `BrainLink MCP ${VERSION} — one Markdown brain for every AI
   brainlink brief [--vault V] [--days 7]  what changed and what is open
   brainlink map                        rebuild each vault's Home map
   brainlink sync                       one sync pass (local by default; set up in Setup)
+  brainlink ui [--no-open] [--port N]  open the milestone UI (notes, search, graph) on your vaults
+  brainlink demo [--no-open]           try the UI on a throwaway sample vault; touches nothing real
   brainlink serve                      MCP over stdio (what AI apps run)
   brainlink serve --http [PORT]        MCP over local HTTP (bearer token from Setup)
 
@@ -178,6 +182,23 @@ async function main() {
       const notesNote = r.provider !== 'local' ? ' (notes: pending the store integration — see brainlink-store/docs/progress.md)' : '';
       out(`sync (${label}): ${r.status}${notesNote}; sessions in index: ${r.sessions}`
         + (r.pushed?.length ? `; pushed ${r.pushed.length}` : '') + (r.pulled?.length ? `; pulled ${r.pulled.length}` : '') + (r.conflicts?.length ? `; conflicts ${r.conflicts.length}` : ''));
+      return;
+    }
+    case 'ui': {
+      let host;
+      try { host = await createConfiguredHost(); } catch (e) { fail(e.message); return; }
+      const port = Number(opt('port', 0)) || 0;
+      const s = await serveUi({ host, port, openUrl: flag('no-open') ? null : (u) => openInBrowser(u) });
+      out(`BrainLink UI: ${s.url}\nKeep this window open while you use it; press Control-C when done.`);
+      return;
+    }
+    case 'demo': {
+      const demoRoot = await mkdtemp(path.join(tmpdir(), 'brainlink-demo-'));
+      const demoPath = path.join(demoRoot, 'Demo Vault');
+      await cp(path.join(ROOT, 'samples', 'acme-studio'), demoPath, { recursive: true });
+      const host = await createFolderHost({ name: 'Demo Vault', folder: demoPath });
+      const s = await serveUi({ host, port: 0, openUrl: flag('no-open') ? null : (u) => openInBrowser(u) });
+      out(`BrainLink demo (made-up sample notes, nothing real touched): ${s.url}\nVault copied to: ${demoPath}\nPress Control-C when done.`);
       return;
     }
     case 'version': case '--version': out(VERSION); return;
