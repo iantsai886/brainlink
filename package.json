@@ -5,6 +5,7 @@
   "private": true,
   "type": "module",
   "bin": { "brainlink": "bin/brainlink.mjs" },
+  "dependencies": { "brainlink-store": "file:../brainlink-store" },
   "scripts": {
     "test": "node --test test/*.test.mjs",
     "setup": "node bin/brainlink.mjs setup",
