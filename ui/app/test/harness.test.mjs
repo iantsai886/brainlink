@@ -1,7 +1,7 @@
 import test from 'node:test'; import assert from 'node:assert/strict';
 import { makeStore, mockServices } from './harness.mjs';
 import { createApi } from '../lib/api.mjs';
-test('harness: real store seeded, private vault hidden from remote callers', async () => {
+test('harness: store seeded, private vault hidden from remote callers', async () => {
   const s = await makeStore();
   assert.equal((await s.list({ vault: 'Work' })).length, 4);
   assert.equal((await s.listSessions()).length, 3);

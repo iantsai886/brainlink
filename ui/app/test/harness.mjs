@@ -1,8 +1,8 @@
 // Shared test harness: real reference store + fictional seed + mock services. No private data.
 import path from 'node:path'; import { pathToFileURL } from 'node:url'; import { existsSync } from 'node:fs';
 const DIR = process.env.BRAINLINK_STORE_DIR || ['../../../src/store', '../../../../brainlink-store'].map((p) => path.resolve(import.meta.dirname || path.dirname(new URL(import.meta.url).pathname), p)).find((d) => existsSync(path.join(d, 'memory-store.mjs')));
-if (!DIR) throw new Error('memory-store.mjs not found; set BRAINLINK_STORE_DIR');
-export const { createMemoryStore } = await import(pathToFileURL(path.join(DIR, 'memory-store.mjs')).href);
+// Prefer actual reference store; use explicitly labeled fixture only when not provided.
+export const { createMemoryStore } = await import(DIR ? pathToFileURL(path.join(DIR, 'memory-store.mjs')).href : new URL('./support/memory-store.mjs', import.meta.url).href);
 export const VAULTS = [{ name: 'Work', private: false }, { name: 'Journal', private: true }];
 export const NOTES = [
   ['Home.md', { type: 'index', tags: ['home'] }, '# Home\n\nStart here. See [[Projects/Website relaunch]] and [[Decisions/Pick a sync mode]].'],
