@@ -1,0 +1,13 @@
+#!/bin/bash
+# Runs as root after the payload is installed. Adds the `brainlink` command and opens Setup
+# for the person at the console.
+APP="$2/Applications/BrainLink.app"
+[ -d "$APP" ] || APP="/Applications/BrainLink.app"
+mkdir -p /usr/local/bin
+ln -sf "$APP/Contents/Resources/bin/brainlink" /usr/local/bin/brainlink
+CONSOLE_USER=$(stat -f%Su /dev/console)
+if [ -n "$CONSOLE_USER" ] && [ "$CONSOLE_USER" != "root" ] && [ "${COMMAND_LINE_INSTALL:-0}" != "1" ]; then
+  CONSOLE_UID=$(id -u "$CONSOLE_USER")
+  launchctl asuser "$CONSOLE_UID" sudo -u "$CONSOLE_USER" open "$APP" >/dev/null 2>&1 || true
+fi
+exit 0
