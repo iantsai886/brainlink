@@ -10,7 +10,7 @@ import { recentNotes, openLoops, vaultHealth, brief } from './insights.mjs';
 import { listCommands, fillCommand } from './commands.mjs';
 import { TEMPLATES } from './templates.mjs';
 import { connectAgent, closeLoop } from './agents.mjs';
-import { openSessionStore } from './sessions/index.mjs';
+import { openSessionStore, importAll } from './sessions/index.mjs';
 import { sessionList, sessionRead, sessionLog } from './sessions/mcp.mjs';
 
 export const VERSION = '1.1.0';
@@ -27,6 +27,11 @@ export function createMcp(ctx, { onCall = () => {} } = {}) {
   const hasHandoff = Boolean(cfg.handoff && ctx.enabled.includes(cfg.handoff.vault));
   let sessionStorePromise = null;
   const sessionStore = () => sessionStorePromise ||= openSessionStore(ctx.env);
+  // Lazy, memoized: the first session_list call (not createMcp itself, which some callers use
+  // against a store they are still seeding) imports once; every later call just awaits the same
+  // resolved promise, so a stale or empty index never reaches a client.
+  let sessionImportPromise = null;
+  const importSessions = () => sessionImportPromise ||= sessionStore().then((store) => importAll({ store, env: ctx.env })).catch(() => {});
 
   const instructions = [
     `BrainLink: the user's Markdown / Obsidian vaults (enabled here: ${ctx.enabled.join(', ') || 'none — open BrainLink Setup'}).`,
@@ -111,7 +116,7 @@ export function createMcp(ctx, { onCall = () => {} } = {}) {
         q: { type: 'string', description: 'Keyword filter over title + summary.' }, client: { type: 'string' }, project: { type: 'string', description: 'Substring match on the session\'s project/working-directory label.' },
         since: { type: 'string', description: 'ISO date/time.' }, limit: { type: 'integer', minimum: 1, maximum: 20, default: 8 },
         include_private: { type: 'boolean', default: false } } },
-      run: async (a) => sessionList(await sessionStore(), a) },
+      run: async (a) => { await importSessions(); return sessionList(await sessionStore(), a); } },
     { name: 'session_read', title: 'Read one AI session', annotations: RO,
       description: 'Defaults to the summary only (no messages, ~800 tokens). Pass limit>0 for a capped-length page of messages, or full=true to page the real text at ~4k tokens via next_offset. Private sessions need include_private=true.',
       inputSchema: { type: 'object', properties: {

@@ -7,7 +7,7 @@ import { execFile } from 'node:child_process';
 import { homedir } from 'node:os';
 import path from 'node:path';
 import { loadConfig, saveConfig, configPath, normalize } from './config.mjs';
-import { verifyLicense, planFeatures, effectiveLicense } from './license.mjs';
+import { verifyLicense, planFeatures, effectiveLicense, startTrial } from './license.mjs';
 import { PACKS, buildPack, scaffold, mergePack } from './packs.mjs';
 import { CLIENTS, detect, connectClient, disconnectClient, test } from './connectors.mjs';
 import { createContext, search } from './core.mjs';
@@ -118,7 +118,7 @@ export async function startSetup(opts = {}) {
     }
     const already = cfg.vaults.find((v) => path.resolve(v.path) === vaultPath);
     if (!already) {
-      if (!cfg.license && !cfg.trial_started) cfg.trial_started = new Date().toISOString();
+      startTrial(cfg);
       const features = planFeatures(effectiveLicense(cfg));
       if (cfg.vaults.length >= features.maxVaults) return { ok: false, error: 'Your free plan has one vault. Remove it in Settings or add a licence key.' };
       let name = path.basename(vaultPath);

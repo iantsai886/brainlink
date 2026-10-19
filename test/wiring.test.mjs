@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtemp, mkdir, readFile, writeFile } from 'node:fs/promises';
+import { mkdtemp, mkdir, readFile, writeFile, cp } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { spawn } from 'node:child_process';
 import path from 'node:path';
@@ -10,8 +10,10 @@ import { normalize, validate } from '../src/config.mjs';
 import { detect, connect, disconnect, test as testClient, UNSUPPORTED } from '../src/connectors.mjs';
 import { runSync } from '../src/sync-cli.mjs';
 import { startSetup } from '../src/setup.mjs';
+import { openSessionStore } from '../src/sessions/index.mjs';
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
+const FIXTURES = path.join(ROOT, 'test', 'fixtures');
 const tmp = (p) => mkdtemp(path.join(tmpdir(), `brainlink-${p}-`));
 
 // ---- config.mjs: optional `sync` key ----
@@ -44,6 +46,58 @@ test('runSync: non-local provider with an offline folder queues instead of faili
   const cfg = normalize({ sync: { provider: 'dropbox', folder: path.join(await tmp('not-mounted'), 'missing'), device: 'macA' } });
   const r = await runSync(cfg, env);
   assert.equal(r.status, 'queued');
+});
+
+test('runSync: non-private sessions get scope "brain" so they reach the sync target; private sessions stay local', async () => {
+  const env = { BRAINLINK_HOME: await tmp('sync-sessions-home') };
+  const folder = await tmp('sync-sessions-folder');
+  const cfg = normalize({ sync: { provider: 'dropbox', folder, device: 'd1' } });
+  const store = await openSessionStore(env);
+  const pub = await store.putSession({ client: 'claude-code', source_id: 'pub/1', project: '/x', title: 'Public', summary: 'pub summary', started_at: '2026-10-10T00:00:00Z', note_refs: [], private: false, messages: [] });
+  await store.putSession({ client: 'claude-code', source_id: 'priv/1', project: '/x', title: 'Private', summary: 'priv summary', started_at: '2026-10-10T00:00:00Z', note_refs: [], private: true, messages: [] });
+  const r = await runSync(cfg, env);
+  assert.equal(r.sessions, 1, 'only the non-private session reaches the sync target');
+  const idx = JSON.parse(await readFile(path.join(folder, 'BrainLink', 'sessions', 'd1.json'), 'utf8'));
+  assert.deepEqual(idx.sessions.map((s) => s.id), [pub.id]);
+});
+
+// ---- src/sessions/index.mjs: importAll wiring (DEMO-CRITICAL: it must have callers) ----
+
+test('importAll wiring: `brainlink sync` and `session_list` both see real ~/.claude and ~/.codex history under a fake HOME', async () => {
+  const home = await tmp('fake-home');
+  await mkdir(path.join(home, '.claude', 'projects'), { recursive: true });
+  await mkdir(path.join(home, '.codex', 'sessions'), { recursive: true });
+  await cp(path.join(FIXTURES, 'claude-code', 'projects'), path.join(home, '.claude', 'projects'), { recursive: true });
+  await cp(path.join(FIXTURES, 'codex', 'sessions'), path.join(home, '.codex', 'sessions'), { recursive: true });
+  const env = { ...process.env, HOME: home, BRAINLINK_AI_PLATFORM: 'Cursor' };
+
+  // 1) `brainlink sync` must call importAll so the local session index is no longer empty.
+  const syncEnv = { ...env, BRAINLINK_HOME: path.join(home, 'app-sync') };
+  await new Promise((resolve, reject) => {
+    const child = spawn(process.execPath, [path.join(ROOT, 'bin', 'brainlink.mjs'), 'sync'], { env: syncEnv });
+    let buf = '';
+    child.stdout.on('data', (d) => { buf += d; });
+    child.on('exit', (code) => (code === 0 ? resolve(buf) : reject(new Error(`exit ${code}: ${buf}`))));
+  });
+  const afterSync = await (await openSessionStore(syncEnv)).listSessions({ limit: 10 });
+  assert.equal(afterSync.length, 2, '`brainlink sync` must import Claude Code + Codex history into the local session index');
+  assert.deepEqual(afterSync.map((s) => s.client).sort(), ['claude-code', 'codex']);
+
+  // 2) `brainlink serve`'s session_list must independently trigger its own lazy import, starting
+  // from a fresh BRAINLINK_HOME with nothing imported yet.
+  const serveEnv = { ...env, BRAINLINK_HOME: path.join(home, 'app-serve') };
+  const child = spawn(process.execPath, [path.join(ROOT, 'bin', 'brainlink.mjs'), 'serve'], { env: serveEnv });
+  const lines = [];
+  let buf = '';
+  child.stdout.on('data', (d) => { buf += d; let i; while ((i = buf.indexOf('\n')) !== -1) { lines.push(JSON.parse(buf.slice(0, i))); buf = buf.slice(i + 1); } });
+  child.stdin.write(JSON.stringify({ jsonrpc: '2.0', id: 1, method: 'initialize', params: {} }) + '\n');
+  child.stdin.write(JSON.stringify({ jsonrpc: '2.0', id: 2, method: 'tools/call', params: { name: 'session_list', arguments: { include_private: true } } }) + '\n');
+  for (let i = 0; i < 100 && lines.length < 2; i++) await new Promise((r) => setTimeout(r, 50));
+  child.kill();
+  assert.equal(lines.length, 2, 'expected an initialize + tools/call response');
+  const result = JSON.parse(lines[1].result.content[0].text);
+  assert.equal(result.sessions.length, 2, `session_list must trigger its own lazy import: ${JSON.stringify(result)}`);
+  assert.deepEqual(result.sessions.map((s) => s.client).sort(), ['claude-code', 'codex']);
 });
 
 // ---- connectors.mjs: {ok,message} wrappers + the ChatGPT honest note ----

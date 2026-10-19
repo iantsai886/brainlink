@@ -5,7 +5,7 @@ import { homedir, tmpdir } from 'node:os';
 import { stat, readFile, writeFile, mkdir, cp, mkdtemp } from 'node:fs/promises';
 import { randomBytes } from 'node:crypto';
 import { loadConfig, saveConfig, configPath, appHome } from '../src/config.mjs';
-import { verifyLicense, planFeatures, effectiveLicense } from '../src/license.mjs';
+import { verifyLicense, planFeatures, effectiveLicense, startTrial } from '../src/license.mjs';
 import { buildPack, scaffold, mergePack, PACKS } from '../src/packs.mjs';
 import { CLIENTS, detect, connectClient, disconnectClient } from '../src/connectors.mjs';
 import { createMcp, serveStdio, serveHttp, VERSION } from '../src/server.mjs';
@@ -17,6 +17,7 @@ import { runSync } from '../src/sync-cli.mjs';
 import { PROVIDER_LABELS } from '../src/sync/settings.mjs';
 import { createConfiguredHost, createFolderHost } from '../src/host.mjs';
 import { serveUi } from '../src/ui-server.mjs';
+import { importAll } from '../src/sessions/index.mjs';
 
 // `brainlink brief | head` closes the pipe early: exit quietly instead of crashing.
 process.stdout.on('error', (e) => { if (e.code === 'EPIPE') process.exit(0); throw e; });
@@ -60,6 +61,7 @@ async function main() {
   switch (cmd) {
     case 'serve': {
       const { ctx, cfg } = await openContext();
+      importAll({ env: ctx.env }).catch(() => {}); // keep the local session index warm at server start; cheap and incremental after the first run
       const mcp = createMcp(ctx, { onCall: (e) => logActivity(process.env, { ...e, platform: ctx.platform || 'unknown', mode: flag('http') ? 'http' : 'stdio' }) });
       if (flag('http')) {
         if (!ctx.features.http) fail('HTTP mode needs a licence key (brainlink license KEY).');
@@ -93,8 +95,10 @@ async function main() {
       if (!(await stat(full).then((s) => s.isDirectory(), () => false))) fail(`folder not found: ${full}`);
       const cfg = await loadConfig();
       const name = opt('name', path.basename(full));
+      const isNew = !cfg.vaults.some((v) => v.name === name);
+      if (isNew) startTrial(cfg); // same trial start as Setup's quickStart, so both paths behave identically
       const features = planFeatures(effectiveLicense(cfg));
-      if (!cfg.vaults.some((v) => v.name === name) && cfg.vaults.length >= features.maxVaults) fail('the free plan supports one vault; add a licence key first');
+      if (isNew && cfg.vaults.length >= features.maxVaults) fail('the free plan supports one vault; add a licence key first');
       const built = buildPack(opt('pack', 'simple'), { vaultName: name, vaultPath: full, agentName: opt('agent') });
       const created = flag('no-scaffold') ? [] : await scaffold(full, built.scaffold);
       const next = mergePack(cfg, built);
@@ -187,6 +191,7 @@ async function main() {
     case 'ui': {
       let host;
       try { host = await createConfiguredHost(); } catch (e) { fail(e.message); return; }
+      importAll().catch(() => {}); // keep the local session index warm; cheap and incremental after the first run
       const port = Number(opt('port', 0)) || 0;
       const s = await serveUi({ host, port, openUrl: flag('no-open') ? null : (u) => openInBrowser(u) });
       out(`BrainLink UI: ${s.url}\nKeep this window open while you use it; press Control-C when done.`);
@@ -196,6 +201,7 @@ async function main() {
       const demoRoot = await mkdtemp(path.join(tmpdir(), 'brainlink-demo-'));
       const demoPath = path.join(demoRoot, 'Demo Vault');
       await cp(path.join(ROOT, 'samples', 'acme-studio'), demoPath, { recursive: true });
+      importAll().catch(() => {}); // same session-index warm-up as `brainlink ui`
       const host = await createFolderHost({ name: 'Demo Vault', folder: demoPath });
       const s = await serveUi({ host, port: 0, openUrl: flag('no-open') ? null : (u) => openInBrowser(u) });
       out(`BrainLink demo (made-up sample notes, nothing real touched): ${s.url}\nVault copied to: ${demoPath}\nPress Control-C when done.`);

@@ -47,11 +47,13 @@ reads notes from — see that file for the current, authoritative value): `{...S
 Every string field is deep-redacted again before it reaches disk (`src/sync/redact.mjs`), on top of
 the redaction already applied at import time — defense in depth, not a reason to skip either pass.
 
-**Current behaviour, by construction:** this repo's local session store keeps every session in the
-`Sessions` vault, not `brain`, so `scope !== 'brain'` for all of them and they are excluded by
-`syncOnce` regardless of `private`. Sessions are local-only today. The MCP server design
-(`docs/mcp.md` §3, "Vault mapping") describes routing a session to whichever content vault contains
-its project's working directory, which would make non-private sessions there sync-eligible — not yet
+**Current behaviour:** this repo's local session store keeps every session in the `Sessions` vault,
+not `brain`, but `src/sync-cli.mjs` (the only caller of `syncOnce` with real session entries) stamps
+`scope` itself rather than passing the raw vault name through unconditionally: non-private sessions
+get `scope: 'brain'`, so they are sync-eligible, while private sessions keep `scope: 'Sessions'`,
+which `syncOnce`'s filter excludes regardless of `private`. The MCP server design (`docs/mcp.md` §3,
+"Vault mapping") describes routing a session to whichever content vault contains its project's
+working directory — a finer-grained scope than the current all-or-nothing `brain` stamp — not yet
 implemented; flagged as an open issue in the milestone report, not silently assumed.
 
 ## 4. Why this shape and not something richer

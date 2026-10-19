@@ -42,6 +42,14 @@ export function planFeatures(license) {
 
 export const TRIAL_DAYS = 14;
 
+// Starts the built-in trial the first time a vault is added with no licence key yet; a no-op once
+// a key is set or the trial has already started. Shared by Setup's quickStart and `brainlink init`
+// so both paths grant the same trial.
+export function startTrial(cfg) {
+  if (!cfg.license && !cfg.trial_started) cfg.trial_started = new Date().toISOString();
+  return cfg;
+}
+
 // The licence in force: a valid key, else the built-in trial that starts at first setup, else free.
 export function effectiveLicense(cfg, { now = new Date(), publicKeyPem } = {}) {
   const key = verifyLicense(cfg?.license, publicKeyPem ? { publicKeyPem, now } : { now });

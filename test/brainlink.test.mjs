@@ -511,6 +511,22 @@ test('one-click setup: new brain, trial starts, every found AI app connected; mu
   } finally { s.server.close(); }
 });
 
+test('CLI: `brainlink init` starts the built-in trial exactly like Setup does', async () => {
+  const home = await tmp('cli-init-trial');
+  const vault = path.join(home, 'Vault');
+  await mkdir(vault, { recursive: true });
+  const env = { ...process.env, BRAINLINK_HOME: path.join(home, 'app') };
+  await new Promise((resolve, reject) => {
+    const child = spawn(process.execPath, [path.join(ROOT, 'bin', 'brainlink.mjs'), 'init', '--vault', vault], { env });
+    let out = '';
+    child.stdout.on('data', (d) => { out += d; });
+    child.on('exit', (code) => (code === 0 ? resolve(out) : reject(new Error(`exit ${code}: ${out}`))));
+  });
+  const cfg = JSON.parse(await readFile(path.join(home, 'app', 'config.json'), 'utf8'));
+  assert.ok(cfg.trial_started, '`brainlink init` must start the trial the same way Setup\'s quickStart does');
+  assert.equal(effectiveLicense(cfg).plan, 'trial');
+});
+
 // ---- smart features ----
 
 import { stem, extractTags, findMentions, makeResolver } from '../src/graph.mjs';
