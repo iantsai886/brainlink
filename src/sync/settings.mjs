@@ -1,9 +1,11 @@
 // Sync settings. A provider is only a folder its own desktop client syncs: no APIs, no credentials.
-// Default is local-only. Non-'brain' scopes and private vaults/sessions never leave the device.
+// Default is local-only. Only the store's 'brain' vault is eligible; private vaults/sessions never leave the device.
 import { existsSync, readdirSync } from 'node:fs';
 import { homedir, hostname } from 'node:os';
 import path from 'node:path';
 
+// The single BrainStore vault (brainlink-store interface.d.ts VaultInfo.name) sync ever touches.
+export const SYNC_VAULT = 'brain';
 export const PROVIDERS = ['local', 'gdrive', 'icloud', 'dropbox'];
 export const PROVIDER_LABELS = { local: 'Local only', gdrive: 'Google Drive folder', icloud: 'iCloud folder', dropbox: 'Dropbox folder' };
 
@@ -40,10 +42,9 @@ export function chooseSync(cfg, { provider = 'local', folder = null, device } = 
 }
 
 // Private vaults stay local whatever the setting.
-export function syncableScopes(cfg = {}) { return ['brain']; }
+export function syncableScopes(cfg = {}) { return [SYNC_VAULT]; }
 export function isPrivateNote(note, cfg = {}) {
   const fm = note.frontmatter || {};
-  if (note.scope && note.scope !== 'brain') return true;
   if (fm.private === true || fm.private === 'true') return true;
   return (cfg.vaults || []).some((v) => v.private && note.path?.startsWith(`${v.name}/`));
 }

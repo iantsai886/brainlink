@@ -1,15 +1,27 @@
 // Sync engine over a BrainStore (see brainlink-store interface.d.ts). Target = a folder an OS client syncs.
-// Rules: local-only default; only 'brain' scope, non-private notes leave the device; session index is redacted;
+// Rules: local-only default; only the store's 'brain' vault, non-private notes leave the device; session index is redacted;
 // both-sides-changed keeps both copies and flags them; offline = no-op + queued; snapshot before any local apply;
 // remote writes are temp-file + rename; nothing is ever deleted.
 import { readFile, writeFile, rename, mkdir, readdir, access, constants } from 'node:fs/promises';
 import { createHash } from 'node:crypto';
 import path from 'node:path';
-import { syncSettings, isPrivateNote } from './settings.mjs';
+import { syncSettings, isPrivateNote, SYNC_VAULT } from './settings.mjs';
 import { redactDeep } from './redact.mjs';
 
 const ROOT = 'BrainLink';
 const sha = (s) => createHash('sha256').update(s).digest('hex');
+
+// store.list() pages (default page size 100); walk `after` cursors to get every note in the vault.
+async function listAll(store, opts = {}) {
+  const limit = opts.limit || 500;
+  const out = []; let after;
+  for (;;) {
+    const page = await store.list({ ...opts, limit, after });
+    out.push(...page);
+    if (page.length < limit) return out;
+    after = page.at(-1).path;
+  }
+}
 
 export function serialize(n) {
   const fm = Object.entries(n.frontmatter || {}).map(([k, v]) => `${k}: ${JSON.stringify(v)}`).join('\n');
@@ -57,8 +69,8 @@ export async function syncOnce({ store, cfg = {}, state = emptyState(), sessions
   const notesDir = path.join(s.folder, ROOT, 'notes');
   const st = { ...emptyState(), ...state, files: { ...state.files }, conflicts: [...(state.conflicts || [])] };
   const local = new Map();
-  for (const sum of await store.list({ scopes: ['brain'] })) {
-    const n = await store.read(sum.id, { scopes: ['brain'] });
+  for (const sum of await listAll(store, { vault: SYNC_VAULT })) {
+    const n = await store.read(sum.id);
     if (!isPrivateNote(n, cfg)) local.set(n.path, n);
   }
   const remote = new Map();
@@ -77,14 +89,14 @@ export async function syncOnce({ store, cfg = {}, state = emptyState(), sessions
     if (x.op === 'push') { const t = serialize(x.n); await atomicWrite(path.join(notesDir, x.p), t); st.files[x.p] = { etag: x.n.etag, rhash: sha(t) }; r.pushed.push(x.p); }
     if (x.op === 'pull') {
       const { frontmatter, body } = parse(x.txt);
-      const w = await store.write({ path: x.p, body, frontmatter, scope: 'brain', author: 'sync' }, { expected_etag: x.n?.etag ?? '' });
+      const w = await store.write({ vault: SYNC_VAULT, path: x.p, body, frontmatter, author: 'sync' }, { expected_etag: x.n?.etag ?? '' });
       st.files[x.p] = { etag: w.etag, rhash: x.rh }; r.pulled.push(x.p);
     }
     if (x.op === 'conflict') {
       // Keep both: local stays at its path; the remote version is saved as a flagged copy on both sides.
       const cp = conflictName(x.p, 'remote', now());
       const { frontmatter, body } = parse(x.txt);
-      const w = await store.write({ path: cp, body, frontmatter: { ...frontmatter, sync_conflict: x.p }, scope: 'brain', author: 'sync' }, { expected_etag: '' });
+      const w = await store.write({ vault: SYNC_VAULT, path: cp, body, frontmatter: { ...frontmatter, sync_conflict: x.p }, author: 'sync' }, { expected_etag: '' });
       const mine = conflictName(x.p, s.device, now()), t = serialize(x.n);
       await atomicWrite(path.join(notesDir, mine), t);
       st.files[cp] = { etag: w.etag, rhash: null }; st.files[mine] = { etag: null, rhash: sha(t) };
@@ -92,8 +104,11 @@ export async function syncOnce({ store, cfg = {}, state = emptyState(), sessions
       const c = { path: x.p, copies: [cp, mine], at: now() }; r.conflicts.push(c); st.conflicts.push(c);
     }
   }
-  // Session index: one file per device so devices never collide; private entries dropped, secrets redacted.
-  const pub = sessions.filter((e) => !e.private && (!e.scope || e.scope === 'brain')).map(redactDeep);
+  // Session index: entries are SessionRecords (store contract v0.2 toSessionRecord shape) plus an
+  // optional `scope` the caller stamps with the session's vault; one file per device so devices never
+  // collide; private:true entries dropped, non-brain scopes dropped, every field redacted again here
+  // (defense in depth on top of the store's own secret filter at putSession/appendSession time).
+  const pub = sessions.filter((e) => !e.private && (!e.scope || e.scope === SYNC_VAULT)).map(redactDeep);
   await atomicWrite(path.join(s.folder, ROOT, 'sessions', `${s.device}.json`), JSON.stringify({ device: s.device, at: now(), sessions: pub }, null, 1));
   r.sessions = pub.length;
   st.queued = false; st.last = now();
@@ -110,7 +125,7 @@ export async function readSessionIndex(folder) {
 // Undo a sync pass: every note back to its state in the pre-sync snapshot (as new versions; history kept).
 export async function restoreSnapshot(store, snapshotId) {
   const out = [];
-  for (const sum of await store.list({ scopes: ['brain'] })) out.push(await store.revert(sum.id, { expected_etag: sum.etag, to_snapshot: snapshotId }));
+  for (const sum of await listAll(store, { vault: SYNC_VAULT })) out.push(await store.revert(sum.id, { expected_etag: sum.etag, to_snapshot: snapshotId }));
   return out;
 }
 
