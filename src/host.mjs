@@ -8,8 +8,23 @@ import { launchSpec } from './runtime.mjs';
 import { loadConfig, saveConfig } from './config.mjs';
 import { syncSettings, suggestFolders, validateSync, chooseSync } from './sync/settings.mjs';
 import { createFolderStore } from './store/folder-store.mjs';
+import { openSessionStore, importAll } from './sessions/index.mjs';
+import { sessionList, sessionRead } from './sessions/mcp.mjs';
 
 export { CLIENTS };
+
+// Cross-session reads over the local session store (src/sessions/*): list, read-summary, privacy
+// toggle. One instance per host lifetime so the first call's import (Claude Code + Codex history)
+// is memoized instead of re-walking those files on every list/read.
+export function sessionsService(env) {
+  let ready = null;
+  const store = () => ready ||= openSessionStore(env).then(async (s) => { await importAll({ store: s, env }); return s; });
+  return {
+    list: async (a = {}) => sessionList(await store(), a),
+    read: async (a = {}) => sessionRead(await store(), a),
+    async setPrivate(id, isPrivate) { const r = await (await store()).setSessionPrivate(id, Boolean(isPrivate)); return { id: r.id, private: r.private }; },
+  };
+}
 
 function connectorService(clientOpts) {
   return {
@@ -40,7 +55,7 @@ function settingsService({ env, configFile }) {
 
 function services({ env, os, home, configFile }) {
   const clientOpts = () => ({ home, os, env, launch: launchSpec(env) });
-  return { connectors: connectorService(clientOpts), settings: settingsService({ env, configFile }) };
+  return { connectors: connectorService(clientOpts), settings: settingsService({ env, configFile }), sessions: sessionsService(env) };
 }
 
 // The real host: store backed by every vault in config.json.

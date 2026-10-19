@@ -187,3 +187,31 @@ test('setup UI: /api/sync chooses a provider (and rejects a bad one); state() re
     assert.equal(bad.status, 400);
   } finally { s.server.close(); }
 });
+
+// ---- setup.mjs: Sessions view (src/host.mjs's sessionsService, over src/sessions/*) ----
+
+test('setup UI: /api/sessions list/read/private wire the same session store as session_list/session_read', async () => {
+  const home = await tmp('setup-sessions-home');
+  const env = { BRAINLINK_HOME: path.join(home, 'app'), BRAINLINK_SEMANTIC: '0' };
+  const store = await openSessionStore(env);
+  const s = await store.putSession({ client: 'codex', source_id: 'proj/1', project: '/work', title: 'Fix the kiln', summary: 'Diagnosed the kiln controller.', started_at: '2026-10-10T00:00:00Z', note_refs: [], private: true, messages: [{ role: 'user', at: '2026-10-10T00:00:00Z', text: 'hi' }] });
+
+  const srv = await startSetup({ env, home, os: 'linux', port: 0, useCli: false });
+  const base = `http://127.0.0.1:${srv.port}`;
+  const api = (p, body) => fetch(base + p, { method: 'POST', headers: { 'X-BrainLink-Token': srv.token, 'Content-Type': 'application/json' }, body: JSON.stringify(body || {}) }).then((r) => r.json());
+  try {
+    assert.deepEqual((await api('/api/sessions', {})).sessions, [], 'private session hidden by default');
+    const visible = await api('/api/sessions', { include_private: true });
+    assert.equal(visible.sessions.length, 1);
+    assert.equal(visible.sessions[0].id, s.id);
+    assert.equal(visible.sessions[0].private, true);
+
+    const read = await api('/api/sessions/read', { id: s.id, include_private: true });
+    assert.equal(read.title, 'Fix the kiln');
+    assert.equal(read.messages, undefined, 'read summary only, no messages');
+
+    const toggled = await api('/api/sessions/private', { id: s.id, private: false });
+    assert.equal(toggled.private, false);
+    assert.deepEqual((await api('/api/sessions', {})).sessions.map((x) => x.id), [s.id], 'no longer private; visible without include_private');
+  } finally { srv.server.close(); }
+});

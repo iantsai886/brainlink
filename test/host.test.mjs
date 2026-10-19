@@ -30,6 +30,29 @@ test('createFolderHost: connectors.detect returns the UI-shaped array', async ()
   rmSync(dir, { recursive: true, force: true });
 });
 
+test('createFolderHost: services.sessions.list/read/setPrivate round-trip a logged session', async () => {
+  const { dir, configFile, vaultDir } = scratch();
+  const env = { BRAINLINK_HOME: dir };
+  const host = await createFolderHost({ name: 'Demo', folder: vaultDir, configFile, env });
+  const { openSessionStore } = await import('../src/sessions/index.mjs');
+  const store = await openSessionStore(env);
+  const s = await store.putSession({ client: 'codex', source_id: 'proj/1', project: '/x', title: 'Fix the kiln', summary: 'Diagnosed the kiln controller.', started_at: '2026-10-10T00:00:00Z', note_refs: [], private: true, messages: [{ role: 'user', at: '2026-10-10T00:00:00Z', text: 'hi' }] });
+
+  assert.deepEqual((await host.services.sessions.list({})).sessions, [], 'private session hidden by default');
+  const visible = await host.services.sessions.list({ include_private: true });
+  assert.equal(visible.sessions.length, 1);
+  assert.equal(visible.sessions[0].id, s.id);
+
+  await assert.rejects(host.services.sessions.read({ id: s.id }), /private/i);
+  const read = await host.services.sessions.read({ id: s.id, include_private: true });
+  assert.equal(read.title, 'Fix the kiln');
+
+  const toggled = await host.services.sessions.setPrivate(s.id, false);
+  assert.equal(toggled.private, false);
+  assert.deepEqual((await host.services.sessions.list({})).sessions.map((x) => x.id), [s.id], 'no longer private, now visible without include_private');
+  rmSync(dir, { recursive: true, force: true });
+});
+
 test('createFolderHost: settings.get/suggestFolders/validate/save round-trip through config.json', async () => {
   const { dir, configFile, vaultDir } = scratch();
   writeFileSync(configFile, JSON.stringify({ version: 1, vaults: [{ name: 'Demo', path: vaultDir }], agents: [] }));

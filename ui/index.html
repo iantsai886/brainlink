@@ -132,6 +132,14 @@ ol.todo li { padding-left: 4px; }
     </div>
   </section>
 
+  <section id="sessions-panel" hidden>
+    <h2>Sessions</h2>
+    <p class="hint">Imported Claude Code / Codex history, plus anything a client without readable local history logged with <span class="mono">session_log</span>. Private sessions (the default for imports) are hidden unless you ask to see them.</p>
+    <div class="row" style="margin-bottom:10px"><label class="muted" style="display:flex;flex-direction:row;gap:6px;align-items:center"><input type="checkbox" id="sess-private" style="width:auto">Show private sessions</label></div>
+    <div id="sessions-list" class="cards"></div>
+    <div id="session-detail" style="margin-top:12px"></div>
+  </section>
+
   <details class="settings" id="settings"><summary>Settings</summary><div>
   <section id="s-vault">
     <h2><span class="step" id="n1">1</span> Your vault</h2>
@@ -179,6 +187,20 @@ ol.todo li { padding-left: 4px; }
     <p class="hint">Ask any connected AI: <b id="try-phrase">"Connect to …"</b>. Calls appear below (tool names only, never note content).</p>
     <div class="row"><input id="q" placeholder="Search your vault to check the index" style="max-width:420px"><button id="test">Search</button></div>
     <div id="test-out" style="margin-top:10px"></div>
+  </section>
+
+  <section id="s-sync">
+    <h2>Sync</h2>
+    <p class="hint">Keep notes available on your other devices by pointing BrainLink at a folder your own desktop client (Google Drive, iCloud, Dropbox) already syncs. No account, no API: local-only by default, and private vaults/sessions never leave this computer.</p>
+    <div class="grid2">
+      <label>Where<select id="sync-provider"></select></label>
+      <label>This device<input id="sync-device" placeholder="e.g. laptop"></label>
+    </div>
+    <div id="sync-folder-row" class="grid2" style="margin-top:10px" hidden>
+      <label>Synced folder<input id="sync-folder" class="mono" placeholder="/path/to/synced/folder"></label>
+      <div id="sync-suggestions" class="muted" style="font-size:13px;align-self:end"></div>
+    </div>
+    <div class="row" style="margin-top:12px"><button class="primary" id="sync-save">Save sync settings</button></div>
   </section>
 
   <section id="s-license">
@@ -235,6 +257,24 @@ function renderReady(r) {
   $('more-apps').innerHTML = missing.length ? `<button class="primary" id="connect-all">Connect my AI apps (${esc(missing.map((c) => c.title).join(', '))})</button>` : '';
   if (missing.length) $('connect-all').onclick = () => act(async () => { const x = await api('POST', '/api/connect-all'); toast(x.connected.length ? `Connected ${x.connected.join(', ')}. Quit and reopen them.` : (x.skipped.length ? 'The free plan connects 2 apps. Add a licence in Settings.' : 'Nothing new to connect.')); });
   if (r?.skipped?.length) toast(`Not connected on the free plan: ${r.skipped.join(', ')}`, true);
+}
+
+async function loadSessions() {
+  const r = await api('POST', '/api/sessions', { include_private: $('sess-private').checked, limit: 10 });
+  renderSessions(r.sessions);
+}
+function renderSessions(list) {
+  $('sessions-list').innerHTML = list.length ? list.map((s) => `<div class="card">
+    <div class="row" style="justify-content:space-between"><b>${esc(s.client)}${s.project ? ' · ' + esc(s.project) : ''}</b><span class="pill ${s.private ? '' : 'on'}">${s.private ? 'Private' : 'Shared'}</span></div>
+    <div class="muted" style="font-size:14px">${esc(s.summary || '(no summary)')}</div>
+    <div class="row muted" style="font-size:13px">${esc(new Date(s.started_at).toLocaleString())} · ${s.turns} message${s.turns === 1 ? '' : 's'}
+      <button class="link" data-sess-read="${esc(s.id)}">Read summary</button>
+      <button class="link" data-sess-toggle="${esc(s.id)}" data-sess-private="${s.private ? '1' : ''}">${s.private ? 'Make shared' : 'Make private'}</button>
+    </div></div>`).join('') : '<p class="muted">No sessions yet. They show up once an AI logs one with session_log, or once local Claude Code / Codex history is found.</p>';
+}
+function renderSyncSuggestions(provider, suggested) {
+  const list = (suggested && suggested[provider]) || [];
+  $('sync-suggestions').innerHTML = list.length ? `Found: ${list.map((p) => `<button type="button" class="link" data-sync-pick="${esc(p)}">${esc(p)}</button>`).join(' ')}` : '';
 }
 
 // Force-directed map of the vault, computed once per load (no library).
@@ -321,6 +361,8 @@ async function load() {
   $('brain-panel').hidden = S.vaults.length === 0;
   $('smart').textContent = S.semantic?.available ? `Smart search: keyword + meaning, using ${S.semantic.model} on this computer.` : `Smart search: keyword. For meaning-based search, install Ollama (ollama.com) and run "ollama pull nomic-embed-text"; BrainLink picks it up automatically.`;
   if (!S.vaults.length) renderStart(); else { renderReady(last); drawGraph().catch(() => {}); }
+  $('sessions-panel').hidden = S.vaults.length === 0;
+  if (S.vaults.length) loadSessions().catch(() => {});
   $('cfgpath').textContent = S.config_path;
   $('lic-out').textContent = L.valid ? `Active: ${L.plan} (${L.key})` : (L.key ? L.reason : '');
   $('n1').className = 'step' + (S.vaults.length ? ' done' : '');
@@ -342,6 +384,12 @@ async function load() {
   $('activity').innerHTML = S.activity.length ? S.activity.map((e) => `<tr><td>${esc(new Date(e.at).toLocaleString())}</td><td>${esc(e.platform)}</td><td class="mono">${esc(e.tool)}</td><td>${e.ok ? (e.written ? 'written' : 'ok') : 'refused / error'}</td></tr>`).join('') : '<tr><td colspan="4" class="muted">No calls yet.</td></tr>';
   $('n5').className = 'step' + (L.valid ? ' done' : '');
   $('packs').innerHTML = S.packs.map((p) => `<label class="pack ${p.id === pack ? 'sel' : ''}"><span><input type="radio" name="pack" value="${p.id}" ${p.id === pack ? 'checked' : ''}><b>${esc(p.title)}</b></span><small>${esc(p.description)}</small></label>`).join('');
+  const SY = S.sync;
+  $('sync-provider').innerHTML = SY.providers.map((p) => `<option value="${esc(p)}" ${p === SY.provider ? 'selected' : ''}>${esc(SY.provider_labels[p] || p)}</option>`).join('');
+  $('sync-device').value = SY.device || '';
+  $('sync-folder').value = SY.folder || '';
+  $('sync-folder-row').hidden = SY.provider === 'local';
+  renderSyncSuggestions(SY.provider, SY.suggested_folders);
 }
 
 function openForm(p) {
@@ -368,6 +416,21 @@ document.addEventListener('click', (e) => {
     await api('POST', '/api/agent', { name: a.name, role: get('role').value, activation: get('activation').value, close: get('close').value, ...(get('capture_approved') ? { capture_approved: get('capture_approved').checked } : {}) });
     toast(`Saved ${a.name}. Restart your AI apps to pick up new phrases.`);
   });
+  if (d.sessRead) act(async () => {
+    const s = await api('POST', '/api/sessions/read', { id: d.sessRead, include_private: $('sess-private').checked });
+    $('session-detail').innerHTML = `<div class="card"><b>${esc(s.title || s.client)}</b>
+      <div class="muted" style="font-size:14px">${esc(s.summary || '(no summary)')}</div>
+      <div class="muted" style="font-size:13px">${esc(s.client)}${s.project ? ' · ' + esc(s.project) : ''} · ${s.message_count} messages · started ${esc(new Date(s.started_at).toLocaleString())}${s.note_refs?.length ? ' · refs: ' + s.note_refs.map(esc).join(', ') : ''}</div></div>`;
+  });
+  if (d.sessToggle) act(() => api('POST', '/api/sessions/private', { id: d.sessToggle, private: !d.sessPrivate }));
+  if (d.syncPick) $('sync-folder').value = d.syncPick;
+});
+$('sess-private').onchange = () => loadSessions().catch(() => {});
+$('sync-provider').onchange = () => { const p = $('sync-provider').value; $('sync-folder-row').hidden = p === 'local'; renderSyncSuggestions(p, S.sync.suggested_folders); };
+$('sync-save').onclick = () => act(async () => {
+  const provider = $('sync-provider').value;
+  const r = await api('POST', '/api/sync', { provider, folder: provider === 'local' ? null : $('sync-folder').value, device: $('sync-device').value });
+  toast(provider === 'local' ? 'Sync: local only.' : `Sync: now syncing via ${esc(r.sync.folder)}.`);
 });
 $('save-lic').onclick = () => act(async () => { const r = await api('POST', '/api/license', { key: $('lic').value }); $('lic').value = ''; toast(r.license.valid ? `Licence active: ${r.license.plan}` : 'Licence removed'); });
 $('http-token').onclick = () => act(async () => { const r = await api('POST', '/api/http-token'); $('http-out').innerHTML = `URL: ${esc(r.url)}<br>Header: Authorization: Bearer ${esc(r.token)}<br>Start: ${esc(r.start)}`; });

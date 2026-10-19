@@ -18,6 +18,7 @@ import { loadVault } from './core.mjs';
 import { VERSION } from './server.mjs';
 import { findObsidianVaults, nestedVaults } from './obsidian.mjs';
 import { syncSettings, chooseSync, suggestFolders, PROVIDERS, PROVIDER_LABELS } from './sync/settings.mjs';
+import { sessionsService } from './host.mjs';
 
 const json = (res, code, body) => res.writeHead(code, { 'Content-Type': 'application/json', 'Cache-Control': 'no-store' }).end(JSON.stringify(body));
 
@@ -55,6 +56,7 @@ export async function startSetup(opts = {}) {
   const token = opts.token || randomBytes(18).toString('base64url');
   const pick = opts.pick || (() => pickFolder(os));
   const clientOpts = () => ({ home, os, env, launch: launchSpec(env), useCli: opts.useCli });
+  const sessions = sessionsService(env); // src/host.mjs: cross-session reads over src/sessions/* (importAll, session_list/read semantics)
   const html = await readFile(path.join(ROOT, 'ui', 'index.html'), 'utf8');
   let port = opts.port ?? 0;
   // When started from the app (no terminal), exit after idleMinutes without requests or on Done.
@@ -234,6 +236,9 @@ export async function startSetup(opts = {}) {
       if (!(await stat(dest).catch(() => null))) await cp(path.join(ROOT, 'samples', 'acme-studio'), dest, { recursive: true, errorOnExist: true, force: false });
       return { ok: true, path: dest };
     },
+    'POST /api/sessions': (b) => sessions.list({ q: b.q, client: b.client, project: b.project, since: b.since, limit: b.limit, include_private: Boolean(b.include_private) }),
+    'POST /api/sessions/read': (b) => sessions.read({ id: b.id, include_private: Boolean(b.include_private) }),
+    'POST /api/sessions/private': (b) => sessions.setPrivate(b.id, b.private),
     'POST /api/test': async (b) => {
       const cfg = normalize(await loadConfig(file));
       const ctx = createContext(cfg, { env: { ...env, BRAINLINK_AI_PLATFORM: '' }, license: effectiveLicense(cfg) });

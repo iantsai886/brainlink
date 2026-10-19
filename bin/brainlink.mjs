@@ -4,7 +4,7 @@ import path from 'node:path';
 import { homedir, tmpdir } from 'node:os';
 import { stat, readFile, writeFile, mkdir, cp, mkdtemp } from 'node:fs/promises';
 import { randomBytes } from 'node:crypto';
-import { loadConfig, saveConfig, configPath, appHome } from '../src/config.mjs';
+import { loadConfig, saveConfig, configPath, appHome, emptyConfig } from '../src/config.mjs';
 import { verifyLicense, planFeatures, effectiveLicense, startTrial } from '../src/license.mjs';
 import { buildPack, scaffold, mergePack, PACKS } from '../src/packs.mjs';
 import { CLIENTS, detect, connectClient, disconnectClient } from '../src/connectors.mjs';
@@ -15,8 +15,6 @@ import { brief } from '../src/insights.mjs';
 import { startSetup, openInBrowser } from '../src/setup.mjs';
 import { runSync } from '../src/sync-cli.mjs';
 import { PROVIDER_LABELS } from '../src/sync/settings.mjs';
-import { createConfiguredHost, createFolderHost } from '../src/host.mjs';
-import { serveUi } from '../src/ui-server.mjs';
 import { importAll } from '../src/sessions/index.mjs';
 
 // `brainlink brief | head` closes the pipe early: exit quietly instead of crashing.
@@ -189,21 +187,30 @@ async function main() {
       return;
     }
     case 'ui': {
-      let host;
-      try { host = await createConfiguredHost(); } catch (e) { fail(e.message); return; }
+      // Same v1.1 Setup app (ui/index.html) as `brainlink setup`, but a per-launch token/port
+      // instead of the fixed, reopenable one: a dedicated "just use it" entry point.
       importAll().catch(() => {}); // keep the local session index warm; cheap and incremental after the first run
       const port = Number(opt('port', 0)) || 0;
-      const s = await serveUi({ host, port, openUrl: flag('no-open') ? null : (u) => openInBrowser(u) });
+      const s = await startSetup({ port, openUrl: flag('no-open') ? null : (u) => openInBrowser(u) });
       out(`BrainLink UI: ${s.url}\nKeep this window open while you use it; press Control-C when done.`);
       return;
     }
     case 'demo': {
+      // Throwaway vault + throwaway config/session home (BRAINLINK_HOME), pre-populated with the
+      // sample vault under the Founder OS pack, so the demo opens straight into the v1.1
+      // experience (vault, agent, graph, sessions) with nothing real touched.
       const demoRoot = await mkdtemp(path.join(tmpdir(), 'brainlink-demo-'));
-      const demoPath = path.join(demoRoot, 'Demo Vault');
+      const demoPath = path.join(demoRoot, 'Acme Studio');
       await cp(path.join(ROOT, 'samples', 'acme-studio'), demoPath, { recursive: true });
-      importAll().catch(() => {}); // same session-index warm-up as `brainlink ui`
-      const host = await createFolderHost({ name: 'Demo Vault', folder: demoPath });
-      const s = await serveUi({ host, port: 0, openUrl: flag('no-open') ? null : (u) => openInBrowser(u) });
+      const demoEnv = { ...process.env, BRAINLINK_HOME: path.join(demoRoot, 'home') };
+      const built = buildPack('founder-os', { vaultName: 'Acme Studio', vaultPath: demoPath, agentName: 'Chief of Staff' });
+      const cfg = mergePack(emptyConfig(), built);
+      cfg.timezone = Intl.DateTimeFormat().resolvedOptions().timeZone;
+      startTrial(cfg);
+      await saveConfig(cfg, configPath(demoEnv));
+      await refreshMap(cfg, 'Acme Studio', demoEnv);
+      importAll({ env: demoEnv }).catch(() => {}); // same session-index warm-up as `brainlink ui`
+      const s = await startSetup({ env: demoEnv, port: 0, openUrl: flag('no-open') ? null : (u) => openInBrowser(u) });
       out(`BrainLink demo (made-up sample notes, nothing real touched): ${s.url}\nVault copied to: ${demoPath}\nPress Control-C when done.`);
       return;
     }
