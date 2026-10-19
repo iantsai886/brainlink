@@ -42,12 +42,14 @@ test('session_log creates a private-by-default session; session_list hides it un
   const read = await call(mcp, 'session_read', { id: logged.id, include_private: true });
   assert.equal(read.message_count, 1);
   assert.equal(read.messages, undefined, 'default session_read returns no messages');
+  assert.equal(read.key_turns.length, 1);
+  assert.equal(read.key_turns[0].text, 'Remember to check the kiln schedule.');
 });
 
 test('session_log secret filter: a planted key never reaches storage', async () => {
   const { mcp } = await mcpWithHome();
   const logged = await call(mcp, 'session_log', { text: 'DB_PASSWORD=hunter2SECRET and done.' });
-  const read = await call(mcp, 'session_read', { id: logged.id, include_private: true, limit: 5 });
+  const read = await call(mcp, 'session_read', { id: logged.id, include_private: true });
   assert.ok(!JSON.stringify(read).includes('hunter2SECRET'));
 });
 
@@ -67,12 +69,15 @@ test('session_read: full=true pages long sessions at ~4k tokens via next_offset;
 
   const summary = await call(mcp, 'session_read', { id: s.id });
   assert.ok(estTokens(JSON.stringify(summary)) < 800, 'default session_read stays well under the ~800 token budget');
-  assert.equal(summary.messages, undefined);
+  assert.equal(summary.messages, undefined, 'default session_read returns no messages field');
+  assert.equal(summary.key_turns.length, 3, 'default session_read returns at most 3 key-turn snippets');
+  for (const turn of summary.key_turns) assert.ok(turn.text.length <= 200, 'each key-turn snippet is clipped to ~200 chars');
 
   let offset = 0, pages = 0, seen = 0;
   for (;;) {
     const page = await call(mcp, 'session_read', { id: s.id, full: true, offset });
     assert.ok(estTokens(JSON.stringify(page)) <= 4200, 'a full=true page stays near the ~4k token budget');
+    assert.ok(Array.isArray(page.messages), 'full=true returns the real messages array');
     seen += page.messages.length;
     pages++;
     if (page.next_offset == null) break;
@@ -93,7 +98,7 @@ test('token budget: representative session_list/session_read calls average <=105
   samples.push(JSON.stringify(await call(mcp, 'session_list', {})));
   const first = (await call(mcp, 'session_list', {})).sessions[0];
   samples.push(JSON.stringify(await call(mcp, 'session_read', { id: first.id })));
-  samples.push(JSON.stringify(await call(mcp, 'session_read', { id: first.id, limit: 2 })));
+  samples.push(JSON.stringify(await call(mcp, 'session_read', { id: first.id, include_private: true })));
   samples.push(JSON.stringify(await call(mcp, 'session_read', { id: first.id, full: true })));
   const toks = samples.map(estTokens).sort((a, b) => a - b);
   const median = toks[Math.floor(toks.length / 2)];

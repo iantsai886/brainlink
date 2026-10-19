@@ -4,9 +4,10 @@ import { toSessionRecord } from 'brainlink-store';
 import { estTokens, clip } from './tokens.mjs';
 import { redactText } from './redact.mjs';
 
-const MSG_CLIP_CHARS = 400;
 const FULL_PAGE_TOKENS = 3800; // leaves headroom for the summary fields wrapped around the page
 const FULL_PAGE_FETCH = 200; // messages fetched per page before trimming to the token budget
+const KEY_TURN_CHARS = 200; // snippet length for the default (non-full) response
+const MAX_KEY_TURNS = 3;
 
 export const clientIdFor = (platform) => {
   const id = String(platform || '').trim().toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '');
@@ -39,7 +40,16 @@ export async function sessionList(store, a = {}) {
   return { sessions: visible.slice(0, limit).map(toSessionRecord) };
 }
 
-// a: { id, offset?, limit?<=20, full?, include_private? }
+// Up to MAX_KEY_TURNS short snippets (first, middle, last turn) instead of the raw message log —
+// enough to orient on without a client having to opt into full=true.
+async function keyTurns(store, id, messageCount) {
+  if (!messageCount) return [];
+  const offsets = [...new Set([0, Math.floor((messageCount - 1) / 2), messageCount - 1])].slice(0, MAX_KEY_TURNS);
+  const picked = await Promise.all(offsets.map((offset) => store.readSession(id, { offset, limit: 1 })));
+  return picked.map(({ messages: [m] }) => ({ role: m.role, at: m.at, text: clip(redactText(m.text), KEY_TURN_CHARS / 4) }));
+}
+
+// a: { id, offset?, full?, include_private? }
 export async function sessionRead(store, a = {}) {
   if (!a.id) throw new Error('id is required');
   const peek = await store.readSession(a.id, {});
@@ -51,10 +61,8 @@ export async function sessionRead(store, a = {}) {
     const nextOffset = (a.offset || 0) + messages.length < peek.session.message_count ? (a.offset || 0) + messages.length : null;
     return { ...base, messages: messages.map((m) => ({ ...m, text: redactText(m.text) })), next_offset: nextOffset };
   }
-  const limit = Math.max(0, Math.min(a.limit || 0, 20));
-  if (!limit) return base; // summary only — comfortably under the ~800 token default budget
-  const page = await store.readSession(a.id, { offset: a.offset || 0, limit });
-  return { ...base, messages: page.messages.map((m) => ({ ...m, text: clip(redactText(m.text), MSG_CLIP_CHARS / 4) })), next_offset: page.next_offset };
+  // summary + metadata + up to 3 key-turn snippets — comfortably under the ~800 token default budget
+  return { ...base, key_turns: await keyTurns(store, a.id, peek.session.message_count) };
 }
 
 // a: { title?, text, role?, session_id?, project?, private? }. platform = ctx.platform (BRAINLINK_AI_PLATFORM).
