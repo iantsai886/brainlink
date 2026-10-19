@@ -11,6 +11,7 @@ import { detect, connect, disconnect, test as testClient, UNSUPPORTED } from '..
 import { runSync } from '../src/sync-cli.mjs';
 import { startSetup } from '../src/setup.mjs';
 import { openSessionStore } from '../src/sessions/index.mjs';
+import { launchSpec, CLI_PATH } from '../src/runtime.mjs';
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const FIXTURES = path.join(ROOT, 'test', 'fixtures');
@@ -151,6 +152,29 @@ test('CLI: `brainlink connect --all` connects every present client and skips the
   const claude = JSON.parse(await readFile(path.join(home, '.config', 'Claude', 'claude_desktop_config.json'), 'utf8'));
   assert.ok(claude.mcpServers.brainlink);
   await assert.rejects(readFile(path.join(home, '.gemini', 'settings.json')), 'gemini was never present, so --all must not create it');
+});
+
+// A clean Mac has no `node` on PATH: the launch command written into AI clients' MCP configs
+// must be the absolute path of whatever node is currently running (the bundled runtime when
+// launched from the mac zip), never a bare "node" that only resolves via a shell PATH.
+test('launchSpec(): defaults to this process\'s own absolute node path, not a bare "node"', () => {
+  const spec = launchSpec({});
+  assert.equal(spec.command, process.execPath);
+  assert.ok(path.isAbsolute(spec.command), 'command must be an absolute path');
+  assert.notEqual(spec.command, 'node');
+  assert.deepEqual(spec.args, [CLI_PATH, 'serve']);
+  assert.ok(path.isAbsolute(spec.args[0]), 'CLI_PATH must be absolute');
+});
+
+test('connect() writes the absolute node path into the client config, not a bare "node"', async () => {
+  const home = await tmp('connectors-execpath');
+  const opts = { home, os: 'linux', env: {}, launch: launchSpec({}), useCli: false };
+  await mkdir(path.join(home, '.cursor'), { recursive: true });
+  const r = await connect('cursor', opts);
+  assert.equal(r.ok, true);
+  const cfg = JSON.parse(await readFile(path.join(home, '.cursor', 'mcp.json'), 'utf8'));
+  assert.equal(cfg.mcpServers.brainlink.command, process.execPath);
+  assert.ok(path.isAbsolute(cfg.mcpServers.brainlink.command));
 });
 
 test('CLI: `brainlink sync` runs end to end with no vault configured', async () => {
