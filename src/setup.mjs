@@ -9,7 +9,7 @@ import path from 'node:path';
 import { loadConfig, saveConfig, configPath, normalize } from './config.mjs';
 import { verifyLicense, planFeatures, effectiveLicense } from './license.mjs';
 import { PACKS, buildPack, scaffold, mergePack } from './packs.mjs';
-import { CLIENTS, detect, connectClient, disconnectClient } from './connectors.mjs';
+import { CLIENTS, detect, connectClient, disconnectClient, test } from './connectors.mjs';
 import { createContext, search } from './core.mjs';
 import { ROOT, launchSpec, readActivity, refreshMap } from './runtime.mjs';
 import { detectEmbedder } from './embed.mjs';
@@ -17,6 +17,7 @@ import { vaultHealth } from './insights.mjs';
 import { loadVault } from './core.mjs';
 import { VERSION } from './server.mjs';
 import { findObsidianVaults, nestedVaults } from './obsidian.mjs';
+import { syncSettings, chooseSync, suggestFolders, PROVIDERS, PROVIDER_LABELS } from './sync/settings.mjs';
 
 const json = (res, code, body) => res.writeHead(code, { 'Content-Type': 'application/json', 'Cache-Control': 'no-store' }).end(JSON.stringify(body));
 
@@ -80,6 +81,7 @@ export async function startSetup(opts = {}) {
       activity: await readActivity(env, 15),
       semantic: await detectEmbedder(cfg, env),
       obsidian_vaults: (await findObsidianVaults({ home, os, env })).filter((o) => !cfg.vaults.some((v) => path.resolve(v.path) === path.resolve(o.path))),
+      sync: { ...syncSettings(cfg), providers: PROVIDERS, provider_labels: PROVIDER_LABELS, suggested_folders: suggestFolders(home) },
     };
   }
 
@@ -179,6 +181,15 @@ export async function startSetup(opts = {}) {
       await saveConfig(next, file);
       return { ok: true };
     },
+    'POST /api/sync': async (b) => {
+      // Local by default; Drive/iCloud/Dropbox need an existing, writable folder (the user's own
+      // desktop client syncs it — no API, no credentials). validateSync (src/sync/settings.mjs)
+      // rejects anything else.
+      const cfg = await loadConfig(file);
+      const next = chooseSync(cfg, { provider: b.provider, folder: b.folder, device: b.device });
+      await saveConfig(next, file);
+      return { ok: true, sync: syncSettings(next) };
+    },
     'POST /api/agent': async (b) => {
       const cfg = await loadConfig(file);
       const a = cfg.agents.find((x) => x.name === b.name);
@@ -199,6 +210,10 @@ export async function startSetup(opts = {}) {
       return connectClient(b.client, clientOpts());
     },
     'POST /api/disconnect': (b) => disconnectClient(b.client, clientOpts()),
+    // Normalized {ok,message} check (connectors.mjs `test`): same detect() the buttons above
+    // already use, re-shaped for callers that want one consistent result instead of each
+    // function's own shape (see connectors.mjs for why /api/connect keeps its richer shape).
+    'POST /api/client-test': (b) => test(b.client, clientOpts()),
     'POST /api/license': async (b) => {
       const key = String(b.key || '').trim();
       const lic = verifyLicense(key);

@@ -5,6 +5,7 @@ import { readFile, writeFile, mkdir, rename } from 'node:fs/promises';
 import { existsSync } from 'node:fs';
 import { homedir } from 'node:os';
 import path from 'node:path';
+import { validateSync } from './sync/settings.mjs';
 
 export const DEFAULT_PLATFORMS = ['Claude', 'ChatGPT', 'ChatGPT Codex', 'Gemini', 'Grok', 'Cursor', 'other'];
 export const CLOSE_MODES = ['append-section', 'new-note', 'append-task', 'proposal-only'];
@@ -63,6 +64,7 @@ export function validate(cfg) {
   }
   if (cfg.handoff && (!names.has(cfg.handoff.vault) || !cfg.handoff.folder)) errors.push('handoff needs an existing vault and a folder');
   if (cfg.timezone) { try { new Intl.DateTimeFormat('en', { timeZone: cfg.timezone }); } catch { errors.push(`unknown timezone "${cfg.timezone}"`); } }
+  if (cfg.sync) errors.push(...validateSync(cfg.sync));
   return errors;
 }
 

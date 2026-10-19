@@ -48,6 +48,12 @@ export function serverEntry(client, launch, extraEnv = {}) {
   return { command: launch.command, args: [...launch.args], env: { BRAINLINK_AI_PLATFORM: c.platform, BRAINLINK_AGENT_ROLE: c.role, ...extraEnv } };
 }
 
+// ChatGPT needs a public HTTPS MCP connector; it can't reach 127.0.0.1, so there is no config
+// file to merge-write here. N/A pending Ian's decision on an opt-in tunnel (PRODUCT-SPEC §3, §7).
+export const UNSUPPORTED = {
+  chatgpt: { title: 'ChatGPT', note: 'N/A: ChatGPT needs a remote HTTPS MCP connector; pending Ian\'s decision on an opt-in tunnel. Use session_log through any connected client, or Codex, in the meantime.' },
+};
+
 // Client is "present" when its config file or config folder exists.
 export async function detect(opts) {
   const out = {};
@@ -61,6 +67,7 @@ export async function detect(opts) {
     }
     out[id] = { title: c.title, file, present, connected, note: c.note };
   }
+  for (const [id, c] of Object.entries(UNSUPPORTED)) out[id] = { title: c.title, file: null, present: false, connected: false, unsupported: true, note: c.note };
   return out;
 }
 
@@ -148,4 +155,35 @@ export async function disconnectClient(id, opts) {
   const b = await backup(file, opts.now || new Date());
   await atomicWrite(file, text);
   return { client: id, removed: true, backup: b };
+}
+
+// Normalized {ok,message} wrappers over detect/connectClient/disconnectClient, for Setup's
+// Connect buttons and anything else that wants one consistent shape instead of each function's
+// own richer (and differently-shaped) result. Both call the exact same underlying code, so there
+// is only ever one path that writes a client's MCP config.
+export async function connect(id, opts) {
+  if (UNSUPPORTED[id]) return { ok: false, message: UNSUPPORTED[id].note };
+  try {
+    const r = await connectClient(id, opts);
+    return { ok: true, message: `Connected ${r.title} via ${r.via}${r.file ? ` (${r.file})` : ''}.${r.backup ? ` Backup: ${r.backup}.` : ''} ${r.note}`.trim() };
+  } catch (e) { return { ok: false, message: e.message || String(e) }; }
+}
+
+export async function disconnect(id, opts) {
+  if (UNSUPPORTED[id]) return { ok: false, message: UNSUPPORTED[id].note };
+  try {
+    const r = await disconnectClient(id, opts);
+    return { ok: true, message: r.removed ? `Removed BrainLink from ${id}.` : `${id} had no BrainLink entry.` };
+  } catch (e) { return { ok: false, message: e.message || String(e) }; }
+}
+
+// A light "is it actually connected" check: re-reads the client's config (no MCP round trip —
+// serve isn't necessarily running). A live initialize + tools/list check is a UI-layer concern.
+export async function test(id, opts) {
+  if (UNSUPPORTED[id]) return { ok: false, message: UNSUPPORTED[id].note };
+  try {
+    const found = (await detect(opts))[id];
+    if (!found) return { ok: false, message: `Unknown client "${id}".` };
+    return { ok: found.connected, message: found.connected ? `${found.title} is connected.` : found.present ? `${found.title} was found but is not connected yet.` : `${found.title} was not found on this machine.` };
+  } catch (e) { return { ok: false, message: e.message || String(e) }; }
 }

@@ -13,6 +13,8 @@ import { openContext, launchSpec, logActivity, refreshMap } from '../src/runtime
 import { warmSemantic } from '../src/core.mjs';
 import { brief } from '../src/insights.mjs';
 import { startSetup, openInBrowser } from '../src/setup.mjs';
+import { runSync } from '../src/sync-cli.mjs';
+import { PROVIDER_LABELS } from '../src/sync/settings.mjs';
 
 // `brainlink brief | head` closes the pipe early: exit quietly instead of crashing.
 process.stdout.on('error', (e) => { if (e.code === 'EPIPE') process.exit(0); throw e; });
@@ -37,13 +39,14 @@ const HELP = `BrainLink MCP ${VERSION} — one Markdown brain for every AI
 
   brainlink setup [--no-open]          open the Setup app (pick vault, connect AIs, licence)
   brainlink init --vault PATH [--name N] [--pack ${Object.keys(PACKS).join('|')}] [--agent NAME] [--no-scaffold]
-  brainlink connect <client|all>       ${Object.keys(CLIENTS).join(', ')}
+  brainlink connect <client|all>       ${Object.keys(CLIENTS).join(', ')} (or --all)
   brainlink disconnect <client>        (disconnect-all removes it from every app)
   brainlink clients                    show detected / connected AI apps
   brainlink license [KEY]              show or set the licence key
   brainlink status                     config, vaults, plan
   brainlink brief [--vault V] [--days 7]  what changed and what is open
   brainlink map                        rebuild each vault's Home map
+  brainlink sync                       one sync pass (local by default; set up in Setup)
   brainlink serve                      MCP over stdio (what AI apps run)
   brainlink serve --http [PORT]        MCP over local HTTP (bearer token from Setup)
 
@@ -99,11 +102,12 @@ async function main() {
     }
     case 'connect': {
       const which = argv[1];
-      if (!which) fail(`connect needs a client: ${Object.keys(CLIENTS).join(', ')}, or all`);
+      const all = flag('all') || which === 'all';
+      if (!which && !all) fail(`connect needs a client: ${Object.keys(CLIENTS).join(', ')}, or --all`);
       const cfg = await loadConfig();
       const features = planFeatures(effectiveLicense(cfg));
       const found = await detect(clientOpts());
-      const ids = which === 'all' ? Object.keys(found).filter((id) => found[id].present) : [which];
+      const ids = all ? Object.keys(found).filter((id) => found[id].present) : [which];
       let connected = Object.values(found).filter((c) => c.connected).length;
       for (const id of ids) {
         if (!found[id]?.connected && connected >= features.maxConnections) { out(`skip ${id}: the free plan connects ${features.maxConnections} AI apps`); continue; }
@@ -127,7 +131,7 @@ async function main() {
       return;
     }
     case 'clients': {
-      for (const [id, c] of Object.entries(await detect(clientOpts()))) out(`${c.connected ? '●' : c.present ? '○' : '·'} ${id.padEnd(15)} ${c.title}${c.connected ? ' — connected' : c.present ? ' — found' : ''}`);
+      for (const [id, c] of Object.entries(await detect(clientOpts()))) out(`${c.connected ? '●' : c.present ? '○' : '·'} ${id.padEnd(15)} ${c.title}${c.unsupported ? ` — ${c.note}` : c.connected ? ' — connected' : c.present ? ' — found' : ''}`);
       return;
     }
     case 'license': {
@@ -165,6 +169,15 @@ async function main() {
     case 'map': {
       const cfg = await loadConfig();
       for (const v of cfg.vaults) { const r = await refreshMap(cfg, v.name); out(r ? `updated ${v.name}/${r}` : `skipped ${v.name} (map off, read-only, or a note of yours already uses that name)`); }
+      return;
+    }
+    case 'sync': {
+      const cfg = await loadConfig();
+      const r = await runSync(cfg);
+      const label = PROVIDER_LABELS[r.provider] || r.provider;
+      const notesNote = r.provider !== 'local' ? ' (notes: pending the store integration — see brainlink-store/docs/progress.md)' : '';
+      out(`sync (${label}): ${r.status}${notesNote}; sessions in index: ${r.sessions}`
+        + (r.pushed?.length ? `; pushed ${r.pushed.length}` : '') + (r.pulled?.length ? `; pulled ${r.pulled.length}` : '') + (r.conflicts?.length ? `; conflicts ${r.conflicts.length}` : ''));
       return;
     }
     case 'version': case '--version': out(VERSION); return;
