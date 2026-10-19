@@ -1,0 +1,719 @@
+import test from 'node:test';
+import assert from 'node:assert/strict';
+import { mkdtemp, mkdir, writeFile, readFile, readdir, cp, utimes } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import { spawn } from 'node:child_process';
+import { request } from 'node:http';
+import { generateKeyPairSync, sign } from 'node:crypto';
+import path from 'node:path';
+import { fileURLToPath } from 'node:url';
+
+import { normalize, validate, saveConfig } from '../src/config.mjs';
+import { tokens, extractLinks, linkGraph } from '../src/graph.mjs';
+import { createContext, chunkMarkdown, search, readNote, related, zonedNow, findSecrets } from '../src/core.mjs';
+import { verifyLicense, canonicalPayload, encodeKey, planFeatures, effectiveLicense } from '../src/license.mjs';
+import { findObsidianVaults, nestedVaults } from '../src/obsidian.mjs';
+import { proposeNote, sendHandoff, listHandoffs, frontmatter, resolveIdentity } from '../src/writes.mjs';
+import { connectAgent, closeLoop, resolveAgent, latestCaptures } from '../src/agents.mjs';
+import { createMcp, serveHttp } from '../src/server.mjs';
+import { buildPack, scaffold, mergePack } from '../src/packs.mjs';
+import { connectClient, disconnectClient, detect, codexToml } from '../src/connectors.mjs';
+import { startSetup } from '../src/setup.mjs';
+
+const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
+const SAMPLE = path.join(ROOT, 'samples', 'acme-studio');
+const tmp = (p) => mkdtemp(path.join(tmpdir(), `brainlink-${p}-`));
+const PAID = { valid: true, plan: 'personal', email: 'test@example.com' };
+const NOW = new Date('2026-10-18T01:30:00Z');
+const long = Array.from({ length: 300 }, (_, i) => `filler${i}`).join(' ');
+
+// Company vault = copy of the sample with the Founder OS pack; private vault = journal pack.
+async function fixture() {
+  const base = await tmp('vaults');
+  const company = path.join(base, 'Acme Studio'), journal = path.join(base, 'Journal');
+  await cp(SAMPLE, company, { recursive: true });
+  await mkdir(journal);
+  await writeFile(path.join(company, 'Agent Memory.md'), `---\nstatus: active\n---\n# Agent Memory\n\n## Retrieval\n\nHybrid retrieval with reranking for agent memory.\n\n## Storage\n\n${long}\n\nSee [[Home]].`);
+  await writeFile(path.join(company, 'Old Memory.md'), '---\nsuperseded_by: "[[Agent Memory]]"\n---\nagent memory retrieval reranking');
+  await writeFile(path.join(journal, 'diary.md'), 'private diary about pricing and agent memory');
+  let cfg = normalize({ timezone: 'Asia/Taipei' });
+  const f = buildPack('founder-os', { vaultName: 'Acme Studio', vaultPath: company, agentName: 'Chief of Staff' });
+  await scaffold(company, f.scaffold);
+  cfg = mergePack(cfg, f);
+  const j = buildPack('private-journal', { vaultName: 'Journal', vaultPath: journal, agentName: 'Journal' });
+  await scaffold(journal, j.scaffold);
+  cfg = normalize(mergePack(cfg, j));
+  // mergePack keeps the company handoff when adding a vault without one.
+  return { base, company, journal, cfg };
+}
+
+// Tests never touch the real app folder or a local Ollama.
+process.env.BRAINLINK_SEMANTIC = '0';
+const TEST_HOME = await mkdtemp(path.join(tmpdir(), 'brainlink-apphome-'));
+const ctxOf = (cfg, env = {}, license = PAID) => createContext(cfg, { env: { BRAINLINK_AI_PLATFORM: 'Claude', BRAINLINK_HOME: TEST_HOME, BRAINLINK_SEMANTIC: '0', ...env }, license });
+
+// ---- graph & retrieval ----
+
+test('tokens: Latin words, stopwords dropped, CJK bigrams', () => {
+  const t = tokens('The agent memory 知識管理 and retrieval');
+  assert.ok(t.includes('agent') && t.includes('retrieval') && !t.includes('the') && !t.includes('and'));
+  assert.ok(t.includes('知識') && t.includes('識管') && t.includes('管理'));
+});
+
+test('links: wikilinks, embeds, md links; code ignored; graph resolves by title and relative path', () => {
+  const links = extractLinks('[[A|alias]] ![[B#h]] [c](sub/C.md) `[[No]]`\n```\n[[NoFence]]\n```\n[x](https://e.com/x.md)');
+  assert.deepEqual(links, ['A', 'B', 'sub/C.md']);
+  const notes = [{ rel: 'A.md', title: 'A', raw: '[[B]] [c](sub/C.md) [[A]]' }, { rel: 'dir/B.md', title: 'B', raw: '[[Missing]]' }, { rel: 'sub/C.md', title: 'C', raw: '[[dir/B]]' }];
+  const g = linkGraph(notes);
+  assert.deepEqual(g.edges, [[0, 1], [0, 2], [2, 1]]);
+  assert.deepEqual(g.broken, [{ from: 1, target: 'Missing' }]);
+});
+
+test('chunks carry heading ancestry and respect the word cap', () => {
+  const chunks = chunkMarkdown(`# A\n\n## B\n\nshort\n\n## C\n\n${long}`);
+  assert.ok(chunks.some((c) => c.heading === 'A › B' && c.text.includes('short')));
+  assert.ok(chunks.filter((c) => c.heading === 'A › C').length >= 2);
+  assert.ok(chunks.every((c) => c.text.split(/\s+/).length <= 256));
+});
+
+test('search ranks the relevant note first and demotes superseded notes', async () => {
+  const { cfg } = await fixture();
+  const ctx = ctxOf(cfg);
+  const r = await search(ctx, 'Acme Studio', 'agent memory reranking');
+  assert.equal(r[0].path, 'Agent Memory.md');
+  const old = r.find((x) => x.path === 'Old Memory.md');
+  assert.ok(old.historical && old.superseded_by);
+  const p = await search(ctx, 'Acme Studio', 'care plan pricing');
+  assert.equal(p[0].path, 'Pricing and Packages.md');
+  assert.ok(p.findIndex((x) => x.path.startsWith('SUPERSEDED')) > 0);
+});
+
+test('[[mentions]] are returned first in full', async () => {
+  const { cfg } = await fixture();
+  const r = await search(ctxOf(cfg), 'Acme Studio', 'what about [[Northwind Coffee]] subscriptions');
+  assert.equal(r[0].match, 'mention');
+  assert.equal(r[0].path, 'Clients/Northwind Coffee.md');
+});
+
+test('related: links both ways plus unlinked suggestions', async () => {
+  const { cfg } = await fixture();
+  const r = await related(ctxOf(cfg), 'Acme Studio', 'Clients/Northwind Coffee.md');
+  assert.ok(r.links_to.some((x) => x.path === 'Pricing and Packages.md'));
+  assert.ok(r.linked_from.some((x) => x.path === 'Home.md'));
+  assert.ok(Array.isArray(r.suggested));
+});
+
+test('reads are confined to the vault and to Markdown', async () => {
+  const { cfg } = await fixture();
+  const ctx = ctxOf(cfg);
+  await assert.rejects(readNote(ctx, 'Acme Studio', '../Journal/diary.md'), /escapes/);
+  await assert.rejects(readNote(ctx, 'Acme Studio', 'AGENTS'), /Markdown/);
+  assert.match((await readNote(ctx, 'Acme Studio', 'Home.md')).body, /Acme Studio/);
+});
+
+test('per-connection vault scope: BRAINLINK_VAULTS hides other vaults', async () => {
+  const { cfg } = await fixture();
+  const ctx = ctxOf(cfg, { BRAINLINK_VAULTS: 'Acme Studio' });
+  assert.deepEqual(ctx.enabled, ['Acme Studio']);
+  await assert.rejects(search(ctx, 'Journal', 'diary'), /not enabled/);
+  assert.ok(ctx.agents.every((a) => a.vault === 'Acme Studio'));
+});
+
+// ---- config, time, licence ----
+
+test('config validation catches bad vaults, agents, close targets and timezones', () => {
+  const errs = validate(normalize({ timezone: 'Mars/Base', vaults: [{ name: 'A', path: 'relative' }, { name: 'A', path: '/x' }], agents: [{ name: 'Z', vault: 'Nope', close_target: { mode: 'bogus' } }], handoff: { vault: 'Q', folder: 'x' } }));
+  for (const re of [/absolute/, /duplicate vault/, /unknown vault/, /close_target.mode/, /handoff/, /timezone/]) assert.ok(errs.some((e) => re.test(e)), re);
+  assert.deepEqual(validate(normalize({ vaults: [{ name: 'A', path: '/x' }] })), []);
+});
+
+test('zonedNow formats the configured zone with its offset', () => {
+  assert.equal(zonedNow('Asia/Taipei', NOW), '2026-10-18T09:30:00+08:00');
+  assert.equal(zonedNow('UTC', NOW), '2026-10-18T01:30:00+00:00');
+  assert.equal(zonedNow('America/New_York', NOW), '2026-10-17T21:30:00-04:00');
+});
+
+test('licence keys: valid, tampered, wrong signer, expired', () => {
+  const { publicKey, privateKey } = generateKeyPairSync('ed25519');
+  const pem = publicKey.export({ type: 'spki', format: 'pem' });
+  const make = (p) => { const j = canonicalPayload({ email: 'a@b.co', plan: 'personal', issued: '2026-10-18', id: 'x', ...p }); return encodeKey(j, sign(null, Buffer.from(j), privateKey)); };
+  const key = make({});
+  assert.equal(verifyLicense(key, { publicKeyPem: pem }).valid, true);
+  const [, payload, sig] = key.split('.');
+  const forged = `BL1.${Buffer.from(Buffer.from(payload, 'base64url').toString().replace('personal', 'team')).toString('base64url')}.${sig}`;
+  assert.equal(verifyLicense(forged, { publicKeyPem: pem }).valid, false);
+  assert.equal(verifyLicense(key).valid, false); // shipped public key did not sign it
+  const exp = verifyLicense(make({ plan: 'trial', expires: '2026-10-01' }), { publicKeyPem: pem, now: NOW });
+  assert.equal(exp.valid, false); assert.match(exp.reason, /expired/);
+  assert.equal(verifyLicense('nonsense').plan, 'free');
+  assert.equal(planFeatures(null).writes, false);
+});
+
+test('free plan: one vault, read-only, no agents, no write tools', async () => {
+  const { cfg } = await fixture();
+  const ctx = createContext(cfg, { env: {}, license: verifyLicense(null) });
+  assert.equal(ctx.enabled.length, 1);
+  assert.equal(ctx.readOnly, true);
+  const names = createMcp(ctx).tools.map((t) => t.name);
+  assert.ok(names.includes('vault_search') && !names.includes('propose_note') && !names.includes('agent_connect'));
+  const r = await proposeNote(ctx, { title: 'x', body: 'y', source: 's', decision: 'ADOPT' });
+  assert.equal(r.ok, false);
+  assert.match(r.errors.join(), /licence/);
+});
+
+// ---- writes ----
+
+test('propose_note: preview, write, never overwrite, attribution in the vault schema', async () => {
+  const { cfg, company } = await fixture();
+  const ctx = ctxOf(cfg);
+  const args = { vault: 'Acme Studio', title: 'Faster QA', body: 'Use a checklist.', source: 'retro', decision: 'adopt', session_or_task_id: 's1' };
+  const p = await proposeNote(ctx, args, NOW);
+  assert.equal(p.written, false);
+  assert.match(p.preview, /ai_platform: "Claude"/);
+  assert.match(p.preview, /written_at: 2026-10-18T09:30:00\+08:00/);
+  assert.match(p.preview, /\*\*ADOPT\*\*/);
+  const w = await proposeNote(ctx, { ...args, confirm: true }, NOW);
+  assert.equal(w.path, 'Acme Studio/Knowledge Intake/2026-10-18 — Faster QA.md');
+  assert.match(await readFile(path.join(company, 'Knowledge Intake/2026-10-18 — Faster QA.md'), 'utf8'), /Made by Claude \(direct assistant\)/);
+  const again = await proposeNote(ctx, { ...args, confirm: true }, NOW);
+  assert.match(again.errors[0], /already exists/);
+});
+
+test('propose_note refuses: missing decision, unknown folder, secrets, missing identity', async () => {
+  const { cfg } = await fixture();
+  const ctx = ctxOf(cfg);
+  const base = { vault: 'Acme Studio', title: 'T', body: 'b', source: 's' };
+  assert.match((await proposeNote(ctx, base)).errors.join(), /decision is required/);
+  assert.match((await proposeNote(ctx, { ...base, folder: 'Nowhere' })).errors.join(), /does not exist/);
+  assert.match((await proposeNote(ctx, { ...base, decision: 'ADOPT', body: 'key sk-abcdefghijklmnopqrstuvwxyz123' })).errors.join(), /secrets/);
+  assert.match((await proposeNote(ctx, { ...base, folder: 'Clients', body: 'card 4111 1111 1111 1111' })).errors.join(), /card/);
+  const anon = createContext(cfg, { env: {}, license: PAID });
+  assert.match((await proposeNote(anon, { ...base, decision: 'ADOPT' })).errors.join(), /ai_platform is required/);
+  assert.ok((await proposeNote(ctx, { ...base, folder: 'Clients' })).ok, 'existing folder needs no decision');
+});
+
+test('proposal-only vault never writes; provenance schema used', async () => {
+  const { cfg, journal } = await fixture();
+  const ctx = ctxOf(cfg);
+  const r = await proposeNote(ctx, { vault: 'Journal', title: 'Mood', body: 'ok', source: 'chat', confidence: 'reported', confirm: true }, NOW);
+  assert.equal(r.written, false);
+  assert.match(r.preview, /created_by_platform: claude/);
+  assert.match(r.preview, /provenance_confidence: reported/);
+  assert.deepEqual((await readdir(path.join(journal, 'Inbox'))), []);
+});
+
+test('read-only connection refuses writes', async () => {
+  const { cfg } = await fixture();
+  const ctx = ctxOf(cfg, { BRAINLINK_READ_ONLY: '1' });
+  assert.match((await proposeNote(ctx, { title: 'T', body: 'b', source: 's', decision: 'ADOPT' })).errors.join(), /read-only/);
+});
+
+test('handoffs: send to a mailbox and filter by recipient', async () => {
+  const { cfg } = await fixture();
+  const ctx = ctxOf(cfg);
+  const r = await sendHandoff(ctx, { to: 'Grok', subject: 'Check pricing page', body: 'Please review.', priority: 'P1', confirm: true }, NOW);
+  assert.match(r.path, /Handoffs\/2026-10-18-0930-from-claude-to-grok-check-pricing-page\.md$/);
+  const forGrok = await listHandoffs(ctx, { to: 'Grok' });
+  assert.equal(forGrok.length, 1);
+  assert.equal((await listHandoffs(ctx, {})).length, 2);
+});
+
+// ---- agents ----
+
+test('agents resolve by name or phrase, case and punctuation insensitive', async () => {
+  const { cfg } = await fixture();
+  const ctx = ctxOf(cfg);
+  assert.equal(resolveAgent(ctx, 'connect to chief of staff').name, 'Chief of Staff');
+  assert.equal(resolveAgent(ctx, 'Chief of Staff, close the loop.').name, 'Chief of Staff');
+  assert.throws(() => resolveAgent(ctx, 'Anna'), /Unknown agent/);
+});
+
+test('agent_connect loads role notes, newest captures and stale warnings', async () => {
+  const { cfg, company } = await fixture();
+  const old = new Date(Date.now() - 40 * 86400e3);
+  await utimes(path.join(company, 'Chief of Staff Office/Current Goal.md'), old, old);
+  const r = await connectAgent(ctxOf(cfg), { agent: 'Connect to Chief of Staff' });
+  assert.equal(r.agent.vault, 'Acme Studio');
+  assert.ok(r.role_notes.some((n) => /Operating coordinator/.test(n.excerpt)));
+  assert.equal(r.recent_captures[0].heading, '2026-10-10 09:30 — Weekly planning');
+  assert.ok(r.warnings.some((w) => /Current Goal/.test(w)));
+  assert.match(r.instructions, /Chief of Staff close loop/);
+});
+
+test('latestCaptures sorts by date, not file order', () => {
+  const c = latestCaptures('## 2026-08-01 — a\n\nx\n\n## 2026-10-15 — c\n\nz\n\n## 2026-09-07 — b\n\ny');
+  assert.deepEqual(c.map((x) => x.heading), ['2026-10-15 — c', '2026-09-07 — b']);
+});
+
+test('close loop: append-section preview then append', async () => {
+  const { cfg, company } = await fixture();
+  const ctx = ctxOf(cfg);
+  const args = { agent: 'Chief of Staff', title: 'Launch review', source: 'chat', confidence: 'high', decisions: ['Launch Nov 3'], next_actions: ['Book QA'], links: ['Northwind Launch Site'] };
+  const p = await closeLoop(ctx, args, NOW);
+  assert.equal(p.written, false);
+  assert.match(p.preview, /## 2026-10-18 09:30 — Launch review/);
+  const w = await closeLoop(ctx, { ...args, confirm: true }, NOW);
+  assert.equal(w.written, true);
+  const text = await readFile(path.join(company, 'Chief of Staff Office/Session Captures.md'), 'utf8');
+  assert.match(text, /Weekly planning[\s\S]*Launch review/);
+  assert.match(text, /\[\[Northwind Launch Site\]\]/);
+  assert.match((await closeLoop(ctx, { agent: 'Chief of Staff', source: 'x', confidence: 'y', title: 'T' })).errors.join(), /decision or action/);
+});
+
+test('close loop: proposal-only agent stays a proposal until capture_approved', async () => {
+  const { cfg, journal } = await fixture();
+  const args = { agent: 'Journal', title: 'Evening', source: 'chat', confidence: 'reported', actions: ['Reflected'], confirm: true };
+  const r = await closeLoop(ctxOf(cfg), args, NOW);
+  assert.equal(r.written, false);
+  assert.match(r.next, /proposal-only/);
+  assert.doesNotMatch(await readFile(path.join(journal, 'Memory Review Inbox.md'), 'utf8'), /Evening/);
+});
+
+test('close loop: new-note and append-task modes', async () => {
+  const { cfg, company } = await fixture();
+  cfg.agents.push(
+    { ...cfg.agents[0], name: 'Fin', activation: ['Connect to Fin'], close: ['Fin close loop'], close_target: { mode: 'new-note', dir: 'Projects' } },
+    { ...cfg.agents[0], name: 'Sec', activation: ['Connect to Sec'], close: ['Sec close loop'], close_target: { mode: 'append-task', path: 'Chief of Staff Office/Tasks.md' } },
+  );
+  const ctx = ctxOf(cfg);
+  const n = await closeLoop(ctx, { agent: 'Fin', title: 'Budget check', source: 'chat', confidence: 'high', decisions: ['Hold'], confirm: true }, NOW);
+  assert.equal(n.path, 'Acme Studio/Projects/2026-10-18 — Budget check.md');
+  assert.match(await readFile(path.join(company, 'Projects/2026-10-18 — Budget check.md'), 'utf8'), /tags: \[close-loop, fin\]/);
+  const t = await closeLoop(ctx, { agent: 'Sec', source: 'chat', confidence: 'high', tasks: [{ task: 'Renew domain', next: 'check registrar' }], confirm: true }, NOW);
+  assert.equal(t.appended_tasks, 1);
+  assert.match(await readFile(path.join(company, 'Chief of Staff Office/Tasks.md'), 'utf8'), /- \[ \] 2026-10-18 — Renew domain — check registrar/);
+});
+
+// ---- MCP protocol ----
+
+test('MCP: initialize, tools, prompts, resources, errors', async () => {
+  const { cfg } = await fixture();
+  const mcp = createMcp(ctxOf(cfg));
+  const call = (method, params, id = 1) => mcp.handle({ jsonrpc: '2.0', id, method, params });
+  const init = await call('initialize', { protocolVersion: '2025-03-26' });
+  assert.equal(init.result.protocolVersion, '2025-03-26');
+  assert.match(init.result.instructions, /"Connect to Chief of Staff" → agent_connect/);
+  const names = (await call('tools/list')).result.tools.map((t) => t.name);
+  for (const n of ['brainlink_guide', 'vault_search', 'agent_connect', 'agent_close_loop', 'propose_note', 'send_handoff', 'search', 'fetch']) assert.ok(names.includes(n), n);
+  const prompts = (await call('prompts/list')).result.prompts.map((p) => p.name);
+  assert.ok(prompts.includes('connect-chief-of-staff') && prompts.includes('close-loop-chief-of-staff'));
+  assert.match((await call('prompts/get', { name: 'close-loop-chief-of-staff', arguments: { focus: 'launch' } })).result.messages[0].content.text, /launch/);
+  const res = (await call('resources/list')).result.resources;
+  const rule = res.find((r) => r.name === 'Acme Studio: AGENTS.md');
+  assert.match((await call('resources/read', { uri: rule.uri })).result.contents[0].text, /Rules for AI agents/);
+  assert.equal((await call('nope')).error.code, -32601);
+  assert.equal(await mcp.handle({ jsonrpc: '2.0', method: 'notifications/initialized' }), null);
+  const bad = await call('tools/call', { name: 'vault_read_note', arguments: { vault: 'Acme Studio', path: '../x.md' } });
+  assert.equal(bad.result.isError, true);
+});
+
+test('connector search/fetch exclude private vaults', async () => {
+  const { cfg } = await fixture();
+  const mcp = createMcp(ctxOf(cfg));
+  const r = await mcp.handle({ jsonrpc: '2.0', id: 1, method: 'tools/call', params: { name: 'search', arguments: { query: 'pricing diary' } } });
+  const ids = r.result.structuredContent.results.map((x) => x.id);
+  assert.ok(ids.length && ids.every((id) => id.startsWith('Acme Studio::')));
+  const f = await mcp.handle({ jsonrpc: '2.0', id: 2, method: 'tools/call', params: { name: 'fetch', arguments: { id: 'Journal::diary.md' } } });
+  assert.equal(f.result.isError, true);
+});
+
+test('HTTP transport: token required, foreign origins rejected', async () => {
+  const { cfg } = await fixture();
+  const token = 'a'.repeat(32);
+  const server = await serveHttp(createMcp(ctxOf(cfg)), 0, token);
+  const url = `http://127.0.0.1:${server.address().port}/mcp`;
+  const body = JSON.stringify({ jsonrpc: '2.0', id: 1, method: 'tools/list' });
+  try {
+    assert.equal((await fetch(url, { method: 'POST', body })).status, 401);
+    assert.equal((await fetch(url, { method: 'POST', body, headers: { Authorization: `Bearer ${token}`, Origin: 'https://evil.example' } })).status, 403);
+    const ok = await fetch(url, { method: 'POST', body, headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' } });
+    assert.ok((await ok.json()).result.tools.length > 5);
+  } finally { server.close(); }
+  assert.throws(() => serveHttp(createMcp(ctxOf(cfg)), 0, 'short'), /16\+/);
+});
+
+// ---- connectors, packs, setup ----
+
+test('connectors: JSON clients keep other servers and get a backup; bad JSON is never overwritten', async () => {
+  const home = await tmp('home');
+  const opts = { home, os: 'darwin', env: {}, launch: { command: '/opt/BrainLink/node', args: ['/opt/BrainLink/cli.mjs', 'serve'] }, useCli: false, now: NOW };
+  const file = path.join(home, 'Library/Application Support/Claude/claude_desktop_config.json');
+  await mkdir(path.dirname(file), { recursive: true });
+  await writeFile(file, JSON.stringify({ mcpServers: { other: { command: 'x' } }, theme: 'dark' }));
+  const r = await connectClient('claude-desktop', opts);
+  const j = JSON.parse(await readFile(file, 'utf8'));
+  assert.equal(j.mcpServers.other.command, 'x');
+  assert.equal(j.theme, 'dark');
+  assert.deepEqual(j.mcpServers.brainlink, { command: '/opt/BrainLink/node', args: ['/opt/BrainLink/cli.mjs', 'serve'], env: { BRAINLINK_AI_PLATFORM: 'Claude', BRAINLINK_AGENT_ROLE: 'Claude Desktop' } });
+  assert.ok(r.backup && JSON.parse(await readFile(r.backup, 'utf8')).mcpServers.brainlink === undefined);
+  assert.equal((await detect(opts))['claude-desktop'].connected, true);
+  await disconnectClient('claude-desktop', opts);
+  assert.equal(JSON.parse(await readFile(file, 'utf8')).mcpServers.brainlink, undefined);
+  const cursor = path.join(home, '.cursor/mcp.json');
+  await mkdir(path.dirname(cursor), { recursive: true });
+  await writeFile(cursor, '{ broken');
+  await assert.rejects(connectClient('cursor', opts), /not valid JSON/);
+  assert.equal(await readFile(cursor, 'utf8'), '{ broken');
+});
+
+test('connectors: Codex TOML block is replaced, not duplicated', async () => {
+  const entry = { command: 'C:\\BrainLink\\node.exe', args: ['C:\\BrainLink\\app\\bin\\brainlink.mjs', 'serve'], env: { BRAINLINK_AI_PLATFORM: 'ChatGPT Codex' } };
+  const start = 'model = "gpt-5"\n\n[mcp_servers.other]\ncommand = "x"\n';
+  const once = codexToml(start, entry);
+  const twice = codexToml(once, entry);
+  assert.equal(once, twice);
+  assert.equal((twice.match(/\[mcp_servers\.brainlink\]/g) || []).length, 1);
+  assert.match(twice, /command = "C:\\\\BrainLink\\\\node.exe"/);
+  assert.match(twice, /\[mcp_servers\.other\]\ncommand = "x"/);
+  assert.equal(codexToml(twice, null).includes('brainlink'), false);
+});
+
+test('packs: scaffold never overwrites; merge replaces same-named vault', async () => {
+  const dir = await tmp('pack');
+  await writeFile(path.join(dir, 'AGENTS.md'), 'mine');
+  const b = buildPack('founder-os', { vaultName: 'V', vaultPath: dir, agentName: 'Max' });
+  const created = await scaffold(dir, b.scaffold);
+  assert.equal(await readFile(path.join(dir, 'AGENTS.md'), 'utf8'), 'mine');
+  assert.ok(created.includes('Max Office/Session Captures.md'));
+  assert.deepEqual(await scaffold(dir, b.scaffold), []);
+  const merged = mergePack(mergePack(normalize({}), b), b);
+  assert.equal(merged.vaults.length, 1);
+  assert.equal(merged.agents.length, 1);
+  assert.deepEqual(validate(normalize(merged)), []);
+  assert.throws(() => buildPack('nope', {}), /Unknown rule pack/);
+});
+
+test('setup UI: host check, token check, add vault, free-plan limits, licence rejection', async () => {
+  const home = await tmp('setup-home');
+  const env = { BRAINLINK_HOME: path.join(home, 'app'), BRAINLINK_SEMANTIC: '0' };
+  const vaultDir = path.join(home, 'Notes');
+  await cp(SAMPLE, vaultDir, { recursive: true });
+  const s = await startSetup({ env, home, os: 'darwin', port: 0, pick: async () => vaultDir, useCli: false });
+  const base = `http://127.0.0.1:${s.port}`;
+  const api = (method, p, body, token = s.token) => fetch(base + p, { method, headers: { 'X-BrainLink-Token': token, 'Content-Type': 'application/json' }, body: body && JSON.stringify(body) });
+  try {
+    assert.equal((await fetch(base + '/')).status, 200);
+    assert.equal((await api('GET', '/api/state', null, 'wrong')).status, 401);
+    assert.equal((await api('POST', '/api/pick-folder')).status, 200);
+    const add = await (await api('POST', '/api/vault', { path: vaultDir, name: 'Acme', pack: 'founder-os', agentName: 'Chief of Staff' })).json();
+    assert.equal(add.ok, true);
+    const st = await (await api('GET', '/api/state')).json();
+    assert.equal(st.vaults[0].notes > 5, true);
+    assert.equal(st.agents[0].name, 'Chief of Staff');
+    assert.equal(st.license.valid, false);
+    const second = await api('POST', '/api/vault', { path: home, name: 'Other' });
+    assert.equal(second.status, 400);
+    assert.match((await second.json()).error, /free plan/);
+    assert.match((await (await api('POST', '/api/license', { key: 'BL1.abc.def' })).json()).error, /not accepted/);
+    const t = await (await api('POST', '/api/test', { query: 'care plan discount rules' })).json();
+    assert.equal(t.results[0].path, 'Pricing and Packages.md');
+    for (const c of ['claude-desktop', 'cursor']) { await mkdir(path.join(home, c === 'cursor' ? '.cursor' : 'Library/Application Support/Claude'), { recursive: true }); assert.equal((await api('POST', '/api/connect', { client: c })).status, 200); }
+    const third = await api('POST', '/api/connect', { client: 'gemini' });
+    assert.match((await third.json()).error, /free plan connects 2/);
+    // fetch() drops custom Host headers, so use node:http to simulate DNS rebinding.
+    const status = await new Promise((resolve) => request({ host: '127.0.0.1', port: s.port, path: '/api/state', headers: { 'X-BrainLink-Token': s.token, Host: `evil.example:${s.port}` } }, (r) => { r.resume(); resolve(r.statusCode); }).end());
+    assert.equal(status, 421);
+  } finally { s.server.close(); }
+});
+
+test('CLI: `brainlink serve` speaks MCP over stdio and logs content-free activity', async () => {
+  const { cfg } = await fixture();
+  const home = await tmp('cli');
+  await saveConfig(cfg, path.join(home, 'config.json'));
+  const child = spawn(process.execPath, [path.join(ROOT, 'bin/brainlink.mjs'), 'serve'], { env: { ...process.env, BRAINLINK_HOME: home, BRAINLINK_AI_PLATFORM: 'Cursor' } });
+  const lines = [];
+  let buf = '';
+  child.stdout.on('data', (d) => { buf += d; let i; while ((i = buf.indexOf('\n')) !== -1) { lines.push(JSON.parse(buf.slice(0, i))); buf = buf.slice(i + 1); } });
+  child.stdin.write(JSON.stringify({ jsonrpc: '2.0', id: 1, method: 'initialize', params: {} }) + '\n');
+  child.stdin.write(JSON.stringify({ jsonrpc: '2.0', id: 2, method: 'tools/call', params: { name: 'vault_search', arguments: { vault: 'Acme Studio', query: 'secret pricing words' } } }) + '\n');
+  for (let i = 0; i < 100 && lines.length < 2; i++) await new Promise((r) => setTimeout(r, 50));
+  for (let i = 0; i < 40; i++) { if (await readFile(path.join(home, 'activity.log'), 'utf8').then((t) => t.includes('vault_search'), () => false)) break; await new Promise((r) => setTimeout(r, 50)); }
+  child.kill();
+  assert.equal(lines[0].result.serverInfo.name, 'brainlink');
+  assert.equal(lines[1].result.isError, false); // free plan (no licence in config) still searches
+  const log = await readFile(path.join(home, 'activity.log'), 'utf8');
+  assert.match(log, /"tool":"vault_search"/);
+  assert.match(log, /"platform":"Cursor"/);
+  assert.doesNotMatch(log, /secret pricing/);
+});
+
+test('shipped files name no specific customer, person or private path', async () => {
+  const banned = /\b(Iango|Ian Tsai|iantsai|Anna CEO|Ian Livva|Ian Personal|GoogleDrive-|Asia\/Taipei)\b/;
+  const walk = async (d) => (await readdir(d, { withFileTypes: true })).flatMap((f) => f.isDirectory() ? [] : [path.join(d, f.name)]);
+  const dirs = ['src', 'bin', 'ui'].map((d) => path.join(ROOT, d));
+  const files = (await Promise.all(dirs.map(walk))).flat();
+  const sampleFiles = [];
+  const rec = async (d) => { for (const f of await readdir(d, { withFileTypes: true })) f.isDirectory() ? await rec(path.join(d, f.name)) : sampleFiles.push(path.join(d, f.name)); };
+  await rec(SAMPLE);
+  for (const f of [...files, ...sampleFiles]) assert.doesNotMatch(await readFile(f, 'utf8'), banned, f);
+});
+
+test('identity and secret helpers', () => {
+  const ctx = { platform: '', agentRole: 'direct assistant', cfg: { platforms: ['Claude'] } };
+  assert.ok(resolveIdentity(ctx, {}).errors.length);
+  assert.equal(resolveIdentity(ctx, { ai_platform: 'Gemini' }).errors.length, 0);
+  assert.deepEqual(findSecrets('plain text with 2026-10-18 date'), []);
+  assert.ok(findSecrets('-----BEGIN OPENSSH PRIVATE KEY-----').length);
+});
+
+// ---- easy setup ----
+
+test('built-in trial: 14 days from first setup, then free; a key always wins', () => {
+  const now = new Date('2026-10-18T00:00:00Z');
+  const t = effectiveLicense({ trial_started: '2026-10-10T00:00:00Z' }, { now });
+  assert.equal(t.valid, true); assert.equal(t.plan, 'trial'); assert.equal(t.days_left, 6);
+  const ended = effectiveLicense({ trial_started: '2026-09-01T00:00:00Z' }, { now });
+  assert.equal(ended.valid, false); assert.match(ended.reason, /trial ended/);
+  assert.equal(effectiveLicense({ trial_started: '2026-10-10T00:00:00Z', license: 'BL1.bad.key' }, { now }).valid, false);
+  assert.equal(effectiveLicense({}, { now }).plan, 'free');
+});
+
+test('Obsidian vaults are found from Obsidian settings; parent folders of several vaults are detected', async () => {
+  const home = await tmp('obs');
+  const root = path.join(home, 'Vaults');
+  for (const v of ['Work', 'Life']) await mkdir(path.join(root, v, '.obsidian'), { recursive: true });
+  const cfgFile = path.join(home, 'Library/Application Support/obsidian/obsidian.json');
+  await mkdir(path.dirname(cfgFile), { recursive: true });
+  await writeFile(cfgFile, JSON.stringify({ vaults: { a: { path: path.join(root, 'Work'), ts: 1 }, b: { path: path.join(root, 'Life'), ts: 2, open: true }, c: { path: path.join(root, 'Gone') } } }));
+  const found = await findObsidianVaults({ home, os: 'darwin' });
+  assert.deepEqual(found.map((v) => v.name), ['Life', 'Work']);
+  assert.deepEqual((await nestedVaults(root)).sort(), ['Life', 'Work']);
+  assert.deepEqual(await nestedVaults(path.join(root, 'Work')), []);
+});
+
+test('one-click setup: new brain, trial starts, every found AI app connected; multi-vault folders refused', async () => {
+  const home = await tmp('quick');
+  const env = { BRAINLINK_HOME: path.join(home, 'app'), BRAINLINK_SEMANTIC: '0' };
+  for (const d of ['Library/Application Support/Claude', '.cursor', '.gemini']) await mkdir(path.join(home, d), { recursive: true });
+  for (const v of ['A', 'B']) await mkdir(path.join(home, 'Parent', v, '.obsidian'), { recursive: true });
+  const s = await startSetup({ env, home, os: 'darwin', port: 0, useCli: false });
+  const api = (p, body) => fetch(`http://127.0.0.1:${s.port}${p}`, { method: body ? 'POST' : 'GET', headers: { 'X-BrainLink-Token': s.token, 'Content-Type': 'application/json' }, body: body && JSON.stringify(body) }).then((r) => r.json());
+  try {
+    assert.equal((await fetch(`http://127.0.0.1:${s.port}/health`).then((r) => r.json())).app, 'brainlink');
+    const nested = await api('/api/quick', { mode: 'folder', path: path.join(home, 'Parent') });
+    assert.equal(nested.ok, false);
+    assert.deepEqual(nested.nested.map((n) => n.name).sort(), ['A', 'B']);
+    const r = await api('/api/quick', { mode: 'new' });
+    assert.equal(r.ok, true);
+    assert.equal(r.path, path.join(home, 'Documents', 'My Brain'));
+    assert.equal(r.phrase, 'Connect to Brain');
+    assert.deepEqual(r.connected.sort(), ['Claude Desktop', 'Cursor', 'Gemini CLI']);
+    assert.match(await readFile(path.join(r.path, 'BrainLink', 'Brain Role.md'), 'utf8'), /Brain/);
+    assert.match(await readFile(path.join(r.path, 'BrainLink', 'Home.md'), 'utf8'), /generated_by: brainlink[\s\S]*\[\[Welcome\]\]/, 'Home map created at setup');
+    const st = await api('/api/state');
+    assert.equal(st.license.plan, 'trial');
+    assert.equal(st.agents[0].name, 'Brain');
+    // The brain works straight away in a connected AI (trial = agents + writes).
+    const ctx = createContext(normalize(JSON.parse(await readFile(path.join(home, 'app', 'config.json'), 'utf8'))), { env: { BRAINLINK_AI_PLATFORM: 'Claude' }, license: st.license });
+    assert.equal(resolveAgent(ctx, 'Connect to my brain').name, 'Brain');
+    const closed = await closeLoop(ctx, { agent: 'Close loop', title: 'First chat', source: 'chat', confidence: 'high', decisions: ['Try BrainLink'], confirm: true });
+    assert.equal(closed.written, true);
+  } finally { s.server.close(); }
+});
+
+// ---- smart features ----
+
+import { stem, extractTags, findMentions, makeResolver } from '../src/graph.mjs';
+import { remember, appendDaily } from '../src/writes.mjs';
+import { recentNotes, openLoops, vaultHealth, brief } from '../src/insights.mjs';
+import { buildHomeMap } from '../src/links.mjs';
+import { createServer as httpServer } from 'node:http';
+
+test('stemming, tags, unlinked mentions, Obsidian-style link resolution', () => {
+  assert.equal(stem('pricing'), stem('price'));
+  assert.equal(stem('notes'), 'note');
+  assert.equal(stem('strategies'), 'strategy');
+  assert.deepEqual([...extractTags('Text #launch and #Q4/plan `#code`', { tags: '[client, "vip"]' })].sort(), ['client', 'launch', 'q4/plan', 'vip']);
+  assert.deepEqual(findMentions('Call Northwind Coffee about the [[Strategy 2027]] and the coffee plan', ['Northwind Coffee', 'Strategy 2027', 'Coffee', 'Plan']), ['Northwind Coffee']);
+  const notes = [{ rel: 'A/Spec.md', title: 'Spec' }, { rel: 'B/Spec.md', title: 'Spec' }, { rel: 'B/Other.md', title: 'Other' }];
+  const r = makeResolver(notes);
+  assert.equal(r('Spec', 'B/Other.md'), 1, 'same folder wins');
+  assert.equal(r('A/Spec', 'B/Other.md'), 0, 'path suffix');
+});
+
+test('search: folder, date and #tag filters; rephrasings are fused', async () => {
+  const { cfg, company } = await fixture();
+  await writeFile(path.join(company, 'Projects/Launch Checklist.md'), '---\ndate: 2026-10-15\n---\n# Launch Checklist\n\n#launch tasks for go-live.');
+  const ctx = ctxOf(cfg);
+  const inClients = await search(ctx, 'Acme Studio', 'launch site', { folder: 'Clients' });
+  assert.ok(inClients.length && inClients.every((x) => x.path.startsWith('Clients/')));
+  const tagged = await search(ctx, 'Acme Studio', '#launch');
+  assert.equal(tagged[0].path, 'Projects/Launch Checklist.md');
+  assert.equal(tagged[0].match, 'tag');
+  const recent = await search(ctx, 'Acme Studio', 'launch', { since: '2026-10-14' });
+  assert.ok(recent.every((x) => x.date >= '2026-10-14'));
+  const fused = await search(ctx, 'Acme Studio', 'go-live readiness', { queries: ['physiotherapy booking'] });
+  assert.ok(fused.some((x) => x.path === 'Clients/Blue Harbor Clinic.md'), 'rephrasing finds the clinic');
+});
+
+test('meaning-based search with a local embedding model (fake Ollama)', async () => {
+  const { cfg } = await fixture();
+  const topics = [['coffee', 'espresso', 'roaster', 'beans', 'northwind', 'cafe'], ['clinic', 'physiotherapy', 'booking', 'patients', 'accessibility'], ['pricing', 'price', 'discount', 'invoice', 'fee']];
+  const vec = (t) => { const w = t.toLowerCase(); return topics.map((ws) => ws.reduce((s, x) => s + (w.split(x).length - 1), 0) + 0.01); };
+  const fake = httpServer(async (req, res) => {
+    let body = ''; for await (const c of req) body += c;
+    if (req.url === '/api/tags') return res.end(JSON.stringify({ models: [{ name: 'nomic-embed-text:latest' }] }));
+    const { input } = JSON.parse(body);
+    res.end(JSON.stringify({ embeddings: input.map(vec) }));
+  });
+  await new Promise((r) => fake.listen(0, '127.0.0.1', r));
+  try {
+    const ctx = ctxOf(cfg, { BRAINLINK_SEMANTIC: '1', BRAINLINK_EMBED_URL: `http://127.0.0.1:${fake.address().port}` });
+    const r = await search(ctx, 'Acme Studio', 'espresso');
+    assert.ok(r.length, 'no keyword overlap, found by meaning');
+    assert.match(r[0].path, /Northwind/);
+    assert.equal(r[0].match, 'meaning');
+    const g = await (createMcp(ctx).tools.find((t) => t.name === 'brainlink_guide').run());
+    assert.match(g.search, /meaning \(local model nomic-embed-text/);
+  } finally { fake.close(); }
+});
+
+test('auto-linking: new notes link what they mention plus similar notes, and the Home map links everything', async () => {
+  const { cfg, company } = await fixture();
+  const ctx = ctxOf(cfg);
+  const r = await proposeNote(ctx, { vault: 'Acme Studio', folder: 'Projects', title: 'Subscription page', body: 'Plan the bean subscription page for Northwind Coffee. Shopify integration for subscriptions in phase 2.', source: 'chat', confirm: true }, NOW);
+  assert.ok(r.linked_to.includes('Northwind Coffee'));
+  const text = await readFile(path.join(company, 'Projects/2026-10-18 — Subscription page.md'), 'utf8');
+  assert.match(text, /## Related\n\n- \[\[Northwind Coffee\]\] — mentioned here/);
+  const home = await readFile(path.join(company, 'BrainLink/Home.md'), 'utf8');
+  assert.match(home, /generated_by: brainlink/);
+  assert.match(home, /\[\[Subscription page\]\]|\[\[2026-10-18 — Subscription page\]\]/);
+  assert.match(home, /\[\[Strategy 2027\]\]/);
+  // A user's own note at that path is never replaced.
+  await writeFile(path.join(company, 'BrainLink/Home.md'), '# My own home');
+  await proposeNote(ctx, { vault: 'Acme Studio', folder: 'Projects', title: 'Second', body: 'x', source: 's', confirm: true }, NOW);
+  assert.equal(await readFile(path.join(company, 'BrainLink/Home.md'), 'utf8'), '# My own home');
+  assert.match(await buildHomeMap(ctx, 'Acme Studio', NOW), /not linked to anything yet/);
+});
+
+test('templates: meeting note with linked attendees, tasks and its own folder', async () => {
+  const { cfg, company } = await fixture();
+  await mkdir(path.join(company, 'Meetings'));
+  const ctx = ctxOf(cfg);
+  const r = await proposeNote(ctx, { vault: 'Acme Studio', template: 'meeting', title: 'Northwind launch sync', source: 'transcript', fields: { date: '2026-10-18', attendees: ['Dana', 'Sam'], summary: 'Reviewed the Northwind Launch Site timeline.', decisions: ['Launch Nov 3'], action_items: ['Sam — book QA — Oct 30'] }, confirm: true }, NOW);
+  assert.equal(r.path, 'Acme Studio/Meetings/2026-10-18 — Northwind launch sync.md');
+  const t = await readFile(path.join(company, 'Meetings/2026-10-18 — Northwind launch sync.md'), 'utf8');
+  assert.match(t, /\*\*Attendees:\*\* \[\[Dana\]\], \[\[Sam\]\]/);
+  assert.match(t, /- \[ \] Sam — book QA — Oct 30/);
+  assert.match(t, /type: meeting/);
+  assert.match(t, /\[\[Northwind Launch Site\]\] — mentioned here/);
+  const loops = await openLoops(ctx, 'Acme Studio');
+  assert.ok(loops.tasks.some((x) => /book QA/.test(x.task)));
+});
+
+test('remember, daily note, open loops, recent, health and brief', async () => {
+  const { cfg, company } = await fixture();
+  await mkdir(path.join(company, '.obsidian'), { recursive: true });
+  await writeFile(path.join(company, '.obsidian/daily-notes.json'), JSON.stringify({ folder: 'Journal/Daily', format: 'YYYY-MM-DD' }));
+  await writeFile(path.join(company, 'Lonely.md'), '# Lonely\n\nNo links here, and a [[Missing Note]].');
+  const ctx = ctxOf(cfg);
+  const m1 = await remember(ctx, { vault: 'Acme Studio', fact: 'Founder prefers short answers.', confirm: true }, NOW);
+  assert.equal(m1.written, true);
+  assert.equal((await remember(ctx, { vault: 'Acme Studio', fact: 'founder prefers short answers', confirm: true }, NOW)).written, false, 'duplicates skipped');
+  const d = await appendDaily(ctx, { vault: 'Acme Studio', text: 'Called the printer', confirm: true }, NOW);
+  assert.equal(d.path, 'Acme Studio/Journal/Daily/2026-10-18.md');
+  assert.match(await readFile(path.join(company, 'Journal/Daily/2026-10-18.md'), 'utf8'), /- 09:30 Called the printer _\(Claude\)_/);
+  const loops = await openLoops(ctx, 'Acme Studio', { days: 3650 });
+  assert.ok(loops.next_actions.some((x) => /booking vendor/.test(x.action)));
+  const rec = await recentNotes(ctx, 'Acme Studio', { days: 1 });
+  assert.ok(rec.some((x) => x.title === 'Lonely'));
+  const h = await vaultHealth(ctx, 'Acme Studio');
+  assert.ok(h.orphans.some((o) => o.title === 'Lonely'));
+  assert.ok(h.broken_links.some((b) => b.target === 'Missing Note'));
+  const b = await brief(ctx, 'Acme Studio');
+  assert.ok(b.changed.length && b.health.notes > 10 && 'open_loops' in b);
+  const c = await connectAgent(ctx, { agent: 'Chief of Staff' });
+  assert.ok(c.memories.includes('Founder prefers short answers.'));
+  assert.ok(c.whats_new.length);
+  assert.ok(c.open_loops.counts);
+});
+
+test('close-loop captures link the notes they are about', async () => {
+  const { cfg, company } = await fixture();
+  const r = await closeLoop(ctxOf(cfg), { agent: 'Chief of Staff', title: 'Clinic follow-up', source: 'chat', confidence: 'high', decisions: ['Blue Harbor Clinic picks a booking vendor this week'], confirm: true }, NOW);
+  assert.ok(r.linked_to.includes('Blue Harbor Clinic'));
+  assert.match(await readFile(path.join(company, 'Chief of Staff Office/Session Captures.md'), 'utf8'), /- \*\*Related:\*\* \[\[Blue Harbor Clinic\]\]/);
+});
+
+test('shared commands from BrainLink/Commands appear as prompts in every AI', async () => {
+  const { cfg } = await fixture();
+  const mcp = createMcp(ctxOf(cfg));
+  const list = (await mcp.handle({ jsonrpc: '2.0', id: 1, method: 'prompts/list' })).result.prompts.map((p) => p.name);
+  for (const n of ['cmd-weekly-review', 'cmd-meeting-notes', 'cmd-link-my-notes', 'brief', 'remember']) assert.ok(list.includes(n), n);
+  const got = await mcp.handle({ jsonrpc: '2.0', id: 2, method: 'prompts/get', params: { name: 'cmd-meeting-notes', arguments: { input: 'Dana: launch moved to Nov 3' } } });
+  assert.match(got.result.messages[0].content.text, /template "meeting"[\s\S]*Dana: launch moved to Nov 3/);
+  const tools = (await mcp.handle({ jsonrpc: '2.0', id: 3, method: 'tools/list' })).result.tools.map((t) => t.name);
+  for (const n of ['vault_recent', 'open_loops', 'brain_brief', 'vault_health', 'remember', 'append_daily']) assert.ok(tools.includes(n), n);
+});
+
+// ---- Windows code paths (run here with os = 'win32') ----
+
+import { appHome } from '../src/config.mjs';
+import { obsidianConfigPath } from '../src/obsidian.mjs';
+import { CLIENTS } from '../src/connectors.mjs';
+
+test('Windows: app data, Obsidian and every AI client resolve to their Windows locations', () => {
+  const home = 'C:/Users/Ana', env = { APPDATA: 'C:/Users/Ana/AppData/Roaming' };
+  assert.equal(appHome(env, 'win32', home), path.join(env.APPDATA, 'BrainLink'));
+  assert.equal(obsidianConfigPath({ home, os: 'win32', env }), path.join(env.APPDATA, 'obsidian', 'obsidian.json'));
+  const files = Object.fromEntries(Object.entries(CLIENTS).map(([id, c]) => [id, c.file({ home, os: 'win32', env })]));
+  assert.equal(files['claude-desktop'], path.join(env.APPDATA, 'Claude', 'claude_desktop_config.json'));
+  assert.equal(files.cursor, path.join(home, '.cursor', 'mcp.json'));
+  assert.equal(files.codex, path.join(home, '.codex', 'config.toml'));
+  assert.equal(files.gemini, path.join(home, '.gemini', 'settings.json'));
+  assert.equal(appHome({}, 'win32', home), path.join(home, 'AppData', 'Roaming', 'BrainLink'));
+});
+
+test('Windows: one-click setup connects apps with node.exe paths, and disconnect-all removes them', async () => {
+  const home = await tmp('win');
+  const env = { BRAINLINK_HOME: path.join(home, 'AppData/Roaming/BrainLink'), APPDATA: path.join(home, 'AppData/Roaming'), BRAINLINK_SEMANTIC: '0', BRAINLINK_LAUNCHER: 'C:\\Users\\Ana\\AppData\\Local\\Programs\\BrainLink\\bin\\brainlink.cmd' };
+  await mkdir(path.join(env.APPDATA, 'Claude'), { recursive: true });
+  await mkdir(path.join(home, '.codex'), { recursive: true });
+  await writeFile(path.join(home, '.codex/config.toml'), 'model = "gpt-5"\n');
+  const s = await startSetup({ env, home, os: 'win32', port: 0, useCli: false });
+  const api = (p, body) => fetch(`http://127.0.0.1:${s.port}${p}`, { method: 'POST', headers: { 'X-BrainLink-Token': s.token, 'Content-Type': 'application/json' }, body: JSON.stringify(body || {}) }).then((r) => r.json());
+  try {
+    const r = await api('/api/quick', { mode: 'new' });
+    assert.deepEqual(r.connected.sort(), ['ChatGPT Codex', 'Claude Desktop']);
+    const claude = JSON.parse(await readFile(path.join(env.APPDATA, 'Claude/claude_desktop_config.json'), 'utf8'));
+    assert.equal(claude.mcpServers.brainlink.command, env.BRAINLINK_LAUNCHER);
+    assert.match(await readFile(path.join(home, '.codex/config.toml'), 'utf8'), /command = "C:\\\\Users\\\\Ana\\\\AppData\\\\Local\\\\Programs\\\\BrainLink\\\\bin\\\\brainlink.cmd"/);
+  } finally { s.server.close(); }
+  const { disconnectClient: dc, detect: dt } = await import('../src/connectors.mjs');
+  const opts = { home, os: 'win32', env, launch: { command: 'x', args: [] }, useCli: false };
+  for (const [id, c] of Object.entries(await dt(opts))) if (c.connected) await dc(id, opts);
+  assert.equal(Object.values(await dt(opts)).some((c) => c.connected), false);
+  assert.match(await readFile(path.join(home, '.codex/config.toml'), 'utf8'), /^model = "gpt-5"/);
+});
+
+// ---- Linux code paths ----
+
+test('Linux: XDG config, Claude Desktop path, and Obsidian found in native, Flatpak and Snap installs', async () => {
+  const home = await tmp('linux');
+  assert.equal(appHome({}, 'linux', home), path.join(home, '.config', 'brainlink'));
+  assert.equal(appHome({ XDG_CONFIG_HOME: '/x' }, 'linux', home), '/x/brainlink');
+  assert.equal(CLIENTS['claude-desktop'].file({ home, os: 'linux', env: {} }), path.join(home, '.config', 'Claude', 'claude_desktop_config.json'));
+  const mk = async (rel, vaultName) => {
+    const v = path.join(home, vaultName); await mkdir(v, { recursive: true });
+    const f = path.join(home, rel); await mkdir(path.dirname(f), { recursive: true });
+    await writeFile(f, JSON.stringify({ vaults: { [vaultName]: { path: v, ts: 1 } } }));
+  };
+  await mk('.var/app/md.obsidian.Obsidian/config/obsidian/obsidian.json', 'Flatpak Vault');
+  await mk('snap/obsidian/current/.config/obsidian/obsidian.json', 'Snap Vault');
+  const found = await findObsidianVaults({ home, os: 'linux', env: {} });
+  assert.deepEqual(found.map((v) => v.name).sort(), ['Flatpak Vault', 'Snap Vault']);
+  assert.deepEqual(await findObsidianVaults({ home, os: 'darwin', env: {} }), [], 'Flatpak/Snap paths are Linux-only');
+});
+
+test('.brainlinkignore hides folders (e.g. sample vaults inside stored source code) from search', async () => {
+  const { cfg, company } = await fixture();
+  await mkdir(path.join(company, 'Projects/Tool/source/samples'), { recursive: true });
+  await writeFile(path.join(company, 'Projects/Tool/source/samples/Fake.md'), '# Fake\n\nzebracorn pricing');
+  await writeFile(path.join(company, 'Projects/Tool/source/README.md'), '# Tool readme\n\nzebracorn build notes');
+  await writeFile(path.join(company, 'Projects/Tool/source/.brainlinkignore'), '# fictional sample notes\nsamples/\n*.tmp\n');
+  await mkdir(path.join(company, 'Archive'));
+  await writeFile(path.join(company, 'Archive/Old.md'), '# Old\n\nzebracorn');
+  await writeFile(path.join(company, 'Archive/.brainlinkignore'), '*\n');
+  const r = await search(ctxOf(cfg), 'Acme Studio', 'zebracorn');
+  assert.deepEqual(r.map((x) => x.path), ['Projects/Tool/source/README.md']);
+});
