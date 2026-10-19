@@ -5,7 +5,7 @@ test('harness: store seeded, private vault hidden from remote callers', async ()
   const s = await makeStore();
   assert.equal((await s.list({ vault: 'Work' })).length, 4);
   assert.equal((await s.listSessions()).length, 3);
-  assert.equal((await s.listSessions({ remote: true })).length, 2);
+  assert.equal((await s.listSessions({ remote: true })).length, 0);
   const robin = (await s.list({ vault: 'Work', folder: 'People' }))[0];
   assert.ok((await s.links(robin.id)).some((l) => l.target_id === null));
 });

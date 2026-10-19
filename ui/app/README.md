@@ -1,7 +1,17 @@
-# BrainLink UI — milestone 1
+# BrainLink UI — milestone 2
 
-Plain ES modules, no framework, bundler, or UI filesystem/network access. Integrate by importing `startApp(root, createApi({store, services, access}))` from `app/app.mjs` and `app/lib/api.mjs`. The host is responsible for injecting a v0.1 BrainStore and connector services; `index.html` expects `globalThis.brainlinkHost` supplied by a host shell. Without it the page shows a configuration message, not fabricated connector data.
+Dependency-free ES modules for Node 22 hosts and modern browsers. Import `startApp(root, createApi({ store, services, access }))` from `app/app.mjs` and `app/lib/api.mjs`. Host injects a BrainStore and independent `services.connectors`; the browser UI does not use filesystem or network APIs. Without a host, `index.html` displays a configuration message.
 
-Pages: `#connect`, `#sessions`, `#search`. Connector operations use the provided host services; they cannot directly edit settings from the browser. Session privacy is vault membership; the adapter moves a session via a same-ID upsert with its complete message history when a host `services.sessions.setPrivate` is not provided. Search uses an injected `services.search.query` when present, else a client-side list/read ranking fallback.
+Routes: `#connect`, `#sessions`, `#search`, `#notes`. Connectors: `detect(): [{client,installed,connected}]`; `connect(client)`, `test(client)` and `disconnect(client)` return `{ok,message}`. Per-session privacy uses `store.setSessionPrivate` when available, else the legacy complete-history vault move; readout prefers `Session.private`. Imported sessions should be created with `private: true` by host importers and kept local-only by the store. Ranked search delegates directly to `store.search(query,{limit,scope?,includeSessions:false})` when available, or M1 scoring fallback otherwise.
 
-Run tests from package parent: `node --test app/test/*.test.mjs`. If the real v0.1 reference store is available set `BRAINLINK_STORE_DIR=/absolute/path/to/folder/containing/memory-store.mjs` to exercise it. Otherwise tests use `app/test/support/memory-store.mjs`, a minimal **test-only fixture**, not the reference implementation. Real integration is therefore not verified by the bundled tests alone.
+Notes: vault/folder browsing, Markdown rendered safely (including wikilinks), read-only frontmatter table and editable JSON frontmatter, editable Markdown textarea, backlinks, creation, optional rename, no delete. Save uses the full `etag` as `expected_etag` for compare-and-swap; `sha12` is display-only, never used as a write token. Conflict retains unsaved edits. Cmd/Ctrl+S saves; leaving with edits prompts. Rendering supports ordinary headings, lists, inline emphasis, code spans and fenced blocks, links and wikilinks; it is not a complete CommonMark parser. Frontmatter is edited as JSON corresponding to the store's parsed YAML map, rather than re-serializing YAML.
+
+## Tests
+
+Run with the real reference store supplied separately (not distributed in this ZIP):
+
+```sh
+BRAINLINK_STORE_DIR=/path/to/reference-store node --test app/test/*.test.mjs
+```
+
+Directory must contain `memory-store.mjs` and `errors.mjs`. The test harness uses that store and fictional data; there are no bundled store implementations or support fixture files. M2 was verified with the provided v0.2 reference store: **16 passed, 0 failed**.

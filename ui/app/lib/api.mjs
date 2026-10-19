@@ -15,9 +15,10 @@ export function createApi({ store, services = {}, access = {} }) {
   }
   async function sessions({ q = '', client, include_private = true, limit = 100 } = {}) {
     const visible = await store.listSessions(opts({ q, client, limit }));
-    return visible.filter(s => include_private || !store.vaults().find(v => v.name === s.vault)?.private).map(s => ({ ...s, private: !!store.vaults().find(v => v.name === s.vault)?.private }));
+    return visible.filter(s => include_private || !(s.private ?? store.vaults().find(v => v.name === s.vault)?.private)).map(s => ({ ...s, private: s.private ?? !!store.vaults().find(v => v.name === s.vault)?.private }));
   }
   async function setPrivate(id, value) {
+    if (typeof store.setSessionPrivate === 'function') return store.setSessionPrivate(id, !!value, opts());
     const page = await store.readSession(id, opts({ limit: 100000 }));
     const old = page.session;
     const target = value ? privateVault() : publicVault();
@@ -35,8 +36,18 @@ export function createApi({ store, services = {}, access = {} }) {
     store, services, access, vaults,
     detect: () => call('detect'), connect: id => call('connect', id), test: id => call('test', id), disconnect: id => call('disconnect', id),
     listSessions: sessions, readSession: id => store.readSession(id, opts({ limit: 100 })), setPrivate,
-    search: (q, filters = {}) => services.search?.query ? services.search.query(q, { ...filters, vaults: vaults().map(v => v.name) }) : storeSearch(store, q, { ...filters, access, vaults: vaults().map(v => v.name) }),
+    search: async (q, filters = {}) => {
+      if (typeof store.search === 'function') {
+        const hits = String(q).trim() ? await store.search(q, opts({ limit: filters.limit ?? 5, ...(filters.scope ? { scope: filters.scope } : {}), includeSessions: false })) : [];
+        return { verdict: hits.length ? 'hits' : 'not_in_brain', hits, tokens_est: hits.reduce((n,h) => n + Math.ceil((h.snippet || '').length / 4), 0) };
+      }
+      return storeSearch(store, q, { ...filters, access, vaults: vaults().map(v => v.name) });
+    },
     readNote: id => store.read(id, opts()),
+    listNotes: async () => { const all = []; for (const v of vaults()) { let after; for (let i = 0; i < 100; i++) { const page = await store.list(opts({ vault: v.name, limit: 100, ...(after ? {after} : {}) })); all.push(...page); if (page.length < 100) break; after = page.at(-1).path; } } return all; },
+    writeNote: (input, expected_etag) => store.write(input, opts({ expected_etag })),
+    renameNote: typeof store.rename === 'function' ? (id, path, etag) => store.rename(id, path, opts({expected_etag:etag})) : null,
+    backlinks: id => typeof store.backlinks === 'function' ? store.backlinks(id, opts()) : Promise.resolve([]),
   };
 }
 export async function storeSearch(store, q, f = {}) {

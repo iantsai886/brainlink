@@ -1,17 +1,17 @@
 import { createHook, errText } from './state.mjs';
 export function useConnect(api) {
   const h = createHook({ apps: [], busy: {}, error: null });
-  const put = app => h.set(s => ({ apps: s.apps.map(a => a.id === app.id ? { ...a, ...app } : a) }));
+  const put = app => h.set(s => ({ apps: s.apps.map(a => a.client === (app.client || app.id) ? { ...a, ...app } : a) }));
   const busy = (id, status) => h.set(s => ({ busy: { ...s.busy, [id]: status } }));
   async function refresh() { try { h.set({ apps: await api.detect(), error: null }); } catch (e) { h.set({ error: errText(e) }); } }
   async function connect(id) {
     busy(id, 'Connecting');
-    try { put(await api.connect(id)); busy(id, 'Testing'); const result = await api.test(id); put({ id, last_test: result, connected: !!result.ok }); }
-    catch (e) { put({ id, connected: false, last_test: { ok: false, error: errText(e) } }); }
+    try { const result = await api.connect(id); if (!result.ok) { put({client:id,connected:false,last_test:result}); return; } busy(id, 'Testing'); const tested = await api.test(id); put({client:id,last_test:tested,connected:!!tested.ok}); }
+    catch (e) { put({ client: id, connected: false, last_test: { ok: false, message: errText(e) } }); }
     finally { busy(id, null); }
   }
-  async function connectAll() { for (const a of h.get().apps.filter(a => a.installed && !a.last_test?.ok)) await connect(a.id); }
-  async function disconnect(id) { busy(id, 'Disconnecting'); try { put({ ...await api.disconnect(id), last_test: null }); } catch (e) { h.set({ error: errText(e) }); } finally { busy(id, null); } }
+  async function connectAll() { for (const a of h.get().apps.filter(a => a.installed && !a.last_test?.ok)) await connect(a.client); }
+  async function disconnect(id) { busy(id, 'Disconnecting'); try { const result = await api.disconnect(id); if (!result.ok) throw new Error(result.message); put({ client:id,connected:false,last_test:null }); } catch (e) { h.set({ error: errText(e) }); } finally { busy(id, null); } }
   return { ...h, refresh, connect, retry: connect, connectAll, disconnect };
 }
 export function useSessions(api) {
