@@ -15,3 +15,6 @@ BRAINLINK_STORE_DIR=/path/to/reference-store node --test app/test/*.test.mjs
 ```
 
 Directory must contain `memory-store.mjs` and `errors.mjs`. The test harness uses that store and fictional data; there are no bundled store implementations or support fixture files. M2 was verified with the provided v0.2 reference store: **16 passed, 0 failed**.
+
+### M3/M4 host extensions
+Optional `services.settings` supplies `get()`, `suggestFolders()`, `validate(sync)` and `save(sync)`; returns `{ok,message}` for validate/save. Without the full service the settings UI is disabled. The theme preference uses optional `access.prefs.get('theme')` and `access.prefs.set('theme', value)`; it never accesses browser storage directly. Sync operates through the host only, not directly from browser JS. Graph notes are read through the existing BrainStore adapter.

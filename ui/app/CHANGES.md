@@ -20,3 +20,12 @@
 ## Verification
 
 `node --test app/test/*.test.mjs` (Node 22.16.0): **9 passed, 0 failed** using the bundled test-only fixture, because the real reference `memory-store.mjs` was not included in the provided attachments.
+
+## M3 + M4 (2026-10-19)
+- Added Settings route with sync provider radio options matching `sync-settings.mjs` (`local`, `gdrive`, `icloud`, `dropbox`), suggested folder choices, device field, explicit Validate/Save host calls, and disabled controls when host settings are absent.
+- Host `services.settings` is the sole authority for sync validation/persistence. Backend `sync-settings.mjs` is not imported by the UI.
+- Added connected apps shortcut, private-session defaults and no-private-sync guidance, About and light/dark themes via optional injected `access.prefs.get('theme')` / `set('theme', value)` (no direct localStorage access).
+- Added graph view with deterministic, bounded, DOM-independent force-directed layout, wikilink edge parsing, vault filter, private filtering, canvas pan/zoom/hover/click and accessible note-list buttons.
+- Navigation now includes Setup, Connect, Notes, Search, Sessions, Graph, Settings.
+- Added eight M3/M4 tests, taking test count from 16 to 24.
+- Run test suite with `BRAINLINK_STORE_DIR=/absolute/path/to/reference-store node --test test/*.test.mjs`; place the REAL `memory-store.mjs` and `errors.mjs` in that external directory. They are not distributed in this ZIP.

@@ -31,6 +31,7 @@ export function mockServices({ installed = ['claude-desktop', 'cursor', 'codex',
   const calls = [];
   return {
     calls,
+    settings: (()=>{let config={provider:'local',folder:null,device:'test-device'};return {async get(){calls.push('settings:get');return {...config};},async suggestFolders(){return {gdrive:['/home/test/Google Drive'],icloud:['/home/test/iCloudDrive'],dropbox:['/home/test/Dropbox']};},async validate(s){calls.push('settings:validate');if(!['local','gdrive','icloud','dropbox'].includes(s.provider))return {ok:false,message:'Invalid provider'};if(s.provider!=='local'&&!(/^(?:\/|[A-Za-z]:[\\/])/.test(s.folder||'')))return {ok:false,message:'Absolute sync folder required'};if(!s.device||/[\\/:()]/.test(s.device))return {ok:false,message:'Invalid device name'};return {ok:true,message:'Valid'};},async save(s){calls.push('settings:save');const result=await this.validate(s);if(result.ok)config={...s};return result.ok?{ok:true,message:'Settings saved'}:result;}}})(),
     connectors: {
       async detect() { calls.push('detect'); return apps.map((a) => ({ ...a })); },
       async connect(id) { calls.push(`connect:${id}`); const a = get(id); if (!a?.installed) throw Object.assign(new Error('not installed'), { code: 'E_INVALID' }); a.connected = true; return { ok:true, message:'Connected' }; },
