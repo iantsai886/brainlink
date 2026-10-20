@@ -96,5 +96,5 @@ Section "Uninstall"
   RMDir /r "$SMPROGRAMS\BrainLink"
   DeleteRegKey HKCU "${UNINSTALL_KEY}"
   DeleteRegKey HKCU "Software\BrainLink"
-  ; Notes and %APPDATA%\BrainLink (settings, licence) are left in place on purpose.
+  ; Notes and %APPDATA%\BrainLink (settings) are left in place on purpose.
 SectionEnd
