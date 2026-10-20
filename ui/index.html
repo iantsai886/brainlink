@@ -90,15 +90,62 @@ ol.todo li { padding-left: 4px; }
 .legend span { display: inline-flex; align-items: center; gap: 6px; }
 .legend i { width: 10px; height: 10px; border-radius: 50%; display: inline-block; }
 .legend i.ring { background: transparent !important; border: 2px solid var(--muted); width: 8px; height: 8px; }
+.chip { font: inherit; border: 1px solid var(--line); border-radius: 999px; background: var(--accent-soft); color: var(--accent); padding: 5px 12px; font-size: 13px; cursor: pointer; display: inline-flex; gap: 6px; align-items: baseline; }
+.chip:hover { border-color: var(--accent); }
+.chip small { color: inherit; opacity: .75; }
+.badge { display: inline-flex; align-items: center; padding: 2px 10px; border-radius: 999px; color: #fff; font-size: 12px; font-weight: 600; white-space: nowrap; }
+.day-label { font-size: 12px; font-weight: 600; color: var(--muted); margin: 14px 0 2px; }
+.day-label:first-child { margin-top: 0; }
+.answer-card { display: grid; gap: 10px; }
+.answer-text { font-size: 15px; line-height: 1.6; margin: 0; }
+.error-box { background: var(--bad); color: #fff; border-radius: 8px; padding: 10px 12px; font-size: 14px; }
+.skeleton { color: var(--muted); font-size: 14px; }
+.modal-overlay { position: fixed; inset: 0; background: rgba(0,0,0,.45); display: grid; place-items: center; z-index: 80; padding: 24px; }
+.modal-overlay[hidden] { display: none; }
+.modal { background: var(--panel); border: 1px solid var(--line); border-radius: var(--radius); padding: 20px 22px; max-width: 640px; width: 100%; max-height: 80vh; overflow: auto; }
+.modal .mono { white-space: pre-wrap; }
+#boot-loading, #boot-error { max-width: 860px; margin: 8px auto 0; padding: 10px 20px; font-size: 14px; color: var(--muted); }
+#boot-error { color: #fff; background: var(--bad); border-radius: 8px; margin: 8px 20px; }
+#boot-error button { background: transparent; border-color: rgba(255,255,255,.6); color: #fff; }
 </style>
 </head>
 <body>
 <header><h1>BrainLink</h1><span class="plan" id="plan">Loading…</span><button class="link" id="done" style="margin-left:auto">Done — close setup</button></header>
+<div id="boot-loading" role="status">Loading your brain…</div>
+<div id="boot-error" hidden role="alert"><b>Could not load BrainLink.</b> <span id="boot-error-msg"></span> <button id="boot-retry">Retry</button></div>
 <main>
   <section class="big" id="start" hidden>
     <h2>Where are your notes?</h2>
     <p class="hint">Pick one. BrainLink connects it to the AI apps on this computer. Your notes stay here.</p>
     <div class="choices" id="choices"></div>
+  </section>
+
+  <section class="big" id="sync-onboarding" hidden>
+    <h2>Keep notes on your other devices?</h2>
+    <p class="hint">Optional, and off by default. BrainLink never uses an account or API for this — it only watches a folder your own desktop client (Google Drive, iCloud, Dropbox) already keeps in sync. Private vaults and sessions never leave this computer either way.</p>
+    <div class="choices">
+      <button class="choice primary-choice" id="sync-onb-local"><span><b>Local only</b><small>Recommended. Nothing leaves this computer.</small></span><span class="go">Continue</span></button>
+      <button class="choice" id="sync-onb-pick"><span><b>Sync to a folder</b><small>A Google Drive, iCloud or Dropbox folder already on this computer</small></span><span class="go">Choose</span></button>
+    </div>
+    <div id="sync-onb-form" hidden style="margin-top:16px">
+      <div class="grid2">
+        <label>Where<select id="sync-onb-provider"></select></label>
+        <label>This device<input id="sync-onb-device" placeholder="e.g. laptop"></label>
+      </div>
+      <div class="grid2" style="margin-top:10px">
+        <label>Synced folder<input id="sync-onb-folder" class="mono" placeholder="/path/to/synced/folder"></label>
+        <div id="sync-onb-suggestions" class="muted" style="font-size:13px;align-self:end"></div>
+      </div>
+      <p class="error-box" id="sync-onb-error" hidden></p>
+      <div class="row" style="margin-top:14px"><button class="primary" id="sync-onb-save">Save and continue</button><button class="link" id="sync-onb-cancel">Back</button></div>
+    </div>
+  </section>
+
+  <section id="ask-panel" hidden>
+    <h2>Ask your brain</h2>
+    <p class="hint">A cited answer pulled straight from your notes — click a source to open it. Never a guess: if it is not in your notes, BrainLink says so.</p>
+    <div class="row"><input id="ask-q" placeholder="e.g. What did we decide about pricing?" style="flex:1;min-width:240px"><button class="primary" id="ask-go">Ask</button></div>
+    <div id="ask-out" style="margin-top:14px"></div>
   </section>
 
   <section class="big" id="ready" hidden>
@@ -134,7 +181,7 @@ ol.todo li { padding-left: 4px; }
 
   <section id="sessions-panel" hidden>
     <h2>Sessions</h2>
-    <p class="hint">Imported Claude Code / Codex history, plus anything a client without readable local history logged with <span class="mono">session_log</span>. Private sessions (the default for imports) are hidden unless you ask to see them.</p>
+    <p class="hint">One timeline across every AI you connect — Claude, Cursor, Codex and more. Any session can open and read any other (the same <span class="mono">session_read</span> call every connected AI uses). Private sessions (the default for imports) show 🔒 and are hidden unless you ask to see them; they never sync.</p>
     <div class="row" style="margin-bottom:10px"><label class="muted" style="display:flex;flex-direction:row;gap:6px;align-items:center"><input type="checkbox" id="sess-private" style="width:auto">Show private sessions</label></div>
     <div id="sessions-list" class="cards"></div>
     <div id="session-detail" style="margin-top:12px"></div>
@@ -173,7 +220,7 @@ ol.todo li { padding-left: 4px; }
 
   <section id="s-connect">
     <h2><span class="step" id="n3">3</span> Connect your AIs</h2>
-    <p class="hint">One click adds BrainLink to that app's MCP settings and keeps a backup of the old file.</p>
+    <p class="hint">BrainLink auto-detects the AI apps already on this computer. One click adds BrainLink to that app's MCP settings (with a backup of the old file) and runs a live test call so you see it work immediately, not after a restart.</p>
     <div class="clients" id="clients"></div>
     <details style="margin-top:14px"><summary>Grok, custom agents and other HTTP clients</summary>
       <p class="hint" style="margin-top:8px">Run <span class="mono">brainlink serve --http</span> and give the client the URL and token below. It listens on this computer only.</p>
@@ -212,12 +259,27 @@ ol.todo li { padding-left: 4px; }
   </div></details>
   <p class="muted" style="font-size:12px;text-align:center">Config: <span class="mono" id="cfgpath"></span></p>
 </main>
+<div id="note-modal" class="modal-overlay" hidden>
+  <div class="modal" role="dialog" aria-modal="true">
+    <div class="row" style="justify-content:space-between;align-items:flex-start">
+      <div><b id="note-title"></b><div class="mono muted" id="note-path" style="font-size:12px"></div></div>
+      <button class="link" id="note-close">Close ✕</button>
+    </div>
+    <div id="note-body" class="mono" style="margin-top:12px"></div>
+  </div>
+</div>
 <div id="toast" role="status" aria-live="polite"></div>
 <script>
 const T = new URLSearchParams(location.search).get('t') || '';
 const $ = (id) => document.getElementById(id);
 const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 let S = null, pack = 'founder-os';
+let pendingSyncOnboarding = false; // set when a first-run vault pick just succeeded; cleared once the sync choice is saved
+let healthByClient = {}; // client id -> last /api/client-health (or /api/connect's health) result, kept across re-renders
+const CLIENT_LABEL = { 'claude-code': 'Claude Code', 'claude-desktop': 'Claude Desktop', cursor: 'Cursor', codex: 'ChatGPT Codex', gemini: 'Gemini CLI', windsurf: 'Windsurf' };
+const clientLabel = (id) => CLIENT_LABEL[id] || (id ? id[0].toUpperCase() + id.slice(1) : 'Other');
+const CLIENT_COLOR_VARS = ['c1', 'c2', 'c3', 'c4', 'c5', 'c6', 'c7', 'c8'];
+function clientColor(id) { let h = 0; for (const c of String(id)) h = (h * 31 + c.charCodeAt(0)) >>> 0; return `var(--${CLIENT_COLOR_VARS[h % CLIENT_COLOR_VARS.length]})`; }
 
 async function api(method, url, body) {
   const r = await fetch(url, { method, headers: { 'Content-Type': 'application/json', 'X-BrainLink-Token': T }, body: body ? JSON.stringify(body) : undefined });
@@ -260,27 +322,76 @@ function renderReady(r) {
 }
 
 async function loadSessions() {
-  const r = await api('POST', '/api/sessions', { include_private: $('sess-private').checked, limit: 10 });
-  renderSessions(r.sessions);
+  $('sessions-list').innerHTML = '<p class="skeleton">Loading sessions…</p>';
+  try { renderSessions((await api('POST', '/api/sessions', { include_private: $('sess-private').checked, limit: 20 })).sessions); }
+  catch (e) { $('sessions-list').innerHTML = `<p class="error-box">Could not load sessions: ${esc(e.message)}</p>`; }
+}
+function dayLabel(iso) {
+  const d = new Date(iso), days = Math.floor((new Date(new Date().toDateString()) - new Date(d.toDateString())) / 86400000);
+  if (days === 0) return 'Today';
+  if (days === 1) return 'Yesterday';
+  return d.toLocaleDateString(undefined, { weekday: 'long', month: 'short', day: 'numeric' });
 }
 function renderSessions(list) {
-  $('sessions-list').innerHTML = list.length ? list.map((s) => `<div class="card">
-    <div class="row" style="justify-content:space-between"><b>${esc(s.client)}${s.project ? ' · ' + esc(s.project) : ''}</b><span class="pill ${s.private ? '' : 'on'}">${s.private ? 'Private' : 'Shared'}</span></div>
-    <div class="muted" style="font-size:14px">${esc(s.summary || '(no summary)')}</div>
-    <div class="row muted" style="font-size:13px">${esc(new Date(s.started_at).toLocaleString())} · ${s.turns} message${s.turns === 1 ? '' : 's'}
-      <button class="link" data-sess-read="${esc(s.id)}">Read summary</button>
-      <button class="link" data-sess-toggle="${esc(s.id)}" data-sess-private="${s.private ? '1' : ''}">${s.private ? 'Make shared' : 'Make private'}</button>
-    </div></div>`).join('') : '<p class="muted">No sessions yet. They show up once an AI logs one with session_log, or once local Claude Code / Codex history is found.</p>';
+  if (!list.length) { $('sessions-list').innerHTML = '<p class="muted">No sessions yet. They show up once an AI logs one with session_log, or once local Claude Code / Codex history is found.</p>'; return; }
+  let lastDay = null, html = '';
+  for (const s of list) {
+    const day = dayLabel(s.started_at);
+    if (day !== lastDay) { html += `<div class="day-label">${esc(day)}</div>`; lastDay = day; }
+    html += `<div class="card">
+      <div class="row" style="justify-content:space-between">
+        <b><span class="badge" style="background:${clientColor(s.client)}">${esc(clientLabel(s.client))}</span>${s.project ? ' · ' + esc(s.project) : ''}</b>
+        <span class="pill ${s.private ? '' : 'on'}">${s.private ? '🔒 Private — never synced' : 'Shared'}</span>
+      </div>
+      <div class="muted" style="font-size:14px">${esc(s.summary || '(no summary)')}</div>
+      <div class="row muted" style="font-size:13px">${esc(new Date(s.started_at).toLocaleString())} · ${s.turns} message${s.turns === 1 ? '' : 's'}
+        <button class="link" data-sess-read="${esc(s.id)}">Open</button>
+        <button class="link" data-sess-toggle="${esc(s.id)}" data-sess-private="${s.private ? '1' : ''}">${s.private ? 'Make shared' : 'Make private'}</button>
+      </div></div>`;
+  }
+  $('sessions-list').innerHTML = html;
 }
 function renderSyncSuggestions(provider, suggested) {
   const list = (suggested && suggested[provider]) || [];
   $('sync-suggestions').innerHTML = list.length ? `Found: ${list.map((p) => `<button type="button" class="link" data-sync-pick="${esc(p)}">${esc(p)}</button>`).join(' ')}` : '';
 }
 
+// First-run Sync step: Local only (default, recommended) or pick a provider folder; either way
+// saves a real choice via /api/sync so it is not just a skipped screen.
+function renderSyncOnbSuggestions(provider) {
+  const list = (S.sync.suggested_folders && S.sync.suggested_folders[provider]) || [];
+  $('sync-onb-suggestions').innerHTML = list.length ? `Found: ${list.map((p) => `<button type="button" class="link" data-sync-onb-pick="${esc(p)}">${esc(p)}</button>`).join(' ')}` : '';
+}
+function renderSyncOnboarding() {
+  $('sync-onb-form').hidden = true;
+  $('sync-onb-error').hidden = true;
+  $('sync-onb-provider').innerHTML = S.sync.providers.filter((p) => p !== 'local').map((p) => `<option value="${esc(p)}">${esc(S.sync.provider_labels[p] || p)}</option>`).join('');
+  $('sync-onb-device').value = S.sync.device || '';
+  renderSyncOnbSuggestions($('sync-onb-provider').value);
+}
+async function finishSyncOnboarding(fn) {
+  $('sync-onb-error').hidden = true;
+  try { await fn(); pendingSyncOnboarding = false; await load(); }
+  catch (e) { $('sync-onb-error').hidden = false; $('sync-onb-error').textContent = e.message; }
+}
+$('sync-onb-local').onclick = () => finishSyncOnboarding(() => api('POST', '/api/sync', { provider: 'local', device: $('sync-onb-device').value }));
+$('sync-onb-pick').onclick = () => { $('sync-onb-form').hidden = false; renderSyncOnbSuggestions($('sync-onb-provider').value); };
+$('sync-onb-provider').onchange = () => renderSyncOnbSuggestions($('sync-onb-provider').value);
+$('sync-onb-cancel').onclick = () => { $('sync-onb-form').hidden = true; };
+$('sync-onb-save').onclick = () => finishSyncOnboarding(async () => {
+  const folder = $('sync-onb-folder').value.trim();
+  if (!folder) throw new Error('Choose a synced folder first.');
+  await api('POST', '/api/sync', { provider: $('sync-onb-provider').value, folder, device: $('sync-onb-device').value });
+});
+
 // Force-directed map of the vault, computed once per load (no library).
 async function drawGraph() {
-  const g = await api('POST', '/api/graph', {});
+  $('legend').innerHTML = '<span class="skeleton">Loading your brain map…</span>';
+  let g;
+  try { g = await api('POST', '/api/graph', {}); }
+  catch (e) { $('legend').innerHTML = `<span class="error-box">Could not load the map: ${esc(e.message)}</span>`; return; }
   $('st-notes').textContent = g.health?.notes ?? 0; $('st-links').textContent = g.health?.links ?? 0; $('st-orphans').textContent = g.health?.not_linked ?? 0;
+  if (!g.nodes.length) { $('legend').innerHTML = '<span class="muted">No notes yet — once you add some, their links show up here.</span>'; const cv0 = $('graph'); cv0.getContext('2d').clearRect(0, 0, cv0.width, cv0.height); return; }
   const cv = $('graph'), ctx2 = cv.getContext('2d'), W = cv.width, H = cv.height, n = g.nodes.length;
   const css = getComputedStyle(document.documentElement);
   // One colour per top-level folder, biggest folders first; the rest share grey.
@@ -333,6 +444,56 @@ async function drawGraph() {
   });
 }
 
+// ---- Ask your brain: cited instant answer ----
+function renderAskEmpty() {
+  $('ask-out').innerHTML = '<p class="muted">Try: “What did we decide about pricing?”, “What changed this week?”, or any question about your notes.</p>';
+}
+function renderAskError(msg) { $('ask-out').innerHTML = `<p class="error-box">${esc(msg)}</p>`; }
+function renderAsk(r) {
+  if (r.status === 'not_in_brain') {
+    $('ask-out').innerHTML = `<div class="card"><span class="pill">Not in your notes</span><p class="muted" style="margin:8px 0 0">BrainLink looked through ${esc(r.vault)} and found nothing that answers this. Try rephrasing, or add a note about it.</p></div>`;
+    return;
+  }
+  const badge = r.status === 'weak' ? '<span class="pill">Partial match</span>' : '<span class="pill on">Answered</span>';
+  const chip = (x) => `<button class="chip" data-open-note="${esc(x.vault)}::${esc(x.path)}" title="Open ${esc(x.path)}"><b>${esc(x.title)}</b>${x.heading ? `<small>› ${esc(x.heading)}</small>` : ''}</button>`;
+  $('ask-out').innerHTML = `<div class="answer-card card">${badge}
+    <p class="answer-text">${esc(r.answer || '(no snippet found)')}</p>
+    ${r.note ? `<p class="muted" style="font-size:13px;margin:0">${esc(r.note)}</p>` : ''}
+    <div class="row">${r.sources.map(chip).join('')}</div>
+  </div>`;
+}
+async function ask() {
+  const query = $('ask-q').value.trim();
+  if (!query) return;
+  $('ask-out').innerHTML = '<p class="skeleton">Searching your notes…</p>';
+  try { renderAsk(await api('POST', '/api/ask', { query })); }
+  catch (e) { renderAskError(e.message); }
+}
+$('ask-go').onclick = ask;
+$('ask-q').onkeydown = (e) => { if (e.key === 'Enter') ask(); };
+
+// ---- Source chips / session refs open the real note, read-only, in a modal ----
+async function openNote(vault, p) {
+  $('note-modal').hidden = false;
+  $('note-title').textContent = p.replace(/\.md$/i, '').split('/').pop();
+  $('note-path').textContent = `${vault} / ${p}`;
+  $('note-body').innerHTML = '<p class="skeleton">Loading…</p>';
+  try {
+    const n = await api('POST', '/api/note', { vault, path: p });
+    $('note-body').textContent = n.body.trim() || '(This note is empty.)';
+  } catch (e) { $('note-body').innerHTML = `<p class="error-box">Could not open this note: ${esc(e.message)}</p>`; }
+}
+function closeNote() { $('note-modal').hidden = true; }
+$('note-close').onclick = closeNote;
+$('note-modal').addEventListener('click', (e) => { if (e.target.id === 'note-modal') closeNote(); });
+document.addEventListener('keydown', (e) => { if (e.key === 'Escape') closeNote(); });
+document.addEventListener('click', (e) => {
+  const b = e.target.closest('[data-open-note]');
+  if (!b) return;
+  const [vault, ...rest] = b.dataset.openNote.split('::');
+  openNote(vault, rest.join('::'));
+});
+
 let last = null;
 async function quick(getBody) {
   const box = $('start'); box.classList.add('working');
@@ -343,6 +504,7 @@ async function quick(getBody) {
     if (!r.ok && r.nested) { renderStart(r.nested); return; }
     if (!r.ok) throw new Error(r.error);
     last = r;
+    pendingSyncOnboarding = true; // first-run vault pick just succeeded: ask the Sync question once before Ready
     await load();
   } catch (e) { toast(e.message, true); } finally { box.classList.remove('working'); }
 }
@@ -356,17 +518,22 @@ async function load() {
   S = await api('GET', '/api/state');
   const L = S.license;
   $('plan').textContent = L.builtin ? `Free trial · ${L.days_left} days left` : L.valid ? `${L.plan[0].toUpperCase() + L.plan.slice(1)} · ${L.email}${L.expires ? ' · until ' + L.expires : ''}` : (L.reason && L.reason.startsWith('free trial ended') ? 'Trial ended · read-only' : (S.vaults.length ? 'Free plan' : '14-day free trial, no card needed'));
-  $('start').hidden = S.vaults.length > 0;
-  $('ready').hidden = S.vaults.length === 0;
-  $('brain-panel').hidden = S.vaults.length === 0;
+  const hasVault = S.vaults.length > 0;
+  const onboardingSync = hasVault && pendingSyncOnboarding;
+  $('start').hidden = hasVault;
+  $('sync-onboarding').hidden = !onboardingSync;
+  if (onboardingSync) renderSyncOnboarding();
+  $('ready').hidden = !hasVault || onboardingSync;
+  $('brain-panel').hidden = !hasVault || onboardingSync;
+  $('ask-panel').hidden = !hasVault || onboardingSync;
   $('smart').textContent = S.semantic?.available ? `Smart search: keyword + meaning, using ${S.semantic.model} on this computer.` : `Smart search: keyword. For meaning-based search, install Ollama (ollama.com) and run "ollama pull nomic-embed-text"; BrainLink picks it up automatically.`;
-  if (!S.vaults.length) renderStart(); else { renderReady(last); drawGraph().catch(() => {}); }
-  $('sessions-panel').hidden = S.vaults.length === 0;
-  if (S.vaults.length) loadSessions().catch(() => {});
+  if (!hasVault) renderStart(); else if (!onboardingSync) { renderReady(last); drawGraph().catch(() => {}); }
+  $('sessions-panel').hidden = !hasVault || onboardingSync;
+  if (hasVault && !onboardingSync) loadSessions().catch(() => {});
   $('cfgpath').textContent = S.config_path;
   $('lic-out').textContent = L.valid ? `Active: ${L.plan} (${L.key})` : (L.key ? L.reason : '');
   $('n1').className = 'step' + (S.vaults.length ? ' done' : '');
-  $('vaults').innerHTML = S.vaults.map((v) => `<div class="card"><div class="row" style="justify-content:space-between"><b>${esc(v.name)}</b><span class="pill ${v.exists ? 'on' : ''}">${v.exists ? v.notes + ' notes' : 'folder missing'}</span></div><div class="mono muted">${esc(v.path)}</div><div class="row muted" style="font-size:13px">${v.private ? 'Private · ' : ''}writes: ${esc(v.writes)} · intake: ${esc(v.flat ? 'root' : v.intake_folder)}${v.decisions.length ? ' · decisions ' + esc(v.decisions.join('/')) : ''}<button class="link" data-remove="${esc(v.name)}">Remove from BrainLink</button></div></div>`).join('');
+  $('vaults').innerHTML = S.vaults.length ? S.vaults.map((v) => `<div class="card"><div class="row" style="justify-content:space-between"><b>${esc(v.name)}</b><span class="pill ${v.exists ? 'on' : ''}">${v.exists ? v.notes + ' notes' : 'folder missing'}</span></div><div class="mono muted">${esc(v.path)}</div><div class="row muted" style="font-size:13px">${v.private ? 'Private · ' : ''}writes: ${esc(v.writes)} · intake: ${esc(v.flat ? 'root' : v.intake_folder)}${v.decisions.length ? ' · decisions ' + esc(v.decisions.join('/')) : ''}<button class="link" data-remove="${esc(v.name)}">Remove from BrainLink</button></div></div>`).join('') : '<p class="muted">No vaults yet — choose a folder above.</p>';
   $('n2').className = 'step' + (S.agents.length ? ' done' : '');
   $('agents').innerHTML = S.agents.length ? S.agents.map((a, i) => `<div class="card"><b>${esc(a.name)} <span class="muted" style="font-weight:400">· ${esc(a.vault)} · close → ${esc(a.close_target.mode)} ${esc(a.close_target.path || a.close_target.dir || '')}</span></b>
     <label>Role<textarea data-a="${i}" data-f="role">${esc(a.role)}</textarea></label>
@@ -378,8 +545,8 @@ async function load() {
   $('try-phrase').textContent = first ? `"${first.activation[0]}"` : '"Search my vault for …"';
   const cs = Object.entries(S.clients);
   $('n3').className = 'step' + (cs.some(([, c]) => c.connected) ? ' done' : '');
-  $('clients').innerHTML = cs.map(([id, c]) => `<div class="client"><div><div class="name">${esc(c.title)}</div><span class="pill ${c.connected ? 'on' : ''}">${c.connected ? 'Connected' : c.present ? 'Found on this computer' : 'Not found'}</span></div>
-    <div class="row">${c.connected ? `<button data-disconnect="${id}">Disconnect</button>` : `<button class="primary" data-connect="${id}" ${S.vaults.length ? '' : 'disabled title="Add a vault first"'}>Connect</button>`}</div>${c.connected ? `<small class="muted">${esc(c.note)}</small>` : ''}</div>`).join('');
+  $('clients').innerHTML = cs.length ? cs.map(([id, c]) => { const h = healthByClient[id]; return `<div class="client"><div><div class="name">${esc(c.title)}</div><span class="pill ${c.connected ? 'on' : ''}">${c.connected ? 'Connected' : c.present ? 'Found on this computer' : 'Not found'}</span></div>
+    <div class="row">${c.connected ? `<button data-disconnect="${id}">Disconnect</button><button data-health="${id}">Test connection</button>` : `<button class="primary" data-connect="${id}" ${S.vaults.length ? '' : 'disabled title="Add a vault first"'}>Connect</button>`}</div>${c.connected ? `<small class="muted">${esc(c.note)}</small>` : ''}${h ? `<span class="pill ${h.ok ? 'on' : ''}" style="width:fit-content">${h.ok ? '● live' : '○ failed'} · ${esc(h.message)}</span>` : ''}</div>`; }).join('') : '<p class="muted">No AI clients recognised on this computer yet.</p>';
   $('n4').className = 'step' + (S.activity.length ? ' done' : '');
   $('activity').innerHTML = S.activity.length ? S.activity.map((e) => `<tr><td>${esc(new Date(e.at).toLocaleString())}</td><td>${esc(e.platform)}</td><td class="mono">${esc(e.tool)}</td><td>${e.ok ? (e.written ? 'written' : 'ok') : 'refused / error'}</td></tr>`).join('') : '<tr><td colspan="4" class="muted">No calls yet.</td></tr>';
   $('n5').className = 'step' + (L.valid ? ' done' : '');
@@ -408,22 +575,32 @@ $('save-vault').onclick = () => act(async () => {
 });
 document.addEventListener('click', (e) => {
   const d = e.target.dataset;
-  if (d.connect) act(async () => { const r = await api('POST', '/api/connect', { client: d.connect }); toast(`${r.title} connected. ${r.note}`); });
-  if (d.disconnect) act(async () => { await api('POST', '/api/disconnect', { client: d.disconnect }); toast('Disconnected'); });
+  if (d.connect) act(async () => {
+    const r = await api('POST', '/api/connect', { client: d.connect });
+    healthByClient[d.connect] = r.health;
+    toast(r.health?.ok ? `${r.title} connected. Live check: ${r.health.message}` : `${r.title} connected. ${r.note}`);
+  });
+  if (d.disconnect) act(async () => { await api('POST', '/api/disconnect', { client: d.disconnect }); delete healthByClient[d.disconnect]; toast('Disconnected'); });
+  if (d.health) act(async () => { const r = await api('POST', '/api/client-health', { client: d.health }); healthByClient[d.health] = r; toast(r.message, !r.ok); });
   if (d.remove && confirm(`Remove ${d.remove} from BrainLink? Your notes are not touched.`)) act(() => api('POST', '/api/vault/remove', { name: d.remove }));
   if (d.saveAgent !== undefined) act(async () => {
     const i = d.saveAgent, a = S.agents[i], get = (f) => document.querySelector(`[data-a="${i}"][data-f="${f}"]`);
     await api('POST', '/api/agent', { name: a.name, role: get('role').value, activation: get('activation').value, close: get('close').value, ...(get('capture_approved') ? { capture_approved: get('capture_approved').checked } : {}) });
     toast(`Saved ${a.name}. Restart your AI apps to pick up new phrases.`);
   });
-  if (d.sessRead) act(async () => {
-    const s = await api('POST', '/api/sessions/read', { id: d.sessRead, include_private: $('sess-private').checked });
-    $('session-detail').innerHTML = `<div class="card"><b>${esc(s.title || s.client)}</b>
-      <div class="muted" style="font-size:14px">${esc(s.summary || '(no summary)')}</div>
-      <div class="muted" style="font-size:13px">${esc(s.client)}${s.project ? ' · ' + esc(s.project) : ''} · ${s.message_count} messages · started ${esc(new Date(s.started_at).toLocaleString())}${s.note_refs?.length ? ' · refs: ' + s.note_refs.map(esc).join(', ') : ''}</div></div>`;
-  });
+  if (d.sessRead) (async (id) => {
+    // Independent of whatever session is currently shown: proves any session can read any other.
+    $('session-detail').innerHTML = '<p class="skeleton">Opening session…</p>';
+    try {
+      const s = await api('POST', '/api/sessions/read', { id, include_private: $('sess-private').checked });
+      $('session-detail').innerHTML = `<div class="card"><b><span class="badge" style="background:${clientColor(s.client)}">${esc(clientLabel(s.client))}</span> ${esc(s.title || '(untitled)')}</b>
+        <div class="muted" style="font-size:14px">${esc(s.summary || '(no summary)')}</div>
+        <div class="muted" style="font-size:13px">${s.project ? esc(s.project) + ' · ' : ''}${s.message_count} messages · started ${esc(new Date(s.started_at).toLocaleString())}${s.note_refs?.length ? ' · refs: ' + s.note_refs.map(esc).join(', ') : ''}</div></div>`;
+    } catch (e) { $('session-detail').innerHTML = `<p class="error-box">Could not open this session: ${esc(e.message)}</p>`; }
+  })(d.sessRead);
   if (d.sessToggle) act(() => api('POST', '/api/sessions/private', { id: d.sessToggle, private: !d.sessPrivate }));
   if (d.syncPick) $('sync-folder').value = d.syncPick;
+  if (d.syncOnbPick) $('sync-onb-folder').value = d.syncOnbPick;
 });
 $('sess-private').onchange = () => loadSessions().catch(() => {});
 $('sync-provider').onchange = () => { const p = $('sync-provider').value; $('sync-folder-row').hidden = p === 'local'; renderSyncSuggestions(p, S.sync.suggested_folders); };
@@ -434,10 +611,21 @@ $('sync-save').onclick = () => act(async () => {
 });
 $('save-lic').onclick = () => act(async () => { const r = await api('POST', '/api/license', { key: $('lic').value }); $('lic').value = ''; toast(r.license.valid ? `Licence active: ${r.license.plan}` : 'Licence removed'); });
 $('http-token').onclick = () => act(async () => { const r = await api('POST', '/api/http-token'); $('http-out').innerHTML = `URL: ${esc(r.url)}<br>Header: Authorization: Bearer ${esc(r.token)}<br>Start: ${esc(r.start)}`; });
-$('test').onclick = () => act(async () => { const r = await api('POST', '/api/test', { query: $('q').value }); $('test-out').innerHTML = r.results.length ? `<div class="cards">${r.results.map((x) => `<div class="card"><b>${esc(x.title)}</b><span class="mono muted">${esc(r.vault)}/${esc(x.path)}${x.heading ? ' › ' + esc(x.heading) : ''}</span></div>`).join('')}</div>` : '<p class="muted">No matches.</p>'; });
+$('test').onclick = () => {
+  $('test-out').innerHTML = '<p class="skeleton">Searching…</p>';
+  act(async () => { const r = await api('POST', '/api/test', { query: $('q').value }); $('test-out').innerHTML = r.results.length ? `<div class="cards">${r.results.map((x) => `<div class="card"><b>${esc(x.title)}</b><span class="mono muted">${esc(r.vault)}/${esc(x.path)}${x.heading ? ' › ' + esc(x.heading) : ''}</span></div>`).join('')}</div>` : '<p class="muted">No matches.</p>'; });
+};
 $('done').onclick = async () => { try { await api('POST', '/api/quit'); } catch {} document.body.innerHTML = '<main><section><h2>Setup closed</h2><p class="hint">BrainLink keeps working inside your AI apps. To change settings later, open BrainLink from Applications; this same page comes back.</p></section></main>'; };
 $('q').onkeydown = (e) => { if (e.key === 'Enter') $('test').click(); };
-load().catch((e) => toast(e.message, true));
+renderAskEmpty();
+
+async function boot() {
+  $('boot-error').hidden = true;
+  try { await load(); $('boot-loading').hidden = true; }
+  catch (e) { $('boot-loading').hidden = true; $('boot-error').hidden = false; $('boot-error-msg').textContent = e.message; }
+}
+$('boot-retry').onclick = boot;
+boot();
 // Light refresh: only the activity table, so edits in progress are never wiped.
 setInterval(async () => {
   if (document.visibilityState !== 'visible') return;

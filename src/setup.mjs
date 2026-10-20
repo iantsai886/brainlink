@@ -10,12 +10,12 @@ import { loadConfig, saveConfig, configPath, normalize } from './config.mjs';
 import { verifyLicense, planFeatures, effectiveLicense, startTrial } from './license.mjs';
 import { PACKS, buildPack, scaffold, mergePack } from './packs.mjs';
 import { CLIENTS, detect, connectClient, disconnectClient, test } from './connectors.mjs';
-import { createContext, search } from './core.mjs';
-import { ROOT, launchSpec, readActivity, refreshMap } from './runtime.mjs';
+import { createContext, search, searchWithVerdict, readNote } from './core.mjs';
+import { ROOT, launchSpec, readActivity, refreshMap, logActivity } from './runtime.mjs';
 import { detectEmbedder } from './embed.mjs';
 import { vaultHealth } from './insights.mjs';
 import { loadVault } from './core.mjs';
-import { VERSION } from './server.mjs';
+import { VERSION, createMcp } from './server.mjs';
 import { findObsidianVaults, nestedVaults } from './obsidian.mjs';
 import { syncSettings, chooseSync, suggestFolders, PROVIDERS, PROVIDER_LABELS } from './sync/settings.mjs';
 import { sessionsService } from './host.mjs';
@@ -46,6 +46,10 @@ async function countNotes(dir, n = 0, depth = 0) {
 }
 
 const mask = (k) => (k ? `${k.slice(0, 8)}…${k.slice(-6)}` : null);
+
+// A search snippet is raw note text (headings, **bold**, `code`); strip the Markdown so the
+// instant answer reads as prose instead of exposing the source's formatting.
+const plainText = (s) => String(s || '').replace(/^#+\s*/gm, '').replace(/\*\*([^*]+)\*\*/g, '$1').replace(/`([^`]+)`/g, '$1').replace(/\s+/g, ' ').trim();
 
 // opts: { env, home, os, port, pick, openUrl }
 export async function startSetup(opts = {}) {
@@ -99,6 +103,27 @@ export async function startSetup(opts = {}) {
       try { await connectClient(id, clientOpts()); connected.push(c.title); count++; } catch (e) { failed.push(`${c.title}: ${e.message}`); }
     }
     return { connected, skipped, failed, already: Object.values(found).filter((c) => c.connected).map((c) => c.title) };
+  }
+
+  // Live proof a just-connected client actually works: an in-process MCP round trip through the
+  // exact same createMcp() a real `brainlink serve` process would run, using that client's own
+  // platform/role env so the call looks identical to one the client would make. Logs through the
+  // normal activity log (content-free: tool name + ok/fail only) so it shows up in the call log too.
+  async function clientHealthCheck(clientId) {
+    const c = CLIENTS[clientId];
+    if (!c) throw new Error(`Unknown client "${clientId}".`);
+    const cfg = await loadConfig(file);
+    const ctx = createContext(cfg, { env: { ...env, BRAINLINK_AI_PLATFORM: c.platform, BRAINLINK_AGENT_ROLE: c.role }, license: effectiveLicense(cfg) });
+    if (!ctx.enabled.length) return { ok: false, client: clientId, tool: null, took_ms: 0, message: 'Add a vault first, then test the connection.' };
+    const pending = [];
+    const mcp = createMcp(ctx, { onCall: (e) => pending.push(logActivity(env, { ...e, platform: c.platform, mode: 'health-check' })) });
+    const t0 = Date.now();
+    await mcp.handle({ jsonrpc: '2.0', id: 1, method: 'initialize', params: {} });
+    const called = await mcp.handle({ jsonrpc: '2.0', id: 2, method: 'tools/call', params: { name: 'brainlink_guide', arguments: {} } });
+    await Promise.all(pending);
+    const took_ms = Date.now() - t0;
+    const ok = Boolean(called?.result) && !called.result.isError;
+    return { ok, client: clientId, tool: 'brainlink_guide', took_ms, message: ok ? `Live MCP call succeeded: brainlink_guide (${took_ms}ms).` : 'The MCP call failed; see Activity below.' };
   }
 
   // The one-click path: use an Obsidian vault, a folder, or a brand-new vault; then connect all AIs.
@@ -209,8 +234,11 @@ export async function startSetup(opts = {}) {
       const features = planFeatures(effectiveLicense(cfg));
       const connected = Object.entries(await detect(clientOpts())).filter(([, c]) => c.connected).map(([id]) => id);
       if (!connected.includes(b.client) && connected.length >= features.maxConnections) throw new Error(`The free plan connects ${features.maxConnections} AI apps. Add a licence key to connect more.`);
-      return connectClient(b.client, clientOpts());
+      const r = await connectClient(b.client, clientOpts());
+      const health = await clientHealthCheck(b.client).catch((e) => ({ ok: false, client: b.client, tool: null, took_ms: 0, message: e.message || String(e) }));
+      return { ...r, health };
     },
+    'POST /api/client-health': (b) => clientHealthCheck(b.client),
     'POST /api/disconnect': (b) => disconnectClient(b.client, clientOpts()),
     // Normalized {ok,message} check (connectors.mjs `test`): same detect() the buttons above
     // already use, re-shaped for callers that want one consistent result instead of each
@@ -245,6 +273,30 @@ export async function startSetup(opts = {}) {
       if (!ctx.enabled.length) throw new Error('Add a vault first.');
       const v = b.vault && ctx.enabled.includes(b.vault) ? b.vault : ctx.enabled[0];
       return { vault: v, results: (await search(ctx, v, String(b.query || 'goal'), 5)).map((r) => ({ title: r.title, path: r.path, heading: r.heading, score: r.score })) };
+    },
+    // Cited instant answer: the same ranked search + status verdict the vault_search MCP tool uses,
+    // reshaped for a one-paragraph answer with clickable source chips (/api/note opens each one).
+    'POST /api/ask': async (b) => {
+      const cfg = normalize(await loadConfig(file));
+      const ctx = createContext(cfg, { env: { ...env, BRAINLINK_AI_PLATFORM: '' }, license: effectiveLicense(cfg) });
+      if (!ctx.enabled.length) throw new Error('Add a vault first.');
+      const query = String(b.query || '').trim();
+      if (!query) throw new Error('Ask a question first.');
+      const v = b.vault && ctx.enabled.includes(b.vault) ? b.vault : ctx.enabled[0];
+      const r = await searchWithVerdict(ctx, v, query, { limit: 5 });
+      const top = r.results.slice(0, 3);
+      const answer = r.status === 'not_in_brain' ? null : plainText(top[0]?.snippet) || null;
+      return {
+        vault: v, query, status: r.status, coverage: r.coverage, note: r.note || null, answer,
+        sources: top.map((x) => ({ vault: v, path: x.path, title: x.title, heading: x.heading || '', score: x.score })),
+      };
+    },
+    // Opens one of the answer's source chips: full frontmatter + body, read-only.
+    'POST /api/note': async (b) => {
+      const cfg = normalize(await loadConfig(file));
+      const ctx = createContext(cfg, { env: { ...env, BRAINLINK_AI_PLATFORM: '' }, license: effectiveLicense(cfg) });
+      if (!b.vault || !ctx.enabled.includes(b.vault)) throw new Error('Unknown vault.');
+      return { vault: b.vault, ...(await readNote(ctx, b.vault, String(b.path || ''))) };
     },
   };
 

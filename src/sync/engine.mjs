@@ -64,8 +64,12 @@ const emptyState = () => ({ files: {}, conflicts: [], queued: false, last: null 
 export async function syncOnce({ store, cfg = {}, state = emptyState(), sessions = [], now = () => new Date().toISOString() }) {
   const s = syncSettings(cfg);
   const r = { status: 'ok', pushed: [], pulled: [], conflicts: [], snapshot: null, sessions: 0 };
-  if (s.provider === 'local') return { ...r, status: 'local-only', state };
-  if (!(await online(s.folder))) return { ...r, status: 'queued', state: { ...state, queued: true } };
+  // Eligible = what would leave the device if sync were on: non-private, 'brain'-scoped. Counted
+  // even when provider is 'local' or the folder is offline, so `brainlink sync` always reports how
+  // many sessions are ready to sync instead of a hardcoded 0.
+  const eligibleSessions = sessions.filter((e) => !e.private && (!e.scope || e.scope === SYNC_VAULT));
+  if (s.provider === 'local') return { ...r, status: 'local-only', state, sessions: eligibleSessions.length };
+  if (!(await online(s.folder))) return { ...r, status: 'queued', state: { ...state, queued: true }, sessions: eligibleSessions.length };
   const notesDir = path.join(s.folder, ROOT, 'notes');
   const st = { ...emptyState(), ...state, files: { ...state.files }, conflicts: [...(state.conflicts || [])] };
   const local = new Map();
@@ -108,7 +112,7 @@ export async function syncOnce({ store, cfg = {}, state = emptyState(), sessions
   // optional `scope` the caller stamps with the session's vault; one file per device so devices never
   // collide; private:true entries dropped, non-brain scopes dropped, every field redacted again here
   // (defense in depth on top of the store's own secret filter at putSession/appendSession time).
-  const pub = sessions.filter((e) => !e.private && (!e.scope || e.scope === SYNC_VAULT)).map(redactDeep);
+  const pub = eligibleSessions.map(redactDeep);
   await atomicWrite(path.join(s.folder, ROOT, 'sessions', `${s.device}.json`), JSON.stringify({ device: s.device, at: now(), sessions: pub }, null, 1));
   r.sessions = pub.length;
   st.queued = false; st.last = now();

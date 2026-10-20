@@ -32,13 +32,24 @@ export async function createSessionStore({ dir, clock = () => new Date().toISOSt
       title: session.title, summary: session.summary, started_at: session.started_at, note_refs: session.note_refs, private: session.private, messages });
   }
 
-  async function persist() {
-    const lines = [];
-    for (const s of await inner.listSessions({ limit: 1e6 })) {
-      const { messages } = await inner.readSession(s.id, { limit: 1e6 });
-      lines.push(JSON.stringify({ session: s, messages }));
-    }
-    await atomicWrite(file, lines.length ? lines.join('\n') + '\n' : '');
+  // Two importers can both call putSession/appendSession concurrently (src/sessions/index.mjs
+  // runs them via Promise.all). Each writes the *full* current state, so overlapping writes to the
+  // same file are not merge conflicts, but their completion order is not guaranteed to match call
+  // order (real disk I/O). Chaining every persist() through one queue forces writes to land in call
+  // order, so the last one to finish always reflects the fullest state instead of a stale snapshot
+  // winning the race.
+  let queue = Promise.resolve();
+  function persist() {
+    const run = queue.then(async () => {
+      const lines = [];
+      for (const s of await inner.listSessions({ limit: 1e6 })) {
+        const { messages } = await inner.readSession(s.id, { limit: 1e6 });
+        lines.push(JSON.stringify({ session: s, messages }));
+      }
+      await atomicWrite(file, lines.length ? lines.join('\n') + '\n' : '');
+    });
+    queue = run.catch(() => {}); // keep the queue alive even if this write failed
+    return run;
   }
 
   return {
