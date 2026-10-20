@@ -101,7 +101,10 @@ export BRAINLINK_HOME="$TMP/home"
 export HOME="$TMP/home"
 mkdir -p "$HOME"
 LOG="$TMP/demo.log"
-node app/bin/brainlink.mjs demo --no-open > "$LOG" 2>&1 &
+# BRAINLINK_SHOW_TOKEN: bin/brainlink.mjs masks the token (?t=...) in anything it prints to the
+# terminal by default (RB3); this harness needs the real URL to curl it, so it opts in via the
+# same env var real test/debug harnesses use. Terminal output for end users stays masked.
+BRAINLINK_SHOW_TOKEN=1 node app/bin/brainlink.mjs demo --no-open > "$LOG" 2>&1 &
 PID=$!
 
 URL=""

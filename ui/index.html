@@ -315,10 +315,12 @@ function renderReady(r) {
   const fresh = r?.connected?.length ? r.connected : apps;
   $('ready-title').textContent = apps.length ? "You're set" : 'Almost there';
   $('ready-sub').textContent = `${v.name} · ${v.notes} notes${apps.length ? ' · connected to ' + apps.join(', ') : ''}`;
-  $('todo-restart').innerHTML = fresh.length ? `Quit and reopen <b>${esc(fresh.join(', '))}</b> so it loads BrainLink.` : 'No AI apps were found on this computer. Install Claude Desktop, Cursor or Codex, then press <b>Connect my AI apps</b> below.';
+  const missing = Object.values(S.clients).filter((c) => c.present && !c.connected);
+  $('todo-restart').innerHTML = fresh.length ? `Quit and reopen <b>${esc(fresh.join(', '))}</b> so it loads BrainLink.`
+    : missing.length ? 'Press <b>Connect my AI apps</b> below.'
+    : 'No AI apps were found on this computer. Install Claude Desktop, Cursor or Codex, then reload this page.';
   $('say-connect').textContent = agent ? `${agent.activation.includes('Connect to my brain') ? 'Connect to my brain' : agent.activation[0]}` : 'Search my notes for …';
   $('say-close').textContent = agent ? (agent.close.includes('Close loop') ? 'Close loop' : agent.close[0]) : 'Close loop';
-  const missing = Object.values(S.clients).filter((c) => c.present && !c.connected);
   $('more-apps').innerHTML = missing.length ? `<button class="primary" id="connect-all">Connect my AI apps (${esc(missing.map((c) => c.title).join(', '))})</button>` : '';
   if (missing.length) $('connect-all').onclick = () => act(async () => { const x = await api('POST', '/api/connect-all'); toast(x.connected.length ? `Connected ${x.connected.join(', ')}. Quit and reopen them.` : (x.skipped.length ? 'The free plan connects 2 apps. Add a licence in Settings.' : 'Nothing new to connect.')); });
   if (r?.skipped?.length) toast(`Not connected on the free plan: ${r.skipped.join(', ')}`, true);
