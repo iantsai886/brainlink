@@ -24,8 +24,13 @@ export function configPath(env = process.env) {
   return env.BRAINLINK_CONFIG || path.join(appHome(env), 'config.json');
 }
 
+// AI agents a person adds themselves (distinct from `agents`: vault role-players with
+// activation/close phrases). Each has its own revocable token, shown once and stored only as a
+// hash (sha256 hex, see src/mcp-agents.mjs); never persisted in plain text.
+export const AGENT_KINDS = ['local', 'remote'];
+
 export function emptyConfig() {
-  return { version: 1, timezone: null, vaults: [], agents: [], handoff: null, platforms: DEFAULT_PLATFORMS, license: null, http: { port: 8765, token: null }, connections: {} };
+  return { version: 1, timezone: null, vaults: [], agents: [], ai_agents: [], handoff: null, platforms: DEFAULT_PLATFORMS, license: null, http: { port: 8765, token: null }, connections: {} };
 }
 
 // Fill defaults so the rest of the code never checks for missing keys.
@@ -36,6 +41,7 @@ export function normalize(raw = {}) {
     writes: 'on', flat: false, protected: ['00 INDEX', '00 MAP'], extra_fields: {}, purpose: '', ...v,
   }));
   cfg.agents = (raw.agents || []).map((a) => ({ role: '', activation: [`Connect to ${a.name}`], close: [`${a.name} close loop`], connect_notes: [], tail_notes: [], recent_dir: null, stale_days: 14, capture_approved: false, ...a }));
+  cfg.ai_agents = (raw.ai_agents || []).map((a) => ({ kind: 'local', tokenHash: null, revoked: false, connected: false, createdAt: null, lastSeenAt: null, ...a }));
   cfg.http = { port: 8765, token: null, ...(raw.http || {}) };
   cfg.connections = raw.connections || {};
   return cfg;
@@ -61,6 +67,14 @@ export function validate(cfg) {
     const t = a.close_target;
     if (!t || !CLOSE_MODES.includes(t.mode)) errors.push(`agent "${a.name}": close_target.mode must be ${CLOSE_MODES.join(' | ')}`);
     else if (t.mode === 'new-note' ? !t.dir : !t.path) errors.push(`agent "${a.name}": close_target needs ${t.mode === 'new-note' ? 'dir' : 'path'}`);
+  }
+  const aiAgentNames = new Set();
+  for (const a of cfg.ai_agents) {
+    if (!a.id) errors.push('an agent is missing an id');
+    if (!a.name) errors.push('an agent is missing a name');
+    if (aiAgentNames.has(a.name?.toLowerCase())) errors.push(`duplicate agent "${a.name}"`);
+    aiAgentNames.add(a.name?.toLowerCase());
+    if (!AGENT_KINDS.includes(a.kind)) errors.push(`agent "${a.name}": kind must be ${AGENT_KINDS.join(' | ')}`);
   }
   if (cfg.handoff && (!names.has(cfg.handoff.vault) || !cfg.handoff.folder)) errors.push('handoff needs an existing vault and a folder');
   if (cfg.timezone) { try { new Intl.DateTimeFormat('en', { timeZone: cfg.timezone }); } catch { errors.push(`unknown timezone "${cfg.timezone}"`); } }

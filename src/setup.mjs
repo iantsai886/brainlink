@@ -19,6 +19,21 @@ import { VERSION, createMcp } from './server.mjs';
 import { findObsidianVaults, nestedVaults } from './obsidian.mjs';
 import { syncSettings, chooseSync, suggestFolders, PROVIDERS, PROVIDER_LABELS } from './sync/settings.mjs';
 import { sessionsService } from './host.mjs';
+import { addAgent, renameAgent, removeAgent, revokeAgent, markConnected, findAgentByToken, publicAgent, localAgentSnippet, remoteAgentSnippet } from './mcp-agents.mjs';
+import { buildGraph3D, noteDetail3D } from './graph3d.mjs';
+
+const UI_STATIC_TYPES = { '.js': 'text/javascript; charset=utf-8', '.css': 'text/css; charset=utf-8', '.json': 'application/json; charset=utf-8' };
+const UI_DIR = path.join(ROOT, 'ui');
+
+// A small whitelist of ui/* assets this server will hand out with no session token (same trust
+// level as index.html itself: static code and styles, never vault content or secrets).
+async function readUiStatic(rel) {
+  const ext = path.extname(rel);
+  if (!UI_STATIC_TYPES[ext] || rel === 'index.html') return null;
+  const full = path.resolve(UI_DIR, '.' + rel);
+  if (full !== UI_DIR && !full.startsWith(UI_DIR + path.sep)) return null; // no traversal out of ui/
+  try { return { body: await readFile(full), type: UI_STATIC_TYPES[ext] }; } catch { return null; }
+}
 
 const json = (res, code, body) => res.writeHead(code, { 'Content-Type': 'application/json', 'Cache-Control': 'no-store' }).end(JSON.stringify(body));
 
@@ -82,7 +97,7 @@ export async function startSetup(opts = {}) {
       version: VERSION, config_path: file, os,
       default_excluded_folders: DEFAULT_EXCLUDED_FOLDERS, suggested_excluded_folders: SUGGESTED_EXCLUDED_FOLDERS,
       license: { ...lic, key: mask(cfg.license), features: { ...features, maxVaults: String(features.maxVaults), maxConnections: String(features.maxConnections) } },
-      vaults, agents: cfg.agents, handoff: cfg.handoff, timezone: cfg.timezone,
+      vaults, agents: cfg.agents, ai_agents: cfg.ai_agents.map(publicAgent), handoff: cfg.handoff, timezone: cfg.timezone,
       packs: Object.entries(PACKS).map(([id, p]) => ({ id, title: p.title, description: p.description })),
       clients: await detect(clientOpts()),
       http: { port: cfg.http.port, token_set: Boolean(cfg.http.token) },
@@ -133,6 +148,27 @@ export async function startSetup(opts = {}) {
     const took_ms = Date.now() - t0;
     const ok = Boolean(called?.result) && !called.result.isError;
     return { ok, client: clientId, tool: 'brainlink_guide', took_ms, message: ok ? `Live MCP call succeeded: brainlink_guide (${took_ms}ms).` : 'The MCP call failed; see Activity below.' };
+  }
+
+  // Same live-proof pattern as clientHealthCheck, keyed by an agent's own token instead of a
+  // preset app's env. Agents start out not connected; this is the only path that flips one to
+  // connected, and only once the round trip actually succeeds with that exact token.
+  async function agentHealthCheck(token) {
+    const cfg = await loadConfig(file);
+    const agent = findAgentByToken(cfg, token);
+    if (!agent) return { ok: false, agent: null, tool: null, took_ms: 0, message: 'That key was not recognized. It may have been revoked or mistyped.' };
+    const ctx = createContext(cfg, { env: { ...env, BRAINLINK_AGENT_TOKEN: token }, license: effectiveLicense(cfg) });
+    if (!ctx.enabled.length) return { ok: false, agent: agent.name, tool: null, took_ms: 0, message: 'Add a vault first, then test the connection.' };
+    const pending = [];
+    const mcp = createMcp(ctx, { onCall: (e) => pending.push(logActivity(env, { ...e, platform: agent.name, mode: 'agent-check' })) });
+    const t0 = Date.now();
+    await mcp.handle({ jsonrpc: '2.0', id: 1, method: 'initialize', params: {} });
+    const called = await mcp.handle({ jsonrpc: '2.0', id: 2, method: 'tools/call', params: { name: 'brainlink_guide', arguments: {} } });
+    await Promise.all(pending);
+    const took_ms = Date.now() - t0;
+    const ok = Boolean(called?.result) && !called.result.isError;
+    if (ok) await saveConfig(markConnected(cfg, agent.id), file);
+    return { ok, agent: agent.name, tool: 'brainlink_guide', took_ms, message: ok ? `Live call succeeded (${took_ms}ms). This agent is now connected.` : 'The call failed; see Activity below.' };
   }
 
   // The one-click path: use an Obsidian vault, a folder, or a brand-new vault; then connect all AIs.
@@ -298,6 +334,47 @@ export async function startSetup(opts = {}) {
       await saveConfig({ ...cfg, http: { ...cfg.http, token: t } }, file);
       return { ok: true, url: `http://127.0.0.1:${cfg.http.port}/mcp`, token: t, start: 'brainlink serve --http' };
     },
+    // ---- Agents: any number of user-added AI connections, on top of the preset apps above ----
+    'POST /api/agents/add': async (b) => {
+      const cfg = await loadConfig(file);
+      const { cfg: next, agent, token } = addAgent(cfg, { name: b.name, kind: b.kind });
+      await saveConfig(next, file);
+      const snippet = agent.kind === 'remote' ? remoteAgentSnippet(agent, token, cfg.http.port) : localAgentSnippet(agent, token, launchSpec(env));
+      return { ok: true, agent: publicAgent(agent), token, snippet };
+    },
+    'POST /api/agents/rename': async (b) => {
+      const cfg = await loadConfig(file);
+      const next = renameAgent(cfg, b.id, b.name);
+      await saveConfig(next, file);
+      return { ok: true, agent: publicAgent(next.ai_agents.find((a) => a.id === b.id)) };
+    },
+    'POST /api/agents/remove': async (b) => {
+      const cfg = await loadConfig(file);
+      await saveConfig(removeAgent(cfg, b.id), file);
+      return { ok: true };
+    },
+    'POST /api/agents/revoke': async (b) => {
+      const cfg = await loadConfig(file);
+      const next = revokeAgent(cfg, b.id);
+      await saveConfig(next, file);
+      return { ok: true, agent: publicAgent(next.ai_agents.find((a) => a.id === b.id)) };
+    },
+    // Runs the same live round trip as /api/client-health, keyed by the agent's own key instead
+    // of a preset app's env; the only path that marks an agent Connected.
+    'POST /api/agents/test': (b) => agentHealthCheck(String(b.token || '')),
+    // ---- 3D notes graph: nodes/edges plus one note's panel (Markdown, tags, links) ----
+    'POST /api/graph3d': async (b) => {
+      const cfg = await loadConfig(file);
+      const ctx = createContext(cfg, { env: { ...env, BRAINLINK_SEMANTIC: '0' }, license: effectiveLicense(cfg) });
+      if (!ctx.enabled.length) return { nodes: [], links: [], shown: 0, total: 0 };
+      return buildGraph3D(ctx, b.vault && ctx.enabled.includes(b.vault) ? b.vault : undefined);
+    },
+    'POST /api/graph3d/note': async (b) => {
+      const cfg = await loadConfig(file);
+      const ctx = createContext(cfg, { env: { ...env, BRAINLINK_SEMANTIC: '0' }, license: effectiveLicense(cfg) });
+      if (!b.vault || !ctx.enabled.includes(b.vault)) throw new Error('Unknown vault.');
+      return noteDetail3D(ctx, b.vault, String(b.path || ''));
+    },
     'POST /api/sample': async () => {
       const dest = path.join(home, 'Documents', 'BrainLink Sample Vault');
       if (!(await stat(dest).catch(() => null))) await cp(path.join(ROOT, 'samples', 'acme-studio'), dest, { recursive: true, errorOnExist: true, force: false });
@@ -349,6 +426,12 @@ export async function startSetup(opts = {}) {
     if (req.method === 'GET' && (url.pathname === '/' || url.pathname === '/index.html')) {
       res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8', 'Cache-Control': 'no-store', 'Content-Security-Policy': "default-src 'self'; style-src 'self' 'unsafe-inline'; script-src 'self' 'unsafe-inline'; img-src 'self' data:", 'X-Frame-Options': 'DENY' }).end(html);
       return;
+    }
+    // Static code/styles for the Agents and 3D graph panels (ui/agents.js, ui/notes3d.js, their
+    // CSS and vendored libraries): same trust level as index.html, no session token needed.
+    if (req.method === 'GET') {
+      const file = await readUiStatic(url.pathname);
+      if (file) { res.writeHead(200, { 'Content-Type': file.type, 'Cache-Control': 'no-store' }).end(file.body); return; }
     }
     const route = routes[`${req.method} ${url.pathname}`];
     if (!route) { res.writeHead(404).end(); return; }

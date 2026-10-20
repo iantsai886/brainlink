@@ -254,10 +254,10 @@ export function createMcp(ctx, { onCall = () => {} } = {}) {
           try {
             const out = await tool.run(params.arguments || {});
             const failed = out?.ok === false;
-            onCall({ tool: tool.name, ok: !failed, written: Boolean(out?.written) });
+            onCall({ tool: tool.name, ok: !failed, written: Boolean(out?.written), agent: ctx.mcpAgent?.name || null });
             return ok({ content: [{ type: 'text', text: JSON.stringify(out, null, 1) }], structuredContent: Array.isArray(out) ? { items: out } : out, isError: failed });
           } catch (e) {
-            onCall({ tool: tool.name, ok: false });
+            onCall({ tool: tool.name, ok: false, agent: ctx.mcpAgent?.name || null });
             return ok({ content: [{ type: 'text', text: String(e.message || e) }], isError: true });
           }
         }

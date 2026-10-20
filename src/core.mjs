@@ -10,6 +10,7 @@ import { termFrequencies, terms, linkGraph, collection, suggestRelated, extractT
 import { planFeatures } from './license.mjs';
 import { appHome } from './config.mjs';
 import { detectEmbedder, VectorStore, fillVectors, embedTexts, nearest } from './embed.mjs';
+import { findAgentByToken, publicAgent } from './mcp-agents.mjs';
 
 const truthy = (v) => /^(1|true|yes|on)$/i.test(String(v || ''));
 
@@ -19,13 +20,17 @@ export function createContext(cfg, { env = process.env, license = null } = {}) {
   let enabled = env.BRAINLINK_VAULTS ? env.BRAINLINK_VAULTS.split(',').map((s) => s.trim()).filter((v) => byName.has(v)) : cfg.vaults.map((v) => v.name);
   if (features.maxVaults < enabled.length) enabled = enabled.slice(0, features.maxVaults);
   const readOnly = truthy(env.BRAINLINK_READ_ONLY) || !features.writes;
+  // An AI agent the user added themselves (src/mcp-agents.mjs), identified by the token it was
+  // launched with. Revoked or unknown tokens resolve to no agent — never a guess at identity.
+  const matchedAgent = findAgentByToken(cfg, env.BRAINLINK_AGENT_TOKEN) || null;
   return {
     cfg, features, license, byName, enabled, readOnly, env,
-    platform: String(env.BRAINLINK_AI_PLATFORM || '').trim(),
+    platform: String(env.BRAINLINK_AI_PLATFORM || '').trim() || (matchedAgent ? matchedAgent.name : ''),
     agentRole: String(env.BRAINLINK_AGENT_ROLE || 'direct assistant').trim(),
     connectorPrivate: truthy(env.BRAINLINK_CONNECTOR_PRIVATE),
     tz: cfg.timezone || Intl.DateTimeFormat().resolvedOptions().timeZone || 'UTC',
     agents: features.agents ? cfg.agents.filter((a) => enabled.includes(a.vault)) : [],
+    mcpAgent: matchedAgent ? publicAgent(matchedAgent) : null,
     dataDir: appHome(env),
     cache: new Map(),
     stores: new Map(),

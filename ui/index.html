@@ -108,6 +108,8 @@ ol.todo li { padding-left: 4px; }
 #boot-error { color: #fff; background: var(--bad); border-radius: 8px; margin: 8px 20px; }
 #boot-error button { background: transparent; border-color: rgba(255,255,255,.6); color: #fff; }
 </style>
+<link rel="stylesheet" href="agents.css">
+<link rel="stylesheet" href="notes3d.css">
 </head>
 <body>
 <header><h1>BrainLink</h1><span class="plan" id="plan">Loading…</span><button class="link" id="done" style="margin-left:auto">Done — close setup</button></header>
@@ -164,7 +166,7 @@ ol.todo li { padding-left: 4px; }
     <h2>Your brain</h2>
     <p class="hint">Every dot is a note; lines are links. BrainLink links new notes to the ones they mention or are about, and keeps a Home note that links everything.</p>
     <div class="brain">
-      <div><canvas id="graph" width="800" height="600" aria-label="Map of notes and links"></canvas><div class="legend" id="legend"></div></div>
+      <div><div id="notes3d-root" aria-label="Map of notes and links"></div></div>
       <div>
         <div class="stats"><div class="stat"><b id="st-notes">–</b><span>notes</span></div><div class="stat"><b id="st-links">–</b><span>links</span></div><div class="stat"><b id="st-orphans">–</b><span>not linked yet</span></div></div>
         <div class="phrases"><b style="font-size:13px;color:var(--muted)">Things to say in any AI</b>
@@ -177,6 +179,12 @@ ol.todo li { padding-left: 4px; }
         <p class="smart muted" id="smart"></p>
       </div>
     </div>
+  </section>
+
+  <section id="agents-panel" hidden>
+    <h2>Agents</h2>
+    <p class="hint">Any AI can connect with its own key — on this Mac now, or ready for the cloud once that is reachable.</p>
+    <div id="agents-root"></div>
   </section>
 
   <section id="sessions-panel" hidden>
@@ -659,5 +667,8 @@ setInterval(async () => {
   try { const s = await api('GET', '/api/state'); S.activity = s.activity; $('activity').innerHTML = s.activity.length ? s.activity.map((e) => `<tr><td>${esc(new Date(e.at).toLocaleString())}</td><td>${esc(e.platform)}</td><td class="mono">${esc(e.tool)}</td><td>${e.ok ? (e.written ? 'written' : 'ok') : 'refused / error'}</td></tr>`).join('') : '<tr><td colspan="4" class="muted">No calls yet.</td></tr>'; $('n4').className = 'step' + (s.activity.length ? ' done' : ''); } catch {}
 }, 5000);
 </script>
+<script src="agents.js"></script>
+<script src="vendor/3d-force-graph/3d-force-graph.min.js"></script>
+<script src="notes3d.js"></script>
 </body>
 </html>
