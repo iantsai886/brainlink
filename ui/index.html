@@ -207,6 +207,9 @@ ol.todo li { padding-left: 4px; }
           <label>Agent name<input id="v-agent" placeholder="e.g. Max"></label>
           <label class="muted" style="align-self:end"><span><input type="checkbox" id="v-scaffold" checked style="width:auto"> Create starter notes (never overwrites)</span></label>
         </div>
+        <label class="muted" style="display:flex;flex-direction:row;gap:6px;align-items:center;margin-top:10px"><input type="checkbox" id="v-private" style="width:auto"> Private — hidden from search, answers, graph, sessions and sync for connected AIs</label>
+        <label style="margin-top:6px">Excluded folders (one per line; never read, searched, answered from, graphed or synced)<textarea id="v-excluded" class="mono" rows="4"></textarea></label>
+        <p class="hint" id="v-excluded-hint"></p>
         <div class="row" style="margin-top:12px"><button class="primary" id="save-vault">Add vault</button><button class="link" id="cancel-vault">Cancel</button></div>
       </div>
     </div>
@@ -533,7 +536,12 @@ async function load() {
   $('cfgpath').textContent = S.config_path;
   $('lic-out').textContent = L.valid ? `Active: ${L.plan} (${L.key})` : (L.key ? L.reason : '');
   $('n1').className = 'step' + (S.vaults.length ? ' done' : '');
-  $('vaults').innerHTML = S.vaults.length ? S.vaults.map((v) => `<div class="card"><div class="row" style="justify-content:space-between"><b>${esc(v.name)}</b><span class="pill ${v.exists ? 'on' : ''}">${v.exists ? v.notes + ' notes' : 'folder missing'}</span></div><div class="mono muted">${esc(v.path)}</div><div class="row muted" style="font-size:13px">${v.private ? 'Private · ' : ''}writes: ${esc(v.writes)} · intake: ${esc(v.flat ? 'root' : v.intake_folder)}${v.decisions.length ? ' · decisions ' + esc(v.decisions.join('/')) : ''}<button class="link" data-remove="${esc(v.name)}">Remove from BrainLink</button></div></div>`).join('') : '<p class="muted">No vaults yet — choose a folder above.</p>';
+  $('vaults').innerHTML = S.vaults.length ? S.vaults.map((v, i) => `<div class="card"><div class="row" style="justify-content:space-between"><b>${esc(v.name)}</b><span class="pill ${v.exists ? 'on' : ''}">${v.exists ? v.notes + ' notes' : 'folder missing'}</span></div><div class="mono muted">${esc(v.path)}</div><div class="row muted" style="font-size:13px">${v.private ? 'Private · ' : ''}writes: ${esc(v.writes)} · intake: ${esc(v.flat ? 'root' : v.intake_folder)}${v.decisions.length ? ' · decisions ' + esc(v.decisions.join('/')) : ''}<button class="link" data-remove="${esc(v.name)}">Remove from BrainLink</button></div>
+    <label class="muted" style="display:flex;flex-direction:row;gap:6px;align-items:center;margin-top:8px"><input type="checkbox" data-vault-private="${i}" ${v.private ? 'checked' : ''} style="width:auto"> Private — hidden from search, answers, graph, sessions and sync for connected AIs</label>
+    <label style="margin-top:6px">Excluded folders (one per line; never read, searched, answered from, graphed or synced)<textarea data-vault-excluded="${i}" class="mono" rows="3">${esc((v.excluded_folders || []).join('\n'))}</textarea></label>
+    ${v.excluded_suggestions && v.excluded_suggestions.length ? `<div class="muted" style="font-size:12px;margin-top:4px">Suggestions: ${v.excluded_suggestions.map((s) => esc(s)).join(', ')}</div>` : ''}
+    <div class="row" style="margin-top:6px"><button data-vault-excluded-save="${i}">Save excluded folders</button></div>
+  </div>`).join('') : '<p class="muted">No vaults yet — choose a folder above.</p>';
   $('n2').className = 'step' + (S.agents.length ? ' done' : '');
   $('agents').innerHTML = S.agents.length ? S.agents.map((a, i) => `<div class="card"><b>${esc(a.name)} <span class="muted" style="font-weight:400">· ${esc(a.vault)} · close → ${esc(a.close_target.mode)} ${esc(a.close_target.path || a.close_target.dir || '')}</span></b>
     <label>Role<textarea data-a="${i}" data-f="role">${esc(a.role)}</textarea></label>
@@ -563,13 +571,17 @@ function openForm(p) {
   $('vault-form').hidden = false;
   $('v-path').value = p;
   $('v-name').value = p.replace(/[\/\\]+$/, '').split(/[\/\\]/).pop();
+  $('v-private').checked = false;
+  $('v-excluded').value = (S.default_excluded_folders || []).join('\n');
+  $('v-excluded-hint').textContent = `Suggestions: ${(S.suggested_excluded_folders || []).join(', ')} — add any that apply to this vault.`;
 }
 $('pick').onclick = () => act(async () => { const r = await api('POST', '/api/pick-folder'); const p = r.path || (r.unavailable ? (window.prompt('Folder path of your notes:') || '').trim() : ''); if (p) openForm(p); });
 $('sample').onclick = () => act(async () => { const r = await api('POST', '/api/sample'); openForm(r.path); $('v-name').value = 'Acme Studio'; $('v-agent').value = 'Chief of Staff'; pack = 'founder-os'; });
 $('cancel-vault').onclick = () => ($('vault-form').hidden = true);
 $('packs').onchange = (e) => { if (e.target.name === 'pack') { pack = e.target.value; document.querySelectorAll('.pack').forEach((el) => el.classList.toggle('sel', el.querySelector('input').checked)); } };
 $('save-vault').onclick = () => act(async () => {
-  const r = await api('POST', '/api/vault', { path: $('v-path').value, name: $('v-name').value, pack, agentName: $('v-agent').value, scaffold: $('v-scaffold').checked });
+  const excludedFolders = $('v-excluded').value.split('\n').map((s) => s.trim()).filter(Boolean);
+  const r = await api('POST', '/api/vault', { path: $('v-path').value, name: $('v-name').value, pack, agentName: $('v-agent').value, scaffold: $('v-scaffold').checked, private: $('v-private').checked, excludedFolders });
   $('vault-form').hidden = true;
   toast(`Added ${r.vault}${r.created.length ? ` · created ${r.created.length} starter notes` : ''}`);
 });
@@ -583,6 +595,17 @@ document.addEventListener('click', (e) => {
   if (d.disconnect) act(async () => { await api('POST', '/api/disconnect', { client: d.disconnect }); delete healthByClient[d.disconnect]; toast('Disconnected'); });
   if (d.health) act(async () => { const r = await api('POST', '/api/client-health', { client: d.health }); healthByClient[d.health] = r; toast(r.message, !r.ok); });
   if (d.remove && confirm(`Remove ${d.remove} from BrainLink? Your notes are not touched.`)) act(() => api('POST', '/api/vault/remove', { name: d.remove }));
+  if (d.vaultPrivate !== undefined) act(async () => {
+    const v = S.vaults[+d.vaultPrivate];
+    await api('POST', '/api/vault/private', { name: v.name, private: e.target.checked });
+    toast(e.target.checked ? `${v.name} is now private.` : `${v.name} is no longer private.`);
+  });
+  if (d.vaultExcludedSave !== undefined) act(async () => {
+    const i = +d.vaultExcludedSave, v = S.vaults[i];
+    const folders = document.querySelector(`[data-vault-excluded="${i}"]`).value.split('\n').map((s) => s.trim()).filter(Boolean);
+    await api('POST', '/api/vault/excluded', { name: v.name, folders });
+    toast(`Saved excluded folders for ${v.name}.`);
+  });
   if (d.saveAgent !== undefined) act(async () => {
     const i = d.saveAgent, a = S.agents[i], get = (f) => document.querySelector(`[data-a="${i}"][data-f="${f}"]`);
     await api('POST', '/api/agent', { name: a.name, role: get('role').value, activation: get('activation').value, close: get('close').value, ...(get('capture_approved') ? { capture_approved: get('capture_approved').checked } : {}) });

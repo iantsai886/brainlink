@@ -16,7 +16,10 @@ const tmp = (p) => mkdtemp(path.join(tmpdir(), `brainlink-${p}-`));
 // + token and a stop() to kill the child. The CLI never exits on its own (the HTTP server keeps
 // the event loop alive, same as a real `ui`/`demo` session) so every caller must stop() it.
 async function launch(cmd, env) {
-  const child = spawn(process.execPath, [CLI, cmd, '--no-open'], { env });
+  // BRAINLINK_SHOW_TOKEN: the Terminal normally shows the URL with the token masked (RB3 safety
+  // fix); tests need the real token to drive the API the way the browser (which always gets the
+  // full URL) would.
+  const child = spawn(process.execPath, [CLI, cmd, '--no-open'], { env: { ...env, BRAINLINK_SHOW_TOKEN: '1' } });
   let buf = '';
   const url = await new Promise((resolve, reject) => {
     child.stdout.on('data', (d) => {
@@ -61,4 +64,18 @@ test('`brainlink ui`: with no vaults configured yet, serves the v1.1 onboarding 
     const st = await (await s.api('GET', '/api/state')).json();
     assert.deepEqual(st.vaults, []);
   } finally { s.stop(); }
+});
+
+test('`brainlink ui`: the Terminal shows the URL with the token masked, not in full', async () => {
+  const home = await tmp('ui-mask-home');
+  const child = spawn(process.execPath, [CLI, 'ui', '--no-open'], { env: { ...process.env, BRAINLINK_HOME: home } });
+  try {
+    let buf = '';
+    const line = await new Promise((resolve, reject) => {
+      child.stdout.on('data', (d) => { buf += d; const m = buf.match(/http:\/\/127\.0\.0\.1:\d+\/\?t=\S+/); if (m) resolve(m[0]); });
+      child.on('exit', (code) => reject(new Error(`exited ${code} before printing a URL: ${buf}`)));
+      setTimeout(() => reject(new Error(`no URL after 5s: ${buf}`)), 5000);
+    });
+    assert.match(line, /\?t=.{1,4}…$/, `expected a masked token, got: ${line}`);
+  } finally { child.kill(); }
 });

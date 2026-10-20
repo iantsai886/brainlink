@@ -66,9 +66,34 @@ cp "$STORE_SRC/memory-store.mjs" "$STORE_SRC/errors.mjs" "$STORE_SRC/interface.d
 
 # 4. Launchers (double-click .command files; each locates its own folder, so the zip works
 #    wherever it is unzipped -- Downloads, Desktop, or after "Install BrainLink.command").
+#
+# .install.sh is shared by Start/Connect: it moves this folder to the permanent
+# ~/Applications/BrainLink home on first run (if it isn't already running from there) before
+# doing anything else, so the MCP configs Connect writes -- and every later launch -- always
+# point at that stable path, never at a Downloads folder the user might later empty or delete.
+cat > "$STAGE/.install.sh" <<'SH'
+#!/bin/bash
+# Sourced by the other .command files; safe to source repeatedly. Copies to a temp dir first and
+# mv's into place (never `rm -rf` the old copy before the new one is ready); a no-op if this
+# folder is already $BRAINLINK_DEST. Leaves cwd at $BRAINLINK_DEST on return.
+HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd -P)"
+BRAINLINK_DEST="$HOME/Applications/BrainLink"
+if [ "$HERE" != "$(cd "$BRAINLINK_DEST" 2>/dev/null && pwd -P || true)" ]; then
+  mkdir -p "$HOME/Applications"
+  TMP="$(mktemp -d "$HOME/Applications/.BrainLink-install.XXXXXX")"
+  cp -R "$HERE/." "$TMP/"
+  rm -rf "$BRAINLINK_DEST"
+  mv "$TMP" "$BRAINLINK_DEST"
+  chmod +x "$BRAINLINK_DEST/Start BrainLink.command" "$BRAINLINK_DEST/Install BrainLink.command" "$BRAINLINK_DEST/Connect AI apps.command"
+fi
+cd "$BRAINLINK_DEST"
+SH
+
 cat > "$STAGE/Start BrainLink.command" <<'SH'
 #!/bin/bash
+set -euo pipefail
 cd "$(dirname "$0")"
+source "./.install.sh"
 case "$(uname -m)" in
   arm64) ARCH=arm64 ;;
   x86_64) ARCH=x64 ;;
@@ -81,13 +106,24 @@ SH
 
 cat > "$STAGE/Install BrainLink.command" <<'SH'
 #!/bin/bash
-# Optional: copies this BrainLink folder to ~/Applications so it has a stable home, then you can
-# delete the original download. Does not use sudo or touch anything outside your home folder.
+# Copies this BrainLink folder to ~/Applications so it has a stable home, then you can delete
+# the original download. Does not use sudo or touch anything outside your home folder. Start and
+# Connect do this automatically too (see .install.sh); this is here for people who want it done
+# up front, or want to re-run it on purpose.
+set -euo pipefail
 cd "$(dirname "$0")"
+HERE="$(pwd -P)"
 DEST="$HOME/Applications/BrainLink"
+if [ -d "$DEST" ] && [ "$HERE" = "$(cd "$DEST" && pwd -P)" ]; then
+  echo "BrainLink is already installed at $DEST -- nothing to do."
+  read -n1 -r -p "Press any key to close this window..."
+  exit 0
+fi
 mkdir -p "$HOME/Applications"
+TMP="$(mktemp -d "$HOME/Applications/.BrainLink-install.XXXXXX")"
+cp -R "$HERE/." "$TMP/"
 rm -rf "$DEST"
-cp -R "$(pwd)" "$DEST"
+mv "$TMP" "$DEST"
 chmod +x "$DEST/Start BrainLink.command" "$DEST/Install BrainLink.command" "$DEST/Connect AI apps.command"
 echo "Installed BrainLink to: $DEST"
 echo "Open that folder and double-click \"Start BrainLink.command\" any time."
@@ -96,7 +132,9 @@ SH
 
 cat > "$STAGE/Connect AI apps.command" <<'SH'
 #!/bin/bash
+set -euo pipefail
 cd "$(dirname "$0")"
+source "./.install.sh"
 case "$(uname -m)" in
   arm64) ARCH=arm64 ;;
   x86_64) ARCH=x64 ;;
@@ -108,6 +146,7 @@ read -n1 -r -p "Press any key to close this window..."
 SH
 
 chmod 755 "$STAGE/Start BrainLink.command" "$STAGE/Install BrainLink.command" "$STAGE/Connect AI apps.command"
+chmod 644 "$STAGE/.install.sh"
 
 # 5. READ ME FIRST.txt: the exact Gatekeeper steps for an unsigned, unnotarised app.
 cat > "$STAGE/READ ME FIRST.txt" <<TXT
@@ -127,10 +166,15 @@ GETTING STARTED
      (adjust the path if you unzipped somewhere other than Downloads), then try step 2 again.
 5. A Terminal window opens and your browser opens to BrainLink. Keep the Terminal window open
    while you use BrainLink; closing it stops the app.
+6. The first time you run "Start BrainLink.command" or "Connect AI apps.command", BrainLink
+   quietly copies itself to ~/Applications/BrainLink (no admin password needed) before doing
+   anything else, so it has one permanent home and you can delete this downloaded folder
+   afterwards. Every later launch, and every AI app BrainLink connects, uses that permanent
+   path -- never this download folder.
 
 OPTIONAL
-- "Install BrainLink.command" copies this folder to ~/Applications/BrainLink so it has a
-  permanent home (no admin password needed).
+- "Install BrainLink.command" does that same move right away, if you would rather not wait for
+  the first launch to do it.
 - "Connect AI apps.command" wires BrainLink into Claude Desktop, Claude Code, Cursor, Codex,
   Gemini CLI and Windsurf, whichever you have installed.
 

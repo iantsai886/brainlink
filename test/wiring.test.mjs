@@ -154,6 +154,28 @@ test('CLI: `brainlink connect --all` connects every present client and skips the
   await assert.rejects(readFile(path.join(home, '.gemini', 'settings.json')), 'gemini was never present, so --all must not create it');
 });
 
+test('CLI: `brainlink connect --all` keeps going past one app\'s unreadable config and reports every app\'s result', async () => {
+  const home = await tmp('cli-home-bad-config');
+  await mkdir(path.join(home, '.cursor'), { recursive: true });
+  await writeFile(path.join(home, '.cursor', 'mcp.json'), '{ broken'); // cursor is present but its config is not valid JSON
+  await mkdir(path.join(home, '.config', 'Claude'), { recursive: true });
+  const env = { ...process.env, HOME: home, BRAINLINK_HOME: path.join(home, 'app') };
+  const out = await new Promise((resolve, reject) => {
+    const child = spawn(process.execPath, [path.join(ROOT, 'bin', 'brainlink.mjs'), 'connect', '--all'], { env });
+    let buf = '';
+    child.stdout.on('data', (d) => { buf += d; });
+    child.on('exit', (code) => (code === 0 ? resolve(buf) : reject(new Error(`exit ${code}: ${buf}`))));
+  });
+  // cursor's bad config must not stop claude desktop from being connected.
+  const claude = JSON.parse(await readFile(path.join(home, '.config', 'Claude', 'claude_desktop_config.json'), 'utf8'));
+  assert.ok(claude.mcpServers.brainlink);
+  assert.equal(await readFile(path.join(home, '.cursor', 'mcp.json'), 'utf8'), '{ broken', 'the broken file is never overwritten');
+  // Every app's outcome is reported, not just the first failure.
+  assert.match(out, /failed to connect Cursor.*not valid JSON/);
+  assert.match(out, /Cursor: failed/);
+  assert.match(out, /Claude Desktop: connected/);
+});
+
 // A clean Mac has no `node` on PATH: the launch command written into AI clients' MCP configs
 // must be the absolute path of whatever node is currently running (the bundled runtime when
 // launched from the mac zip), never a bare "node" that only resolves via a shell PATH.

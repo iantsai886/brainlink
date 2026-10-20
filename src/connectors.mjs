@@ -49,9 +49,10 @@ export function serverEntry(client, launch, extraEnv = {}) {
 }
 
 // ChatGPT needs a public HTTPS MCP connector; it can't reach 127.0.0.1, so there is no config
-// file to merge-write here. N/A pending Ian's decision on an opt-in tunnel (PRODUCT-SPEC §3, §7).
+// file to merge-write here. Not available yet; an opt-in tunnel is a possible future option
+// (PRODUCT-SPEC §3, §7).
 export const UNSUPPORTED = {
-  chatgpt: { title: 'ChatGPT', note: 'N/A: ChatGPT needs a remote HTTPS MCP connector; pending Ian\'s decision on an opt-in tunnel. Use session_log through any connected client, or Codex, in the meantime.' },
+  chatgpt: { title: 'ChatGPT', note: 'Not available yet: ChatGPT needs a remote HTTPS MCP connector. Use session_log through any connected client, or Codex, in the meantime.' },
 };
 
 // Client is "present" when its config file or config folder exists.

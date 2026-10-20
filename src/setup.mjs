@@ -10,7 +10,7 @@ import { loadConfig, saveConfig, configPath, normalize } from './config.mjs';
 import { verifyLicense, planFeatures, effectiveLicense, startTrial } from './license.mjs';
 import { PACKS, buildPack, scaffold, mergePack } from './packs.mjs';
 import { CLIENTS, detect, connectClient, disconnectClient, test } from './connectors.mjs';
-import { createContext, search, searchWithVerdict, readNote } from './core.mjs';
+import { createContext, search, searchWithVerdict, readNote, ensureDefaultIgnore, readExcludedFolders, writeExcludedFolders, DEFAULT_EXCLUDED_FOLDERS, SUGGESTED_EXCLUDED_FOLDERS } from './core.mjs';
 import { ROOT, launchSpec, readActivity, refreshMap, logActivity } from './runtime.mjs';
 import { detectEmbedder } from './embed.mjs';
 import { vaultHealth } from './insights.mjs';
@@ -75,10 +75,12 @@ export async function startSetup(opts = {}) {
     const vaults = [];
     for (const v of cfg.vaults) {
       const ok = await stat(v.path).then((s) => s.isDirectory(), () => false);
-      vaults.push({ ...v, exists: ok, notes: ok ? await countNotes(v.path) : 0 });
+      const excluded = ok ? await readExcludedFolders(v.path) : { active: [], suggested: [] };
+      vaults.push({ ...v, exists: ok, notes: ok ? await countNotes(v.path) : 0, excluded_folders: excluded.active, excluded_suggestions: excluded.suggested });
     }
     return {
       version: VERSION, config_path: file, os,
+      default_excluded_folders: DEFAULT_EXCLUDED_FOLDERS, suggested_excluded_folders: SUGGESTED_EXCLUDED_FOLDERS,
       license: { ...lic, key: mask(cfg.license), features: { ...features, maxVaults: String(features.maxVaults), maxConnections: String(features.maxConnections) } },
       vaults, agents: cfg.agents, handoff: cfg.handoff, timezone: cfg.timezone,
       packs: Object.entries(PACKS).map(([id, p]) => ({ id, title: p.title, description: p.description })),
@@ -142,6 +144,10 @@ export async function startSetup(opts = {}) {
       if (!(await stat(vaultPath).then((x) => x.isDirectory(), () => false))) return { ok: false, error: `Folder not found: ${vaultPath}` };
       const nested = await nestedVaults(vaultPath);
       if (nested.length > 1) return { ok: false, nested: nested.map((n) => ({ name: n, path: path.join(vaultPath, n) })), error: `This folder holds ${nested.length} separate vaults. Pick one so they stay separate.` };
+      // A real, already-existing folder: ship the default excluded-folder list so personal/system
+      // folders never reach search, answers, graph, sessions or sync. Never overrides a vault's
+      // own .brainlinkignore if it already has one.
+      await ensureDefaultIgnore(vaultPath);
     }
     const already = cfg.vaults.find((v) => path.resolve(v.path) === vaultPath);
     if (!already) {
@@ -194,7 +200,12 @@ export async function startSetup(opts = {}) {
       if (!(await stat(vaultPath).then((s) => s.isDirectory(), () => false))) throw new Error(`Folder not found: ${vaultPath}`);
       const name = String(b.name || path.basename(vaultPath)).trim();
       if (!cfg.vaults.some((v) => v.name === name) && cfg.vaults.length >= features.maxVaults) throw new Error('The free plan supports one vault. Add a licence key to connect more.');
+      // A real vault folder: write the shipped default excluded-folder list (unless the caller
+      // already chose one, e.g. from the "connect a vault" form), or keep an existing one as-is.
+      if (Array.isArray(b.excludedFolders)) await writeExcludedFolders(vaultPath, b.excludedFolders);
+      else await ensureDefaultIgnore(vaultPath);
       const built = buildPack(b.pack || 'simple', { vaultName: name, vaultPath, agentName: String(b.agentName || '').trim() || undefined });
+      if (b.private !== undefined) built.vault.private = Boolean(b.private);
       const created = b.scaffold === false ? [] : await scaffold(vaultPath, built.scaffold);
       const next = mergePack(cfg, built);
       if (!next.timezone) next.timezone = Intl.DateTimeFormat().resolvedOptions().timeZone;
@@ -207,6 +218,24 @@ export async function startSetup(opts = {}) {
       const next = { ...cfg, vaults: cfg.vaults.filter((v) => v.name !== b.name), agents: cfg.agents.filter((a) => a.vault !== b.name), handoff: cfg.handoff?.vault === b.name ? null : cfg.handoff };
       await saveConfig(next, file);
       return { ok: true };
+    },
+    // Excluded folders and the private flag stay editable after connecting, not just at
+    // first-connect time (Technical Reviewer's Mac-zip safety review).
+    'POST /api/vault/excluded': async (b) => {
+      const cfg = await loadConfig(file);
+      const v = cfg.vaults.find((x) => x.name === b.name);
+      if (!v) throw new Error(`Unknown vault "${b.name}".`);
+      const folders = Array.isArray(b.folders) ? b.folders : String(b.folders || '').split(/\r?\n/);
+      const active = await writeExcludedFolders(v.path, folders);
+      return { ok: true, excluded_folders: active };
+    },
+    'POST /api/vault/private': async (b) => {
+      const cfg = await loadConfig(file);
+      const v = cfg.vaults.find((x) => x.name === b.name);
+      if (!v) throw new Error(`Unknown vault "${b.name}".`);
+      v.private = Boolean(b.private);
+      await saveConfig(cfg, file);
+      return { ok: true, private: v.private };
     },
     'POST /api/sync': async (b) => {
       // Local by default; Drive/iCloud/Dropbox need an existing, writable folder (the user's own

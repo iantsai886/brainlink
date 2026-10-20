@@ -3,7 +3,7 @@
 // BM25 over stemmed terms, fused (reciprocal rank) across the query, its rephrasings and the
 // optional semantic ranking; capped graph boost from links, co-citations and shared tags;
 // title boost; demotion of superseded / archived notes; date, folder and tag filters.
-import { readdir, readFile, stat } from 'node:fs/promises';
+import { readdir, readFile, writeFile, stat } from 'node:fs/promises';
 import { createHash } from 'node:crypto';
 import path from 'node:path';
 import { termFrequencies, terms, linkGraph, collection, suggestRelated, extractTags } from './graph.mjs';
@@ -123,6 +123,58 @@ async function ignoreRules(dir) {
     return (await readFile(path.join(dir, '.brainlinkignore'), 'utf8')).split(/\r?\n/).map((l) => l.trim()).filter((l) => l && !l.startsWith('#'))
       .map((l) => new RegExp(`^${l.replace(/\/$/, '').replace(/[.+^${}()|[\]\\]/g, '\\$&').replace(/\*/g, '.*').replace(/\?/g, '.')}$`, 'i'));
   } catch { return []; }
+}
+
+// Shipped in every newly connected real vault's root .brainlinkignore (never overwrites one
+// already there). These folders are never read, chunked, searched, answered from, graphed,
+// surfaced in sessions or synced — same as the rest of .brainlinkignore (see walk(), below).
+export const DEFAULT_EXCLUDED_FOLDERS = ['.obsidian/', '.trash/', '.git/', 'node_modules/', '00 Home/'];
+// Common personal folders people keep out of an AI-connected vault; shipped as commented-out
+// suggestions so the user opts in rather than losing folders silently.
+export const SUGGESTED_EXCLUDED_FOLDERS = ['finance/', 'personal/', 'home/'];
+
+export function defaultBrainlinkignore() {
+  return [
+    '# Folders BrainLink never reads, searches, answers from, graphs or syncs. Edit any time in Settings.',
+    ...DEFAULT_EXCLUDED_FOLDERS,
+    '',
+    '# Common folders people keep private from an AI-connected vault -- uncomment any that apply:',
+    ...SUGGESTED_EXCLUDED_FOLDERS.map((f) => `# ${f}`),
+    '',
+  ].join('\n');
+}
+
+// Writes the default .brainlinkignore into a newly connected vault's root; a no-op if that vault
+// already has one (never overwrites a user's own choices).
+export async function ensureDefaultIgnore(vaultPath) {
+  try { await writeFile(path.join(vaultPath, '.brainlinkignore'), defaultBrainlinkignore(), { flag: 'wx' }); return true; }
+  catch (e) { if (e.code === 'EEXIST') return false; throw e; }
+}
+
+// A commented-out folder suggestion ("# finance/") is a single bare name/pattern; explanatory
+// comment sentences ("# Edit any time in Settings.") have whitespace or punctuation and are not.
+const SUGGESTION_RE = /^[A-Za-z0-9_.\/-]+$/;
+
+// The vault root's own excluded-folder lines: active rules plus commented-out suggestions, in
+// file order. Used by Setup to show (and let the user edit) what a vault excludes.
+export async function readExcludedFolders(vaultPath) {
+  let raw;
+  try { raw = await readFile(path.join(vaultPath, '.brainlinkignore'), 'utf8'); } catch { return { active: [], suggested: [] }; }
+  const active = [], suggested = [];
+  for (const line of raw.split(/\r?\n/)) {
+    const t = line.trim();
+    if (!t) continue;
+    if (t.startsWith('#')) { const s = t.replace(/^#\s*/, ''); if (SUGGESTION_RE.test(s)) suggested.push(s); continue; }
+    active.push(t);
+  }
+  return { active, suggested };
+}
+
+// Rewrites a vault root's .brainlinkignore with exactly the given active folder list.
+export async function writeExcludedFolders(vaultPath, folders) {
+  const lines = [...new Set(folders.map((f) => String(f).trim()).filter(Boolean))];
+  await writeFile(path.join(vaultPath, '.brainlinkignore'), lines.length ? lines.join('\n') + '\n' : '');
+  return lines;
 }
 
 async function walk(root, dir = root, out = []) {

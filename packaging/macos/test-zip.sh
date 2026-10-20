@@ -33,7 +33,7 @@ REQUIRED=(
   "app/samples/acme-studio" "app/package.json" "app/LICENSE.txt" "app/README.md"
   "app/node_modules/brainlink-store/memory-store.mjs" "app/node_modules/brainlink-store/package.json"
   "runtime/arm64/bin/node" "runtime/arm64/LICENSE" "runtime/x64/bin/node" "runtime/x64/LICENSE"
-  "Start BrainLink.command" "Install BrainLink.command" "Connect AI apps.command" "READ ME FIRST.txt"
+  "Start BrainLink.command" "Install BrainLink.command" "Connect AI apps.command" ".install.sh" "READ ME FIRST.txt"
 )
 for p in "${REQUIRED[@]}"; do
   [ -e "$BASE/$p" ] || { echo "FAIL: missing $p" >&2; exit 1; }
@@ -58,6 +58,42 @@ if [ -n "$HITS" ]; then
   echo "FAIL: possible secret/key file(s) in bundle:" >&2; echo "$HITS" >&2; exit 1
 fi
 echo "ok: no excluded paths or obvious secret files"
+
+echo "== install script safety (set -euo pipefail, copy-then-mv, refuses to run from the installed copy) =="
+for p in "Start BrainLink.command" "Install BrainLink.command" "Connect AI apps.command"; do
+  grep -q '^set -euo pipefail$' "$BASE/$p" || { echo "FAIL: $p is missing set -euo pipefail" >&2; exit 1; }
+done
+grep -q 'mktemp -d' "$BASE/Install BrainLink.command" || { echo "FAIL: Install BrainLink.command does not copy to a temp dir before moving into place" >&2; exit 1; }
+
+FAKEHOME="$(mktemp -d)"
+DOWNLOAD_PARENT="$(mktemp -d)"
+DOWNLOAD="$DOWNLOAD_PARENT/BrainLink"
+cp -R "$BASE" "$DOWNLOAD"
+DEST="$FAKEHOME/Applications/BrainLink"
+
+# First run from a Downloads-style folder installs to ~/Applications/BrainLink without touching
+# the original download, via a real .command file (not just the shared .install.sh helper) so the
+# set -euo pipefail / shebang / quoting are exercised the same way a double-click would. The
+# trailing "press any key" read hits EOF against </dev/null and returns non-zero under set -e --
+# expected for this harness, not a sign the install itself failed -- so `|| true` here; the real
+# check is the filesystem state asserted below.
+(HOME="$FAKEHOME" bash "$DOWNLOAD/Install BrainLink.command" < /dev/null > /dev/null || true)
+[ -e "$DEST/app/bin/brainlink.mjs" ] || { echo "FAIL: Install BrainLink.command did not install to \$HOME/Applications/BrainLink" >&2; exit 1; }
+[ -e "$DOWNLOAD/app/bin/brainlink.mjs" ] || { echo "FAIL: the original download folder was removed instead of copied" >&2; exit 1; }
+[ -x "$DEST/Start BrainLink.command" ] || { echo "FAIL: installed Start BrainLink.command lost its executable bit" >&2; exit 1; }
+find "$FAKEHOME/Applications" -maxdepth 1 -name '.BrainLink-install.*' | grep -q . && { echo "FAIL: a temp install dir was left behind" >&2; exit 1; }
+echo "ok: installs from a Downloads-style folder to \$HOME/Applications/BrainLink, original download untouched"
+
+# Re-running Install from inside $DEST must refuse (no rm -rf of its own running copy) rather
+# than silently re-copying itself into itself.
+BEFORE="$(find "$DEST" -type f | sort | xargs -I{} stat -c '%n %Y %s' {} | sort)"
+OUT="$(HOME="$FAKEHOME" bash "$DEST/Install BrainLink.command" < /dev/null || true)"
+AFTER="$(find "$DEST" -type f | sort | xargs -I{} stat -c '%n %Y %s' {} | sort)"
+echo "$OUT" | grep -qi "already installed" || { echo "FAIL: running Install from inside \$DEST did not refuse: $OUT" >&2; exit 1; }
+[ "$BEFORE" = "$AFTER" ] || { echo "FAIL: running Install from inside \$DEST modified the installed copy" >&2; exit 1; }
+find "$FAKEHOME/Applications" -maxdepth 1 -name '.BrainLink-install.*' | grep -q . && { echo "FAIL: a temp install dir was left behind by the refused run" >&2; exit 1; }
+echo "ok: refuses to run from inside \$DEST"
+rm -rf "$FAKEHOME" "$DOWNLOAD_PARENT"
 
 echo "== running the bundled app (with this box's own node) =="
 cd "$BASE"

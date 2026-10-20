@@ -25,6 +25,12 @@ const flag = (name) => argv.includes(`--${name}`);
 const opt = (name, dflt) => { const i = argv.indexOf(`--${name}`); return i === -1 || argv[i + 1]?.startsWith('--') ? dflt : argv[i + 1] ?? dflt; };
 const out = (s) => process.stdout.write(s + '\n');
 const fail = (s) => { process.stderr.write(`brainlink: ${s}\n`); process.exit(1); };
+// The Setup/UI URL carries a bearer-style session token (?t=...). The browser gets the real
+// link (openInBrowser below uses the unmasked url); anything printed to the Terminal — which can
+// end up in screen recordings, shared terminals or scrollback — shows only the first few chars.
+// BRAINLINK_SHOW_TOKEN is for test/debug harnesses that need the real value; it is not documented
+// for end users and masking stays the default.
+const maskUrl = (url) => (process.env.BRAINLINK_SHOW_TOKEN ? url : url.replace(/([?&]t=)([^&\s]+)/, (_, p, t) => `${p}${t.slice(0, 4)}…`));
 const SETUP_PORT = 47800;
 async function setupToken() {
   const file = path.join(appHome(), 'setup-token');
@@ -80,10 +86,10 @@ async function main() {
       const token = await setupToken();
       const url = `http://127.0.0.1:${port}/?t=${token}`;
       const running = await fetch(`http://127.0.0.1:${port}/health`).then((r) => r.json(), () => null);
-      if (running?.app === 'brainlink') { if (!flag('no-open')) openInBrowser(url); out(`BrainLink Setup: ${url}`); return; }
+      if (running?.app === 'brainlink') { if (!flag('no-open')) openInBrowser(url); out(`BrainLink Setup: ${maskUrl(url)}`); return; }
       const opts = { token, openUrl: flag('no-open') ? null : (u) => openInBrowser(u), idleMinutes: fromApp ? 30 : 0, onQuit: () => process.exit(0) };
       const s = await startSetup({ ...opts, port }).catch((e) => (e.code === 'EADDRINUSE' ? startSetup({ ...opts, port: 0 }) : Promise.reject(e)));
-      out(fromApp ? `BrainLink Setup: ${s.url}` : `BrainLink Setup is open at ${s.url}\nKeep this window open while you set up; press Control-C when done.`);
+      out(fromApp ? `BrainLink Setup: ${maskUrl(s.url)}` : `BrainLink Setup is open at ${maskUrl(s.url)}\nKeep this window open while you set up; press Control-C when done.`);
       return;
     }
     case 'init': {
@@ -115,12 +121,27 @@ async function main() {
       const found = await detect(clientOpts());
       const ids = all ? Object.keys(found).filter((id) => found[id].present) : [which];
       let connected = Object.values(found).filter((c) => c.connected).length;
+      // One app's bad/unreadable config must not stop the rest from connecting; every app's
+      // outcome (connected, skipped or failed) is reported, not just the first failure.
+      const results = [];
       for (const id of ids) {
-        if (!found[id]?.connected && connected >= features.maxConnections) { out(`skip ${id}: the free plan connects ${features.maxConnections} AI apps`); continue; }
-        const r = await connectClient(id, clientOpts());
-        if (!found[id]?.connected) connected++;
-        out(`connected ${r.title} via ${r.via}${r.file ? ` (${r.file})` : ''}${r.backup ? `\n  backup: ${r.backup}` : ''}\n  ${r.note}`);
+        const title = found[id]?.title || id;
+        if (!found[id]?.connected && connected >= features.maxConnections) {
+          out(`skip ${id}: the free plan connects ${features.maxConnections} AI apps`);
+          results.push({ title, status: 'skipped (free plan limit)' });
+          continue;
+        }
+        try {
+          const r = await connectClient(id, clientOpts());
+          if (!found[id]?.connected) connected++;
+          out(`connected ${r.title} via ${r.via}${r.file ? ` (${r.file})` : ''}${r.backup ? `\n  backup: ${r.backup}` : ''}\n  ${r.note}`);
+          results.push({ title: r.title, status: 'connected' });
+        } catch (e) {
+          out(`failed to connect ${title}: ${e.message || e}`);
+          results.push({ title, status: `failed: ${e.message || e}` });
+        }
       }
+      if (all) out(`\n${results.length ? results.map((r) => `${r.title}: ${r.status}`).join('\n') : 'No AI apps found on this computer.'}`);
       return;
     }
     case 'disconnect': {
@@ -192,7 +213,7 @@ async function main() {
       importAll().catch(() => {}); // keep the local session index warm; cheap and incremental after the first run
       const port = Number(opt('port', 0)) || 0;
       const s = await startSetup({ port, openUrl: flag('no-open') ? null : (u) => openInBrowser(u) });
-      out(`BrainLink UI: ${s.url}\nKeep this window open while you use it; press Control-C when done.`);
+      out(`BrainLink UI: ${maskUrl(s.url)}\nKeep this window open while you use it; press Control-C when done.`);
       return;
     }
     case 'demo': {
@@ -211,7 +232,7 @@ async function main() {
       await refreshMap(cfg, 'Acme Studio', demoEnv);
       importAll({ env: demoEnv }).catch(() => {}); // same session-index warm-up as `brainlink ui`
       const s = await startSetup({ env: demoEnv, port: 0, openUrl: flag('no-open') ? null : (u) => openInBrowser(u) });
-      out(`BrainLink demo (made-up sample notes, nothing real touched): ${s.url}\nVault copied to: ${demoPath}\nPress Control-C when done.`);
+      out(`BrainLink demo (made-up sample notes, nothing real touched): ${maskUrl(s.url)}\nVault copied to: ${demoPath}\nPress Control-C when done.`);
       return;
     }
     case 'version': case '--version': out(VERSION); return;

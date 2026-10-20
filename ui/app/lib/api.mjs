@@ -1,7 +1,7 @@
 // Only boundary between UI and BrainStore v0.1 plus host-provided services.
-// TODO-CONTRACT: connectors.detect/connect/test/disconnect are host services, not BrainStore.
-// TODO-CONTRACT: sessions.setPrivate is optional; otherwise reimport into another vault.
-// TODO-CONTRACT: search.query is optional; fallback ranks notes from list/read.
+// connectors.detect/connect/test/disconnect are host services, not BrainStore.
+// sessions.setPrivate is optional; otherwise reimport into another vault.
+// search.query is optional; fallback ranks notes from list/read.
 export function createApi({ store, services = {}, access = {} }) {
   if (!store) throw new Error('createApi needs a BrainStore');
   const opts = (extra = {}) => ({ ...access, ...extra });
@@ -10,7 +10,7 @@ export function createApi({ store, services = {}, access = {} }) {
   const publicVault = () => vaults().find(v => !v.private)?.name;
   const connectors = services.connectors || {};
   async function call(method, ...args) {
-    if (typeof connectors[method] !== 'function') throw new Error(`TODO-CONTRACT: connectors.${method} requires a host service`);
+    if (typeof connectors[method] !== 'function') throw new Error(`connectors.${method} requires a host service`);
     return connectors[method](...args);
   }
   async function sessions({ q = '', client, include_private = true, limit = 100 } = {}) {
@@ -25,7 +25,7 @@ export function createApi({ store, services = {}, access = {} }) {
     if (!target) throw new Error('No accessible destination vault for privacy change');
     if (old.vault === target) return old;
     if (services.sessions?.setPrivate) return services.sessions.setPrivate(id, value);
-    // TODO-CONTRACT: v0.1 has no moveSession or per-session privacy field.
+    // v0.1 has no moveSession or per-session privacy field.
     // Upsert same client + source_id preserving stable ID, reusing messages from store.
     // Fails closed if message history is incomplete: never silently drop messages.
     const messages = page.messages;
