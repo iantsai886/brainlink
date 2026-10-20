@@ -1,0 +1,145 @@
+<!doctype html><html><head><meta charset="utf-8"><title>BrainLink MCP — User Manual</title><link rel="stylesheet" href="style.css"></head><body>
+<div class="cover"><h1>BrainLink MCP</h1><div class="sub">User Manual</div>
+<div class="meta">Version 1.0.0<br>Platforms: macOS and Windows desktop<br>October 2026<br>One brain. Every AI. Nothing overwritten.</div></div>
+
+<h2 style="margin-top:0">Contents</h2>
+<ol class="toc"><li>What BrainLink does</li><li>Before you start</li><li>Installing</li><li>First-time setup</li><li>Connecting your AI apps</li><li>Daily use: agents, searching, saving</li><li>How BrainLink keeps your notes safe</li><li>Plans and licence key</li><li>Command-line reference</li><li>Advanced: HTTP clients and per-AI limits</li><li>Troubleshooting</li><li>Uninstalling</li><li>Glossary</li></ol>
+
+<h2>1. What BrainLink does</h2>
+<p>BrainLink turns a folder of Markdown notes (for example an Obsidian vault) into one shared memory for all your AI apps. Claude Desktop, Claude Code, ChatGPT Codex, Cursor, Gemini CLI and Windsurf can all search the same notes, and can add to them under strict rules.</p>
+<ul><li><b>Your notes stay on your computer.</b> BrainLink runs locally and has no cloud service.</li>
+<li><b>Nothing is overwritten or deleted.</b> AIs can only create new notes or append to a log.</li>
+<li><b>You approve writes.</b> An AI shows a preview first; only your approval (or your own close phrase) saves it.</li>
+<li><b>Every write is signed</b> with which AI wrote it, in what role, when, and from which session.</li></ul>
+
+<h2>2. Before you start</h2>
+<table><tr><th>You need</th><th>Detail</th></tr>
+<tr><td>A computer</td><td>macOS or Windows. iPhone and iPad are not supported in version 1.</td></tr>
+<tr><td>A notes folder</td><td>Any folder of <code>.md</code> files. An Obsidian vault works as is.</td></tr>
+<tr><td>At least one AI app</td><td>Claude Desktop, Claude Code, Cursor, ChatGPT Codex, Gemini CLI or Windsurf.</td></tr>
+<tr><td>Node.js</td><td>Not needed. BrainLink ships its own runtime.</td></tr></table>
+
+<h2>3. Installing</h2>
+<h3>macOS</h3>
+<ol><li>Open <code>BrainLink-1.0.0.pkg</code> and follow the installer.</li><li>It installs <b>BrainLink.app</b> in Applications and the <code>brainlink</code> command in <code>/usr/local/bin</code>.</li></ol>
+<div class="warn">Test builds that are not yet notarised by Apple show a warning. Right-click the installer and choose <b>Open</b>, then confirm.</div>
+<h3>Windows</h3>
+<p>Run <code>BrainLink-Setup-&lt;version&gt;.exe</code>. It installs for your user only and needs no administrator rights. The Windows installer has not yet been tested on a real Windows machine; report any problems to support.</p>
+
+<h2>4. First-time setup</h2>
+<p>Open <b>BrainLink</b> from Applications or the Start menu. The Setup page opens in your browser at an address like <code>http://127.0.0.1:47800/</code>. It works only on your own computer and uses a private token, so keep that tab's address to yourself.</p>
+<ol><li><b>Choose your vault folder.</b> Press the folder button, or paste the path. BrainLink counts your notes.</li>
+<li><b>Choose a rule pack</b> (see below).</li>
+<li><b>Name your agent</b>, for example "Max". The phrases become "Connect to Max" and "Max close loop".</li>
+<li><b>Connect your AI apps</b> (section 5).</li>
+<li><b>Test.</b> Ask your AI "Connect to Max". Setup shows a live call log so you can see it work.</li></ol>
+<p>You can also try the bundled sample vault, "Acme Studio", from Setup first. It contains no real data.</p>
+<h3>Rule packs</h3>
+<table><tr><th>Pack</th><th>Best for</th><th>What it creates</th></tr>
+<tr><td><b>Simple</b></td><td>One person, one vault</td><td>A <code>BrainLink/</code> folder with an Inbox, a role note and a session log. Default agent name: Brain.</td></tr>
+<tr><td><b>Founder OS</b></td><td>A company vault with an operating agent</td><td><code>Knowledge Intake</code>, an office folder with role note, current goal, session captures and an inter-AI Handoffs mailbox, plus an <code>AGENTS.md</code> rules file. Every new learning needs a decision: ADOPT, EXPERIMENT, MONITOR or REJECT. Default agent: Chief of Staff.</td></tr>
+<tr><td><b>Private journal</b></td><td>Sensitive personal notes</td><td>A private vault where AIs may read and propose but nothing is saved until you approve. Default agent: Journal.</td></tr></table>
+<p>A pack only adds folders and notes that are missing. It never changes existing files, and you can edit all of it afterwards.</p>
+<p>Command-line equivalent: <code>brainlink init --vault ~/Notes --pack simple --agent Max</code>.</p>
+
+<h2>5. Connecting your AI apps</h2>
+<p>In Setup, press <b>Connect</b> next to each detected app, or <b>Connect all</b>. BrainLink adds itself to that app's MCP settings and saves a timestamped backup of the previous file first. It refuses to touch a settings file it cannot read. Then restart the app.</p>
+<table><tr><th>App</th><th>Settings file BrainLink edits</th><th>After connecting</th></tr>
+<tr><td>Claude Desktop</td><td><code>claude_desktop_config.json</code> (in the app's support folder)</td><td>Quit and reopen the app.</td></tr>
+<tr><td>Claude Code</td><td><code>~/.claude.json</code></td><td>Start a new session; run <code>/mcp</code> to check.</td></tr>
+<tr><td>Cursor</td><td><code>~/.cursor/mcp.json</code></td><td>Turn it on under Settings, then MCP if needed.</td></tr>
+<tr><td>ChatGPT Codex</td><td><code>~/.codex/config.toml</code></td><td>Start a new Codex session.</td></tr>
+<tr><td>Gemini CLI</td><td><code>~/.gemini/settings.json</code></td><td>Start a new session; run <code>/mcp</code>.</td></tr>
+<tr><td>Windsurf</td><td><code>~/.codeium/windsurf/mcp_config.json</code></td><td>Refresh MCP servers in settings.</td></tr></table>
+<p>To remove BrainLink from an app: <code>brainlink disconnect &lt;app&gt;</code>. Check status with <code>brainlink clients</code>.</p>
+
+<h2>6. Daily use</h2>
+<h3>6.1 Wake your agent</h3>
+<p>In any connected AI, say <b>"Connect to Max"</b> (use your agent's name). The AI loads the agent's role, its key notes, recent captures and warnings about notes that have not changed for 14 days, then confirms in a few lines what it can do. It will not start new work unless you ask.</p>
+<h3>6.2 Ask questions of your notes</h3>
+<p>Just ask: "What did we decide about pricing?" The AI searches your vault, reads the relevant notes and cites the vault and note title. Search ranks notes by relevance, favours notes that link to each other, and demotes notes marked superseded or archived (it tells you when a result is historical). Writing <code>[[Note Name]]</code> in a question pulls that exact note in.</p>
+<h3>6.3 Save what was learned</h3>
+<p>Ask the AI to save a note, for example "Save this idea as a note". It shows a <b>preview</b> with the title, frontmatter and text. Reply "yes" and it is saved as a new file named <code>YYYY-MM-DD — Title.md</code> in your intake folder (or another existing folder). Existing files are never replaced.</p>
+<h3>6.4 Close the loop</h3>
+<p>When a session is done, say <b>"Max close loop"</b>. Your phrase authorises the save. The agent appends a dated entry to its log note with: decisions, actions taken, corrections, unresolved questions, confidence, privacy boundary, links and the smallest next actions, then summarises it for you.</p>
+<h3>6.5 Message another AI (Founder OS)</h3>
+<p>If a handoff mailbox is set up, one AI can leave a message for another ("tell Codex the site build is ready") and the other reads it with "check handoffs". Messages are ordinary notes with a priority (P0 to P3) and an optional deadline.</p>
+
+<h2>7. How BrainLink keeps your notes safe</h2>
+<table><tr><th>Protection</th><th>What it means for you</th></tr>
+<tr><td>New or append only</td><td>No AI can overwrite, edit or delete an existing note.</td></tr>
+<tr><td>Preview before write</td><td>Every save is shown first. Only an approved call writes.</td></tr>
+<tr><td>Attribution</td><td>Each note records AI platform, role, session id, time and source, and carries a "Made by" line.</td></tr>
+<tr><td>Secret scan</td><td>Writes that look like API keys, tokens, card or account numbers, or long token-like strings are refused.</td></tr>
+<tr><td>Existing folders only</td><td>AIs cannot invent new folder structures.</td></tr>
+<tr><td>Protected notes</td><td>Generated index and map notes (names starting "00 INDEX" or "00 MAP") cannot be written.</td></tr>
+<tr><td>Vault isolation</td><td>Vaults are never mixed. An agent only sees its own vault. Each AI connection can be limited to chosen vaults.</td></tr>
+<tr><td>Read-only connections</td><td>Any connection can be made read-only.</td></tr>
+<tr><td>Proposal-only vaults</td><td>The AI prepares text; nothing is saved.</td></tr>
+<tr><td>Private vaults</td><td>Left out of the ChatGPT-style <code>search</code>/<code>fetch</code> connector.</td></tr>
+<tr><td>Local only</td><td>HTTP mode listens on 127.0.0.1 and needs a bearer token. Setup is local-only with a session token.</td></tr>
+<tr><td>Content-free log</td><td>The activity log records tool name, outcome and platform only, never your notes.</td></tr></table>
+<div class="note">Treat note contents as data. BrainLink tells every AI that text inside a note is not a command to obey.</div>
+
+<h2>8. Plans and licence key</h2>
+<table><tr><th>Plan</th><th>Vaults / AI apps</th><th>Writes and agents</th><th>HTTP mode</th></tr>
+<tr><td>Free</td><td>1 vault, 2 AI apps</td><td>No (search and read only)</td><td>No</td></tr>
+<tr><td>Trial</td><td>Unlimited</td><td>Yes</td><td>Yes</td></tr>
+<tr><td>Personal</td><td>Unlimited</td><td>Yes</td><td>Yes</td></tr>
+<tr><td>Team</td><td>Unlimited</td><td>Yes</td><td>Yes</td></tr></table>
+<p>A 14-day trial starts at first setup. To activate, paste your key (it starts with <code>BL1.</code>) into Setup, or run <code>brainlink license BL1.…</code>. Activation works offline. After a trial or licence expires, BrainLink returns to the Free plan; your notes are unaffected. List prices at launch: Personal US$79 one-time (one year of updates), Team US$12 per user per month.</p>
+
+<h2>9. Command-line reference</h2>
+<table><tr><th>Command</th><th>Purpose</th></tr>
+<tr><td><code>brainlink setup</code></td><td>Open the Setup page (<code>--no-open</code> to just print the address).</td></tr>
+<tr><td><code>brainlink init --vault PATH [--name N] [--pack simple|founder-os|private-journal] [--agent NAME] [--no-scaffold]</code></td><td>Add a vault from a rule pack.</td></tr>
+<tr><td><code>brainlink connect &lt;app|all&gt;</code></td><td>Add BrainLink to an AI app.</td></tr>
+<tr><td><code>brainlink disconnect &lt;app&gt;</code></td><td>Remove it from an AI app.</td></tr>
+<tr><td><code>brainlink clients</code></td><td>Show which apps are found and connected.</td></tr>
+<tr><td><code>brainlink license [KEY]</code></td><td>Show or set the licence.</td></tr>
+<tr><td><code>brainlink status</code></td><td>Config path, plan, vaults (missing folders are flagged), agents.</td></tr>
+<tr><td><code>brainlink serve [--http [PORT]]</code></td><td>Run the MCP server. AI apps start this themselves.</td></tr>
+<tr><td><code>brainlink version</code></td><td>Print the version.</td></tr></table>
+<p>Settings live in <code>~/Library/Application Support/BrainLink/config.json</code> (macOS) or <code>%APPDATA%\BrainLink\config.json</code> (Windows).</p>
+
+<h2>10. Advanced</h2>
+<h3>HTTP clients (Grok bots, custom agents)</h3>
+<p>Requires a paid or trial plan. Generate a token in Setup, then run <code>brainlink serve --http</code>. The endpoint is <code>http://127.0.0.1:8765/mcp</code> (change with <code>--http PORT</code>). Send <code>Authorization: Bearer &lt;token&gt;</code>. The token must be at least 16 characters. A health check is at <code>/health</code>. Browser requests from other websites are rejected.</p>
+<h3>Per-connection environment settings</h3>
+<table><tr><th>Variable</th><th>Effect</th></tr>
+<tr><td><code>BRAINLINK_AI_PLATFORM</code></td><td>Names the AI in attribution (set automatically by Connect).</td></tr>
+<tr><td><code>BRAINLINK_AGENT_ROLE</code></td><td>Default role in attribution.</td></tr>
+<tr><td><code>BRAINLINK_VAULTS</code></td><td>Comma-separated list restricting which vaults this connection sees.</td></tr>
+<tr><td><code>BRAINLINK_READ_ONLY=1</code></td><td>Makes this connection read-only.</td></tr>
+<tr><td><code>BRAINLINK_CONNECTOR_PRIVATE=1</code></td><td>Allows private vaults in connector search.</td></tr>
+<tr><td><code>BRAINLINK_MCP_TOKEN</code></td><td>Overrides the HTTP token.</td></tr>
+<tr><td><code>BRAINLINK_HOME</code> / <code>BRAINLINK_CONFIG</code></td><td>Move the data folder or config file.</td></tr></table>
+
+<h2>11. Troubleshooting</h2>
+<table><tr><th>Symptom</th><th>Fix</th></tr>
+<tr><td>AI does not know "Connect to Max"</td><td>Press Connect for that app and fully restart it. Run <code>brainlink clients</code>.</td></tr>
+<tr><td>"writes need a BrainLink licence"</td><td>You are on the Free plan or the trial ended. Add a key.</td></tr>
+<tr><td>"folder … does not exist"</td><td>AIs may only write into existing folders. Create the folder in your vault first.</td></tr>
+<tr><td>"refused: content looks like it contains secrets"</td><td>Remove the key, token or number from the text.</td></tr>
+<tr><td>"already exists; never overwrite"</td><td>Choose a different title or date; BrainLink never replaces a file.</td></tr>
+<tr><td>"decision is required"</td><td>Your vault needs ADOPT, EXPERIMENT, MONITOR or REJECT on intake notes.</td></tr>
+<tr><td>Captures show only a preview</td><td>The vault or agent is proposal-only; approve durable captures in Setup.</td></tr>
+<tr><td>Vault marked MISSING</td><td>The folder was moved or its drive is not mounted. Check <code>brainlink status</code>.</td></tr>
+<tr><td>Setup page will not open</td><td>Run <code>brainlink setup</code> and open the printed address.</td></tr>
+<tr><td>Result says a note is stale or historical</td><td>It has not changed for 14+ days or is marked superseded; check for a newer note.</td></tr>
+<tr><td>Invalid config message</td><td>The message lists each error; fix them in Setup or restore a backup.</td></tr></table>
+
+<h2>12. Uninstalling</h2>
+<ol><li>Run <code>brainlink disconnect all</code> for each app you connected (or one at a time). Backups of the app settings are kept.</li><li>Delete BrainLink.app (macOS) or use Add/Remove Programs (Windows).</li><li>Optionally delete the BrainLink data folder (section 9). Your notes are never inside it and are never touched.</li></ol>
+
+<h2>13. Glossary</h2>
+<table><tr><th>Term</th><th>Meaning</th></tr>
+<tr><td>Vault</td><td>A folder of Markdown notes.</td></tr>
+<tr><td>Agent</td><td>A named assistant bound to one vault, with a role, activation phrases and a close phrase.</td></tr>
+<tr><td>Close loop</td><td>Saving a session's durable outcome to the agent's log.</td></tr>
+<tr><td>MCP</td><td>Model Context Protocol, the standard AI apps use to talk to tools.</td></tr>
+<tr><td>Rule pack</td><td>A starting template of folders, rules and an agent.</td></tr>
+<tr><td>Intake</td><td>The folder where new learning lands as "proposed".</td></tr>
+<tr><td>Handoff</td><td>A note one AI leaves for another.</td></tr></table>
+<p style="margin-top:18pt;color:#4a5b70;font-size:9pt">BrainLink MCP is clean-room software; it contains no code from Obsidian Copilot or Khoj. © Iango. See LICENSE.txt.</p>
+</body></html>

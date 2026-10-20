@@ -1,0 +1,222 @@
+<!doctype html><html><head><meta charset="utf-8"><title>BrainLink MCP — Detailed Specification</title><link rel="stylesheet" href="style.css"></head><body>
+<div class="cover"><h1>BrainLink MCP</h1><div class="sub">Detailed Software Specification</div>
+<div class="meta">Version 1.0.0 · Document status: describes the v1 implementation<br>Runtime: Node.js 22+ (bundled), zero third-party dependencies<br>October 2026</div></div>
+
+<h2 style="margin-top:0">1. Purpose and scope</h2>
+<p>BrainLink is a desktop application and local Model Context Protocol (MCP) server that gives every AI app a shared, rule-enforcing view of one or more Markdown / Obsidian vaults. It provides ranked search, safe attributed writes, configurable agents with activation and close-loop phrases, and an optional inter-AI mailbox.</p>
+<p><b>In scope (v1):</b> macOS and Windows desktop; stdio and local HTTP MCP transports; Setup UI; one-click client configuration; offline licensing; installers. <b>Out of scope:</b> iPhone/iPad, hosted relay, embeddings, auto-update, MSIX, team sync.</p>
+<p><b>Design goals:</b> (1) notes never leave the machine; (2) no write can destroy existing content; (3) behaviour is identical across AI vendors; (4) nothing in code is specific to a person, company, vault or timezone; (5) install in under 3 minutes.</p>
+
+<h2>2. System architecture</h2>
+<pre>AI apps (Claude Desktop/Code, Cursor, Codex, Gemini CLI, Windsurf)
+      │ stdio JSON-RPC (one process per app, env: BRAINLINK_*)
+      ▼
+ bin/brainlink.mjs ──► src/server.mjs (MCP handler) ──► core / writes / agents
+      ▲                         ▲                               │
+ HTTP clients ── 127.0.0.1 + bearer ┘                           ▼
+ Setup UI (127.0.0.1:47800, token) ─► src/setup.mjs         Vault folders (.md)
+                                      config.json, activity.log (app data dir)</pre>
+<table><tr><th>Module</th><th>Responsibility</th></tr>
+<tr><td><code>bin/brainlink.mjs</code></td><td>CLI entry: setup, init, connect, disconnect, clients, license, status, serve, version.</td></tr>
+<tr><td><code>src/server.mjs</code></td><td>MCP JSON-RPC handler; tools, resources, prompts; stdio and HTTP transports.</td></tr>
+<tr><td><code>src/core.mjs</code></td><td>Context creation, vault loading, chunking, BM25 index, search, read, related, secret scan, path guard, time zone.</td></tr>
+<tr><td><code>src/graph.mjs</code></td><td>Link graph (wikilinks, Markdown links) and related-note suggestions.</td></tr>
+<tr><td><code>src/obsidian.mjs</code></td><td>Obsidian conventions (wikilink and note-name resolution).</td></tr>
+<tr><td><code>src/writes.mjs</code></td><td>Identity, frontmatter schemas, <code>propose_note</code>, handoff mailbox, append and create-new primitives.</td></tr>
+<tr><td><code>src/agents.mjs</code></td><td>Agent resolution, <code>agent_connect</code>, <code>agent_close_loop</code> in four modes.</td></tr>
+<tr><td><code>src/config.mjs</code></td><td>Config schema, defaults, validation, atomic save, per-OS data directory.</td></tr>
+<tr><td><code>src/packs.mjs</code></td><td>Rule packs and non-destructive scaffolding.</td></tr>
+<tr><td><code>src/connectors.mjs</code></td><td>Detect and write MCP entries for six AI clients, with backups.</td></tr>
+<tr><td><code>src/license.mjs</code>, <code>license-key.mjs</code></td><td>Offline Ed25519 licence verification, plan features, built-in trial.</td></tr>
+<tr><td><code>src/setup.mjs</code>, <code>ui/index.html</code></td><td>Local Setup web app and its JSON API.</td></tr>
+<tr><td><code>src/runtime.mjs</code></td><td>Context loader, launch command, content-free activity log.</td></tr>
+<tr><td><code>tools/license-issue.mjs</code></td><td>Vendor-only key generation and issuing (not shipped).</td></tr>
+<tr><td><code>packaging/</code></td><td>macOS .pkg scripts and Windows Inno Setup scripts.</td></tr></table>
+
+<h2>3. Functional requirements</h2>
+<table><tr><th>ID</th><th>Requirement</th></tr>
+<tr><td>F-01</td><td>Serve MCP over stdio (newline-delimited JSON-RPC 2.0) and over Streamable HTTP (JSON responses).</td></tr>
+<tr><td>F-02</td><td>Negotiate protocol versions 2025-06-18, 2025-03-26 and 2024-11-05; default to the newest if the client asks for another.</td></tr>
+<tr><td>F-03</td><td>Expose tools, resources and prompts; supply server <code>instructions</code> describing vaults, rules and agents.</td></tr>
+<tr><td>F-04</td><td>Rank search results with heading-aware chunking, BM25, link-graph boost and title boost; demote and flag superseded/archived notes; honour <code>[[Note]]</code> mentions first.</td></tr>
+<tr><td>F-05</td><td>Never overwrite or delete a file. Writes are exclusive-create (<code>wx</code>) or append only.</td></tr>
+<tr><td>F-06</td><td>Every write returns a preview unless <code>confirm=true</code>.</td></tr>
+<tr><td>F-07</td><td>Every write carries identity: <code>ai_platform</code>, <code>agent_or_role</code>, <code>session_or_task_id</code>, timestamp in the configured time zone, source and confidence.</td></tr>
+<tr><td>F-08</td><td>Refuse writes whose content matches secret patterns.</td></tr>
+<tr><td>F-09</td><td>Confine all file access to vault roots (path-escape guard).</td></tr>
+<tr><td>F-10</td><td>Support multiple vaults, each with its own schema, rules, folders, intake folder and write mode; never mix vaults.</td></tr>
+<tr><td>F-11</td><td>Support configurable agents bound to one vault with activation and close phrases and a close target.</td></tr>
+<tr><td>F-12</td><td>Provide an optional inter-AI handoff mailbox.</td></tr>
+<tr><td>F-13</td><td>Detect and configure six AI clients, backing up changed files and refusing unparsable ones.</td></tr>
+<tr><td>F-14</td><td>Enforce licence plans offline; provide a 14-day built-in trial.</td></tr>
+<tr><td>F-15</td><td>Provide connector-compatible <code>search</code> and <code>fetch</code> tools that exclude private vaults by default.</td></tr>
+<tr><td>F-16</td><td>Support read-only and vault-scoped connections via environment variables.</td></tr></table>
+
+<h2>4. MCP interface</h2>
+<h3>4.1 Tools</h3>
+<table><tr><th>Tool</th><th>Type</th><th>Inputs (required in bold)</th><th>Behaviour</th></tr>
+<tr><td><code>brainlink_guide</code></td><td>read</td><td>none</td><td>Returns server info, plan, enabled vaults (purpose, schema, write mode, intake folder, decisions, read-first, folders, rules), agents, identity requirements, write rules, handoff location.</td></tr>
+<tr><td><code>vault_search</code></td><td>read</td><td><b>vault</b>, <b>query</b>, limit (1–25, default 8)</td><td>Ranked results with path, title, status, collection, heading, snippet, score, historical flag, <code>superseded_by</code>.</td></tr>
+<tr><td><code>vault_read_note</code></td><td>read</td><td><b>vault</b>, <b>path</b></td><td>Frontmatter and body of one note.</td></tr>
+<tr><td><code>vault_related</code></td><td>read</td><td><b>vault</b>, <b>path</b></td><td>Inbound and outbound links plus suggested unlinked related notes.</td></tr>
+<tr><td><code>agent_connect</code></td><td>read</td><td><b>agent</b>, ai_platform</td><td>Returns role, identity, vault rules, role notes, sources with modified time and stale flag, tail notes, recent notes (up to 6 dated notes), recent captures (newest 2), warnings, and instructions. Present only if agents exist.</td></tr>
+<tr><td><code>agent_close_loop</code></td><td>write</td><td><b>agent</b>, <b>source</b>, <b>confidence</b>, title, decisions[], actions[], corrections[], unresolved[], next_actions[], decision_needed, links[], privacy, tasks[], identity fields, confirm</td><td>Captures the session per the agent's close target mode (section 6.3).</td></tr>
+<tr><td><code>propose_note</code></td><td>write</td><td><b>title</b>, <b>body</b>, <b>source</b>, vault, folder, decision, confidence, type, status, tags[], identity, confirm</td><td>Creates <code>YYYY-MM-DD — Title.md</code> with frontmatter, Made-by line, optional Decision section and Changelog.</td></tr>
+<tr><td><code>send_handoff</code></td><td>write</td><td><b>to</b>, <b>subject</b>, <b>body</b>, priority P0–P3 (default P2), decision_needed, deadline, ack_of, status, source</td><td>Creates a mailbox note named <code>YYYY-MM-DD-HHmm-from-X-to-Y-slug.md</code>. Present only if a handoff mailbox is configured.</td></tr>
+<tr><td><code>list_handoffs</code></td><td>read</td><td>to, limit (1–30, default 10)</td><td>Newest handoffs, filtered by recipient (includes "all").</td></tr>
+<tr><td><code>search</code></td><td>read</td><td><b>query</b></td><td>Connector-compatible: up to 10 results <code>{id: "vault::path", title, url}</code> across non-private vaults, with <code>obsidian://</code> URLs.</td></tr>
+<tr><td><code>fetch</code></td><td>read</td><td><b>id</b></td><td>Returns <code>{id, title, text, url, metadata}</code>; limited to non-private vaults.</td></tr></table>
+<p>Write tools are removed from the tool list when the connection is read-only. All tools declare MCP annotations: read tools are read-only and idempotent; write tools are non-destructive. Failures return <code>isError: true</code> with <code>{ok:false, errors[]}</code> for validation problems. Results are returned as JSON text plus <code>structuredContent</code>.</p>
+<h3>4.2 Resources and prompts</h3>
+<ul><li>Resource <code>brainlink://guide</code> (JSON guide) and one <code>brainlink://vault/{vault}/{file}</code> per configured <code>read_first</code> rule file. Only published rule files are readable.</li>
+<li>Prompts per agent: <code>connect-&lt;agent&gt;</code> and <code>close-loop-&lt;agent&gt;</code> (optional argument <code>focus</code>).</li></ul>
+<h3>4.3 Methods handled</h3>
+<p><code>initialize</code>, <code>ping</code>, <code>tools/list</code>, <code>tools/call</code>, <code>resources/list</code>, <code>resources/templates/list</code>, <code>resources/read</code>, <code>prompts/list</code>, <code>prompts/get</code>. Notifications (no id) get no reply. Batches are supported. Unknown methods return -32601; invalid requests -32600; parse errors -32700; internal errors -32603.</p>
+<h3>4.4 HTTP transport</h3>
+<table><tr><th>Item</th><th>Rule</th></tr>
+<tr><td>Bind</td><td>127.0.0.1 only; default port 8765.</td></tr>
+<tr><td>Endpoint</td><td><code>POST /mcp</code>; <code>GET /health</code> returns <code>{ok, version}</code>. GET on /mcp returns 405; DELETE returns 200; other paths 404.</td></tr>
+<tr><td>Auth</td><td><code>Authorization: Bearer &lt;token&gt;</code>, constant-time comparison; token at least 16 characters, else the server refuses to start.</td></tr>
+<tr><td>Origin</td><td>Requests with an Origin other than localhost/127.0.0.1 get 403.</td></tr>
+<tr><td>Limits</td><td>Request body over 2 MB gets 413; invalid JSON gets 400; notification-only bodies get 202.</td></tr>
+<tr><td>Licence</td><td>HTTP mode requires a plan with <code>http</code> enabled.</td></tr></table>
+
+<h2>5. Data model</h2>
+<h3>5.1 Configuration (<code>config.json</code>, mode 0600, atomic write)</h3>
+<pre>{ "version": 1, "timezone": "Asia/Taipei"|null, "platforms": [...],
+  "license": "BL1…"|null, "trial_started": ISO|undefined,
+  "http": { "port": 8765, "token": null },
+  "handoff": { "vault": "...", "folder": "..." } | null,
+  "connections": {},
+  "vaults": [ Vault ], "agents": [ Agent ] }</pre>
+<table><tr><th>Vault field</th><th>Default</th><th>Meaning</th></tr>
+<tr><td>name</td><td>required</td><td>Unique; may not contain / \ :</td></tr>
+<tr><td>path</td><td>required</td><td>Absolute folder path</td></tr>
+<tr><td>private</td><td>false</td><td>Excluded from connector search and fetch</td></tr>
+<tr><td>schema</td><td>standard</td><td><code>standard</code> or <code>provenance</code></td></tr>
+<tr><td>intake_folder</td><td>Inbox</td><td>Default folder for new notes</td></tr>
+<tr><td>decisions</td><td>[]</td><td>Allowed intake decisions (e.g. ADOPT, EXPERIMENT, MONITOR, REJECT); required if non-empty</td></tr>
+<tr><td>read_first, folders, rules, purpose</td><td>empty</td><td>Guidance returned to AIs</td></tr>
+<tr><td>writes</td><td>on</td><td><code>on</code>, <code>proposal-only</code>, <code>off</code></td></tr>
+<tr><td>flat</td><td>false</td><td>Vault has no folders; notes go to the root</td></tr>
+<tr><td>protected</td><td>["00 INDEX","00 MAP"]</td><td>Path prefixes that are not writable</td></tr>
+<tr><td>extra_fields</td><td>{}</td><td>Extra constant frontmatter keys</td></tr></table>
+<table><tr><th>Agent field</th><th>Default</th><th>Meaning</th></tr>
+<tr><td>name, vault</td><td>required</td><td>Unique name (case-insensitive); must reference a vault</td></tr>
+<tr><td>role</td><td>""</td><td>Description returned on connect</td></tr>
+<tr><td>activation / close</td><td>"Connect to {name}" / "{name} close loop"</td><td>Phrases (matched case-insensitively, trailing punctuation ignored; an input containing the agent name also matches)</td></tr>
+<tr><td>connect_notes, tail_notes, recent_dir</td><td>empty/null</td><td>Notes read on connect</td></tr>
+<tr><td>stale_days</td><td>14</td><td>Age after which a source is flagged stale</td></tr>
+<tr><td>capture_approved</td><td>false</td><td>Needed for durable captures in proposal-only mode</td></tr>
+<tr><td>close_target</td><td>required</td><td>{mode, path | dir} — see 6.3</td></tr></table>
+<p><b>Validation</b> rejects: missing or duplicate names, relative paths, unknown schema or write mode, agents pointing at unknown vaults, invalid close targets, handoff pointing at unknown vault, and unknown IANA time zones. An invalid file stops the server with a list of errors.</p>
+<h3>5.2 Frontmatter schemas</h3>
+<p><b>standard:</b> type, status (default <code>proposed</code>), ai_platform, agent_or_role, session_or_task_id, written_at, source, confidence, tags, plus extra_fields.</p>
+<p><b>provenance:</b> type, status, tags, extra_fields, created_by_platform/agent/session_or_task_id/date, last_material_revision_by_platform/agent/session_or_task_id/date, provenance_confidence (verified | reported | inferred | unknown), source.</p>
+<h3>5.3 Note body template</h3>
+<p>Frontmatter; <code># Title</code>; <code>**Made by {platform} ({role}).**</code>; a notice that other AI platforms also write the vault; optional <code>## Decision</code>; body; <code>## Changelog</code> with the creation line.</p>
+<h3>5.4 Data directory</h3>
+<p>macOS <code>~/Library/Application Support/BrainLink</code>; Windows <code>%APPDATA%\BrainLink</code>; other <code>$XDG_CONFIG_HOME/brainlink</code>. Contents: <code>config.json</code>, <code>setup-token</code> (0600), <code>activity.log</code> (JSON lines, rotated at 512 KB to <code>.1</code>), client-config backups. Override with <code>BRAINLINK_HOME</code> or <code>BRAINLINK_CONFIG</code>.</p>
+
+<h2>6. Detailed behaviour</h2>
+<h3>6.1 Search</h3>
+<ol><li>Each Markdown note is parsed (frontmatter, headings, links) and split into heading-aware chunks with ancestry.</li>
+<li>Explicit <code>[[Note]]</code> mentions in the query are returned first (match: mention). A bare title is accepted only if unique.</li>
+<li>Remaining chunks are scored with BM25 (k1 = 1.2, b = 0.75), boosted by link-graph relations and title matches. Superseded or archived notes (by path, status or <code>superseded_by</code>) are demoted and marked historical.</li>
+<li>Results are de-duplicated per note and limited to the requested count.</li></ol>
+<h3>6.2 Write pipeline (all write tools)</h3>
+<ol><li>Resolve identity (call arguments, else environment). Platform must be a short name without newline or colon.</li>
+<li>Checks: connection not read-only, plan allows writes, vault write mode not <code>off</code>, source present, secret scan clean.</li>
+<li>Validate title (non-empty, one line, at most 120 characters, no <code>/ \ : # * ? " &lt; &gt; | *</code>), body, folder exists, folder not protected, decision valid if required.</li>
+<li>Build content. If the target exists, refuse. If the vault is proposal-only or <code>confirm</code> is false, return the preview and the next step. Otherwise write with an exclusive-create flag.</li></ol>
+<p><b>Secret scan</b> detects API-key and token formats, card/account-like digit runs (13–19 digits), and long token-like strings (40+ base64 characters).</p>
+<h3>6.3 Agents</h3>
+<p><b>Connect:</b> resolves the agent, reads connect notes (excerpt up to 1,800 characters), tail notes (last 1,500 characters), recent dated notes, and the latest captures; returns warnings for missing or stale sources, and instructions to confirm role and scope briefly and not start new workflows.</p>
+<table><tr><th>Close mode</th><th>Target</th><th>Result</th></tr>
+<tr><td>append-section</td><td><code>path</code></td><td>Appends a dated section: Source/date, platform/agent/session, Decisions, Actions taken, Corrections, Unresolved questions, Confidence, Privacy boundary, Links (as wikilinks), Smallest next actions, Decision needed.</td></tr>
+<tr><td>new-note</td><td><code>dir</code></td><td>Creates a dated note with the vault's frontmatter containing the same capture.</td></tr>
+<tr><td>append-task</td><td><code>path</code></td><td>Appends task lines <code>- [ ] date — task — next — approval — source/confidence</code>.</td></tr>
+<tr><td>proposal-only</td><td><code>path</code></td><td>Returns the text only until <code>capture_approved</code> is set.</td></tr></table>
+<p>Close requires confidence, at least one decision or action (task list for append-task), and an existing target folder. The user's close phrase authorises <code>confirm=true</code>.</p>
+<h3>6.4 Handoff mailbox</h3>
+<p>Files match <code>YYYY-MM-DD-HHmm-from-{platform}-to-{recipient}-{slug}.md</code>. Frontmatter includes status (default REQUEST), priority, subject, decision_needed, deadline and ack_of. Listing sorts newest first and returns a 300-character excerpt.</p>
+<h3>6.5 Rule packs</h3>
+<table><tr><th>Pack</th><th>Schema / writes</th><th>Agent and close target</th><th>Scaffold</th></tr>
+<tr><td>simple</td><td>standard / on</td><td>Brain; append-section to <code>BrainLink/Brain Session Log.md</code></td><td>BrainLink/Inbox, role note, session log</td></tr>
+<tr><td>founder-os</td><td>standard / on; decisions ADOPT, EXPERIMENT, MONITOR, REJECT</td><td>Chief of Staff; append-section to <code>{Name} Office/Session Captures.md</code>; handoff mailbox</td><td>Knowledge Intake, Handoffs, AGENTS.md, role, goal, captures</td></tr>
+<tr><td>private-journal</td><td>provenance / proposal-only; private</td><td>Journal; proposal-only to <code>Memory Review Inbox.md</code></td><td>Inbox, role note, review inbox</td></tr></table>
+<p>Scaffolding creates only missing items (exclusive create) and rejects paths that escape the vault. Merging a pack replaces the vault and agents of the same name only.</p>
+
+<h3>6.6 Client connectors</h3>
+<table><tr><th>Client</th><th>File</th><th>Format</th></tr>
+<tr><td>Claude Desktop</td><td>Claude/claude_desktop_config.json (per-OS app data)</td><td>JSON, <code>mcpServers.brainlink</code></td></tr>
+<tr><td>Claude Code</td><td><code>~/.claude.json</code> (uses the <code>claude</code> CLI when present)</td><td>JSON</td></tr>
+<tr><td>Cursor</td><td><code>~/.cursor/mcp.json</code></td><td>JSON</td></tr>
+<tr><td>ChatGPT Codex</td><td><code>$CODEX_HOME</code> or <code>~/.codex/config.toml</code></td><td>TOML, <code>[mcp_servers.brainlink]</code></td></tr>
+<tr><td>Gemini CLI</td><td><code>~/.gemini/settings.json</code></td><td>JSON</td></tr>
+<tr><td>Windsurf</td><td><code>~/.codeium/windsurf/mcp_config.json</code></td><td>JSON</td></tr></table>
+<p>The entry launches BrainLink by absolute path with <code>BRAINLINK_AI_PLATFORM</code> and <code>BRAINLINK_AGENT_ROLE</code> set. A timestamped backup is written before any change; unparsable files are left untouched. On the Free plan at most 2 clients can be connected.</p>
+
+<h2>7. Licensing</h2>
+<table><tr><th>Item</th><th>Specification</th></tr>
+<tr><td>Key format</td><td><code>BL1.&lt;base64url JSON payload&gt;.&lt;base64url Ed25519 signature&gt;</code></td></tr>
+<tr><td>Payload</td><td>v, email, plan, seats, issued, expires (nullable), updates_until, id (UUID)</td></tr>
+<tr><td>Verification</td><td>Offline with the embedded public key. The issuer private key is kept by the vendor (<code>~/.brainlink-issuer</code>) and never shipped.</td></tr>
+<tr><td>Built-in trial</td><td>14 days from <code>trial_started</code>; plan features equal paid plans.</td></tr>
+<tr><td>Failure behaviour</td><td>Invalid, damaged, unknown-plan or expired keys fall back to Free with a stated reason; no data is affected.</td></tr></table>
+<table><tr><th>Plan</th><th>Writes</th><th>Agents</th><th>HTTP</th><th>Max vaults</th><th>Max connections</th></tr>
+<tr><td>free</td><td>No</td><td>No</td><td>No</td><td>1</td><td>2</td></tr>
+<tr><td>trial / personal / team</td><td>Yes</td><td>Yes</td><td>Yes</td><td>Unlimited</td><td>Unlimited</td></tr></table>
+
+<h2>8. Setup UI and API</h2>
+<p>A local HTTP server on 127.0.0.1 (fixed port 47800, falling back to a free port) serves <code>ui/index.html</code>. Access needs the saved setup token (query parameter <code>t</code>) and a valid Host header. The server quits after 30 minutes idle when launched from the app.</p>
+<table><tr><th>Endpoint</th><th>Purpose</th></tr>
+<tr><td><code>GET /health</code></td><td>App identity and version.</td></tr>
+<tr><td><code>GET /api/state</code></td><td>Config, plan, vaults, agents, detected clients, recent activity.</td></tr>
+<tr><td><code>POST /api/pick-folder</code></td><td>Native folder dialog (osascript on macOS, PowerShell on Windows).</td></tr>
+<tr><td><code>POST /api/quick</code></td><td>One-step vault, pack and agent creation.</td></tr>
+<tr><td><code>POST /api/vault</code>, <code>/api/vault/remove</code>, <code>/api/agent</code></td><td>Edit vaults and agents.</td></tr>
+<tr><td><code>POST /api/connect</code>, <code>/api/connect-all</code>, <code>/api/disconnect</code></td><td>Client configuration.</td></tr>
+<tr><td><code>POST /api/license</code>, <code>/api/http-token</code></td><td>Licence entry and HTTP token generation.</td></tr>
+<tr><td><code>POST /api/sample</code>, <code>/api/test</code></td><td>Install the sample vault; run a test call.</td></tr>
+<tr><td><code>POST /api/quit</code></td><td>Stop Setup.</td></tr></table>
+
+<h2>9. Non-functional requirements</h2>
+<table><tr><th>Area</th><th>Specification</th></tr>
+<tr><td>Privacy</td><td>No network calls except localhost. Activity log holds tool name, outcome, platform, mode and time only.</td></tr>
+<tr><td>Security</td><td>Bearer auth with constant-time compare; origin checks; per-session Setup token; Host-header check; config and token files mode 0600; exclusive-create writes; path-escape guard; secret refusal.</td></tr>
+<tr><td>Integrity</td><td>Atomic config writes (temp file then rename); append keeps a newline boundary so concurrent AI writers do not merge lines.</td></tr>
+<tr><td>Portability</td><td>macOS (arm64, x64) and Windows (x64). Config locations resolved per OS. Windows build written but untested.</td></tr>
+<tr><td>Dependencies</td><td>None beyond Node 22 built-ins; official Node runtime bundled (MIT).</td></tr>
+<tr><td>Localisation</td><td>Notes with CJK titles are supported in slugs and tokens; time zone configurable.</td></tr>
+<tr><td>Performance</td><td>Vault is indexed in memory on load; designed for personal and small-team vaults (thousands of notes). No formal benchmark has been run.</td></tr>
+<tr><td>Quality</td><td>33 automated tests (<code>npm test</code>) covering core, config, licence, connectors and installer layout, including a check that shipped code names no specific person or company.</td></tr></table>
+
+<h2>10. Packaging and release</h2>
+<table><tr><th></th><th>macOS</th><th>Windows</th></tr>
+<tr><td>Installer</td><td><code>.pkg</code> (pkgbuild/productbuild): <code>/Applications/BrainLink.app</code> and <code>/usr/local/bin/brainlink</code></td><td>Inno Setup <code>.exe</code>, per-user, no admin</td></tr>
+<tr><td>Runtime</td><td>Node 22.23.3 (arm64 and x64) inside the bundle</td><td>Node 22 x64 inside the install folder</td></tr>
+<tr><td>Signing</td><td>Developer ID Application and Installer, notarisation, stapling (scripted; certificates pending)</td><td>Authenticode via Azure Trusted Signing or an OV certificate (pending)</td></tr>
+<tr><td>Distribution</td><td>Direct download; not the Mac App Store (sandbox blocks editing other apps' config and reading arbitrary folders)</td><td>Direct download; Store optional later</td></tr>
+<tr><td>Status</td><td>Unsigned test build <code>BrainLink-1.0.0.pkg</code> with SHA-256 file produced</td><td>Scripts only</td></tr></table>
+
+<h2>11. Known limitations and open items</h2>
+<ul><li>Apple Developer ID certificates and notarisation not yet done; Windows installer untested.</li>
+<li>Payment webhook that issues keys automatically is not built; keys are issued with <code>tools/license-issue.mjs</code>.</li>
+<li>EULA needs legal review.</li>
+<li>No auto-update, embeddings, hosted relay or team sync in v1.</li>
+<li>ChatGPT connector access requires the customer to provide their own HTTPS tunnel (optional, outside the product).</li>
+<li>Secret scan is pattern-based and may miss unusual secrets or flag long non-secret strings.</li></ul>
+
+<h2>12. Acceptance checklist</h2>
+<table><tr><th>Check</th><th>Pass condition</th></tr>
+<tr><td>Install</td><td>Installer completes; Setup opens; <code>brainlink version</code> prints 1.0.0.</td></tr>
+<tr><td>Onboarding</td><td>Vault, pack and agent created in under 3 minutes; scaffold only adds missing files.</td></tr>
+<tr><td>Connect</td><td>Each present client gets an entry and a backup; clients restart and list BrainLink tools.</td></tr>
+<tr><td>Read</td><td>Search returns the expected note first for a known query; superseded notes are flagged.</td></tr>
+<tr><td>Write</td><td>Preview first; confirm creates one new file; repeating the same call refuses (already exists).</td></tr>
+<tr><td>Safety</td><td>Secret-like text refused; writes outside vault or into protected notes refused; read-only connection exposes no write tools.</td></tr>
+<tr><td>Close loop</td><td>Close phrase appends one dated section to the target log.</td></tr>
+<tr><td>Licence</td><td>Free plan blocks writes; valid key unlocks them offline; expired key reverts to Free.</td></tr>
+<tr><td>HTTP</td><td>Missing or wrong token gets 401; foreign Origin gets 403; correct token returns tool results.</td></tr></table>
+</body></html>
