@@ -118,9 +118,9 @@ export function createMcp(ctx, { onCall = () => {} } = {}) {
         include_private: { type: 'boolean', default: false } } },
       run: async (a) => { await importSessions(); return sessionList(await sessionStore(), a); } },
     { name: 'session_read', title: 'Read one AI session', annotations: RO,
-      description: 'Defaults to the summary only (no messages, ~800 tokens). Pass limit>0 for a capped-length page of messages, or full=true to page the real text at ~4k tokens via next_offset. Private sessions need include_private=true.',
+      description: 'Defaults to the summary plus up to 3 short key-turn snippets (no raw messages, ~800 tokens). Pass full=true to page the real message text at ~4k tokens via next_offset. Private sessions need include_private=true.',
       inputSchema: { type: 'object', properties: {
-        id: { type: 'string' }, offset: { type: 'integer', minimum: 0, default: 0 }, limit: { type: 'integer', minimum: 1, maximum: 20 },
+        id: { type: 'string' }, offset: { type: 'integer', minimum: 0, default: 0 },
         full: { type: 'boolean', default: false }, include_private: { type: 'boolean', default: false } }, required: ['id'] },
       run: async (a) => sessionRead(await sessionStore(), a) },
     { name: 'session_log', title: 'Log a note to an AI session', annotations: WR,
