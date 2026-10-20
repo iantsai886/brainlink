@@ -554,7 +554,7 @@ async function load() {
   const cs = Object.entries(S.clients);
   $('n3').className = 'step' + (cs.some(([, c]) => c.connected) ? ' done' : '');
   $('clients').innerHTML = cs.length ? cs.map(([id, c]) => { const h = healthByClient[id]; return `<div class="client"><div><div class="name">${esc(c.title)}</div><span class="pill ${c.connected ? 'on' : ''}">${c.connected ? 'Connected' : c.present ? 'Found on this computer' : 'Not found'}</span></div>
-    <div class="row">${c.connected ? `<button data-disconnect="${id}">Disconnect</button><button data-health="${id}">Test connection</button>` : `<button class="primary" data-connect="${id}" ${S.vaults.length ? '' : 'disabled title="Add a vault first"'}>Connect</button>`}</div>${c.connected ? `<small class="muted">${esc(c.note)}</small>` : ''}${h ? `<span class="pill ${h.ok ? 'on' : ''}" style="width:fit-content">${h.ok ? '● live' : '○ failed'} · ${esc(h.message)}</span>` : ''}</div>`; }).join('') : '<p class="muted">No AI clients recognised on this computer yet.</p>';
+    <div class="row">${c.connected ? `<button data-disconnect="${id}">Disconnect</button><button data-health="${id}">Test connection</button>` : c.present ? `<button class="primary" data-connect="${id}" ${S.vaults.length ? '' : 'disabled title="Add a vault first"'}>Connect</button>` : `<button class="primary" disabled title="Install ${esc(c.title)} first">Connect</button>`}</div>${c.connected ? `<small class="muted">${esc(c.note)}</small>` : !c.present ? `<small class="muted">Not found on this computer — install it, then reload this page.</small>` : ''}${h ? `<span class="pill ${h.ok ? 'on' : ''}" style="width:fit-content">${h.ok ? '● live' : '○ failed'} · ${esc(h.message)}</span>` : ''}</div>`; }).join('') : '<p class="muted">No AI clients recognised on this computer yet.</p>';
   $('n4').className = 'step' + (S.activity.length ? ' done' : '');
   $('activity').innerHTML = S.activity.length ? S.activity.map((e) => `<tr><td>${esc(new Date(e.at).toLocaleString())}</td><td>${esc(e.platform)}</td><td class="mono">${esc(e.tool)}</td><td>${e.ok ? (e.written ? 'written' : 'ok') : 'refused / error'}</td></tr>`).join('') : '<tr><td colspan="4" class="muted">No calls yet.</td></tr>';
   $('n5').className = 'step' + (L.valid ? ' done' : '');
@@ -588,9 +588,11 @@ $('save-vault').onclick = () => act(async () => {
 document.addEventListener('click', (e) => {
   const d = e.target.dataset;
   if (d.connect) act(async () => {
+    // /api/connect only returns once the live handshake verified the connection; an unverified
+    // write is rolled back server-side and surfaces as a rejected promise (toast via `act`).
     const r = await api('POST', '/api/connect', { client: d.connect });
     healthByClient[d.connect] = r.health;
-    toast(r.health?.ok ? `${r.title} connected. Live check: ${r.health.message}` : `${r.title} connected. ${r.note}`);
+    toast(`${r.title} connected. Live check: ${r.health.message}`);
   });
   if (d.disconnect) act(async () => { await api('POST', '/api/disconnect', { client: d.disconnect }); delete healthByClient[d.disconnect]; toast('Disconnected'); });
   if (d.health) act(async () => { const r = await api('POST', '/api/client-health', { client: d.health }); healthByClient[d.health] = r; toast(r.message, !r.ok); });

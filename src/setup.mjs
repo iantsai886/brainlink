@@ -94,6 +94,8 @@ export async function startSetup(opts = {}) {
   }
 
   // Connect every AI app found on this computer that is not connected yet (within the plan).
+  // connectClient already refuses apps it did not detect; a live handshake (clientHealthCheck)
+  // confirms the write actually works before it is reported as connected, and is undone otherwise.
   async function connectAll(cfg) {
     const features = planFeatures(effectiveLicense(cfg));
     const found = await detect(clientOpts());
@@ -102,7 +104,12 @@ export async function startSetup(opts = {}) {
     for (const [id, c] of Object.entries(found)) {
       if (!c.present || c.connected) continue;
       if (count >= features.maxConnections) { skipped.push(c.title); continue; }
-      try { await connectClient(id, clientOpts()); connected.push(c.title); count++; } catch (e) { failed.push(`${c.title}: ${e.message}`); }
+      try {
+        await connectClient(id, clientOpts());
+        const health = await clientHealthCheck(id).catch((e) => ({ ok: false, message: e.message || String(e) }));
+        if (!health.ok) { await disconnectClient(id, clientOpts()).catch(() => {}); throw new Error(health.message); }
+        connected.push(c.title); count++;
+      } catch (e) { failed.push(`${c.title}: ${e.message}`); }
     }
     return { connected, skipped, failed, already: Object.values(found).filter((c) => c.connected).map((c) => c.title) };
   }
@@ -263,8 +270,11 @@ export async function startSetup(opts = {}) {
       const features = planFeatures(effectiveLicense(cfg));
       const connected = Object.entries(await detect(clientOpts())).filter(([, c]) => c.connected).map(([id]) => id);
       if (!connected.includes(b.client) && connected.length >= features.maxConnections) throw new Error(`The free plan connects ${features.maxConnections} AI apps. Add a licence key to connect more.`);
+      // connectClient refuses undetected apps. A write with no verified handshake is not a real
+      // connection, so an unhealthy check undoes the write instead of reporting Connected.
       const r = await connectClient(b.client, clientOpts());
       const health = await clientHealthCheck(b.client).catch((e) => ({ ok: false, client: b.client, tool: null, took_ms: 0, message: e.message || String(e) }));
+      if (!health.ok) { await disconnectClient(b.client, clientOpts()).catch(() => {}); throw new Error(`Could not verify ${r.title}: ${health.message}`); }
       return { ...r, health };
     },
     'POST /api/client-health': (b) => clientHealthCheck(b.client),

@@ -56,18 +56,20 @@ export const UNSUPPORTED = {
 };
 
 // Client is "present" when its config file or config folder exists.
+async function detectOne(id, c, opts) {
+  const file = c.file(opts);
+  const present = (await exists(file)) || (id !== 'claude-code' && (await exists(path.dirname(file))));
+  let connected = false;
+  if (await exists(file)) {
+    const raw = await readFile(file, 'utf8');
+    connected = c.format === 'toml' ? /^\[mcp_servers\.brainlink\]/m.test(raw) : (() => { try { return Boolean(JSON.parse(raw || '{}').mcpServers?.[SERVER_KEY]); } catch { return false; } })();
+  }
+  return { title: c.title, file, present, connected, note: c.note };
+}
+
 export async function detect(opts) {
   const out = {};
-  for (const [id, c] of Object.entries(CLIENTS)) {
-    const file = c.file(opts);
-    const present = (await exists(file)) || (id !== 'claude-code' && (await exists(path.dirname(file))));
-    let connected = false;
-    if (await exists(file)) {
-      const raw = await readFile(file, 'utf8');
-      connected = c.format === 'toml' ? /^\[mcp_servers\.brainlink\]/m.test(raw) : (() => { try { return Boolean(JSON.parse(raw || '{}').mcpServers?.[SERVER_KEY]); } catch { return false; } })();
-    }
-    out[id] = { title: c.title, file, present, connected, note: c.note };
-  }
+  for (const [id, c] of Object.entries(CLIENTS)) out[id] = await detectOne(id, c, opts);
   for (const [id, c] of Object.entries(UNSUPPORTED)) out[id] = { title: c.title, file: null, present: false, connected: false, unsupported: true, note: c.note };
   return out;
 }
@@ -113,6 +115,11 @@ function whichCli(name) {
 export async function connectClient(id, opts) {
   const c = CLIENTS[id];
   if (!c) throw new Error(`Unknown client "${id}". Use one of: ${Object.keys(CLIENTS).join(', ')}`);
+  // Refuse to write a config for an app this computer has never seen (no config file or folder
+  // for it yet). Without this gate, connecting an app that was never installed still "succeeds":
+  // it creates the folder, writes a config nobody reads, and then reports Connected -- a false
+  // success a fresh-install test caught on an uninstalled Claude Desktop.
+  if (!(await detectOne(id, c, opts)).present) throw new Error(`${c.title} was not found on this computer. Install it, then try Connect again.`);
   const entry = serverEntry(id, opts.launch, opts.extraEnv);
   const now = opts.now || new Date();
   // Claude Code owns ~/.claude.json and rewrites it while running; use its CLI when present.
