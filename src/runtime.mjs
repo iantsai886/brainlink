@@ -1,10 +1,9 @@
-// Glue shared by the CLI and Setup UI: load config + licence into a context, the command
-// AI clients should launch, and a content-free activity log.
+// Glue shared by the CLI and Setup UI: load config into a context, the command AI clients
+// should launch, and a content-free activity log.
 import { appendFile, readFile, stat, rename, mkdir } from 'node:fs/promises';
 import { fileURLToPath } from 'node:url';
 import path from 'node:path';
 import { loadConfig, configPath, appHome, normalize } from './config.mjs';
-import { effectiveLicense } from './license.mjs';
 import { createContext } from './core.mjs';
 
 export const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
@@ -12,8 +11,7 @@ export const CLI_PATH = path.join(ROOT, 'bin', 'brainlink.mjs');
 
 export async function openContext(env = process.env) {
   const cfg = await loadConfig(configPath(env));
-  const license = effectiveLicense(cfg);
-  return { cfg, license, ctx: createContext(cfg, { env, license }) };
+  return { cfg, ctx: createContext(cfg, { env }) };
 }
 
 // What AI clients run. Absolute paths so GUI apps without a shell PATH can start it.
@@ -47,6 +45,6 @@ export async function readActivity(env, n = 20) {
 export async function refreshMap(cfg, vaultName, env = process.env) {
   const { updateHomeMap } = await import('./links.mjs');
   cfg = normalize(cfg); // freshly merged packs lack defaults such as writes: 'on'
-  const ctx = createContext(cfg, { env: { ...env, BRAINLINK_VAULTS: vaultName, BRAINLINK_SEMANTIC: '0' }, license: effectiveLicense(cfg) });
+  const ctx = createContext(cfg, { env: { ...env, BRAINLINK_VAULTS: vaultName, BRAINLINK_SEMANTIC: '0' } });
   try { return await updateHomeMap(ctx, vaultName); } catch { return null; }
 }

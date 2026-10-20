@@ -14,7 +14,7 @@ export function resolveAgent(ctx, name) {
   const n = norm(name);
   const hit = ctx.agents.find((a) => norm(a.name) === n || [...a.activation, ...a.close].some((p) => norm(p) === n))
     || ctx.agents.find((a) => n.includes(norm(a.name)));
-  if (!hit) throw new Error(ctx.agents.length ? `Unknown agent "${name}". Known: ${ctx.agents.map((a) => a.name).join(', ')}` : 'No agents are enabled (configure agents in BrainLink Setup; agents need a licence).');
+  if (!hit) throw new Error(ctx.agents.length ? `Unknown agent "${name}". Known: ${ctx.agents.map((a) => a.name).join(', ')}` : 'No agents are enabled (configure agents in BrainLink Setup).');
   return hit;
 }
 

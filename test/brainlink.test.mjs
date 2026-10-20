@@ -4,14 +4,12 @@ import { mkdtemp, mkdir, writeFile, readFile, readdir, cp, utimes } from 'node:f
 import { tmpdir } from 'node:os';
 import { spawn } from 'node:child_process';
 import { request } from 'node:http';
-import { generateKeyPairSync, sign } from 'node:crypto';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 import { normalize, validate, saveConfig } from '../src/config.mjs';
 import { tokens, extractLinks, linkGraph } from '../src/graph.mjs';
 import { createContext, chunkMarkdown, search, readNote, related, zonedNow, findSecrets, DEFAULT_EXCLUDED_FOLDERS, SUGGESTED_EXCLUDED_FOLDERS, ensureDefaultIgnore, readExcludedFolders, writeExcludedFolders } from '../src/core.mjs';
-import { verifyLicense, canonicalPayload, encodeKey, planFeatures, effectiveLicense } from '../src/license.mjs';
 import { findObsidianVaults, nestedVaults } from '../src/obsidian.mjs';
 import { proposeNote, sendHandoff, listHandoffs, frontmatter, resolveIdentity } from '../src/writes.mjs';
 import { connectAgent, closeLoop, resolveAgent, latestCaptures } from '../src/agents.mjs';
@@ -23,7 +21,6 @@ import { startSetup } from '../src/setup.mjs';
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const SAMPLE = path.join(ROOT, 'samples', 'acme-studio');
 const tmp = (p) => mkdtemp(path.join(tmpdir(), `brainlink-${p}-`));
-const PAID = { valid: true, plan: 'personal', email: 'test@example.com' };
 const NOW = new Date('2026-10-18T01:30:00Z');
 const long = Array.from({ length: 300 }, (_, i) => `filler${i}`).join(' ');
 
@@ -50,7 +47,7 @@ async function fixture() {
 // Tests never touch the real app folder or a local Ollama.
 process.env.BRAINLINK_SEMANTIC = '0';
 const TEST_HOME = await mkdtemp(path.join(tmpdir(), 'brainlink-apphome-'));
-const ctxOf = (cfg, env = {}, license = PAID) => createContext(cfg, { env: { BRAINLINK_AI_PLATFORM: 'Claude', BRAINLINK_HOME: TEST_HOME, BRAINLINK_SEMANTIC: '0', ...env }, license });
+const ctxOf = (cfg, env = {}) => createContext(cfg, { env: { BRAINLINK_AI_PLATFORM: 'Claude', BRAINLINK_HOME: TEST_HOME, BRAINLINK_SEMANTIC: '0', ...env } });
 
 // ---- graph & retrieval ----
 
@@ -119,7 +116,7 @@ test('per-connection vault scope: BRAINLINK_VAULTS hides other vaults', async ()
   assert.ok(ctx.agents.every((a) => a.vault === 'Acme Studio'));
 });
 
-// ---- config, time, licence ----
+// ---- config, time ----
 
 test('config validation catches bad vaults, agents, close targets and timezones', () => {
   const errs = validate(normalize({ timezone: 'Mars/Base', vaults: [{ name: 'A', path: 'relative' }, { name: 'A', path: '/x' }], agents: [{ name: 'Z', vault: 'Nope', close_target: { mode: 'bogus' } }], handoff: { vault: 'Q', folder: 'x' } }));
@@ -133,32 +130,14 @@ test('zonedNow formats the configured zone with its offset', () => {
   assert.equal(zonedNow('America/New_York', NOW), '2026-10-17T21:30:00-04:00');
 });
 
-test('licence keys: valid, tampered, wrong signer, expired', () => {
-  const { publicKey, privateKey } = generateKeyPairSync('ed25519');
-  const pem = publicKey.export({ type: 'spki', format: 'pem' });
-  const make = (p) => { const j = canonicalPayload({ email: 'a@b.co', plan: 'personal', issued: '2026-10-18', id: 'x', ...p }); return encodeKey(j, sign(null, Buffer.from(j), privateKey)); };
-  const key = make({});
-  assert.equal(verifyLicense(key, { publicKeyPem: pem }).valid, true);
-  const [, payload, sig] = key.split('.');
-  const forged = `BL1.${Buffer.from(Buffer.from(payload, 'base64url').toString().replace('personal', 'team')).toString('base64url')}.${sig}`;
-  assert.equal(verifyLicense(forged, { publicKeyPem: pem }).valid, false);
-  assert.equal(verifyLicense(key).valid, false); // shipped public key did not sign it
-  const exp = verifyLicense(make({ plan: 'trial', expires: '2026-10-01' }), { publicKeyPem: pem, now: NOW });
-  assert.equal(exp.valid, false); assert.match(exp.reason, /expired/);
-  assert.equal(verifyLicense('nonsense').plan, 'free');
-  assert.equal(planFeatures(null).writes, false);
-});
-
-test('free plan: one vault, read-only, no agents, no write tools', async () => {
+test('every install is fully unlocked: every vault enabled, writes and agents on, no licence needed', async () => {
   const { cfg } = await fixture();
-  const ctx = createContext(cfg, { env: {}, license: verifyLicense(null) });
-  assert.equal(ctx.enabled.length, 1);
-  assert.equal(ctx.readOnly, true);
+  const ctx = createContext(cfg, { env: {} });
+  assert.equal(ctx.enabled.length, 2);
+  assert.equal(ctx.readOnly, false);
+  assert.equal(ctx.features.plan, 'full');
   const names = createMcp(ctx).tools.map((t) => t.name);
-  assert.ok(names.includes('vault_search') && !names.includes('propose_note') && !names.includes('agent_connect'));
-  const r = await proposeNote(ctx, { title: 'x', body: 'y', source: 's', decision: 'ADOPT' });
-  assert.equal(r.ok, false);
-  assert.match(r.errors.join(), /licence/);
+  assert.ok(names.includes('vault_search') && names.includes('propose_note') && names.includes('agent_connect'));
 });
 
 // ---- writes ----
@@ -187,7 +166,7 @@ test('propose_note refuses: missing decision, unknown folder, secrets, missing i
   assert.match((await proposeNote(ctx, { ...base, folder: 'Nowhere' })).errors.join(), /does not exist/);
   assert.match((await proposeNote(ctx, { ...base, decision: 'ADOPT', body: 'key sk-abcdefghijklmnopqrstuvwxyz123' })).errors.join(), /secrets/);
   assert.match((await proposeNote(ctx, { ...base, folder: 'Clients', body: 'card 4111 1111 1111 1111' })).errors.join(), /card/);
-  const anon = createContext(cfg, { env: {}, license: PAID });
+  const anon = createContext(cfg, { env: {} });
   assert.match((await proposeNote(anon, { ...base, decision: 'ADOPT' })).errors.join(), /ai_platform is required/);
   assert.ok((await proposeNote(ctx, { ...base, folder: 'Clients' })).ok, 'existing folder needs no decision');
 });
@@ -383,7 +362,7 @@ test('packs: scaffold never overwrites; merge replaces same-named vault', async 
   assert.throws(() => buildPack('nope', {}), /Unknown rule pack/);
 });
 
-test('setup UI: host check, token check, add vault, free-plan limits, licence rejection', async () => {
+test('setup UI: host check, token check, add vault, connect with no plan limits', async () => {
   const home = await tmp('setup-home');
   const env = { BRAINLINK_HOME: path.join(home, 'app'), BRAINLINK_SEMANTIC: '0' };
   const vaultDir = path.join(home, 'Notes');
@@ -400,16 +379,16 @@ test('setup UI: host check, token check, add vault, free-plan limits, licence re
     const st = await (await api('GET', '/api/state')).json();
     assert.equal(st.vaults[0].notes > 5, true);
     assert.equal(st.agents[0].name, 'Chief of Staff');
-    assert.equal(st.license.valid, false);
+    // No vault cap: a second vault is always allowed, not just on a paid plan.
     const second = await api('POST', '/api/vault', { path: home, name: 'Other' });
-    assert.equal(second.status, 400);
-    assert.match((await second.json()).error, /free plan/);
-    assert.match((await (await api('POST', '/api/license', { key: 'BL1.abc.def' })).json()).error, /not accepted/);
+    assert.equal(second.status, 200);
     const t = await (await api('POST', '/api/test', { query: 'care plan discount rules' })).json();
     assert.equal(t.results[0].path, 'Pricing and Packages.md');
-    for (const c of ['claude-desktop', 'cursor']) { await mkdir(path.join(home, c === 'cursor' ? '.cursor' : 'Library/Application Support/Claude'), { recursive: true }); assert.equal((await api('POST', '/api/connect', { client: c })).status, 200); }
-    const third = await api('POST', '/api/connect', { client: 'gemini' });
-    assert.match((await third.json()).error, /free plan connects 2/);
+    // No connection cap: a third AI app connects fine too.
+    for (const c of ['claude-desktop', 'cursor', 'gemini']) {
+      await mkdir(path.join(home, c === 'cursor' ? '.cursor' : c === 'gemini' ? '.gemini' : 'Library/Application Support/Claude'), { recursive: true });
+      assert.equal((await api('POST', '/api/connect', { client: c })).status, 200);
+    }
     // fetch() drops custom Host headers, so use node:http to simulate DNS rebinding.
     const status = await new Promise((resolve) => request({ host: '127.0.0.1', port: s.port, path: '/api/state', headers: { 'X-BrainLink-Token': s.token, Host: `evil.example:${s.port}` } }, (r) => { r.resume(); resolve(r.statusCode); }).end());
     assert.equal(status, 421);
@@ -430,7 +409,7 @@ test('CLI: `brainlink serve` speaks MCP over stdio and logs content-free activit
   for (let i = 0; i < 40; i++) { if (await readFile(path.join(home, 'activity.log'), 'utf8').then((t) => t.includes('vault_search'), () => false)) break; await new Promise((r) => setTimeout(r, 50)); }
   child.kill();
   assert.equal(lines[0].result.serverInfo.name, 'brainlink');
-  assert.equal(lines[1].result.isError, false); // free plan (no licence in config) still searches
+  assert.equal(lines[1].result.isError, false); // every install searches, no licence needed
   const log = await readFile(path.join(home, 'activity.log'), 'utf8');
   assert.match(log, /"tool":"vault_search"/);
   assert.match(log, /"platform":"Cursor"/);
@@ -458,16 +437,6 @@ test('identity and secret helpers', () => {
 
 // ---- easy setup ----
 
-test('built-in trial: 14 days from first setup, then free; a key always wins', () => {
-  const now = new Date('2026-10-18T00:00:00Z');
-  const t = effectiveLicense({ trial_started: '2026-10-10T00:00:00Z' }, { now });
-  assert.equal(t.valid, true); assert.equal(t.plan, 'trial'); assert.equal(t.days_left, 6);
-  const ended = effectiveLicense({ trial_started: '2026-09-01T00:00:00Z' }, { now });
-  assert.equal(ended.valid, false); assert.match(ended.reason, /trial ended/);
-  assert.equal(effectiveLicense({ trial_started: '2026-10-10T00:00:00Z', license: 'BL1.bad.key' }, { now }).valid, false);
-  assert.equal(effectiveLicense({}, { now }).plan, 'free');
-});
-
 test('Obsidian vaults are found from Obsidian settings; parent folders of several vaults are detected', async () => {
   const home = await tmp('obs');
   const root = path.join(home, 'Vaults');
@@ -481,7 +450,7 @@ test('Obsidian vaults are found from Obsidian settings; parent folders of severa
   assert.deepEqual(await nestedVaults(path.join(root, 'Work')), []);
 });
 
-test('one-click setup: new brain, trial starts, every found AI app connected; multi-vault folders refused', async () => {
+test('one-click setup: new brain, every found AI app connected; multi-vault folders refused', async () => {
   const home = await tmp('quick');
   const env = { BRAINLINK_HOME: path.join(home, 'app'), BRAINLINK_SEMANTIC: '0' };
   for (const d of ['Library/Application Support/Claude', '.cursor', '.gemini']) await mkdir(path.join(home, d), { recursive: true });
@@ -501,18 +470,17 @@ test('one-click setup: new brain, trial starts, every found AI app connected; mu
     assert.match(await readFile(path.join(r.path, 'BrainLink', 'Brain Role.md'), 'utf8'), /Brain/);
     assert.match(await readFile(path.join(r.path, 'BrainLink', 'Home.md'), 'utf8'), /generated_by: brainlink[\s\S]*\[\[Welcome\]\]/, 'Home map created at setup');
     const st = await api('/api/state');
-    assert.equal(st.license.plan, 'trial');
     assert.equal(st.agents[0].name, 'Brain');
-    // The brain works straight away in a connected AI (trial = agents + writes).
-    const ctx = createContext(normalize(JSON.parse(await readFile(path.join(home, 'app', 'config.json'), 'utf8'))), { env: { BRAINLINK_AI_PLATFORM: 'Claude' }, license: st.license });
+    // The brain works straight away in a connected AI: no licence, no trial, nothing to unlock.
+    const ctx = createContext(normalize(JSON.parse(await readFile(path.join(home, 'app', 'config.json'), 'utf8'))), { env: { BRAINLINK_AI_PLATFORM: 'Claude' } });
     assert.equal(resolveAgent(ctx, 'Connect to my brain').name, 'Brain');
     const closed = await closeLoop(ctx, { agent: 'Close loop', title: 'First chat', source: 'chat', confidence: 'high', decisions: ['Try BrainLink'], confirm: true });
     assert.equal(closed.written, true);
   } finally { s.server.close(); }
 });
 
-test('CLI: `brainlink init` starts the built-in trial exactly like Setup does', async () => {
-  const home = await tmp('cli-init-trial');
+test('CLI: `brainlink init` needs no licence and sets up writes and agents immediately', async () => {
+  const home = await tmp('cli-init');
   const vault = path.join(home, 'Vault');
   await mkdir(vault, { recursive: true });
   const env = { ...process.env, BRAINLINK_HOME: path.join(home, 'app') };
@@ -523,8 +491,11 @@ test('CLI: `brainlink init` starts the built-in trial exactly like Setup does', 
     child.on('exit', (code) => (code === 0 ? resolve(out) : reject(new Error(`exit ${code}: ${out}`))));
   });
   const cfg = JSON.parse(await readFile(path.join(home, 'app', 'config.json'), 'utf8'));
-  assert.ok(cfg.trial_started, '`brainlink init` must start the trial the same way Setup\'s quickStart does');
-  assert.equal(effectiveLicense(cfg).plan, 'trial');
+  assert.equal('license' in cfg, false);
+  assert.equal('trial_started' in cfg, false);
+  const ctx = createContext(normalize(cfg), { env: {} });
+  assert.equal(ctx.readOnly, false);
+  assert.equal(ctx.agents.length > 0, true);
 });
 
 // ---- smart features ----

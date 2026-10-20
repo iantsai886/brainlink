@@ -42,7 +42,7 @@ export function frontmatter(ctx, vaultName, id, f, now = new Date()) {
 export function checkCommon(ctx, vaultName, a, id) {
   const errors = [...id.errors];
   const v = vault(ctx, vaultName);
-  if (ctx.readOnly) errors.push(ctx.features.writes ? 'this connection is read-only (BRAINLINK_READ_ONLY)' : 'writes need a BrainLink licence (free mode is read-only)');
+  if (ctx.readOnly) errors.push('this connection is read-only (BRAINLINK_READ_ONLY)');
   if (v.writes === 'off') errors.push(`vault "${vaultName}" does not accept writes`);
   if (!a.source) errors.push('source is required (what prompted this write)');
   const secrets = findSecrets(JSON.stringify(a));

@@ -12,7 +12,7 @@ One Obsidian / Markdown vault that every AI can search and write to safely: Clau
 ## Command line
 
 ```
-brainlink setup | init | connect <client|all> | disconnect <client> | clients | license [KEY] | status | sync | ui | demo | serve [--http]
+brainlink setup | init | connect <client|all> | disconnect <client> | clients | status | sync | ui | demo | serve [--http]
 ```
 
 `connect` also accepts `--all`. `sync` runs one sync pass (local-only by default; choose Drive, iCloud or Dropbox in Setup).
@@ -36,7 +36,7 @@ brainlink setup | init | connect <client|all> | disconnect <client> | clients | 
 
 ## Config
 
-`~/Library/Application Support/BrainLink/config.json` (macOS) or `%APPDATA%\BrainLink\config.json` (Windows). Vaults (`name, path, private, schema, intake_folder, decisions, read_first, folders, rules, writes, flat, protected, extra_fields`), agents (`name, vault, role, activation, close, connect_notes, tail_notes, recent_dir, close_target {mode: append-section | new-note | append-task | proposal-only}`), optional `handoff {vault, folder}`, `timezone`, `license`, `http`, optional `sync {provider: local|gdrive|icloud|dropbox, folder, device}` (local by default).
+`~/Library/Application Support/BrainLink/config.json` (macOS) or `%APPDATA%\BrainLink\config.json` (Windows). Vaults (`name, path, private, schema, intake_folder, decisions, read_first, folders, rules, writes, flat, protected, extra_fields`), agents (`name, vault, role, activation, close, connect_notes, tail_notes, recent_dir, close_target {mode: append-section | new-note | append-task | proposal-only}`), optional `handoff {vault, folder}`, `timezone`, `locale`, `http`, optional `sync {provider: local|gdrive|icloud|dropbox, folder, device}` (local by default).
 
 ## Developers
 
@@ -49,7 +49,6 @@ npm run build:mac        # dist/BrainLink-<version>.pkg (unsigned build: packagi
 npm run build:win        # dist/BrainLink-Setup-<version>.exe + portable zip (needs makensis)
 npm run build:win-preview # dist/BrainLink-Preview-<version>-windows.zip — no installer, no bundled Node, Node 22+ required
 npm run build:linux      # dist/*.deb + linux tar.gz for x64 and arm64
-node tools/license-issue.mjs issue --email buyer@example.com --plan personal   # vendor only
 ```
 
 Dependency: `brainlink-store` (`../brainlink-store`, this repo's sibling) — the Obsidian-independent store contract. Not vendored; see that repo's README for how the UI (`ui/app/`) resolves the same checkout. `src/store/folder-store.mjs` is the real vault backing it: every note is a plain Markdown file in the vault folder (frontmatter is left byte-for-byte untouched until that note is actually edited through the API), with CAS/versions/sessions/snapshots delegated to `brainlink-store`'s reference implementation and search routed through `src/core.mjs` (the same ranking the MCP tools use).

@@ -11,12 +11,11 @@ import { openSessionStore } from '../src/sessions/index.mjs';
 import { estTokens } from '../src/sessions/tokens.mjs';
 
 const tmp = (p) => mkdtemp(path.join(tmpdir(), `brainlink-${p}-`));
-const PAID = { valid: true, plan: 'personal', email: 'test@example.com' };
 
 async function mcpWithHome(extraEnv = {}) {
   const home = await tmp('sess-mcp');
   const env = { BRAINLINK_HOME: home, BRAINLINK_AI_PLATFORM: 'Claude', BRAINLINK_SEMANTIC: '0', ...extraEnv };
-  const ctx = createContext(normalize({}), { env, license: PAID });
+  const ctx = createContext(normalize({}), { env });
   return { mcp: createMcp(ctx), ctx, env };
 }
 

@@ -19,7 +19,7 @@
 body { margin: 0; background: var(--bg); color: var(--ink); font: 15px/1.5 -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, sans-serif; }
 header { max-width: 860px; margin: 0 auto; padding: 32px 20px 8px; display: flex; align-items: baseline; gap: 14px; flex-wrap: wrap; }
 header h1 { font-size: 22px; margin: 0; letter-spacing: -0.01em; }
-header .plan { font-size: 13px; color: var(--muted); }
+header #lang { width: auto; font-size: 13px; padding: 4px 8px; }
 main { max-width: 860px; margin: 0 auto; padding: 8px 20px 60px; display: grid; gap: 16px; }
 section { background: var(--panel); border: 1px solid var(--line); border-radius: var(--radius); padding: 20px 22px; }
 section h2 { margin: 0 0 4px; font-size: 16px; display: flex; gap: 10px; align-items: center; }
@@ -110,69 +110,69 @@ ol.todo li { padding-left: 4px; }
 </style>
 </head>
 <body>
-<header><h1>BrainLink</h1><span class="plan" id="plan">Loading…</span><button class="link" id="done" style="margin-left:auto">Done — close setup</button></header>
-<div id="boot-loading" role="status">Loading your brain…</div>
-<div id="boot-error" hidden role="alert"><b>Could not load BrainLink.</b> <span id="boot-error-msg"></span> <button id="boot-retry">Retry</button></div>
+<header><h1>BrainLink</h1><select id="lang" aria-label="Language" style="margin-left:auto"></select><button class="link" id="done" data-i18n="header.done"></button></header>
+<div id="boot-loading" role="status" data-i18n="boot.loading"></div>
+<div id="boot-error" hidden role="alert"><b data-i18n="boot.errorTitle"></b> <span id="boot-error-msg"></span> <button id="boot-retry" data-i18n="boot.retry"></button></div>
 <main>
   <section class="big" id="start" hidden>
-    <h2>Where are your notes?</h2>
-    <p class="hint">Pick one. BrainLink connects it to the AI apps on this computer. Your notes stay here.</p>
+    <h2 data-i18n="start.title"></h2>
+    <p class="hint" data-i18n="start.hint"></p>
     <div class="choices" id="choices"></div>
   </section>
 
   <section class="big" id="sync-onboarding" hidden>
-    <h2>Keep notes on your other devices?</h2>
-    <p class="hint">Optional, and off by default. BrainLink never uses an account or API for this — it only watches a folder your own desktop client (Google Drive, iCloud, Dropbox) already keeps in sync. Private vaults and sessions never leave this computer either way.</p>
+    <h2 data-i18n="syncOnb.title"></h2>
+    <p class="hint" data-i18n="syncOnb.hint"></p>
     <div class="choices">
-      <button class="choice primary-choice" id="sync-onb-local"><span><b>Local only</b><small>Recommended. Nothing leaves this computer.</small></span><span class="go">Continue</span></button>
-      <button class="choice" id="sync-onb-pick"><span><b>Sync to a folder</b><small>A Google Drive, iCloud or Dropbox folder already on this computer</small></span><span class="go">Choose</span></button>
+      <button class="choice primary-choice" id="sync-onb-local"><span><b data-i18n="syncOnb.localTitle"></b><small data-i18n="syncOnb.localSub"></small></span><span class="go" data-i18n="syncOnb.continue"></span></button>
+      <button class="choice" id="sync-onb-pick"><span><b data-i18n="syncOnb.pickTitle"></b><small data-i18n="syncOnb.pickSub"></small></span><span class="go" data-i18n="syncOnb.choose"></span></button>
     </div>
     <div id="sync-onb-form" hidden style="margin-top:16px">
       <div class="grid2">
-        <label>Where<select id="sync-onb-provider"></select></label>
-        <label>This device<input id="sync-onb-device" placeholder="e.g. laptop"></label>
+        <label data-i18n="syncOnb.where"><select id="sync-onb-provider"></select></label>
+        <label data-i18n="syncOnb.device"><input id="sync-onb-device" data-i18n-placeholder="syncOnb.devicePlaceholder"></label>
       </div>
       <div class="grid2" style="margin-top:10px">
-        <label>Synced folder<input id="sync-onb-folder" class="mono" placeholder="/path/to/synced/folder"></label>
+        <label data-i18n="syncOnb.syncedFolder"><input id="sync-onb-folder" class="mono" data-i18n-placeholder="syncOnb.folderPlaceholder"></label>
         <div id="sync-onb-suggestions" class="muted" style="font-size:13px;align-self:end"></div>
       </div>
       <p class="error-box" id="sync-onb-error" hidden></p>
-      <div class="row" style="margin-top:14px"><button class="primary" id="sync-onb-save">Save and continue</button><button class="link" id="sync-onb-cancel">Back</button></div>
+      <div class="row" style="margin-top:14px"><button class="primary" id="sync-onb-save" data-i18n="syncOnb.saveContinue"></button><button class="link" id="sync-onb-cancel" data-i18n="syncOnb.back"></button></div>
     </div>
   </section>
 
   <section id="ask-panel" hidden>
-    <h2>Ask your brain</h2>
-    <p class="hint">A cited answer pulled straight from your notes — click a source to open it. Never a guess: if it is not in your notes, BrainLink says so.</p>
-    <div class="row"><input id="ask-q" placeholder="e.g. What did we decide about pricing?" style="flex:1;min-width:240px"><button class="primary" id="ask-go">Ask</button></div>
+    <h2 data-i18n="ask.title"></h2>
+    <p class="hint" data-i18n="ask.hint"></p>
+    <div class="row"><input id="ask-q" data-i18n-placeholder="ask.placeholder" style="flex:1;min-width:240px"><button class="primary" id="ask-go" data-i18n="ask.go"></button></div>
     <div id="ask-out" style="margin-top:14px"></div>
   </section>
 
   <section class="big" id="ready" hidden>
-    <h2 id="ready-title">You're set</h2>
+    <h2 id="ready-title"></h2>
     <p class="hint" id="ready-sub"></p>
     <ol class="todo">
       <li id="todo-restart"></li>
-      <li>In that AI, say <span class="say" id="say-connect">Connect to my brain</span></li>
-      <li>When you're done, say <span class="say" id="say-close">Close loop</span> to save what you decided into your notes.</li>
+      <li><span data-i18n="ready.sayConnectIntro"></span> <span class="say" id="say-connect">Connect to my brain</span></li>
+      <li><span data-i18n="ready.sayCloseIntro"></span> <span class="say" id="say-close">Close loop</span> <span data-i18n="ready.sayCloseSuffix"></span></li>
     </ol>
     <div class="row" style="margin-top:18px" id="more-apps"></div>
-    <table style="margin-top:18px"><thead><tr><th>When</th><th>AI</th><th>Tool</th><th>Result</th></tr></thead><tbody id="activity"></tbody></table>
+    <table style="margin-top:18px"><thead><tr><th data-i18n="ready.colWhen"></th><th data-i18n="ready.colAI"></th><th data-i18n="ready.colTool"></th><th data-i18n="ready.colResult"></th></tr></thead><tbody id="activity"></tbody></table>
   </section>
 
   <section id="brain-panel" hidden>
-    <h2>Your brain</h2>
-    <p class="hint">Every dot is a note; lines are links. BrainLink links new notes to the ones they mention or are about, and keeps a Home note that links everything.</p>
+    <h2 data-i18n="brain.title"></h2>
+    <p class="hint" data-i18n="brain.hint"></p>
     <div class="brain">
       <div><canvas id="graph" width="800" height="600" aria-label="Map of notes and links"></canvas><div class="legend" id="legend"></div></div>
       <div>
-        <div class="stats"><div class="stat"><b id="st-notes">–</b><span>notes</span></div><div class="stat"><b id="st-links">–</b><span>links</span></div><div class="stat"><b id="st-orphans">–</b><span>not linked yet</span></div></div>
-        <div class="phrases"><b style="font-size:13px;color:var(--muted)">Things to say in any AI</b>
-          <span><code>Brief me</code> what changed and what's open</span>
-          <span><code>Remember that I prefer short answers</code></span>
-          <span><code>Make a meeting note from this transcript: …</code></span>
-          <span><code>What did we decide about pricing?</code></span>
-          <span><code>Link my unlinked notes</code></span>
+        <div class="stats"><div class="stat"><b id="st-notes">–</b><span data-i18n="brain.notes"></span></div><div class="stat"><b id="st-links">–</b><span data-i18n="brain.links"></span></div><div class="stat"><b id="st-orphans">–</b><span data-i18n="brain.orphans"></span></div></div>
+        <div class="phrases"><b style="font-size:13px;color:var(--muted)" data-i18n="brain.phrasesTitle"></b>
+          <span data-i18n="brain.phrase1"></span>
+          <span data-i18n="brain.phrase2"></span>
+          <span data-i18n="brain.phrase3"></span>
+          <span data-i18n="brain.phrase4"></span>
+          <span data-i18n="brain.phrase5"></span>
         </div>
         <p class="smart muted" id="smart"></p>
       </div>
@@ -180,93 +180,86 @@ ol.todo li { padding-left: 4px; }
   </section>
 
   <section id="sessions-panel" hidden>
-    <h2>Sessions</h2>
-    <p class="hint">One timeline across every AI you connect — Claude, Cursor, Codex and more. Any session can open and read any other (the same <span class="mono">session_read</span> call every connected AI uses). Private sessions (the default for imports) show 🔒 and are hidden unless you ask to see them; they never sync.</p>
-    <div class="row" style="margin-bottom:10px"><label class="muted" style="display:flex;flex-direction:row;gap:6px;align-items:center"><input type="checkbox" id="sess-private" style="width:auto">Show private sessions</label></div>
+    <h2 data-i18n="sessions.title"></h2>
+    <p class="hint" id="sessions-hint"></p>
+    <div class="row" style="margin-bottom:10px"><label class="muted" style="display:flex;flex-direction:row;gap:6px;align-items:center"><input type="checkbox" id="sess-private" style="width:auto"><span data-i18n="sessions.showPrivate"></span></label></div>
     <div id="sessions-list" class="cards"></div>
     <div id="session-detail" style="margin-top:12px"></div>
   </section>
 
-  <details class="settings" id="settings"><summary>Settings</summary><div>
+  <details class="settings" id="settings"><summary data-i18n="settings.summary"></summary><div>
   <section id="s-vault">
-    <h2><span class="step" id="n1">1</span> Your vault</h2>
-    <p class="hint">Choose the Obsidian or Markdown folder your AIs should share. Notes stay on this computer.</p>
+    <h2><span class="step" id="n1">1</span> <span data-i18n="vault.step1Title"></span></h2>
+    <p class="hint" data-i18n="vault.hint"></p>
     <div id="vaults" class="cards"></div>
     <div id="add-vault" style="margin-top:14px">
       <div class="row">
-        <button class="primary" id="pick">Choose folder…</button>
-        <button id="sample">Use the sample vault</button>
+        <button class="primary" id="pick" data-i18n="vault.chooseFolder"></button>
+        <button id="sample" data-i18n="vault.useSample"></button>
       </div>
       <div id="vault-form" hidden style="margin-top:14px">
         <div class="grid2">
-          <label>Folder<input id="v-path" class="mono"></label>
-          <label>Vault name<input id="v-name"></label>
+          <label data-i18n="vault.folderLabel"><input id="v-path" class="mono"></label>
+          <label data-i18n="vault.nameLabel"><input id="v-name"></label>
         </div>
         <div class="packs" id="packs"></div>
         <div class="grid2">
-          <label>Agent name<input id="v-agent" placeholder="e.g. Max"></label>
-          <label class="muted" style="align-self:end"><span><input type="checkbox" id="v-scaffold" checked style="width:auto"> Create starter notes (never overwrites)</span></label>
+          <label data-i18n="vault.agentNameLabel"><input id="v-agent" data-i18n-placeholder="vault.agentNamePlaceholder"></label>
+          <label class="muted" style="align-self:end"><span><input type="checkbox" id="v-scaffold" checked style="width:auto"> <span data-i18n="vault.scaffold"></span></span></label>
         </div>
-        <label class="muted" style="display:flex;flex-direction:row;gap:6px;align-items:center;margin-top:10px"><input type="checkbox" id="v-private" style="width:auto"> Private — hidden from search, answers, graph, sessions and sync for connected AIs</label>
-        <label style="margin-top:6px">Excluded folders (one per line; never read, searched, answered from, graphed or synced)<textarea id="v-excluded" class="mono" rows="4"></textarea></label>
+        <label class="muted" style="display:flex;flex-direction:row;gap:6px;align-items:center;margin-top:10px"><input type="checkbox" id="v-private" style="width:auto"> <span data-i18n="vault.privateLabel"></span></label>
+        <label style="margin-top:6px"><span data-i18n="vault.excludedLabel"></span><textarea id="v-excluded" class="mono" rows="4"></textarea></label>
         <p class="hint" id="v-excluded-hint"></p>
-        <div class="row" style="margin-top:12px"><button class="primary" id="save-vault">Add vault</button><button class="link" id="cancel-vault">Cancel</button></div>
+        <div class="row" style="margin-top:12px"><button class="primary" id="save-vault" data-i18n="vault.addVault"></button><button class="link" id="cancel-vault" data-i18n="vault.cancel"></button></div>
       </div>
     </div>
   </section>
 
   <section id="s-agents">
-    <h2><span class="step" id="n2">2</span> Agents and phrases</h2>
-    <p class="hint">Say an activation phrase in any connected AI to load the agent; say its close phrase to save the session to your vault.</p>
+    <h2><span class="step" id="n2">2</span> <span data-i18n="agents.step2Title"></span></h2>
+    <p class="hint" data-i18n="agents.hint"></p>
     <div id="agents" class="cards"></div>
   </section>
 
   <section id="s-connect">
-    <h2><span class="step" id="n3">3</span> Connect your AIs</h2>
-    <p class="hint">BrainLink auto-detects the AI apps already on this computer. One click adds BrainLink to that app's MCP settings (with a backup of the old file) and runs a live test call so you see it work immediately, not after a restart.</p>
+    <h2><span class="step" id="n3">3</span> <span data-i18n="connect.step3Title"></span></h2>
+    <p class="hint" data-i18n="connect.hint"></p>
     <div class="clients" id="clients"></div>
-    <details style="margin-top:14px"><summary>Grok, custom agents and other HTTP clients</summary>
-      <p class="hint" style="margin-top:8px">Run <span class="mono">brainlink serve --http</span> and give the client the URL and token below. It listens on this computer only.</p>
-      <div class="row"><button id="http-token">Create HTTP token</button></div>
+    <details style="margin-top:14px"><summary data-i18n="connect.httpDetails"></summary>
+      <p class="hint" id="connect-http-hint" style="margin-top:8px"></p>
+      <div class="row"><button id="http-token" data-i18n="connect.createToken"></button></div>
       <div id="http-out" class="mono" style="margin-top:8px"></div>
     </details>
   </section>
 
   <section id="s-test">
-    <h2><span class="step" id="n4">4</span> Try it</h2>
-    <p class="hint">Ask any connected AI: <b id="try-phrase">"Connect to …"</b>. Calls appear below (tool names only, never note content).</p>
-    <div class="row"><input id="q" placeholder="Search your vault to check the index" style="max-width:420px"><button id="test">Search</button></div>
+    <h2><span class="step" id="n4">4</span> <span data-i18n="test.step4Title"></span></h2>
+    <p class="hint" id="test-hint"></p>
+    <div class="row"><input id="q" data-i18n-placeholder="test.placeholder" style="max-width:420px"><button id="test" data-i18n="test.searchBtn"></button></div>
     <div id="test-out" style="margin-top:10px"></div>
   </section>
 
   <section id="s-sync">
-    <h2>Sync</h2>
-    <p class="hint">Keep notes available on your other devices by pointing BrainLink at a folder your own desktop client (Google Drive, iCloud, Dropbox) already syncs. No account, no API: local-only by default, and private vaults/sessions never leave this computer.</p>
+    <h2 data-i18n="sync.title"></h2>
+    <p class="hint" data-i18n="sync.hint"></p>
     <div class="grid2">
-      <label>Where<select id="sync-provider"></select></label>
-      <label>This device<input id="sync-device" placeholder="e.g. laptop"></label>
+      <label data-i18n="sync.where"><select id="sync-provider"></select></label>
+      <label data-i18n="sync.device"><input id="sync-device" data-i18n-placeholder="sync.devicePlaceholder"></label>
     </div>
     <div id="sync-folder-row" class="grid2" style="margin-top:10px" hidden>
-      <label>Synced folder<input id="sync-folder" class="mono" placeholder="/path/to/synced/folder"></label>
+      <label data-i18n="sync.syncedFolder"><input id="sync-folder" class="mono" data-i18n-placeholder="sync.folderPlaceholder"></label>
       <div id="sync-suggestions" class="muted" style="font-size:13px;align-self:end"></div>
     </div>
-    <div class="row" style="margin-top:12px"><button class="primary" id="sync-save">Save sync settings</button></div>
-  </section>
-
-  <section id="s-license">
-    <h2><span class="step" id="n5">5</span> Licence</h2>
-    <p class="hint">Everything is unlocked for 14 days. After that, without a licence, BrainLink can still search and read one vault in two AI apps.</p>
-    <div class="row"><input id="lic" class="mono" placeholder="BL1.…" style="max-width:520px"><button class="primary" id="save-lic">Activate</button></div>
-    <div id="lic-out" class="muted" style="margin-top:8px"></div>
+    <div class="row" style="margin-top:12px"><button class="primary" id="sync-save" data-i18n="sync.saveBtn"></button></div>
   </section>
   </div></details>
-  <p class="muted" style="font-size:12px;text-align:center">Config: <span class="mono" id="cfgpath"></span></p>
+  <p class="muted" style="font-size:12px;text-align:center"><span data-i18n="settings.config"></span> <span class="mono" id="cfgpath"></span></p>
 </main>
 <div id="note-modal" class="modal-overlay" hidden>
   <div class="modal" role="dialog" aria-modal="true">
     <div class="row" style="justify-content:space-between;align-items:flex-start">
       <div><b id="note-title"></b><div class="mono muted" id="note-path" style="font-size:12px"></div></div>
-      <button class="link" id="note-close">Close ✕</button>
+      <button class="link" id="note-close" data-i18n="note.close"></button>
     </div>
     <div id="note-body" class="mono" style="margin-top:12px"></div>
   </div>
@@ -293,18 +286,59 @@ async function api(method, url, body) {
 function toast(msg, bad) { const t = $('toast'); t.textContent = msg; t.className = 'show' + (bad ? ' bad' : ''); clearTimeout(t._h); t._h = setTimeout(() => (t.className = ''), bad ? 6000 : 3500); }
 async function act(fn) { try { await fn(); await load(); } catch (e) { toast(e.message, true); } }
 
+// ---- i18n: plain JSON locale files (ui/locales/*.json), no library ----
+const SUPPORTED_LOCALES = ['en', 'zh-TW', 'pt'];
+const LANG_NAMES = { en: 'English', 'zh-TW': '繁體中文', pt: 'Português' };
+let LOCALE = 'en', STR = {}, FALLBACK = {}, localeReady = false;
+function detectLocale() {
+  const langs = (navigator.languages && navigator.languages.length) ? navigator.languages : [navigator.language || 'en'];
+  for (const l of langs) {
+    if (SUPPORTED_LOCALES.includes(l)) return l;
+    const base = l.split('-')[0].toLowerCase();
+    if (base === 'zh') return 'zh-TW'; // any Chinese variant: we only ship Traditional
+    const hit = SUPPORTED_LOCALES.find((s) => s.split('-')[0].toLowerCase() === base);
+    if (hit) return hit;
+  }
+  return 'en';
+}
+function t(key, vars) {
+  let s = STR[key] ?? FALLBACK[key] ?? key;
+  if (vars) for (const k in vars) s = s.split(`{${k}}`).join(vars[k]);
+  return s;
+}
+function applyI18n() {
+  document.documentElement.lang = LOCALE;
+  document.querySelectorAll('[data-i18n]').forEach((el) => { el.innerHTML = t(el.dataset.i18n); });
+  document.querySelectorAll('[data-i18n-placeholder]').forEach((el) => { el.placeholder = t(el.dataset.i18nPlaceholder); });
+}
+async function fetchLocale(locale) { return fetch(`/locales/${locale}.json`).then((r) => r.json()); }
+async function setLocale(locale, { persist = true } = {}) {
+  LOCALE = SUPPORTED_LOCALES.includes(locale) ? locale : 'en';
+  STR = LOCALE === 'en' ? FALLBACK : await fetchLocale(LOCALE).catch(() => FALLBACK);
+  $('lang').value = LOCALE;
+  applyI18n();
+  if (persist) api('POST', '/api/locale', { locale: LOCALE }).catch(() => {});
+}
+async function ensureLocale(saved) {
+  if (localeReady) return;
+  localeReady = true;
+  FALLBACK = await fetchLocale('en').catch(() => ({}));
+  $('lang').innerHTML = SUPPORTED_LOCALES.map((l) => `<option value="${l}">${esc(LANG_NAMES[l])}</option>`).join('');
+  await setLocale(SUPPORTED_LOCALES.includes(saved) ? saved : detectLocale(), { persist: !saved });
+}
+$('lang').onchange = () => act(() => setLocale($('lang').value));
 
 function choiceHtml(cls, title, sub, go, attrs) { return `<button class="choice ${cls}" ${attrs}><span><b>${esc(title)}</b>${sub ? `<small>${esc(sub)}</small>` : ''}</span><span class="go">${esc(go)}</span></button>`; }
 function renderStart(nested) {
   const list = nested || S.obsidian_vaults;
-  $('choices').innerHTML = (nested ? '<p class="notice">That folder holds several vaults. Pick one so they stay separate.</p>' : '')
-    + list.map((v, i) => choiceHtml(i === 0 ? 'primary-choice' : '', v.name, v.path, 'Use this', `data-quick="${esc(v.path)}"`)).join('')
-    + (nested ? '' : choiceHtml(list.length ? '' : 'primary-choice', "I don't have notes yet", 'Create a new brain in Documents/My Brain', 'Create', 'data-quick-new="1"'))
-    + `<button class="link" id="other-folder" style="justify-self:start">Use a different folder…</button>`;
+  $('choices').innerHTML = (nested ? `<p class="notice">${esc(t('start.nested'))}</p>` : '')
+    + list.map((v, i) => choiceHtml(i === 0 ? 'primary-choice' : '', v.name, v.path, t('start.useThis'), `data-quick="${esc(v.path)}"`)).join('')
+    + (nested ? '' : choiceHtml(list.length ? '' : 'primary-choice', t('start.noNotes'), t('start.noNotesSub'), t('start.create'), 'data-quick-new="1"'))
+    + `<button class="link" id="other-folder" style="justify-self:start">${esc(t('start.otherFolder'))}</button>`;
   $('other-folder').onclick = () => quick(async () => {
     const r = await api('POST', '/api/pick-folder');
     // No folder dialog on this computer (some Linux desktops): ask for the path instead.
-    const p = r.path || (r.unavailable ? (window.prompt('Folder path of your notes (for example ~/Notes):') || '').trim() : '');
+    const p = r.path || (r.unavailable ? (window.prompt(t('start.folderPrompt')) || '').trim() : '');
     return p ? { mode: 'folder', path: p } : null;
   });
 }
@@ -313,32 +347,32 @@ function renderReady(r) {
   const agent = S.agents.find((a) => a.vault === v.name) || S.agents[0];
   const apps = Object.values(S.clients).filter((c) => c.connected).map((c) => c.title);
   const fresh = r?.connected?.length ? r.connected : apps;
-  $('ready-title').textContent = apps.length ? "You're set" : 'Almost there';
-  $('ready-sub').textContent = `${v.name} · ${v.notes} notes${apps.length ? ' · connected to ' + apps.join(', ') : ''}`;
+  $('ready-title').textContent = apps.length ? t('ready.set') : t('ready.almost');
+  $('ready-sub').textContent = `${v.name} · ${v.notes} ${t('brain.notes')}${apps.length ? ' · ' + apps.join(', ') : ''}`;
   const missing = Object.values(S.clients).filter((c) => c.present && !c.connected);
-  $('todo-restart').innerHTML = fresh.length ? `Quit and reopen <b>${esc(fresh.join(', '))}</b> so it loads BrainLink.`
-    : missing.length ? 'Press <b>Connect my AI apps</b> below.'
-    : 'No AI apps were found on this computer. Install Claude Desktop, Cursor or Codex, then reload this page.';
-  $('say-connect').textContent = agent ? `${agent.activation.includes('Connect to my brain') ? 'Connect to my brain' : agent.activation[0]}` : 'Search my notes for …';
+  $('todo-restart').innerHTML = fresh.length ? t('ready.restartQuit', { apps: `<b>${esc(fresh.join(', '))}</b>` })
+    : missing.length ? t('ready.restartPress', { button: `<b>${esc(t('ready.connectAllShort'))}</b>` })
+    : t('ready.restartNoApps');
+  $('say-connect').textContent = agent ? `${agent.activation.includes('Connect to my brain') ? 'Connect to my brain' : agent.activation[0]}` : t('test.defaultPhrase');
   $('say-close').textContent = agent ? (agent.close.includes('Close loop') ? 'Close loop' : agent.close[0]) : 'Close loop';
-  $('more-apps').innerHTML = missing.length ? `<button class="primary" id="connect-all">Connect my AI apps (${esc(missing.map((c) => c.title).join(', '))})</button>` : '';
-  if (missing.length) $('connect-all').onclick = () => act(async () => { const x = await api('POST', '/api/connect-all'); toast(x.connected.length ? `Connected ${x.connected.join(', ')}. Quit and reopen them.` : (x.skipped.length ? 'The free plan connects 2 apps. Add a licence in Settings.' : 'Nothing new to connect.')); });
-  if (r?.skipped?.length) toast(`Not connected on the free plan: ${r.skipped.join(', ')}`, true);
+  $('more-apps').innerHTML = missing.length ? `<button class="primary" id="connect-all">${esc(t('ready.connectAllBtn', { apps: missing.map((c) => c.title).join(', ') }))}</button>` : '';
+  if (missing.length) $('connect-all').onclick = () => act(async () => { const x = await api('POST', '/api/connect-all'); toast(x.connected.length ? t('ready.connectedToast', { apps: x.connected.join(', ') }) : t('ready.nothingToast')); });
+  if (r?.skipped?.length) toast(t('ready.skippedToast', { apps: r.skipped.join(', ') }), true);
 }
 
 async function loadSessions() {
-  $('sessions-list').innerHTML = '<p class="skeleton">Loading sessions…</p>';
+  $('sessions-list').innerHTML = `<p class="skeleton">${esc(t('sessions.loading'))}</p>`;
   try { renderSessions((await api('POST', '/api/sessions', { include_private: $('sess-private').checked, limit: 20 })).sessions); }
-  catch (e) { $('sessions-list').innerHTML = `<p class="error-box">Could not load sessions: ${esc(e.message)}</p>`; }
+  catch (e) { $('sessions-list').innerHTML = `<p class="error-box">${esc(t('sessions.loadError', { msg: e.message }))}</p>`; }
 }
 function dayLabel(iso) {
   const d = new Date(iso), days = Math.floor((new Date(new Date().toDateString()) - new Date(d.toDateString())) / 86400000);
-  if (days === 0) return 'Today';
-  if (days === 1) return 'Yesterday';
-  return d.toLocaleDateString(undefined, { weekday: 'long', month: 'short', day: 'numeric' });
+  if (days === 0) return t('sessions.today');
+  if (days === 1) return t('sessions.yesterday');
+  return d.toLocaleDateString(LOCALE, { weekday: 'long', month: 'short', day: 'numeric' });
 }
 function renderSessions(list) {
-  if (!list.length) { $('sessions-list').innerHTML = '<p class="muted">No sessions yet. They show up once an AI logs one with session_log, or once local Claude Code / Codex history is found.</p>'; return; }
+  if (!list.length) { $('sessions-list').innerHTML = `<p class="muted">${esc(t('sessions.empty'))}</p>`; return; }
   let lastDay = null, html = '';
   for (const s of list) {
     const day = dayLabel(s.started_at);
@@ -346,26 +380,26 @@ function renderSessions(list) {
     html += `<div class="card">
       <div class="row" style="justify-content:space-between">
         <b><span class="badge" style="background:${clientColor(s.client)}">${esc(clientLabel(s.client))}</span>${s.project ? ' · ' + esc(s.project) : ''}</b>
-        <span class="pill ${s.private ? '' : 'on'}">${s.private ? '🔒 Private — never synced' : 'Shared'}</span>
+        <span class="pill ${s.private ? '' : 'on'}">${s.private ? esc(t('sessions.private')) : esc(t('sessions.shared'))}</span>
       </div>
-      <div class="muted" style="font-size:14px">${esc(s.summary || '(no summary)')}</div>
-      <div class="row muted" style="font-size:13px">${esc(new Date(s.started_at).toLocaleString())} · ${s.turns} message${s.turns === 1 ? '' : 's'}
-        <button class="link" data-sess-read="${esc(s.id)}">Open</button>
-        <button class="link" data-sess-toggle="${esc(s.id)}" data-sess-private="${s.private ? '1' : ''}">${s.private ? 'Make shared' : 'Make private'}</button>
+      <div class="muted" style="font-size:14px">${esc(s.summary || t('sessions.noSummary'))}</div>
+      <div class="row muted" style="font-size:13px">${esc(new Date(s.started_at).toLocaleString(LOCALE))} · ${s.turns} ${s.turns === 1 ? esc(t('sessions.messageOne')) : esc(t('sessions.messageMany'))}
+        <button class="link" data-sess-read="${esc(s.id)}">${esc(t('sessions.open'))}</button>
+        <button class="link" data-sess-toggle="${esc(s.id)}" data-sess-private="${s.private ? '1' : ''}">${s.private ? esc(t('sessions.makeShared')) : esc(t('sessions.makePrivate'))}</button>
       </div></div>`;
   }
   $('sessions-list').innerHTML = html;
 }
 function renderSyncSuggestions(provider, suggested) {
   const list = (suggested && suggested[provider]) || [];
-  $('sync-suggestions').innerHTML = list.length ? `Found: ${list.map((p) => `<button type="button" class="link" data-sync-pick="${esc(p)}">${esc(p)}</button>`).join(' ')}` : '';
+  $('sync-suggestions').innerHTML = list.length ? t('syncOnb.found', { list: list.map((p) => `<button type="button" class="link" data-sync-pick="${esc(p)}">${esc(p)}</button>`).join(' ') }) : '';
 }
 
 // First-run Sync step: Local only (default, recommended) or pick a provider folder; either way
 // saves a real choice via /api/sync so it is not just a skipped screen.
 function renderSyncOnbSuggestions(provider) {
   const list = (S.sync.suggested_folders && S.sync.suggested_folders[provider]) || [];
-  $('sync-onb-suggestions').innerHTML = list.length ? `Found: ${list.map((p) => `<button type="button" class="link" data-sync-onb-pick="${esc(p)}">${esc(p)}</button>`).join(' ')}` : '';
+  $('sync-onb-suggestions').innerHTML = list.length ? t('syncOnb.found', { list: list.map((p) => `<button type="button" class="link" data-sync-onb-pick="${esc(p)}">${esc(p)}</button>`).join(' ') }) : '';
 }
 function renderSyncOnboarding() {
   $('sync-onb-form').hidden = true;
@@ -385,18 +419,18 @@ $('sync-onb-provider').onchange = () => renderSyncOnbSuggestions($('sync-onb-pro
 $('sync-onb-cancel').onclick = () => { $('sync-onb-form').hidden = true; };
 $('sync-onb-save').onclick = () => finishSyncOnboarding(async () => {
   const folder = $('sync-onb-folder').value.trim();
-  if (!folder) throw new Error('Choose a synced folder first.');
+  if (!folder) throw new Error(t('syncOnb.needFolder'));
   await api('POST', '/api/sync', { provider: $('sync-onb-provider').value, folder, device: $('sync-onb-device').value });
 });
 
 // Force-directed map of the vault, computed once per load (no library).
 async function drawGraph() {
-  $('legend').innerHTML = '<span class="skeleton">Loading your brain map…</span>';
+  $('legend').innerHTML = `<span class="skeleton">${esc(t('brain.mapLoading'))}</span>`;
   let g;
   try { g = await api('POST', '/api/graph', {}); }
-  catch (e) { $('legend').innerHTML = `<span class="error-box">Could not load the map: ${esc(e.message)}</span>`; return; }
+  catch (e) { $('legend').innerHTML = `<span class="error-box">${esc(t('brain.mapError', { msg: e.message }))}</span>`; return; }
   $('st-notes').textContent = g.health?.notes ?? 0; $('st-links').textContent = g.health?.links ?? 0; $('st-orphans').textContent = g.health?.not_linked ?? 0;
-  if (!g.nodes.length) { $('legend').innerHTML = '<span class="muted">No notes yet — once you add some, their links show up here.</span>'; const cv0 = $('graph'); cv0.getContext('2d').clearRect(0, 0, cv0.width, cv0.height); return; }
+  if (!g.nodes.length) { $('legend').innerHTML = `<span class="muted">${esc(t('brain.mapEmpty'))}</span>`; const cv0 = $('graph'); cv0.getContext('2d').clearRect(0, 0, cv0.width, cv0.height); return; }
   const cv = $('graph'), ctx2 = cv.getContext('2d'), W = cv.width, H = cv.height, n = g.nodes.length;
   const css = getComputedStyle(document.documentElement);
   // One colour per top-level folder, biggest folders first; the rest share grey.
@@ -404,9 +438,9 @@ async function drawGraph() {
   for (const x of g.nodes) counts.set(x.group, (counts.get(x.group) || 0) + 1);
   const ranked = [...counts.entries()].sort((a, b) => b[1] - a[1]).map(([k]) => k);
   const colorOf = (grp) => { const r = ranked.indexOf(grp); return r >= 0 && r < 8 ? css.getPropertyValue(`--c${r + 1}`).trim() : css.getPropertyValue('--muted').trim(); };
-  $('legend').innerHTML = ranked.slice(0, 8).map((k) => `<span><i style="background:${colorOf(k)}"></i>${esc(k || 'Top level')} (${counts.get(k)})</span>`).join('')
-    + (ranked.length > 8 ? `<span><i style="background:${css.getPropertyValue('--muted').trim()}"></i>Other folders</span>` : '')
-    + '<span><i class="ring"></i>Not linked yet</span>';
+  $('legend').innerHTML = ranked.slice(0, 8).map((k) => `<span><i style="background:${colorOf(k)}"></i>${esc(k || t('brain.topLevel'))} (${counts.get(k)})</span>`).join('')
+    + (ranked.length > 8 ? `<span><i style="background:${css.getPropertyValue('--muted').trim()}"></i>${esc(t('brain.otherFolders'))}</span>` : '')
+    + `<span><i class="ring"></i>${esc(t('brain.notLinkedYet'))}</span>`;
   const P = g.nodes.map((_, i) => ({ x: W / 2 + Math.cos(i * 2.4) * (40 + i * 3) % (W / 2.2), y: H / 2 + Math.sin(i * 2.4) * (40 + i * 3) % (H / 2.2), vx: 0, vy: 0 }));
   const k = Math.sqrt((W * H) / Math.max(1, n)) * 0.55;
   const deg = new Array(n).fill(0);
@@ -450,19 +484,17 @@ async function drawGraph() {
 }
 
 // ---- Ask your brain: cited instant answer ----
-function renderAskEmpty() {
-  $('ask-out').innerHTML = '<p class="muted">Try: “What did we decide about pricing?”, “What changed this week?”, or any question about your notes.</p>';
-}
+function renderAskEmpty() { $('ask-out').innerHTML = `<p class="muted">${esc(t('ask.empty'))}</p>`; }
 function renderAskError(msg) { $('ask-out').innerHTML = `<p class="error-box">${esc(msg)}</p>`; }
 function renderAsk(r) {
   if (r.status === 'not_in_brain') {
-    $('ask-out').innerHTML = `<div class="card"><span class="pill">Not in your notes</span><p class="muted" style="margin:8px 0 0">BrainLink looked through ${esc(r.vault)} and found nothing that answers this. Try rephrasing, or add a note about it.</p></div>`;
+    $('ask-out').innerHTML = `<div class="card"><span class="pill">${esc(t('ask.notInBrain'))}</span><p class="muted" style="margin:8px 0 0">${esc(t('ask.notInBrainBody', { vault: r.vault }))}</p></div>`;
     return;
   }
-  const badge = r.status === 'weak' ? '<span class="pill">Partial match</span>' : '<span class="pill on">Answered</span>';
-  const chip = (x) => `<button class="chip" data-open-note="${esc(x.vault)}::${esc(x.path)}" title="Open ${esc(x.path)}"><b>${esc(x.title)}</b>${x.heading ? `<small>› ${esc(x.heading)}</small>` : ''}</button>`;
+  const badge = r.status === 'weak' ? `<span class="pill">${esc(t('ask.partial'))}</span>` : `<span class="pill on">${esc(t('ask.answered'))}</span>`;
+  const chip = (x) => `<button class="chip" data-open-note="${esc(x.vault)}::${esc(x.path)}" title="${esc(x.path)}"><b>${esc(x.title)}</b>${x.heading ? `<small>› ${esc(x.heading)}</small>` : ''}</button>`;
   $('ask-out').innerHTML = `<div class="answer-card card">${badge}
-    <p class="answer-text">${esc(r.answer || '(no snippet found)')}</p>
+    <p class="answer-text">${esc(r.answer || t('ask.noSnippet'))}</p>
     ${r.note ? `<p class="muted" style="font-size:13px;margin:0">${esc(r.note)}</p>` : ''}
     <div class="row">${r.sources.map(chip).join('')}</div>
   </div>`;
@@ -470,7 +502,7 @@ function renderAsk(r) {
 async function ask() {
   const query = $('ask-q').value.trim();
   if (!query) return;
-  $('ask-out').innerHTML = '<p class="skeleton">Searching your notes…</p>';
+  $('ask-out').innerHTML = `<p class="skeleton">${esc(t('ask.searching'))}</p>`;
   try { renderAsk(await api('POST', '/api/ask', { query })); }
   catch (e) { renderAskError(e.message); }
 }
@@ -482,11 +514,11 @@ async function openNote(vault, p) {
   $('note-modal').hidden = false;
   $('note-title').textContent = p.replace(/\.md$/i, '').split('/').pop();
   $('note-path').textContent = `${vault} / ${p}`;
-  $('note-body').innerHTML = '<p class="skeleton">Loading…</p>';
+  $('note-body').innerHTML = `<p class="skeleton">${esc(t('note.loading'))}</p>`;
   try {
     const n = await api('POST', '/api/note', { vault, path: p });
-    $('note-body').textContent = n.body.trim() || '(This note is empty.)';
-  } catch (e) { $('note-body').innerHTML = `<p class="error-box">Could not open this note: ${esc(e.message)}</p>`; }
+    $('note-body').textContent = n.body.trim() || t('note.empty');
+  } catch (e) { $('note-body').innerHTML = `<p class="error-box">${esc(t('note.loadError', { msg: e.message }))}</p>`; }
 }
 function closeNote() { $('note-modal').hidden = true; }
 $('note-close').onclick = closeNote;
@@ -521,8 +553,7 @@ document.addEventListener('click', (e) => {
 
 async function load() {
   S = await api('GET', '/api/state');
-  const L = S.license;
-  $('plan').textContent = L.builtin ? `Free trial · ${L.days_left} days left` : L.valid ? `${L.plan[0].toUpperCase() + L.plan.slice(1)} · ${L.email}${L.expires ? ' · until ' + L.expires : ''}` : (L.reason && L.reason.startsWith('free trial ended') ? 'Trial ended · read-only' : (S.vaults.length ? 'Free plan' : '14-day free trial, no card needed'));
+  await ensureLocale(S.locale);
   const hasVault = S.vaults.length > 0;
   const onboardingSync = hasVault && pendingSyncOnboarding;
   $('start').hidden = hasVault;
@@ -531,35 +562,35 @@ async function load() {
   $('ready').hidden = !hasVault || onboardingSync;
   $('brain-panel').hidden = !hasVault || onboardingSync;
   $('ask-panel').hidden = !hasVault || onboardingSync;
-  $('smart').textContent = S.semantic?.available ? `Smart search: keyword + meaning, using ${S.semantic.model} on this computer.` : `Smart search: keyword. For meaning-based search, install Ollama (ollama.com) and run "ollama pull nomic-embed-text"; BrainLink picks it up automatically.`;
+  $('smart').textContent = S.semantic?.available ? t('brain.smartOn', { model: S.semantic.model }) : t('brain.smartOff');
   if (!hasVault) renderStart(); else if (!onboardingSync) { renderReady(last); drawGraph().catch(() => {}); }
   $('sessions-panel').hidden = !hasVault || onboardingSync;
+  $('sessions-hint').innerHTML = t('sessions.hint', { call: '<span class="mono">session_read</span>' });
   if (hasVault && !onboardingSync) loadSessions().catch(() => {});
   $('cfgpath').textContent = S.config_path;
-  $('lic-out').textContent = L.valid ? `Active: ${L.plan} (${L.key})` : (L.key ? L.reason : '');
   $('n1').className = 'step' + (S.vaults.length ? ' done' : '');
-  $('vaults').innerHTML = S.vaults.length ? S.vaults.map((v, i) => `<div class="card"><div class="row" style="justify-content:space-between"><b>${esc(v.name)}</b><span class="pill ${v.exists ? 'on' : ''}">${v.exists ? v.notes + ' notes' : 'folder missing'}</span></div><div class="mono muted">${esc(v.path)}</div><div class="row muted" style="font-size:13px">${v.private ? 'Private · ' : ''}writes: ${esc(v.writes)} · intake: ${esc(v.flat ? 'root' : v.intake_folder)}${v.decisions.length ? ' · decisions ' + esc(v.decisions.join('/')) : ''}<button class="link" data-remove="${esc(v.name)}">Remove from BrainLink</button></div>
-    <label class="muted" style="display:flex;flex-direction:row;gap:6px;align-items:center;margin-top:8px"><input type="checkbox" data-vault-private="${i}" ${v.private ? 'checked' : ''} style="width:auto"> Private — hidden from search, answers, graph, sessions and sync for connected AIs</label>
-    <label style="margin-top:6px">Excluded folders (one per line; never read, searched, answered from, graphed or synced)<textarea data-vault-excluded="${i}" class="mono" rows="3">${esc((v.excluded_folders || []).join('\n'))}</textarea></label>
-    ${v.excluded_suggestions && v.excluded_suggestions.length ? `<div class="muted" style="font-size:12px;margin-top:4px">Suggestions: ${v.excluded_suggestions.map((s) => esc(s)).join(', ')}</div>` : ''}
-    <div class="row" style="margin-top:6px"><button data-vault-excluded-save="${i}">Save excluded folders</button></div>
-  </div>`).join('') : '<p class="muted">No vaults yet — choose a folder above.</p>';
+  $('vaults').innerHTML = S.vaults.length ? S.vaults.map((v, i) => `<div class="card"><div class="row" style="justify-content:space-between"><b>${esc(v.name)}</b><span class="pill ${v.exists ? 'on' : ''}">${v.exists ? esc(t('vault.notesCount', { n: v.notes })) : esc(t('vault.missing'))}</span></div><div class="mono muted">${esc(v.path)}</div><div class="row muted" style="font-size:13px">${v.private ? esc(t('vault.privateShort')) + ' · ' : ''}${esc(t('vault.writes'))}: ${esc(v.writes)} · ${esc(t('vault.intake'))}: ${esc(v.flat ? 'root' : v.intake_folder)}${v.decisions.length ? ' · ' + esc(t('vault.decisions')) + ' ' + esc(v.decisions.join('/')) : ''}<button class="link" data-remove="${esc(v.name)}">${esc(t('vault.removeBtn'))}</button></div>
+    <label class="muted" style="display:flex;flex-direction:row;gap:6px;align-items:center;margin-top:8px"><input type="checkbox" data-vault-private="${i}" ${v.private ? 'checked' : ''} style="width:auto"> ${esc(t('vault.privateLabel'))}</label>
+    <label style="margin-top:6px">${esc(t('vault.excludedLabel'))}<textarea data-vault-excluded="${i}" class="mono" rows="3">${esc((v.excluded_folders || []).join('\n'))}</textarea></label>
+    ${v.excluded_suggestions && v.excluded_suggestions.length ? `<div class="muted" style="font-size:12px;margin-top:4px">${esc(t('vault.suggestions', { list: v.excluded_suggestions.join(', ') }))}</div>` : ''}
+    <div class="row" style="margin-top:6px"><button data-vault-excluded-save="${i}">${esc(t('vault.saveExcluded'))}</button></div>
+  </div>`).join('') : `<p class="muted">${esc(t('vault.noneYet'))}</p>`;
   $('n2').className = 'step' + (S.agents.length ? ' done' : '');
   $('agents').innerHTML = S.agents.length ? S.agents.map((a, i) => `<div class="card"><b>${esc(a.name)} <span class="muted" style="font-weight:400">· ${esc(a.vault)} · close → ${esc(a.close_target.mode)} ${esc(a.close_target.path || a.close_target.dir || '')}</span></b>
-    <label>Role<textarea data-a="${i}" data-f="role">${esc(a.role)}</textarea></label>
-    <div class="grid2"><label>Activation phrases (one per line)<textarea data-a="${i}" data-f="activation">${esc(a.activation.join('\n'))}</textarea></label>
-    <label>Close phrases (one per line)<textarea data-a="${i}" data-f="close">${esc(a.close.join('\n'))}</textarea></label></div>
-    ${a.close_target.mode === 'proposal-only' ? `<label class="muted"><span><input type="checkbox" data-a="${i}" data-f="capture_approved" style="width:auto" ${a.capture_approved ? 'checked' : ''}> Allow ${esc(a.name)} to write captures (otherwise proposals only)</span></label>` : ''}
-    <div class="row"><button data-save-agent="${i}">Save ${esc(a.name)}</button>${L.valid ? '' : '<span class="notice">Agents run with a licence. Free plan is read-only.</span>'}</div></div>`).join('') : '<p class="muted">Agents come from the rule pack when you add a vault.</p>';
+    <label>${esc(t('agents.roleLabel'))}<textarea data-a="${i}" data-f="role">${esc(a.role)}</textarea></label>
+    <div class="grid2"><label>${esc(t('agents.activationLabel'))}<textarea data-a="${i}" data-f="activation">${esc(a.activation.join('\n'))}</textarea></label>
+    <label>${esc(t('agents.closeLabel'))}<textarea data-a="${i}" data-f="close">${esc(a.close.join('\n'))}</textarea></label></div>
+    ${a.close_target.mode === 'proposal-only' ? `<label class="muted"><span><input type="checkbox" data-a="${i}" data-f="capture_approved" style="width:auto" ${a.capture_approved ? 'checked' : ''}> ${esc(t('agents.allowCaptures', { name: a.name }))}</span></label>` : ''}
+    <div class="row"><button data-save-agent="${i}">${esc(t('agents.saveBtn', { name: a.name }))}</button></div></div>`).join('') : `<p class="muted">${esc(t('agents.none'))}</p>`;
   const first = S.agents[0];
-  $('try-phrase').textContent = first ? `"${first.activation[0]}"` : '"Search my vault for …"';
+  $('connect-http-hint').innerHTML = t('connect.httpHint', { cmd: '<span class="mono">brainlink serve --http</span>' });
+  $('test-hint').innerHTML = t('test.hint', { phrase: `<b>"${esc(first ? first.activation[0] : t('test.defaultPhrase'))}"</b>` });
   const cs = Object.entries(S.clients);
   $('n3').className = 'step' + (cs.some(([, c]) => c.connected) ? ' done' : '');
-  $('clients').innerHTML = cs.length ? cs.map(([id, c]) => { const h = healthByClient[id]; return `<div class="client"><div><div class="name">${esc(c.title)}</div><span class="pill ${c.connected ? 'on' : ''}">${c.connected ? 'Connected' : c.present ? 'Found on this computer' : 'Not found'}</span></div>
-    <div class="row">${c.connected ? `<button data-disconnect="${id}">Disconnect</button><button data-health="${id}">Test connection</button>` : c.present ? `<button class="primary" data-connect="${id}" ${S.vaults.length ? '' : 'disabled title="Add a vault first"'}>Connect</button>` : `<button class="primary" disabled title="Install ${esc(c.title)} first">Connect</button>`}</div>${c.connected ? `<small class="muted">${esc(c.note)}</small>` : !c.present ? `<small class="muted">Not found on this computer — install it, then reload this page.</small>` : ''}${h ? `<span class="pill ${h.ok ? 'on' : ''}" style="width:fit-content">${h.ok ? '● live' : '○ failed'} · ${esc(h.message)}</span>` : ''}</div>`; }).join('') : '<p class="muted">No AI clients recognised on this computer yet.</p>';
+  $('clients').innerHTML = cs.length ? cs.map(([id, c]) => { const h = healthByClient[id]; return `<div class="client"><div><div class="name">${esc(c.title)}</div><span class="pill ${c.connected ? 'on' : ''}">${c.connected ? esc(t('connect.connected')) : c.present ? esc(t('connect.found')) : esc(t('connect.notFound'))}</span></div>
+    <div class="row">${c.connected ? `<button data-disconnect="${id}">${esc(t('connect.disconnectBtn'))}</button><button data-health="${id}">${esc(t('connect.testBtn'))}</button>` : c.present ? `<button class="primary" data-connect="${id}" ${S.vaults.length ? '' : `disabled title="${esc(t('connect.addVaultFirst'))}"`}>${esc(t('connect.connectBtn'))}</button>` : `<button class="primary" disabled title="${esc(t('connect.installFirst', { title: c.title }))}">${esc(t('connect.connectBtn'))}</button>`}</div>${c.connected ? `<small class="muted">${esc(c.note)}</small>` : !c.present ? `<small class="muted">${esc(t('connect.notFoundHint'))}</small>` : ''}${h ? `<span class="pill ${h.ok ? 'on' : ''}" style="width:fit-content">${h.ok ? esc(t('connect.liveOk')) : esc(t('connect.liveFailed'))} · ${esc(h.message)}</span>` : ''}</div>`; }).join('') : `<p class="muted">${esc(t('connect.none'))}</p>`;
   $('n4').className = 'step' + (S.activity.length ? ' done' : '');
-  $('activity').innerHTML = S.activity.length ? S.activity.map((e) => `<tr><td>${esc(new Date(e.at).toLocaleString())}</td><td>${esc(e.platform)}</td><td class="mono">${esc(e.tool)}</td><td>${e.ok ? (e.written ? 'written' : 'ok') : 'refused / error'}</td></tr>`).join('') : '<tr><td colspan="4" class="muted">No calls yet.</td></tr>';
-  $('n5').className = 'step' + (L.valid ? ' done' : '');
+  $('activity').innerHTML = S.activity.length ? S.activity.map((e) => `<tr><td>${esc(new Date(e.at).toLocaleString(LOCALE))}</td><td>${esc(e.platform)}</td><td class="mono">${esc(e.tool)}</td><td>${e.ok ? (e.written ? esc(t('test.written')) : esc(t('test.ok'))) : esc(t('test.refused'))}</td></tr>`).join('') : `<tr><td colspan="4" class="muted">${esc(t('ready.noCalls'))}</td></tr>`;
   $('packs').innerHTML = S.packs.map((p) => `<label class="pack ${p.id === pack ? 'sel' : ''}"><span><input type="radio" name="pack" value="${p.id}" ${p.id === pack ? 'checked' : ''}><b>${esc(p.title)}</b></span><small>${esc(p.description)}</small></label>`).join('');
   const SY = S.sync;
   $('sync-provider').innerHTML = SY.providers.map((p) => `<option value="${esc(p)}" ${p === SY.provider ? 'selected' : ''}>${esc(SY.provider_labels[p] || p)}</option>`).join('');
@@ -575,9 +606,9 @@ function openForm(p) {
   $('v-name').value = p.replace(/[\/\\]+$/, '').split(/[\/\\]/).pop();
   $('v-private').checked = false;
   $('v-excluded').value = (S.default_excluded_folders || []).join('\n');
-  $('v-excluded-hint').textContent = `Suggestions: ${(S.suggested_excluded_folders || []).join(', ')} — add any that apply to this vault.`;
+  $('v-excluded-hint').textContent = t('vault.excludedHint', { list: (S.suggested_excluded_folders || []).join(', ') });
 }
-$('pick').onclick = () => act(async () => { const r = await api('POST', '/api/pick-folder'); const p = r.path || (r.unavailable ? (window.prompt('Folder path of your notes:') || '').trim() : ''); if (p) openForm(p); });
+$('pick').onclick = () => act(async () => { const r = await api('POST', '/api/pick-folder'); const p = r.path || (r.unavailable ? (window.prompt(t('start.folderPrompt')) || '').trim() : ''); if (p) openForm(p); });
 $('sample').onclick = () => act(async () => { const r = await api('POST', '/api/sample'); openForm(r.path); $('v-name').value = 'Acme Studio'; $('v-agent').value = 'Chief of Staff'; pack = 'founder-os'; });
 $('cancel-vault').onclick = () => ($('vault-form').hidden = true);
 $('packs').onchange = (e) => { if (e.target.name === 'pack') { pack = e.target.value; document.querySelectorAll('.pack').forEach((el) => el.classList.toggle('sel', el.querySelector('input').checked)); } };
@@ -585,7 +616,7 @@ $('save-vault').onclick = () => act(async () => {
   const excludedFolders = $('v-excluded').value.split('\n').map((s) => s.trim()).filter(Boolean);
   const r = await api('POST', '/api/vault', { path: $('v-path').value, name: $('v-name').value, pack, agentName: $('v-agent').value, scaffold: $('v-scaffold').checked, private: $('v-private').checked, excludedFolders });
   $('vault-form').hidden = true;
-  toast(`Added ${r.vault}${r.created.length ? ` · created ${r.created.length} starter notes` : ''}`);
+  toast(t('vault.addedToast', { vault: r.vault, extra: r.created.length ? t('vault.createdExtra', { n: r.created.length }) : '' }));
 });
 document.addEventListener('click', (e) => {
   const d = e.target.dataset;
@@ -594,36 +625,36 @@ document.addEventListener('click', (e) => {
     // write is rolled back server-side and surfaces as a rejected promise (toast via `act`).
     const r = await api('POST', '/api/connect', { client: d.connect });
     healthByClient[d.connect] = r.health;
-    toast(`${r.title} connected. Live check: ${r.health.message}`);
+    toast(t('connect.connectedToast', { title: r.title, msg: r.health.message }));
   });
-  if (d.disconnect) act(async () => { await api('POST', '/api/disconnect', { client: d.disconnect }); delete healthByClient[d.disconnect]; toast('Disconnected'); });
+  if (d.disconnect) act(async () => { await api('POST', '/api/disconnect', { client: d.disconnect }); delete healthByClient[d.disconnect]; toast(t('connect.disconnectedToast')); });
   if (d.health) act(async () => { const r = await api('POST', '/api/client-health', { client: d.health }); healthByClient[d.health] = r; toast(r.message, !r.ok); });
-  if (d.remove && confirm(`Remove ${d.remove} from BrainLink? Your notes are not touched.`)) act(() => api('POST', '/api/vault/remove', { name: d.remove }));
+  if (d.remove && confirm(t('vault.removeConfirm', { name: d.remove }))) act(() => api('POST', '/api/vault/remove', { name: d.remove }));
   if (d.vaultPrivate !== undefined) act(async () => {
     const v = S.vaults[+d.vaultPrivate];
     await api('POST', '/api/vault/private', { name: v.name, private: e.target.checked });
-    toast(e.target.checked ? `${v.name} is now private.` : `${v.name} is no longer private.`);
+    toast(e.target.checked ? t('vault.privateOnToast', { name: v.name }) : t('vault.privateOffToast', { name: v.name }));
   });
   if (d.vaultExcludedSave !== undefined) act(async () => {
     const i = +d.vaultExcludedSave, v = S.vaults[i];
     const folders = document.querySelector(`[data-vault-excluded="${i}"]`).value.split('\n').map((s) => s.trim()).filter(Boolean);
     await api('POST', '/api/vault/excluded', { name: v.name, folders });
-    toast(`Saved excluded folders for ${v.name}.`);
+    toast(t('vault.savedExcludedToast', { name: v.name }));
   });
   if (d.saveAgent !== undefined) act(async () => {
     const i = d.saveAgent, a = S.agents[i], get = (f) => document.querySelector(`[data-a="${i}"][data-f="${f}"]`);
     await api('POST', '/api/agent', { name: a.name, role: get('role').value, activation: get('activation').value, close: get('close').value, ...(get('capture_approved') ? { capture_approved: get('capture_approved').checked } : {}) });
-    toast(`Saved ${a.name}. Restart your AI apps to pick up new phrases.`);
+    toast(t('agents.savedToast', { name: a.name }));
   });
   if (d.sessRead) (async (id) => {
     // Independent of whatever session is currently shown: proves any session can read any other.
-    $('session-detail').innerHTML = '<p class="skeleton">Opening session…</p>';
+    $('session-detail').innerHTML = `<p class="skeleton">${esc(t('sessions.detailLoading'))}</p>`;
     try {
       const s = await api('POST', '/api/sessions/read', { id, include_private: $('sess-private').checked });
-      $('session-detail').innerHTML = `<div class="card"><b><span class="badge" style="background:${clientColor(s.client)}">${esc(clientLabel(s.client))}</span> ${esc(s.title || '(untitled)')}</b>
-        <div class="muted" style="font-size:14px">${esc(s.summary || '(no summary)')}</div>
-        <div class="muted" style="font-size:13px">${s.project ? esc(s.project) + ' · ' : ''}${s.message_count} messages · started ${esc(new Date(s.started_at).toLocaleString())}${s.note_refs?.length ? ' · refs: ' + s.note_refs.map(esc).join(', ') : ''}</div></div>`;
-    } catch (e) { $('session-detail').innerHTML = `<p class="error-box">Could not open this session: ${esc(e.message)}</p>`; }
+      $('session-detail').innerHTML = `<div class="card"><b><span class="badge" style="background:${clientColor(s.client)}">${esc(clientLabel(s.client))}</span> ${esc(s.title || t('sessions.untitled'))}</b>
+        <div class="muted" style="font-size:14px">${esc(s.summary || t('sessions.noSummary'))}</div>
+        <div class="muted" style="font-size:13px">${s.project ? esc(s.project) + ' · ' : ''}${s.message_count} ${s.message_count === 1 ? esc(t('sessions.messageOne')) : esc(t('sessions.messageMany'))} · ${esc(new Date(s.started_at).toLocaleString(LOCALE))}${s.note_refs?.length ? ' · ' + esc(t('sessions.refs', { list: s.note_refs.join(', ') })) : ''}</div></div>`;
+    } catch (e) { $('session-detail').innerHTML = `<p class="error-box">${esc(t('sessions.detailError', { msg: e.message }))}</p>`; }
   })(d.sessRead);
   if (d.sessToggle) act(() => api('POST', '/api/sessions/private', { id: d.sessToggle, private: !d.sessPrivate }));
   if (d.syncPick) $('sync-folder').value = d.syncPick;
@@ -634,21 +665,19 @@ $('sync-provider').onchange = () => { const p = $('sync-provider').value; $('syn
 $('sync-save').onclick = () => act(async () => {
   const provider = $('sync-provider').value;
   const r = await api('POST', '/api/sync', { provider, folder: provider === 'local' ? null : $('sync-folder').value, device: $('sync-device').value });
-  toast(provider === 'local' ? 'Sync: local only.' : `Sync: now syncing via ${esc(r.sync.folder)}.`);
+  toast(provider === 'local' ? t('sync.localToast') : t('sync.providerToast', { folder: r.sync.folder }));
 });
-$('save-lic').onclick = () => act(async () => { const r = await api('POST', '/api/license', { key: $('lic').value }); $('lic').value = ''; toast(r.license.valid ? `Licence active: ${r.license.plan}` : 'Licence removed'); });
 $('http-token').onclick = () => act(async () => { const r = await api('POST', '/api/http-token'); $('http-out').innerHTML = `URL: ${esc(r.url)}<br>Header: Authorization: Bearer ${esc(r.token)}<br>Start: ${esc(r.start)}`; });
 $('test').onclick = () => {
-  $('test-out').innerHTML = '<p class="skeleton">Searching…</p>';
-  act(async () => { const r = await api('POST', '/api/test', { query: $('q').value }); $('test-out').innerHTML = r.results.length ? `<div class="cards">${r.results.map((x) => `<div class="card"><b>${esc(x.title)}</b><span class="mono muted">${esc(r.vault)}/${esc(x.path)}${x.heading ? ' › ' + esc(x.heading) : ''}</span></div>`).join('')}</div>` : '<p class="muted">No matches.</p>'; });
+  $('test-out').innerHTML = `<p class="skeleton">${esc(t('test.searching'))}</p>`;
+  act(async () => { const r = await api('POST', '/api/test', { query: $('q').value }); $('test-out').innerHTML = r.results.length ? `<div class="cards">${r.results.map((x) => `<div class="card"><b>${esc(x.title)}</b><span class="mono muted">${esc(r.vault)}/${esc(x.path)}${x.heading ? ' › ' + esc(x.heading) : ''}</span></div>`).join('')}</div>` : `<p class="muted">${esc(t('test.noMatches'))}</p>`; });
 };
-$('done').onclick = async () => { try { await api('POST', '/api/quit'); } catch {} document.body.innerHTML = '<main><section><h2>Setup closed</h2><p class="hint">BrainLink keeps working inside your AI apps. To change settings later, open BrainLink from Applications; this same page comes back.</p></section></main>'; };
+$('done').onclick = async () => { try { await api('POST', '/api/quit'); } catch {} document.body.innerHTML = `<main><section><h2>${esc(t('quit.closedTitle'))}</h2><p class="hint">${esc(t('quit.closedHint'))}</p></section></main>`; };
 $('q').onkeydown = (e) => { if (e.key === 'Enter') $('test').click(); };
-renderAskEmpty();
 
 async function boot() {
   $('boot-error').hidden = true;
-  try { await load(); $('boot-loading').hidden = true; }
+  try { await load(); renderAskEmpty(); $('boot-loading').hidden = true; }
   catch (e) { $('boot-loading').hidden = true; $('boot-error').hidden = false; $('boot-error-msg').textContent = e.message; }
 }
 $('boot-retry').onclick = boot;
@@ -656,7 +685,7 @@ boot();
 // Light refresh: only the activity table, so edits in progress are never wiped.
 setInterval(async () => {
   if (document.visibilityState !== 'visible') return;
-  try { const s = await api('GET', '/api/state'); S.activity = s.activity; $('activity').innerHTML = s.activity.length ? s.activity.map((e) => `<tr><td>${esc(new Date(e.at).toLocaleString())}</td><td>${esc(e.platform)}</td><td class="mono">${esc(e.tool)}</td><td>${e.ok ? (e.written ? 'written' : 'ok') : 'refused / error'}</td></tr>`).join('') : '<tr><td colspan="4" class="muted">No calls yet.</td></tr>'; $('n4').className = 'step' + (s.activity.length ? ' done' : ''); } catch {}
+  try { const s = await api('GET', '/api/state'); S.activity = s.activity; $('activity').innerHTML = s.activity.length ? s.activity.map((e) => `<tr><td>${esc(new Date(e.at).toLocaleString(LOCALE))}</td><td>${esc(e.platform)}</td><td class="mono">${esc(e.tool)}</td><td>${e.ok ? (e.written ? esc(t('test.written')) : esc(t('test.ok'))) : esc(t('test.refused'))}</td></tr>`).join('') : `<tr><td colspan="4" class="muted">${esc(t('ready.noCalls'))}</td></tr>`; $('n4').className = 'step' + (s.activity.length ? ' done' : ''); } catch {}
 }, 5000);
 </script>
 </body>

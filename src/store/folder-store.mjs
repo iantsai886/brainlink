@@ -108,8 +108,7 @@ export function createFolderStore(opts = {}) {
   function getSearchCtx() {
     if (!searchCtx) {
       const cfg = normalize({ vaults: vaults.map((v) => ({ name: v.name, path: vaultPaths[v.name], private: v.private })) });
-      // Unrestricted: a free-plan vault cap is a licensing concern for the MCP server, not this store adapter.
-      searchCtx = createContext(cfg, { env: {}, license: { valid: true, plan: 'personal' } });
+      searchCtx = createContext(cfg, { env: {} });
     }
     return searchCtx;
   }

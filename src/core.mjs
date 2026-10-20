@@ -1,4 +1,4 @@
-// Runtime context (config + licence + per-connection env), vault index, search, read and
+// Runtime context (config + per-connection env), vault index, search, read and
 // related notes. Retrieval: heading-ancestry chunks; guaranteed [[mention]] and #tag hits;
 // BM25 over stemmed terms, fused (reciprocal rank) across the query, its rephrasings and the
 // optional semantic ranking; capped graph boost from links, co-citations and shared tags;
@@ -7,25 +7,25 @@ import { readdir, readFile, writeFile, stat } from 'node:fs/promises';
 import { createHash } from 'node:crypto';
 import path from 'node:path';
 import { termFrequencies, terms, linkGraph, collection, suggestRelated, extractTags } from './graph.mjs';
-import { planFeatures } from './license.mjs';
 import { appHome } from './config.mjs';
 import { detectEmbedder, VectorStore, fillVectors, embedTexts, nearest } from './embed.mjs';
 
 const truthy = (v) => /^(1|true|yes|on)$/i.test(String(v || ''));
 
-export function createContext(cfg, { env = process.env, license = null } = {}) {
-  const features = planFeatures(license);
+// Every install unlocks every feature; there is no plan or licence gating.
+export const FEATURES = Object.freeze({ plan: 'full', writes: true, agents: true, http: true, maxVaults: Infinity, maxConnections: Infinity });
+
+export function createContext(cfg, { env = process.env } = {}) {
   const byName = new Map(cfg.vaults.map((v) => [v.name, v]));
-  let enabled = env.BRAINLINK_VAULTS ? env.BRAINLINK_VAULTS.split(',').map((s) => s.trim()).filter((v) => byName.has(v)) : cfg.vaults.map((v) => v.name);
-  if (features.maxVaults < enabled.length) enabled = enabled.slice(0, features.maxVaults);
-  const readOnly = truthy(env.BRAINLINK_READ_ONLY) || !features.writes;
+  const enabled = env.BRAINLINK_VAULTS ? env.BRAINLINK_VAULTS.split(',').map((s) => s.trim()).filter((v) => byName.has(v)) : cfg.vaults.map((v) => v.name);
+  const readOnly = truthy(env.BRAINLINK_READ_ONLY);
   return {
-    cfg, features, license, byName, enabled, readOnly, env,
+    cfg, features: FEATURES, byName, enabled, readOnly, env,
     platform: String(env.BRAINLINK_AI_PLATFORM || '').trim(),
     agentRole: String(env.BRAINLINK_AGENT_ROLE || 'direct assistant').trim(),
     connectorPrivate: truthy(env.BRAINLINK_CONNECTOR_PRIVATE),
     tz: cfg.timezone || Intl.DateTimeFormat().resolvedOptions().timeZone || 'UTC',
-    agents: features.agents ? cfg.agents.filter((a) => enabled.includes(a.vault)) : [],
+    agents: cfg.agents.filter((a) => enabled.includes(a.vault)),
     dataDir: appHome(env),
     cache: new Map(),
     stores: new Map(),
@@ -537,7 +537,6 @@ const SECRET_PATTERNS = [
   [/\bAKIA[0-9A-Z]{16}\b/, 'AWS access key'],
   [/\bgh[pousr]_[A-Za-z0-9]{30,}/, 'GitHub token'],
   [/\bxox[abpr]-[A-Za-z0-9-]{10,}/, 'Slack token'],
-  [/\bBL1\.[A-Za-z0-9_-]{20,}\.[A-Za-z0-9_-]{20,}/, 'BrainLink licence key'],
   [/\b(?:\d[ -]?){13,19}\b/, 'card/account-like number'],
   [/\b[A-Za-z0-9+/]{40,}={0,2}(?![A-Za-z0-9+/=])/, 'long token-like string'],
 ];

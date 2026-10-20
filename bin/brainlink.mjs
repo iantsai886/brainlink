@@ -5,7 +5,6 @@ import { homedir, tmpdir } from 'node:os';
 import { stat, readFile, writeFile, mkdir, cp, mkdtemp } from 'node:fs/promises';
 import { randomBytes } from 'node:crypto';
 import { loadConfig, saveConfig, configPath, appHome, emptyConfig } from '../src/config.mjs';
-import { verifyLicense, planFeatures, effectiveLicense, startTrial } from '../src/license.mjs';
 import { buildPack, scaffold, mergePack, PACKS } from '../src/packs.mjs';
 import { CLIENTS, detect, connectClient, disconnectClient } from '../src/connectors.mjs';
 import { createMcp, serveStdio, serveHttp, VERSION } from '../src/server.mjs';
@@ -44,13 +43,12 @@ const clientOpts = () => ({ home: homedir(), os: process.platform, env: process.
 
 const HELP = `BrainLink MCP ${VERSION} — one Markdown brain for every AI
 
-  brainlink setup [--no-open]          open the Setup app (pick vault, connect AIs, licence)
+  brainlink setup [--no-open]          open the Setup app (pick vault, connect AIs)
   brainlink init --vault PATH [--name N] [--pack ${Object.keys(PACKS).join('|')}] [--agent NAME] [--no-scaffold]
   brainlink connect <client|all>       ${Object.keys(CLIENTS).join(', ')} (or --all)
   brainlink disconnect <client>        (disconnect-all removes it from every app)
   brainlink clients                    show detected / connected AI apps
-  brainlink license [KEY]              show or set the licence key
-  brainlink status                     config, vaults, plan
+  brainlink status                     config, vaults, timezone
   brainlink brief [--vault V] [--days 7]  what changed and what is open
   brainlink map                        rebuild each vault's Home map
   brainlink sync                       one sync pass (local by default; set up in Setup)
@@ -68,7 +66,6 @@ async function main() {
       importAll({ env: ctx.env }).catch(() => {}); // keep the local session index warm at server start; cheap and incremental after the first run
       const mcp = createMcp(ctx, { onCall: (e) => logActivity(process.env, { ...e, platform: ctx.platform || 'unknown', mode: flag('http') ? 'http' : 'stdio' }) });
       if (flag('http')) {
-        if (!ctx.features.http) fail('HTTP mode needs a licence key (brainlink license KEY).');
         const port = Number(opt('http', cfg.http.port)) || cfg.http.port;
         const token = process.env.BRAINLINK_MCP_TOKEN || cfg.http.token;
         await serveHttp(mcp, port, token);
@@ -99,10 +96,6 @@ async function main() {
       if (!(await stat(full).then((s) => s.isDirectory(), () => false))) fail(`folder not found: ${full}`);
       const cfg = await loadConfig();
       const name = opt('name', path.basename(full));
-      const isNew = !cfg.vaults.some((v) => v.name === name);
-      if (isNew) startTrial(cfg); // same trial start as Setup's quickStart, so both paths behave identically
-      const features = planFeatures(effectiveLicense(cfg));
-      if (isNew && cfg.vaults.length >= features.maxVaults) fail('the free plan supports one vault; add a licence key first');
       const built = buildPack(opt('pack', 'simple'), { vaultName: name, vaultPath: full, agentName: opt('agent') });
       const created = flag('no-scaffold') ? [] : await scaffold(full, built.scaffold);
       const next = mergePack(cfg, built);
@@ -116,24 +109,15 @@ async function main() {
       const which = argv[1];
       const all = flag('all') || which === 'all';
       if (!which && !all) fail(`connect needs a client: ${Object.keys(CLIENTS).join(', ')}, or --all`);
-      const cfg = await loadConfig();
-      const features = planFeatures(effectiveLicense(cfg));
       const found = await detect(clientOpts());
       const ids = all ? Object.keys(found).filter((id) => found[id].present) : [which];
-      let connected = Object.values(found).filter((c) => c.connected).length;
       // One app's bad/unreadable config must not stop the rest from connecting; every app's
-      // outcome (connected, skipped or failed) is reported, not just the first failure.
+      // outcome (connected or failed) is reported, not just the first failure.
       const results = [];
       for (const id of ids) {
         const title = found[id]?.title || id;
-        if (!found[id]?.connected && connected >= features.maxConnections) {
-          out(`skip ${id}: the free plan connects ${features.maxConnections} AI apps`);
-          results.push({ title, status: 'skipped (free plan limit)' });
-          continue;
-        }
         try {
           const r = await connectClient(id, clientOpts());
-          if (!found[id]?.connected) connected++;
           out(`connected ${r.title} via ${r.via}${r.file ? ` (${r.file})` : ''}${r.backup ? `\n  backup: ${r.backup}` : ''}\n  ${r.note}`);
           results.push({ title: r.title, status: 'connected' });
         } catch (e) {
@@ -161,23 +145,10 @@ async function main() {
       for (const [id, c] of Object.entries(await detect(clientOpts()))) out(`${c.connected ? '●' : c.present ? '○' : '·'} ${id.padEnd(15)} ${c.title}${c.unsupported ? ` — ${c.note}` : c.connected ? ' — connected' : c.present ? ' — found' : ''}`);
       return;
     }
-    case 'license': {
-      const cfg = await loadConfig();
-      if (argv[1]) {
-        const lic = verifyLicense(argv[1]);
-        if (!lic.valid) fail(`licence not accepted: ${lic.reason}`);
-        await saveConfig({ ...cfg, license: argv[1].trim() });
-        out(`Licence OK: ${lic.plan} for ${lic.email}${lic.expires ? `, until ${lic.expires}` : ''}.`);
-      } else {
-        const lic = effectiveLicense(cfg);
-        out(lic.valid ? `${lic.plan} licence for ${lic.email}${lic.expires ? ` (expires ${lic.expires})` : ''}` : `Free plan (${lic.reason}).`);
-      }
-      return;
-    }
     case 'status': {
-      const { cfg, license, ctx } = await openContext();
-      out(`BrainLink ${VERSION}\nconfig: ${configPath()}\ndata:   ${appHome()}\nplan:   ${ctx.features.plan}${license.valid ? ` (${license.email})` : ''}\ntimezone: ${ctx.tz}`);
-      for (const v of cfg.vaults) out(`vault  ${v.name}${ctx.enabled.includes(v.name) ? '' : ' (disabled on free plan)'}: ${v.path}${await stat(v.path).then(() => '', () => '  ← MISSING')}`);
+      const { cfg, ctx } = await openContext();
+      out(`BrainLink ${VERSION}\nconfig: ${configPath()}\ndata:   ${appHome()}\ntimezone: ${ctx.tz}`);
+      for (const v of cfg.vaults) out(`vault  ${v.name}: ${v.path}${await stat(v.path).then(() => '', () => '  ← MISSING')}`);
       for (const a of ctx.agents) out(`agent  ${a.name} @ ${a.vault}: "${a.activation[0]}" / "${a.close[0]}"`);
       return;
     }
@@ -227,7 +198,6 @@ async function main() {
       const built = buildPack('founder-os', { vaultName: 'Acme Studio', vaultPath: demoPath, agentName: 'Chief of Staff' });
       const cfg = mergePack(emptyConfig(), built);
       cfg.timezone = Intl.DateTimeFormat().resolvedOptions().timeZone;
-      startTrial(cfg);
       await saveConfig(cfg, configPath(demoEnv));
       await refreshMap(cfg, 'Acme Studio', demoEnv);
       importAll({ env: demoEnv }).catch(() => {}); // same session-index warm-up as `brainlink ui`

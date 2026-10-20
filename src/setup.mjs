@@ -1,13 +1,12 @@
 // Setup UI backend: a local-only web app (127.0.0.1, random session token) that picks the
-// vault folder, applies a rule pack, connects AI clients and stores the licence key.
+// vault folder, applies a rule pack and connects AI clients.
 import { createServer } from 'node:http';
 import { readFile, readdir, stat, cp, mkdir, writeFile } from 'node:fs/promises';
 import { randomBytes, timingSafeEqual } from 'node:crypto';
 import { execFile } from 'node:child_process';
 import { homedir } from 'node:os';
 import path from 'node:path';
-import { loadConfig, saveConfig, configPath, normalize } from './config.mjs';
-import { verifyLicense, planFeatures, effectiveLicense, startTrial } from './license.mjs';
+import { loadConfig, saveConfig, configPath, normalize, LOCALES } from './config.mjs';
 import { PACKS, buildPack, scaffold, mergePack } from './packs.mjs';
 import { CLIENTS, detect, connectClient, disconnectClient, test } from './connectors.mjs';
 import { createContext, search, searchWithVerdict, readNote, ensureDefaultIgnore, readExcludedFolders, writeExcludedFolders, DEFAULT_EXCLUDED_FOLDERS, SUGGESTED_EXCLUDED_FOLDERS } from './core.mjs';
@@ -21,6 +20,7 @@ import { syncSettings, chooseSync, suggestFolders, PROVIDERS, PROVIDER_LABELS } 
 import { sessionsService } from './host.mjs';
 
 const json = (res, code, body) => res.writeHead(code, { 'Content-Type': 'application/json', 'Cache-Control': 'no-store' }).end(JSON.stringify(body));
+const LOCALES_DIR = path.join(ROOT, 'ui', 'locales');
 
 export function pickFolder(os = process.platform) {
   return new Promise((resolve) => {
@@ -45,8 +45,6 @@ async function countNotes(dir, n = 0, depth = 0) {
   return n;
 }
 
-const mask = (k) => (k ? `${k.slice(0, 8)}…${k.slice(-6)}` : null);
-
 // A search snippet is raw note text (headings, **bold**, `code`); strip the Markdown so the
 // instant answer reads as prose instead of exposing the source's formatting.
 const plainText = (s) => String(s || '').replace(/^#+\s*/gm, '').replace(/\*\*([^*]+)\*\*/g, '$1').replace(/`([^`]+)`/g, '$1').replace(/\s+/g, ' ').trim();
@@ -70,8 +68,6 @@ export async function startSetup(opts = {}) {
 
   async function state() {
     const cfg = await loadConfig(file);
-    const lic = effectiveLicense(cfg);
-    const features = planFeatures(lic);
     const vaults = [];
     for (const v of cfg.vaults) {
       const ok = await stat(v.path).then((s) => s.isDirectory(), () => false);
@@ -79,9 +75,8 @@ export async function startSetup(opts = {}) {
       vaults.push({ ...v, exists: ok, notes: ok ? await countNotes(v.path) : 0, excluded_folders: excluded.active, excluded_suggestions: excluded.suggested });
     }
     return {
-      version: VERSION, config_path: file, os,
+      version: VERSION, config_path: file, os, locale: cfg.locale,
       default_excluded_folders: DEFAULT_EXCLUDED_FOLDERS, suggested_excluded_folders: SUGGESTED_EXCLUDED_FOLDERS,
-      license: { ...lic, key: mask(cfg.license), features: { ...features, maxVaults: String(features.maxVaults), maxConnections: String(features.maxConnections) } },
       vaults, agents: cfg.agents, handoff: cfg.handoff, timezone: cfg.timezone,
       packs: Object.entries(PACKS).map(([id, p]) => ({ id, title: p.title, description: p.description })),
       clients: await detect(clientOpts()),
@@ -97,18 +92,15 @@ export async function startSetup(opts = {}) {
   // connectClient already refuses apps it did not detect; a live handshake (clientHealthCheck)
   // confirms the write actually works before it is reported as connected, and is undone otherwise.
   async function connectAll(cfg) {
-    const features = planFeatures(effectiveLicense(cfg));
     const found = await detect(clientOpts());
-    let count = Object.values(found).filter((c) => c.connected).length;
     const connected = [], skipped = [], failed = [];
     for (const [id, c] of Object.entries(found)) {
       if (!c.present || c.connected) continue;
-      if (count >= features.maxConnections) { skipped.push(c.title); continue; }
       try {
         await connectClient(id, clientOpts());
         const health = await clientHealthCheck(id).catch((e) => ({ ok: false, message: e.message || String(e) }));
         if (!health.ok) { await disconnectClient(id, clientOpts()).catch(() => {}); throw new Error(health.message); }
-        connected.push(c.title); count++;
+        connected.push(c.title);
       } catch (e) { failed.push(`${c.title}: ${e.message}`); }
     }
     return { connected, skipped, failed, already: Object.values(found).filter((c) => c.connected).map((c) => c.title) };
@@ -122,7 +114,7 @@ export async function startSetup(opts = {}) {
     const c = CLIENTS[clientId];
     if (!c) throw new Error(`Unknown client "${clientId}".`);
     const cfg = await loadConfig(file);
-    const ctx = createContext(cfg, { env: { ...env, BRAINLINK_AI_PLATFORM: c.platform, BRAINLINK_AGENT_ROLE: c.role }, license: effectiveLicense(cfg) });
+    const ctx = createContext(cfg, { env: { ...env, BRAINLINK_AI_PLATFORM: c.platform, BRAINLINK_AGENT_ROLE: c.role } });
     if (!ctx.enabled.length) return { ok: false, client: clientId, tool: null, took_ms: 0, message: 'Add a vault first, then test the connection.' };
     const pending = [];
     const mcp = createMcp(ctx, { onCall: (e) => pending.push(logActivity(env, { ...e, platform: c.platform, mode: 'health-check' })) });
@@ -158,9 +150,6 @@ export async function startSetup(opts = {}) {
     }
     const already = cfg.vaults.find((v) => path.resolve(v.path) === vaultPath);
     if (!already) {
-      startTrial(cfg);
-      const features = planFeatures(effectiveLicense(cfg));
-      if (cfg.vaults.length >= features.maxVaults) return { ok: false, error: 'Your free plan has one vault. Remove it in Settings or add a licence key.' };
       let name = path.basename(vaultPath);
       while (cfg.vaults.some((v) => v.name === name)) name += ' 2';
       const agentName = cfg.agents.some((a) => a.name === 'Brain') ? name : 'Brain';
@@ -186,7 +175,7 @@ export async function startSetup(opts = {}) {
       const cfg = await loadConfig(file);
       const name = b.vault || cfg.vaults[cfg.vaults.length - 1]?.name;
       if (!name) return { nodes: [], edges: [] };
-      const ctx = createContext(cfg, { env: { ...env, BRAINLINK_VAULTS: name, BRAINLINK_SEMANTIC: '0' }, license: effectiveLicense(cfg) });
+      const ctx = createContext(cfg, { env: { ...env, BRAINLINK_VAULTS: name, BRAINLINK_SEMANTIC: '0' } });
       const index = await loadVault(ctx, name);
       // Big vaults: show the 600 most-connected notes so the map stays readable.
       const deg = (i) => index.backlinks[i].size + index.outlinks[i].size;
@@ -202,11 +191,9 @@ export async function startSetup(opts = {}) {
     'POST /api/connect-all': async () => connectAll(await loadConfig(file)),
     'POST /api/vault': async (b) => {
       const cfg = await loadConfig(file);
-      const features = planFeatures(effectiveLicense(cfg));
       const vaultPath = path.resolve(String(b.path || '').replace(/^~(?=$|[\/\\])/, home));
       if (!(await stat(vaultPath).then((s) => s.isDirectory(), () => false))) throw new Error(`Folder not found: ${vaultPath}`);
       const name = String(b.name || path.basename(vaultPath)).trim();
-      if (!cfg.vaults.some((v) => v.name === name) && cfg.vaults.length >= features.maxVaults) throw new Error('The free plan supports one vault. Add a licence key to connect more.');
       // A real vault folder: write the shipped default excluded-folder list (unless the caller
       // already chose one, e.g. from the "connect a vault" form), or keep an existing one as-is.
       if (Array.isArray(b.excludedFolders)) await writeExcludedFolders(vaultPath, b.excludedFolders);
@@ -266,10 +253,6 @@ export async function startSetup(opts = {}) {
       return { ok: true, agent: a };
     },
     'POST /api/connect': async (b) => {
-      const cfg = await loadConfig(file);
-      const features = planFeatures(effectiveLicense(cfg));
-      const connected = Object.entries(await detect(clientOpts())).filter(([, c]) => c.connected).map(([id]) => id);
-      if (!connected.includes(b.client) && connected.length >= features.maxConnections) throw new Error(`The free plan connects ${features.maxConnections} AI apps. Add a licence key to connect more.`);
       // connectClient refuses undetected apps. A write with no verified handshake is not a real
       // connection, so an unhealthy check undoes the write instead of reporting Connected.
       const r = await connectClient(b.client, clientOpts());
@@ -283,17 +266,15 @@ export async function startSetup(opts = {}) {
     // already use, re-shaped for callers that want one consistent result instead of each
     // function's own shape (see connectors.mjs for why /api/connect keeps its richer shape).
     'POST /api/client-test': (b) => test(b.client, clientOpts()),
-    'POST /api/license': async (b) => {
-      const key = String(b.key || '').trim();
-      const lic = verifyLicense(key);
-      if (key && !lic.valid) throw new Error(`Licence not accepted: ${lic.reason}`);
+    'POST /api/locale': async (b) => {
+      const locale = String(b.locale || '').trim();
+      if (!LOCALES.includes(locale)) throw new Error(`Unknown locale "${locale}".`);
       const cfg = await loadConfig(file);
-      await saveConfig({ ...cfg, license: key || null }, file);
-      return { ok: true, license: { ...lic, key: mask(key) } };
+      await saveConfig({ ...cfg, locale }, file);
+      return { ok: true, locale };
     },
     'POST /api/http-token': async () => {
       const cfg = await loadConfig(file);
-      if (!planFeatures(effectiveLicense(cfg)).http) throw new Error('HTTP clients need a licence key.');
       const t = randomBytes(24).toString('hex');
       await saveConfig({ ...cfg, http: { ...cfg.http, token: t } }, file);
       return { ok: true, url: `http://127.0.0.1:${cfg.http.port}/mcp`, token: t, start: 'brainlink serve --http' };
@@ -308,7 +289,7 @@ export async function startSetup(opts = {}) {
     'POST /api/sessions/private': (b) => sessions.setPrivate(b.id, b.private),
     'POST /api/test': async (b) => {
       const cfg = normalize(await loadConfig(file));
-      const ctx = createContext(cfg, { env: { ...env, BRAINLINK_AI_PLATFORM: '' }, license: effectiveLicense(cfg) });
+      const ctx = createContext(cfg, { env: { ...env, BRAINLINK_AI_PLATFORM: '' } });
       if (!ctx.enabled.length) throw new Error('Add a vault first.');
       const v = b.vault && ctx.enabled.includes(b.vault) ? b.vault : ctx.enabled[0];
       return { vault: v, results: (await search(ctx, v, String(b.query || 'goal'), 5)).map((r) => ({ title: r.title, path: r.path, heading: r.heading, score: r.score })) };
@@ -317,7 +298,7 @@ export async function startSetup(opts = {}) {
     // reshaped for a one-paragraph answer with clickable source chips (/api/note opens each one).
     'POST /api/ask': async (b) => {
       const cfg = normalize(await loadConfig(file));
-      const ctx = createContext(cfg, { env: { ...env, BRAINLINK_AI_PLATFORM: '' }, license: effectiveLicense(cfg) });
+      const ctx = createContext(cfg, { env: { ...env, BRAINLINK_AI_PLATFORM: '' } });
       if (!ctx.enabled.length) throw new Error('Add a vault first.');
       const query = String(b.query || '').trim();
       if (!query) throw new Error('Ask a question first.');
@@ -333,7 +314,7 @@ export async function startSetup(opts = {}) {
     // Opens one of the answer's source chips: full frontmatter + body, read-only.
     'POST /api/note': async (b) => {
       const cfg = normalize(await loadConfig(file));
-      const ctx = createContext(cfg, { env: { ...env, BRAINLINK_AI_PLATFORM: '' }, license: effectiveLicense(cfg) });
+      const ctx = createContext(cfg, { env: { ...env, BRAINLINK_AI_PLATFORM: '' } });
       if (!b.vault || !ctx.enabled.includes(b.vault)) throw new Error('Unknown vault.');
       return { vault: b.vault, ...(await readNote(ctx, b.vault, String(b.path || ''))) };
     },
@@ -346,6 +327,15 @@ export async function startSetup(opts = {}) {
     const url = new URL(req.url, `http://${host}`);
     touch();
     if (url.pathname === '/health') { json(res, 200, { app: 'brainlink', version: VERSION }); return; }
+    if (req.method === 'GET' && /^\/locales\/[A-Za-z-]+\.json$/.test(url.pathname)) {
+      const lang = url.pathname.slice('/locales/'.length, -'.json'.length);
+      if (!LOCALES.includes(lang)) { res.writeHead(404).end(); return; }
+      try {
+        const body = await readFile(path.join(LOCALES_DIR, `${lang}.json`), 'utf8');
+        res.writeHead(200, { 'Content-Type': 'application/json; charset=utf-8', 'Cache-Control': 'no-store' }).end(body);
+      } catch { res.writeHead(404).end(); }
+      return;
+    }
     if (req.method === 'GET' && (url.pathname === '/' || url.pathname === '/index.html')) {
       res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8', 'Cache-Control': 'no-store', 'Content-Security-Policy': "default-src 'self'; style-src 'self' 'unsafe-inline'; script-src 'self' 'unsafe-inline'; img-src 'self' data:", 'X-Frame-Options': 'DENY' }).end(html);
       return;

@@ -24,8 +24,10 @@ export function configPath(env = process.env) {
   return env.BRAINLINK_CONFIG || path.join(appHome(env), 'config.json');
 }
 
+export const LOCALES = ['en', 'zh-TW', 'pt'];
+
 export function emptyConfig() {
-  return { version: 1, timezone: null, vaults: [], agents: [], handoff: null, platforms: DEFAULT_PLATFORMS, license: null, http: { port: 8765, token: null }, connections: {} };
+  return { version: 1, timezone: null, locale: null, vaults: [], agents: [], handoff: null, platforms: DEFAULT_PLATFORMS, http: { port: 8765, token: null }, connections: {} };
 }
 
 // Fill defaults so the rest of the code never checks for missing keys.
@@ -64,6 +66,7 @@ export function validate(cfg) {
   }
   if (cfg.handoff && (!names.has(cfg.handoff.vault) || !cfg.handoff.folder)) errors.push('handoff needs an existing vault and a folder');
   if (cfg.timezone) { try { new Intl.DateTimeFormat('en', { timeZone: cfg.timezone }); } catch { errors.push(`unknown timezone "${cfg.timezone}"`); } }
+  if (cfg.locale && !LOCALES.includes(cfg.locale)) errors.push(`locale must be one of ${LOCALES.join(', ')}`);
   if (cfg.sync) errors.push(...validateSync(cfg.sync));
   return errors;
 }
