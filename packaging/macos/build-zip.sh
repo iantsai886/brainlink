@@ -48,9 +48,12 @@ cp "$STORE_SRC/memory-store.mjs" "$STORE_SRC/errors.mjs" "$STORE_SRC/interface.d
    "$STORE_SRC/package.json" "$STORE_SRC/README.md" "$STAGE/app/node_modules/brainlink-store/"
 
 # 4. The BrainLink.app launcher bundle: a minimal double-clickable app (Info.plist + a small
-#    shell launcher in Contents/MacOS, no Node inside it) that opens the dashboard that already
-#    runs in the background, starting it first if needed. No Terminal window: unlike a .command
-#    file, an app bundle's CFBundleExecutable is launched directly by macOS.
+#    shell launcher in Contents/MacOS, no Node inside it). This IS the Finder install/open path:
+#    double-click it straight from the downloaded, unzipped folder and it installs itself (copies
+#    the payload into ~/Applications, writes and loads the LaunchAgent) on first run, then opens
+#    the dashboard every time after -- no Terminal window ever appears, unlike a .command file
+#    (which Terminal.app visibly runs). Install/Uninstall BrainLink.command still exist as a
+#    secondary fallback for anyone who prefers that route.
 #    BRAINLINK_PORT must match bin/brainlink.mjs's SETUP_PORT -- both are the fixed local port
 #    the background dashboard listens on.
 BRAINLINK_PORT=47800
@@ -78,18 +81,84 @@ PLIST
 
 cat > "$STAGE/BrainLink.app/Contents/MacOS/BrainLink" <<SH
 #!/bin/bash
-# BrainLink.app launcher: opens the dashboard that the ai.brainlink LaunchAgent already runs in
-# the background; starts that background service first if it is not answering yet. No Terminal
-# window -- macOS launches this script directly as the app's CFBundleExecutable.
+# BrainLink.app launcher: on first double-click (from a freshly downloaded, unzipped folder) this
+# installs BrainLink -- copies app/+runtime/ into ~/Applications/BrainLink, copies itself into
+# ~/Applications/BrainLink.app, writes and loads the per-user ai.brainlink LaunchAgent -- then
+# opens the dashboard. On every later double-click (from ~/Applications or Launchpad) the install
+# step is already done, so this just opens the dashboard, starting the background service first
+# if it is not answering yet. No Terminal window: macOS launches this script directly as the
+# app's CFBundleExecutable.
 PORT=$BRAINLINK_PORT
 TOKEN_FILE="\$HOME/Library/Application Support/BrainLink/setup-token"
 PLIST="\$HOME/Library/LaunchAgents/ai.brainlink.plist"
+BUNDLE_DIR="\$(cd "\$(dirname "\$0")/../.." && pwd -P)"
+HERE="\$(dirname "\$BUNDLE_DIR")"
+DEST="\$HOME/Applications/BrainLink"
+APPDEST="\$HOME/Applications/BrainLink.app"
 
 alert() { osascript -e "display alert \"BrainLink\" message \"\$1\"" >/dev/null 2>&1 || true; }
 up() { if curl -fsS -m 1 "http://127.0.0.1:\$PORT/health" >/dev/null 2>&1; then return 0; else return 1; fi; }
 
+install_if_needed() {
+  if [ -f "\$PLIST" ] && up; then return 0; fi
+  # The payload (app/, runtime/) sits next to this bundle on a fresh download; once installed it
+  # lives in \$DEST instead. Either way, find it before copying anything.
+  local SRC=""
+  if [ -d "\$HERE/app" ] && [ -d "\$HERE/runtime" ]; then SRC="\$HERE"
+  elif [ -d "\$DEST/app" ] && [ -d "\$DEST/runtime" ]; then SRC="\$DEST"
+  else
+    alert "Could not find BrainLink's app files next to BrainLink.app. Re-download BrainLink and try again."
+    exit 1
+  fi
+  mkdir -p "\$HOME/Applications" "\$HOME/Library/LaunchAgents" "\$HOME/Library/Logs/BrainLink"
+  if [ "\$SRC" != "\$DEST" ]; then
+    TMP="\$(mktemp -d "\$HOME/Applications/.BrainLink-install.XXXXXX")"
+    cp -R "\$SRC/app" "\$SRC/runtime" "\$TMP/"
+    rm -rf "\$DEST"
+    mv "\$TMP" "\$DEST"
+  fi
+  if [ "\$BUNDLE_DIR" != "\$APPDEST" ]; then
+    APPTMP="\$(mktemp -d "\$HOME/Applications/.BrainLink-app-install.XXXXXX")"
+    cp -R "\$BUNDLE_DIR/." "\$APPTMP/"
+    rm -rf "\$APPDEST"
+    mv "\$APPTMP" "\$APPDEST"
+    chmod +x "\$APPDEST/Contents/MacOS/BrainLink"
+  fi
+  case "\$(uname -m)" in
+    arm64) ARCH=arm64 ;;
+    x86_64) ARCH=x64 ;;
+    *) alert "BrainLink does not support this Mac's processor (\$(uname -m))."; exit 1 ;;
+  esac
+  NODE_BIN="\$DEST/runtime/\$ARCH/bin/node"
+  CLI_PATH="\$DEST/app/bin/brainlink.mjs"
+  cat > "\$PLIST" <<PLIST
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <key>Label</key><string>ai.brainlink</string>
+  <key>ProgramArguments</key>
+  <array>
+    <string>\$NODE_BIN</string>
+    <string>\$CLI_PATH</string>
+    <string>setup</string>
+    <string>--no-open</string>
+  </array>
+  <key>RunAtLoad</key><true/>
+  <key>KeepAlive</key><true/>
+  <key>ProcessType</key><string>Background</string>
+  <key>StandardOutPath</key><string>\$HOME/Library/Logs/BrainLink/stdout.log</string>
+  <key>StandardErrorPath</key><string>\$HOME/Library/Logs/BrainLink/stderr.log</string>
+</dict>
+</plist>
+PLIST
+  launchctl unload "\$PLIST" >/dev/null 2>&1 || true
+  launchctl load "\$PLIST" >/dev/null 2>&1 || true
+}
+
+install_if_needed
+
 if ! up; then
-  if [ -f "\$PLIST" ]; then launchctl load "\$PLIST" >/dev/null 2>&1 || true; fi
   for _ in \$(seq 1 20); do
     if up; then break; fi
     sleep 0.5
@@ -97,7 +166,7 @@ if ! up; then
 fi
 
 if ! up; then
-  alert "BrainLink could not start. Open the BrainLink folder in Applications and run Install BrainLink.command again."
+  alert "BrainLink could not start. Open the BrainLink folder in Applications and double-click BrainLink.app again."
   exit 1
 fi
 
@@ -111,12 +180,12 @@ SH
 chmod 755 "$STAGE/BrainLink.app/Contents/MacOS/BrainLink"
 chmod 644 "$STAGE/BrainLink.app/Contents/Info.plist"
 
-# 5. Install BrainLink.command: one double-click, run once. Copies the payload (runtime/ + app/)
-#    to ~/Applications/BrainLink, copies the launcher to ~/Applications/BrainLink.app, writes and
-#    loads the per-user ai.brainlink LaunchAgent (RunAtLoad + KeepAlive, logs to
-#    ~/Library/Logs/BrainLink), then opens the dashboard once so Install feels instant. After
-#    this, nothing ever needs Terminal again -- the BrainLink icon in Applications/Launchpad is
-#    the only thing people use day to day.
+# 5. Install BrainLink.command: a SECONDARY fallback for anyone who prefers it (or whose Mac
+#    balks at double-clicking an unsigned .app). BrainLink.app above is the lead install/open
+#    path. Same effect either way: copies the payload (runtime/ + app/) to ~/Applications/
+#    BrainLink, copies the launcher to ~/Applications/BrainLink.app, writes and loads the
+#    per-user ai.brainlink LaunchAgent (RunAtLoad + KeepAlive, logs to ~/Library/Logs/BrainLink),
+#    then opens the dashboard once so Install feels instant.
 cat > "$STAGE/Install BrainLink.command" <<SH
 #!/bin/bash
 set -euo pipefail
@@ -224,7 +293,9 @@ SH
 chmod 755 "$STAGE/Uninstall BrainLink.command"
 
 # 7. READ ME FIRST.txt: the exact Gatekeeper steps for an unsigned, unnotarised app, for someone
-#    who has never used Terminal. English, 繁體中文 and Português, in that order.
+#    who has never used Terminal. Leads with double-clicking BrainLink.app (the install and the
+#    everyday-open path are the same icon); Install/Uninstall BrainLink.command are mentioned
+#    only as a fallback. English, 繁體中文 and Português, in that order.
 cat > "$STAGE/READ ME FIRST.txt" <<TXT
 BrainLink $VERSION_FULL for Mac
 
@@ -235,23 +306,27 @@ ENGLISH
 GETTING STARTED (one time only)
 1. Unzip this (double-click the .zip if it did not unzip itself). You should see a BrainLink
    folder with this file inside it.
-2. In that folder, right-click "Install BrainLink.command" and choose Open.
-3. macOS will warn that the file is from an unidentified developer. Click Open (you only need
+2. In that folder, right-click "BrainLink.app" and choose Open.
+3. macOS will warn that the app is from an unidentified developer. Click Open (you only need
    to do this once).
-4. If macOS instead says the file "cannot be opened" or is blocked:
+4. If macOS instead says the app "cannot be opened" or is blocked:
    - Open System Settings > Privacy & Security, scroll to the Security section, and click
      "Open Anyway" next to BrainLink. Then try step 2 again.
    - Or open Terminal and run:
        xattr -dr com.apple.quarantine ~/Downloads/BrainLink
      (adjust the path if you unzipped somewhere other than Downloads), then try step 2 again.
-5. A window opens, installs BrainLink, and your browser opens to it automatically. When it says
-   "Installed", you are done -- press any key to close that window. You can now delete the
-   downloaded BrainLink folder; BrainLink itself now lives in Applications.
+5. BrainLink installs itself and your browser opens to it automatically -- no window, no typing.
+   You can now delete the downloaded BrainLink folder; BrainLink itself now lives in
+   Applications.
 
 EVERY DAY AFTER THAT
-Open BrainLink from the BrainLink icon in Applications or Launchpad, like any other app. No
-Terminal, no windows to keep open -- BrainLink runs quietly in the background and starts itself
-whenever you log in.
+Open BrainLink from the same BrainLink icon, now in Applications or Launchpad, like any other
+app. No Terminal, no windows to keep open -- BrainLink runs quietly in the background and
+starts itself whenever you log in.
+
+IF BRAINLINK.APP WON'T OPEN
+Use the fallback instead: in the BrainLink folder, right-click "Install BrainLink.command" and
+choose Open. It does the same install, in a Terminal window this time.
 
 TO REMOVE BRAINLINK
 Open the BrainLink folder in Applications and double-click "Uninstall BrainLink.command". Your
@@ -266,21 +341,24 @@ No installation of Node.js or Xcode is required -- BrainLink bundles its own Nod
 開始使用（只需做一次）
 1. 解壓縮這個檔案（如果沒有自動解壓，雙擊 .zip 檔即可）。你會看到一個 BrainLink 資料夾，這份說明
    就在裡面。
-2. 在該資料夾中，右鍵點擊「Install BrainLink.command」，選擇「打開」。
-3. macOS 會提示此檔案來自不明開發者。點擊「打開」即可（只需做一次）。
-4. 如果 macOS 顯示檔案「無法打開」或被封鎖：
+2. 在該資料夾中，右鍵點擊「BrainLink.app」，選擇「打開」。
+3. macOS 會提示此應用程式來自不明開發者。點擊「打開」即可（只需做一次）。
+4. 如果 macOS 顯示應用程式「無法打開」或被封鎖：
    - 打開「系統設定」>「隱私權與安全性」，往下捲動到「安全性」區塊，點擊 BrainLink 旁邊的
      「仍要打開」，然後重做步驟 2。
    - 或者打開「終端機」，執行：
        xattr -dr com.apple.quarantine ~/Downloads/BrainLink
      （如果你把檔案解壓到別的資料夾，請改成對應路徑），然後重做步驟 2。
-5. 會出現一個視窗開始安裝 BrainLink，安裝完成後瀏覽器會自動打開。看到「Installed」訊息就表示完
-   成了——按任意鍵關閉視窗即可。這時你可以刪除下載的 BrainLink 資料夾；BrainLink 本身已經安裝在
-   「應用程式」資料夾裡了。
+5. BrainLink 會自動完成安裝，瀏覽器也會自動打開——不會有視窗，也不需要打字。這時你可以刪除下載
+   的 BrainLink 資料夾；BrainLink 本身已經安裝在「應用程式」資料夾裡了。
 
 之後每天怎麼用
-之後只要在「應用程式」或 Launchpad 裡點 BrainLink 的圖示，跟打開其他 App 一樣。不需要開終端機，
-也不需要留著任何視窗——BrainLink 會在背景安靜運作，而且每次登入都會自動啟動。
+之後只要點同一個 BrainLink 圖示（現在在「應用程式」或 Launchpad 裡），跟打開其他 App 一樣。不需
+要開終端機，也不需要留著任何視窗——BrainLink 會在背景安靜運作，而且每次登入都會自動啟動。
+
+如果 BrainLink.app 打不開
+改用備用方式：在 BrainLink 資料夾中，右鍵點擊「Install BrainLink.command」，選擇「打開」。效果
+相同，只是這次會開一個「終端機」視窗。
 
 如何移除 BrainLink
 打開「應用程式」裡的 BrainLink 資料夾，雙擊「Uninstall BrainLink.command」。你的筆記會被保留，
@@ -295,25 +373,28 @@ PORTUGUÊS
 PRIMEIROS PASSOS (só uma vez)
 1. Descompacte este ficheiro (se não abrir automaticamente, basta clicar duas vezes no .zip).
    Vai aparecer uma pasta BrainLink com este texto lá dentro.
-2. Nessa pasta, clique com o botão direito em "Install BrainLink.command" e escolha Abrir.
-3. O macOS vai avisar que o ficheiro é de um desenvolvedor não identificado. Clique em Abrir
+2. Nessa pasta, clique com o botão direito em "BrainLink.app" e escolha Abrir.
+3. O macOS vai avisar que a aplicação é de um desenvolvedor não identificado. Clique em Abrir
    (só precisa fazer isso uma vez).
-4. Se em vez disso o macOS disser que o ficheiro "não pode ser aberto" ou foi bloqueado:
+4. Se em vez disso o macOS disser que a aplicação "não pode ser aberta" ou foi bloqueada:
    - Abra Definições do Sistema > Privacidade e Segurança, desça até a secção Segurança e
      clique em "Abrir Mesmo Assim" junto ao BrainLink. Depois repita o passo 2.
    - Ou abra o Terminal e execute:
        xattr -dr com.apple.quarantine ~/Downloads/BrainLink
      (ajuste o caminho se descompactou noutro sítio que não a pasta Downloads), depois repita
      o passo 2.
-5. Vai abrir uma janela que instala o BrainLink, e o navegador abre automaticamente a seguir.
-   Quando aparecer "Installed", está feito -- pressione qualquer tecla para fechar essa janela.
-   Pode agora apagar a pasta BrainLink que descarregou; o BrainLink já está instalado em
-   Aplicações.
+5. O BrainLink instala-se sozinho e o navegador abre automaticamente a seguir -- sem janelas,
+   sem escrever nada. Pode agora apagar a pasta BrainLink que descarregou; o BrainLink já está
+   instalado em Aplicações.
 
 NO DIA A DIA
-Abra o BrainLink pelo ícone na pasta Aplicações ou na Launchpad, como qualquer outra aplicação.
-Sem Terminal, sem janelas para manter abertas -- o BrainLink fica a funcionar discretamente em
-segundo plano e arranca sozinho sempre que iniciar sessão.
+Abra o BrainLink pelo mesmo ícone, agora na pasta Aplicações ou na Launchpad, como qualquer
+outra aplicação. Sem Terminal, sem janelas para manter abertas -- o BrainLink fica a funcionar
+discretamente em segundo plano e arranca sozinho sempre que iniciar sessão.
+
+SE O BRAINLINK.APP NÃO ABRIR
+Use o método alternativo: na pasta BrainLink, clique com o botão direito em "Install
+BrainLink.command" e escolha Abrir. Faz a mesma instalação, só que numa janela do Terminal.
 
 PARA REMOVER O BRAINLINK
 Abra a pasta BrainLink em Aplicações e clique duas vezes em "Uninstall BrainLink.command". As
