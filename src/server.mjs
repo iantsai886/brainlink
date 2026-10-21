@@ -13,7 +13,7 @@ import { connectAgent, closeLoop } from './agents.mjs';
 import { openSessionStore, importAll } from './sessions/index.mjs';
 import { sessionList, sessionRead, sessionLog } from './sessions/mcp.mjs';
 
-export const VERSION = '1.1.0';
+export const VERSION = '1.2.0';
 export const SERVER_NAME = 'brainlink';
 const SUPPORTED_PROTOCOLS = ['2025-06-18', '2025-03-26', '2024-11-05'];
 const RO = { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: false };
