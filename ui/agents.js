@@ -12,6 +12,12 @@
     if (!r.ok) throw new Error(j.error || r.statusText);
     return j;
   }
+  async function apiState() {
+    const r = await fetch('/api/state', { headers: { 'X-BrainLink-Token': T } });
+    const j = await r.json().catch(() => ({}));
+    if (!r.ok) throw new Error(j.error || r.statusText);
+    return j;
+  }
   function toast(msg, bad) {
     const t = document.getElementById('toast');
     if (!t) return;
@@ -96,7 +102,7 @@
 
     async function load() {
       try {
-        const st = await api('/api/state');
+        const st = await apiState();
         panel.hidden = false;
         state = { ...state, agents: st.ai_agents || [], loading: false, error: null, hasVault: (st.vaults || []).length > 0 };
       } catch (e) { state = { ...state, loading: false, error: e.message }; }
