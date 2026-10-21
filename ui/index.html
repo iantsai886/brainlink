@@ -191,6 +191,11 @@ ol.todo li { padding-left: 4px; }
   <section id="sessions-panel" hidden>
     <h2 data-i18n="sessions.title"></h2>
     <p class="hint" id="sessions-hint"></p>
+    <div class="card" style="margin-bottom:10px">
+      <b data-i18n="sessions.shareTitle"></b>
+      <label class="muted" style="display:flex;flex-direction:row;gap:6px;align-items:center;margin-top:6px"><input type="checkbox" id="sess-share-summaries" style="width:auto"><span data-i18n="sessions.shareSummariesLabel"></span></label>
+      <label class="muted" style="display:flex;flex-direction:row;gap:6px;align-items:center;margin-top:6px"><input type="checkbox" id="sess-share-full" style="width:auto"><span data-i18n="sessions.shareFullTextLabel"></span></label>
+    </div>
     <div class="row" style="margin-bottom:10px"><label class="muted" style="display:flex;flex-direction:row;gap:6px;align-items:center"><input type="checkbox" id="sess-private" style="width:auto"><span data-i18n="sessions.showPrivate"></span></label></div>
     <div id="sessions-list" class="cards"></div>
     <div id="session-detail" style="margin-top:12px"></div>
@@ -607,6 +612,9 @@ async function load() {
   if (!hasVault) renderStart(); else if (!onboardingSync) { renderReady(last); drawGraph().catch(() => {}); }
   $('sessions-panel').hidden = !hasVault || onboardingSync;
   $('sessions-hint').innerHTML = t('sessions.hint', { call: '<span class="mono">session_read</span>' });
+  $('sess-share-summaries').checked = Boolean(S.sessions_sharing?.shareSummaries);
+  $('sess-share-full').checked = Boolean(S.sessions_sharing?.shareFullText);
+  $('sess-share-full').disabled = !$('sess-share-summaries').checked;
   if (hasVault && !onboardingSync) loadSessions().catch(() => {});
   $('cfgpath').textContent = S.config_path;
   $('n1').className = 'step' + (S.vaults.length ? ' done' : '');
@@ -705,6 +713,17 @@ document.addEventListener('click', (e) => {
   if (d.syncOnbPick) $('sync-onb-folder').value = d.syncOnbPick;
 });
 $('sess-private').onchange = () => loadSessions().catch(() => {});
+$('sess-share-summaries').onchange = () => act(async () => {
+  const shareSummaries = $('sess-share-summaries').checked;
+  const r = await api('POST', '/api/sessions/sharing', { shareSummaries, shareFullText: $('sess-share-full').checked });
+  S.sessions_sharing = r.sessions;
+  toast(t('sessions.shareToastSaved'));
+});
+$('sess-share-full').onchange = () => act(async () => {
+  const r = await api('POST', '/api/sessions/sharing', { shareSummaries: $('sess-share-summaries').checked, shareFullText: $('sess-share-full').checked });
+  S.sessions_sharing = r.sessions;
+  toast(t('sessions.shareToastSaved'));
+});
 $('sync-provider').onchange = () => { const p = $('sync-provider').value; $('sync-folder-row').hidden = p === 'local'; renderSyncSuggestions(p, S.sync.suggested_folders); };
 $('sync-save').onclick = () => act(async () => {
   const provider = $('sync-provider').value;

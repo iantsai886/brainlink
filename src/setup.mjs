@@ -118,6 +118,7 @@ export async function startSetup(opts = {}) {
       semantic: await detectEmbedder(cfg, env),
       obsidian_vaults: (await findObsidianVaults({ home, os, env })).filter((o) => !cfg.vaults.some((v) => path.resolve(v.path) === path.resolve(o.path))),
       sync: { ...syncSettings(cfg), providers: PROVIDERS, provider_labels: PROVIDER_LABELS, suggested_folders: suggestFolders(home) },
+      sessions_sharing: cfg.sessions,
       snapshot: { ...snapshotSettings(cfg), suggested_folder: suggestSnapshotFolder(home), ...(await loadSnapshotStatus(snapshotStateFile)) },
     };
   }
@@ -383,6 +384,16 @@ export async function startSetup(opts = {}) {
     'POST /api/sessions': (b) => sessions.list({ q: b.q, client: b.client, project: b.project, since: b.since, limit: b.limit, include_private: Boolean(b.include_private) }),
     'POST /api/sessions/read': (b) => sessions.read({ id: b.id, include_private: Boolean(b.include_private) }),
     'POST /api/sessions/private': (b) => sessions.setPrivate(b.id, b.private),
+    // What connected AI apps (not this local UI) may see of imported/logged sessions. The user's
+    // own choice; session_list/session_read in src/server.mjs always read this, never a caller flag.
+    'POST /api/sessions/sharing': async (b) => {
+      const cfg = await loadConfig(file);
+      const shareSummaries = typeof b.shareSummaries === 'boolean' ? b.shareSummaries : cfg.sessions.shareSummaries;
+      const shareFullText = typeof b.shareFullText === 'boolean' ? b.shareFullText : cfg.sessions.shareFullText;
+      const next = { ...cfg, sessions: { shareSummaries, shareFullText: shareSummaries && shareFullText } };
+      await saveConfig(next, file);
+      return { ok: true, sessions: next.sessions };
+    },
     // ---- Shared snapshot: a read-only copy of the notes for cloud agents (Ian's RB8) ----
     'POST /api/snapshot/pick-folder': async () => { const p = await pickSnapshotFolder(); return p === undefined ? { path: null, unavailable: true } : { path: p }; },
     'POST /api/snapshot': async (b) => {

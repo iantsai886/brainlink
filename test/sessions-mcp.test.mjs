@@ -1,8 +1,9 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtemp } from 'node:fs/promises';
+import { mkdtemp, cp } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
+import { fileURLToPath } from 'node:url';
 
 import { normalize } from '../src/config.mjs';
 import { createContext } from '../src/core.mjs';
@@ -11,6 +12,8 @@ import { openSessionStore } from '../src/sessions/index.mjs';
 import { sessionList, sessionRead } from '../src/sessions/mcp.mjs';
 import { estTokens } from '../src/sessions/tokens.mjs';
 
+const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
+const FIXTURES = path.join(ROOT, 'test', 'fixtures');
 const tmp = (p) => mkdtemp(path.join(tmpdir(), `brainlink-${p}-`));
 
 async function mcpWithHome(extraEnv = {}) {
@@ -18,6 +21,19 @@ async function mcpWithHome(extraEnv = {}) {
   const env = { BRAINLINK_HOME: home, BRAINLINK_AI_PLATFORM: 'Claude', BRAINLINK_SEMANTIC: '0', ...extraEnv };
   const ctx = createContext(normalize({}), { env });
   return { mcp: createMcp(ctx), ctx, env };
+}
+
+// Imported Claude Code / Codex history lives under the real OS home (~/.claude, ~/.codex — see
+// defaultRoot in src/sessions/claude-code.mjs / codex.mjs), not under BRAINLINK_HOME. A fake HOME
+// with the test fixtures copied in is the only way to exercise the real import path end to end.
+async function withFakeHome(run) {
+  const fakeHome = await tmp('fake-home');
+  await cp(path.join(FIXTURES, 'claude-code', 'projects'), path.join(fakeHome, '.claude', 'projects'), { recursive: true });
+  await cp(path.join(FIXTURES, 'codex', 'sessions'), path.join(fakeHome, '.codex', 'sessions'), { recursive: true });
+  await cp(path.join(FIXTURES, 'codex', 'history.jsonl'), path.join(fakeHome, '.codex', 'history.jsonl'));
+  const savedHome = process.env.HOME;
+  process.env.HOME = fakeHome;
+  try { return await run(fakeHome); } finally { process.env.HOME = savedHome; }
 }
 
 async function call(mcp, name, args = {}) {
@@ -33,8 +49,16 @@ test('session_log creates a private-by-default session; session_list hides it ev
   assert.deepEqual((await call(mcp, 'session_list', {})).sessions, []);
   // An MCP caller cannot grant itself private access: include_private is ignored over this transport.
   assert.deepEqual((await call(mcp, 'session_list', { include_private: true })).sessions, []);
-  await assert.rejects(call(mcp, 'session_read', { id: logged.id }), /private/i);
-  await assert.rejects(call(mcp, 'session_read', { id: logged.id, include_private: true }), /private/i);
+  // session_read returns a clear "it's private" result, not a thrown error — and a caller-supplied
+  // include_private has no effect: session_log entries are never relaxed by the imported-sessions
+  // Settings toggle (only Claude Code / Codex imports are, see src/sessions/mcp.mjs isRelaxableImport).
+  const blocked1 = await call(mcp, 'session_read', { id: logged.id });
+  assert.equal(blocked1.private, true);
+  assert.match(blocked1.message, /private/i);
+  assert.equal(blocked1.key_turns, undefined, 'a blocked read never leaks key-turn snippets');
+  const blocked2 = await call(mcp, 'session_read', { id: logged.id, include_private: true });
+  assert.equal(blocked2.private, true);
+  assert.match(blocked2.message, /private/i);
 
   // The private content is still there; it's only readable off the MCP transport, via the store directly
   // (which is what the local /api/sessions route in src/setup.mjs uses on the user's behalf).
@@ -112,4 +136,64 @@ test('token budget: representative session_list/session_read calls average <=105
   const median = toks[Math.floor(toks.length / 2)];
   assert.ok(toks.every((t) => t <= 3000), `max per-call budget exceeded: ${toks}`);
   assert.ok(median <= 1050, `median token budget exceeded: ${toks}`);
+});
+
+// ---- regression: S2 (commit 1c18d80) hard-coded include_private=false for both tools, and every
+// import defaults private:true, so a connected AI client saw 0 sessions and every session_read
+// errored, with no way for the user to ever let an AI see their own imported history again. The
+// fix is a local-only BrainLink Settings choice (cfg.sessions, src/config.mjs), defaulting ON for
+// imported-session summaries, that session_list/session_read read instead of a hard-coded false —
+// while still never taking that choice from the caller. ----
+
+test('regression: imported sessions are visible by default under a fake HOME (import count > 0)', async () => {
+  await withFakeHome(async () => {
+    const { mcp } = await mcpWithHome(); // cfg.sessions defaults: shareSummaries true, shareFullText false
+    const list = await call(mcp, 'session_list', {});
+    assert.ok(list.sessions.length > 0, 'at least one imported session is visible with the default setting');
+    assert.ok(list.sessions.every((s) => s.private === true), 'imports are still private by default, just visible as summaries');
+    const id = list.sessions[0].id;
+    const read = await call(mcp, 'session_read', { id });
+    assert.equal(read.private, true);
+    assert.ok(Array.isArray(read.key_turns), 'the default (non-full) read works and returns key-turn snippets, not an error');
+  });
+});
+
+test('regression: a caller-supplied include_private=true has no effect, on session_list or session_read, full or not', async () => {
+  await withFakeHome(async () => {
+    const { mcp } = await mcpWithHome();
+    const withFlag = await call(mcp, 'session_list', { include_private: true });
+    const without = await call(mcp, 'session_list', {});
+    assert.deepEqual(withFlag.sessions, without.sessions, 'include_private from the caller changes nothing');
+    const id = without.sessions[0].id;
+    const full = await call(mcp, 'session_read', { id, full: true, include_private: true });
+    assert.equal(full.messages, undefined, 'full=true raw text is still refused: shareFullText defaults off');
+    assert.match(full.message, /private/i);
+  });
+});
+
+test('session sharing settings: shareSummaries=false hides imports again; shareFullText=true (with shareSummaries) unlocks full=true', async () => {
+  await withFakeHome(async () => {
+    const off = await mcpWithHome();
+    const ctxOff = createContext(normalize({ sessions: { shareSummaries: false, shareFullText: false } }), { env: off.env });
+    const mcpOff = createMcp(ctxOff);
+    assert.deepEqual((await call(mcpOff, 'session_list', {})).sessions, [], 'turning shareSummaries off hides imports again, matching the pre-fix default');
+
+    const on = await mcpWithHome();
+    const ctxOn = createContext(normalize({ sessions: { shareSummaries: true, shareFullText: true } }), { env: on.env });
+    const mcpOn = createMcp(ctxOn);
+    const id = (await call(mcpOn, 'session_list', {})).sessions[0].id;
+    const full = await call(mcpOn, 'session_read', { id, full: true });
+    assert.ok(Array.isArray(full.messages), 'shareFullText=true unlocks the real message text for imported sessions');
+  });
+});
+
+test('regression: session_log (deliberately-private, non-imported) sessions are never relaxed by the imported-sessions setting', async () => {
+  const { mcp } = await mcpWithHome();
+  const logged = await call(mcp, 'session_log', { text: 'A private quick note, not an import.' });
+  // Even with full sharing cfg, client-created private notes stay private: the toggle only ever
+  // applies to the "claude-code" / "codex" import clients (see isRelaxableImport in src/sessions/mcp.mjs).
+  assert.deepEqual((await call(mcp, 'session_list', {})).sessions, []);
+  const read = await call(mcp, 'session_read', { id: logged.id });
+  assert.equal(read.private, true);
+  assert.match(read.message, /private/i);
 });

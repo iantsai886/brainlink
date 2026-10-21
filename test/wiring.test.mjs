@@ -85,9 +85,12 @@ test('importAll wiring: `brainlink sync` and `session_list` both see real ~/.cla
   assert.deepEqual(afterSync.map((s) => s.client).sort(), ['claude-code', 'codex']);
 
   // 2) `brainlink serve`'s session_list must independently trigger its own lazy import, starting
-  // from a fresh BRAINLINK_HOME with nothing imported yet. The imported sessions are private by
-  // default, and an MCP caller can never self-grant include_private, so session_list itself must
-  // report them as hidden; the lazy import is instead confirmed by reading the store directly.
+  // from a fresh BRAINLINK_HOME with nothing imported yet. Imported sessions are private by
+  // default, but BrainLink Settings' "share summaries of imported sessions" toggle (cfg.sessions,
+  // src/config.mjs) defaults ON, so session_list reports them as summaries out of the box — this
+  // is the fix for the regression where S2 hard-coded include_private=false and imports defaulting
+  // private left every connected AI client seeing 0 sessions forever. A caller-supplied
+  // include_private is still never honoured: it changes nothing here either way.
   const serveEnv = { ...env, BRAINLINK_HOME: path.join(home, 'app-serve') };
   const child = spawn(process.execPath, [path.join(ROOT, 'bin', 'brainlink.mjs'), 'serve'], { env: serveEnv });
   const lines = [];
@@ -99,7 +102,9 @@ test('importAll wiring: `brainlink sync` and `session_list` both see real ~/.cla
   child.kill();
   assert.equal(lines.length, 2, 'expected an initialize + tools/call response');
   const result = JSON.parse(lines[1].result.content[0].text);
-  assert.deepEqual(result.sessions, [], 'imported sessions are private; include_private from an MCP caller is never honoured');
+  assert.equal(result.sessions.length, 2, 'imported sessions are visible as summaries by default (the regression fix)');
+  assert.deepEqual(result.sessions.map((s) => s.client).sort(), ['claude-code', 'codex']);
+  assert.ok(result.sessions.every((s) => s.private === true), 'still flagged private; only the summary is shared');
 
   const afterServe = await (await openSessionStore(serveEnv)).listSessions({ limit: 10 });
   assert.equal(afterServe.length, 2, 'session_list must still trigger its own lazy import behind the scenes');
