@@ -3,7 +3,7 @@
 // so a cloud AI agent can read the brain with no inbound network access. BrainLink itself never
 // opens a network connection or listens on anything but 127.0.0.1 -- whatever gets this folder to
 // the cloud is the user's own desktop sync client, not us.
-import { readFile, writeFile, rename, mkdir, unlink, stat } from 'node:fs/promises';
+import { readFile, writeFile, rename, mkdir, unlink, stat, lstat, realpath } from 'node:fs/promises';
 import { watch } from 'node:fs';
 import { createHash } from 'node:crypto';
 import path from 'node:path';
@@ -54,6 +54,24 @@ async function atomicWrite(file, data) {
 
 async function readManifest(dest) {
   try { return JSON.parse(await readFile(manifestPath(dest), 'utf8')); } catch { return { files: {} }; }
+}
+
+// The manifest read back from `dest` is untrusted (it lives in a folder a cloud sync client also
+// writes to, and a compromised/odd peer could plant one). Before deleting a key from it, confirm
+// the path it names actually resolves inside `dest` -- rejecting absolute paths, "..", and any
+// symlink (in the key's own directory chain, or the key itself) that would resolve outside it.
+async function safeDeletePath(dest, rel) {
+  if (typeof rel !== 'string' || !rel || path.isAbsolute(rel)) return null;
+  const destResolved = path.resolve(dest);
+  const resolved = path.resolve(destResolved, rel);
+  if (resolved !== destResolved && !resolved.startsWith(destResolved + path.sep)) return null;
+  let realDest;
+  try { realDest = await realpath(destResolved); } catch { return null; }
+  let realDir;
+  try { realDir = await realpath(path.dirname(resolved)); } catch { return null; } // containing dir must really exist
+  if (realDir !== realDest && !realDir.startsWith(realDest + path.sep)) return null;
+  try { if ((await lstat(resolved)).isSymbolicLink()) return null; } catch { /* nothing there yet: fine, unlink is a no-op */ }
+  return resolved;
 }
 
 // Same filter every other read path uses: a private vault is skipped whole; a note's own
@@ -125,7 +143,7 @@ export async function writeSnapshotOnce(ctx, cfg, env = process.env) {
   if (sessionsText !== null) files[SESSIONS_FILE] = { sha12: sha12(sessionsText), updated_at: new Date().toISOString() };
 
   const prev = await readManifest(dest);
-  for (const rel of Object.keys(prev.files || {})) if (!files[rel]) { try { await unlink(path.join(dest, rel)); } catch {} }
+  for (const rel of Object.keys(prev.files || {})) if (!files[rel]) { const safe = await safeDeletePath(dest, rel); if (safe) { try { await unlink(safe); } catch {} } }
 
   for (const n of notes) {
     const rel = relFor(n);
@@ -145,7 +163,7 @@ export async function writeSnapshotOnce(ctx, cfg, env = process.env) {
 export async function clearSnapshot(dest) {
   if (!dest) return { ok: true };
   const prev = await readManifest(dest);
-  for (const rel of Object.keys(prev.files || {})) { try { await unlink(path.join(dest, rel)); } catch {} }
+  for (const rel of Object.keys(prev.files || {})) { const safe = await safeDeletePath(dest, rel); if (safe) { try { await unlink(safe); } catch {} } }
   try { await unlink(manifestPath(dest)); } catch {}
   return { ok: true };
 }

@@ -77,6 +77,48 @@ test('snapshot: excluded and private notes never appear; foreign files are left 
   assert.equal(await readFile(path.join(dest, 'my-own-file.txt'), 'utf8'), 'keep me', 'foreign file untouched');
 });
 
+test('snapshot: an exclusion at the vault root also hides nested descendants (e.g. "sub/Secret/x.md")', async () => {
+  const { vaultDir, ctx, cfg, env } = await setupVaults();
+  await mkdir(path.join(vaultDir, 'sub', 'Secret'), { recursive: true });
+  await writeFile(path.join(vaultDir, 'sub', 'Secret', 'x.md'), 'nested but still excluded');
+  await writeFile(path.join(vaultDir, 'sub', 'Public2.md'), '# Public2\nhello again');
+  const dest = await tmp('dest-nested-excl');
+  const withSnapshot = chooseSnapshot(cfg, { enabled: true, folder: dest });
+  const r = await writeSnapshotOnce(ctx, withSnapshot, env);
+  assert.equal(r.noteCount, 2, 'Public.md and sub/Public2.md only');
+  assert.ok(!existsSync(path.join(dest, 'Brain', 'sub', 'Secret')), 'nested excluded folder never copied into the snapshot');
+  assert.ok(existsSync(path.join(dest, 'Brain', 'sub', 'Public2.md')));
+});
+
+// P0-3: the manifest read back from the snapshot folder is untrusted (anything with write access
+// to that folder, e.g. a stray sync conflict file, could plant one). A malicious key must never
+// cause a delete outside the snapshot folder.
+test('snapshot: a malicious manifest key cannot delete files outside the snapshot folder', async () => {
+  const { ctx, cfg, env } = await setupVaults();
+  const dest = await tmp('dest-malicious');
+  const outside = await tmp('outside-victim');
+  const victim = path.join(outside, 'victim.txt');
+  await writeFile(victim, 'do not delete me');
+  const withSnapshot = chooseSnapshot(cfg, { enabled: true, folder: dest });
+  await writeSnapshotOnce(ctx, withSnapshot, env); // establish a real manifest first
+
+  const maliciousManifest = { generated_at: 'x', files: {
+    '../outside-escape/victim.txt': { sha12: 'x', updated_at: 'x' },
+    [path.join(outside, 'victim.txt')]: { sha12: 'x', updated_at: 'x' }, // absolute path
+    '..': { sha12: 'x', updated_at: 'x' },
+  } };
+  await writeFile(path.join(dest, 'manifest.json'), JSON.stringify(maliciousManifest));
+
+  const r2 = await writeSnapshotOnce(ctx, withSnapshot, env); // reconciliation deletes stale manifest keys
+  assert.equal(r2.ok, true);
+  assert.equal(await readFile(victim, 'utf8'), 'do not delete me', 'write path never touched a file outside the snapshot folder');
+  assert.ok(existsSync(dest), 'the snapshot folder itself survives');
+
+  await writeFile(path.join(dest, 'manifest.json'), JSON.stringify(maliciousManifest));
+  await clearSnapshot(dest);
+  assert.equal(await readFile(victim, 'utf8'), 'do not delete me', 'clearSnapshot never touched a file outside the snapshot folder');
+});
+
 test('snapshot: removing or excluding a note propagates, without touching foreign files', async () => {
   const { vaultDir, ctx, cfg, env } = await setupVaults();
   const dest = await tmp('dest-removal');
