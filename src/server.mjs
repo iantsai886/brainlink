@@ -111,18 +111,19 @@ export function createMcp(ctx, { onCall = () => {} } = {}) {
       inputSchema: { type: 'object', properties: { vault: vaultProp, path: { type: 'string' } }, required: ['vault', 'path'] },
       run: (a) => related(ctx, a.vault, a.path) },
     { name: 'session_list', title: 'List recent AI sessions', annotations: RO,
-      description: 'Summary-only, newest first: imported Claude Code / Codex history plus anything logged with session_log. Private sessions (the default for imports) are omitted unless include_private=true.',
+      description: 'Summary-only, newest first: imported Claude Code / Codex history plus anything logged with session_log. Private sessions (the default for imports) are never included here; the user can read them in BrainLink Settings.',
       inputSchema: { type: 'object', properties: {
         q: { type: 'string', description: 'Keyword filter over title + summary.' }, client: { type: 'string' }, project: { type: 'string', description: 'Substring match on the session\'s project/working-directory label.' },
-        since: { type: 'string', description: 'ISO date/time.' }, limit: { type: 'integer', minimum: 1, maximum: 20, default: 8 },
-        include_private: { type: 'boolean', default: false } } },
-      run: async (a) => { await importSessions(); return sessionList(await sessionStore(), a); } },
+        since: { type: 'string', description: 'ISO date/time.' }, limit: { type: 'integer', minimum: 1, maximum: 20, default: 8 } } },
+      // include_private is never taken from the caller: an AI client cannot grant itself access to
+      // private sessions. Only the local user, in BrainLink Settings (/api/sessions), can see them.
+      run: async (a) => { await importSessions(); return sessionList(await sessionStore(), { ...a, include_private: false }); } },
     { name: 'session_read', title: 'Read one AI session', annotations: RO,
-      description: 'Defaults to the summary plus up to 3 short key-turn snippets (no raw messages, ~800 tokens). Pass full=true to page the real message text at ~4k tokens via next_offset. Private sessions need include_private=true.',
+      description: 'Defaults to the summary plus up to 3 short key-turn snippets (no raw messages, ~800 tokens). Pass full=true to page the real message text at ~4k tokens via next_offset. Private sessions are never readable here; the user can read them in BrainLink Settings.',
       inputSchema: { type: 'object', properties: {
         id: { type: 'string' }, offset: { type: 'integer', minimum: 0, default: 0 },
-        full: { type: 'boolean', default: false }, include_private: { type: 'boolean', default: false } }, required: ['id'] },
-      run: async (a) => sessionRead(await sessionStore(), a) },
+        full: { type: 'boolean', default: false } }, required: ['id'] },
+      run: async (a) => sessionRead(await sessionStore(), { ...a, include_private: false }) },
     { name: 'session_log', title: 'Log a note to an AI session', annotations: WR,
       description: 'For clients with no readable local history (ChatGPT, Claude Desktop, Grok…): append a short note/turn to a session, creating one for today if session_id is omitted. Secret-filtered before it is stored; defaults to private.',
       inputSchema: { type: 'object', properties: {

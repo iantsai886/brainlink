@@ -85,7 +85,9 @@ test('importAll wiring: `brainlink sync` and `session_list` both see real ~/.cla
   assert.deepEqual(afterSync.map((s) => s.client).sort(), ['claude-code', 'codex']);
 
   // 2) `brainlink serve`'s session_list must independently trigger its own lazy import, starting
-  // from a fresh BRAINLINK_HOME with nothing imported yet.
+  // from a fresh BRAINLINK_HOME with nothing imported yet. The imported sessions are private by
+  // default, and an MCP caller can never self-grant include_private, so session_list itself must
+  // report them as hidden; the lazy import is instead confirmed by reading the store directly.
   const serveEnv = { ...env, BRAINLINK_HOME: path.join(home, 'app-serve') };
   const child = spawn(process.execPath, [path.join(ROOT, 'bin', 'brainlink.mjs'), 'serve'], { env: serveEnv });
   const lines = [];
@@ -97,8 +99,11 @@ test('importAll wiring: `brainlink sync` and `session_list` both see real ~/.cla
   child.kill();
   assert.equal(lines.length, 2, 'expected an initialize + tools/call response');
   const result = JSON.parse(lines[1].result.content[0].text);
-  assert.equal(result.sessions.length, 2, `session_list must trigger its own lazy import: ${JSON.stringify(result)}`);
-  assert.deepEqual(result.sessions.map((s) => s.client).sort(), ['claude-code', 'codex']);
+  assert.deepEqual(result.sessions, [], 'imported sessions are private; include_private from an MCP caller is never honoured');
+
+  const afterServe = await (await openSessionStore(serveEnv)).listSessions({ limit: 10 });
+  assert.equal(afterServe.length, 2, 'session_list must still trigger its own lazy import behind the scenes');
+  assert.deepEqual(afterServe.map((s) => s.client).sort(), ['claude-code', 'codex']);
 });
 
 // ---- connectors.mjs: {ok,message} wrappers + the ChatGPT honest note ----

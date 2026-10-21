@@ -639,6 +639,9 @@ async function load() {
   $('sync-folder').value = SY.folder || '';
   $('sync-folder-row').hidden = SY.provider === 'local';
   renderSyncSuggestions(SY.provider, SY.suggested_folders);
+  // Lets self-contained panels (agents.js, share.js) that keep their own hasVault copy drop their
+  // stale "Add a vault first" state the moment a vault is picked/created here, with no reload.
+  window.dispatchEvent(new CustomEvent('brainlink:state-updated', { detail: S }));
 }
 
 function openForm(p) {

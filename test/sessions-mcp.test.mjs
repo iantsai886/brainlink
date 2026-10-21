@@ -8,6 +8,7 @@ import { normalize } from '../src/config.mjs';
 import { createContext } from '../src/core.mjs';
 import { createMcp } from '../src/server.mjs';
 import { openSessionStore } from '../src/sessions/index.mjs';
+import { sessionList, sessionRead } from '../src/sessions/mcp.mjs';
 import { estTokens } from '../src/sessions/tokens.mjs';
 
 const tmp = (p) => mkdtemp(path.join(tmpdir(), `brainlink-${p}-`));
@@ -25,20 +26,27 @@ async function call(mcp, name, args = {}) {
   return JSON.parse(res.result.content[0].text);
 }
 
-test('session_log creates a private-by-default session; session_list hides it unless include_private', async () => {
-  const { mcp } = await mcpWithHome();
+test('session_log creates a private-by-default session; session_list hides it even if a caller passes include_private', async () => {
+  const { mcp, env } = await mcpWithHome();
   const logged = await call(mcp, 'session_log', { title: 'Quick note', text: 'Remember to check the kiln schedule.' });
   assert.ok(logged.id && logged.message_count === 1);
   assert.deepEqual((await call(mcp, 'session_list', {})).sessions, []);
-  const visible = await call(mcp, 'session_list', { include_private: true });
-  assert.equal(visible.sessions.length, 1);
-  const rec = visible.sessions[0];
+  // An MCP caller cannot grant itself private access: include_private is ignored over this transport.
+  assert.deepEqual((await call(mcp, 'session_list', { include_private: true })).sessions, []);
+  await assert.rejects(call(mcp, 'session_read', { id: logged.id }), /private/i);
+  await assert.rejects(call(mcp, 'session_read', { id: logged.id, include_private: true }), /private/i);
+
+  // The private content is still there; it's only readable off the MCP transport, via the store directly
+  // (which is what the local /api/sessions route in src/setup.mjs uses on the user's behalf).
+  const store = await openSessionStore(env);
+  const visible = (await sessionList(store, { include_private: true })).sessions;
+  assert.equal(visible.length, 1);
+  const rec = visible[0];
   assert.deepEqual(Object.keys(rec).sort(), ['client', 'id', 'private', 'project', 'started_at', 'summary', 'turns'].sort());
   assert.equal(rec.private, true);
   assert.equal(rec.turns, 1);
 
-  await assert.rejects(call(mcp, 'session_read', { id: logged.id }), /private/i);
-  const read = await call(mcp, 'session_read', { id: logged.id, include_private: true });
+  const read = await sessionRead(store, { id: logged.id, include_private: true });
   assert.equal(read.message_count, 1);
   assert.equal(read.messages, undefined, 'default session_read returns no messages');
   assert.equal(read.key_turns.length, 1);
@@ -46,9 +54,10 @@ test('session_log creates a private-by-default session; session_list hides it un
 });
 
 test('session_log secret filter: a planted key never reaches storage', async () => {
-  const { mcp } = await mcpWithHome();
+  const { mcp, env } = await mcpWithHome();
   const logged = await call(mcp, 'session_log', { text: 'DB_PASSWORD=hunter2SECRET and done.' });
-  const read = await call(mcp, 'session_read', { id: logged.id, include_private: true });
+  const store = await openSessionStore(env);
+  const read = await sessionRead(store, { id: logged.id, include_private: true });
   assert.ok(!JSON.stringify(read).includes('hunter2SECRET'));
 });
 

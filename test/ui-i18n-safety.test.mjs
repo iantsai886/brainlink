@@ -31,3 +31,15 @@ test('ui/index.html and ui/share.js: the folder-picker fallback never uses windo
   assert.match(html, /id="folder-fallback-modal"/);
   assert.match(html, /window\.promptForFolder\s*=/);
 });
+
+// After a vault is picked/created, index.html's load() must tell other self-contained panels
+// (agents.js, share.js) right away, so they stop saying "Add a vault first" without needing a
+// manual reload.
+test('ui/index.html dispatches brainlink:state-updated; agents.js and share.js listen for it', async () => {
+  const html = await readFile(path.join(ROOT, 'ui', 'index.html'), 'utf8');
+  const agentsJs = await readFile(path.join(ROOT, 'ui', 'agents.js'), 'utf8');
+  const shareJs = await readFile(path.join(ROOT, 'ui', 'share.js'), 'utf8');
+  assert.match(html, /dispatchEvent\(new CustomEvent\(['"]brainlink:state-updated['"]/);
+  assert.match(agentsJs, /addEventListener\(['"]brainlink:state-updated['"]/);
+  assert.match(shareJs, /addEventListener\(['"]brainlink:state-updated['"]/);
+});

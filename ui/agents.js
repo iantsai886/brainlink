@@ -180,6 +180,10 @@
       } catch (err) { toast(err.message, true); }
     });
 
+    // index.html's load() fires this after every /api/state refresh, so a vault picked/created
+    // there (hasVault was false) is reflected here right away instead of needing a manual reload.
+    window.addEventListener('brainlink:state-updated', () => { load(); });
+
     await load();
   }
 
