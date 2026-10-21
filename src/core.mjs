@@ -101,6 +101,8 @@ function splitByWords(text, ancestry) {
   return out;
 }
 
+export const isPrivateMeta = (meta) => /^(true|yes|1)$/i.test(String(meta?.private ?? ''));
+
 export function isHistorical(rel, meta) {
   const name = path.posix.basename(rel);
   return /^(SUPERSEDED|BACKUP)\b|\bSUPERSEDED\b/i.test(name) || /^(archived|historical|superseded)$/i.test(meta.status || '') || Boolean(meta.superseded_by);
@@ -520,11 +522,17 @@ export async function search(ctx, name, query, opts = {}) {
   return searchIndex(index, q, { ...opts, queries: extra, semantic });
 }
 
+const PRIVATE_NOTE_ERROR = 'This note is private.';
+
 export async function readNote(ctx, name, rel) {
-  const full = safeJoin(vaultRoot(ctx, name), rel);
+  const root = vaultRoot(ctx, name);
+  const full = safeJoin(root, rel);
   if (!full.toLowerCase().endsWith('.md')) throw new Error('Only Markdown notes can be read');
+  const relNorm = path.relative(root, full).split(path.sep).join('/');
+  if (await isExcludedPath(root, relNorm)) throw new Error(PRIVATE_NOTE_ERROR);
   const raw = await readFile(full, 'utf8');
   const { meta, body } = parseFrontmatter(raw);
+  if (isPrivateMeta(meta)) throw new Error(PRIVATE_NOTE_ERROR);
   return { path: rel, meta, body, historical: isHistorical(rel, meta) };
 }
 

@@ -108,6 +108,34 @@ test('reads are confined to the vault and to Markdown', async () => {
   assert.match((await readNote(ctx, 'Acme Studio', 'Home.md')).body, /Acme Studio/);
 });
 
+test('readNote refuses private notes and notes in an excluded folder, everywhere it is called', async () => {
+  const { cfg, company } = await fixture();
+  await writeFile(path.join(company, 'Secret Plan.md'), '---\nprivate: true\n---\n# Secret Plan\n\nAcquire Globex quietly.');
+  await mkdir(path.join(company, '00 Home'), { recursive: true });
+  await writeFile(path.join(company, '00 Home', 'Diary.md'), '# Diary\n\nvery personal notes');
+  await writeFile(path.join(company, '.brainlinkignore'), '00 Home/\n');
+  const ctx = ctxOf(cfg);
+  // vault_read_note (MCP tool)
+  const mcp = createMcp(ctx);
+  const privTool = await mcp.handle({ jsonrpc: '2.0', id: 1, method: 'tools/call', params: { name: 'vault_read_note', arguments: { vault: 'Acme Studio', path: 'Secret Plan.md' } } });
+  assert.equal(privTool.result.isError, true);
+  assert.match(privTool.result.content[0].text, /private/i);
+  assert.ok(!JSON.stringify(privTool.result).includes('Globex'));
+  const exclTool = await mcp.handle({ jsonrpc: '2.0', id: 2, method: 'tools/call', params: { name: 'vault_read_note', arguments: { vault: 'Acme Studio', path: '00 Home/Diary.md' } } });
+  assert.equal(exclTool.result.isError, true);
+  assert.match(exclTool.result.content[0].text, /private/i);
+  // connector fetch tool
+  const fetchPriv = await mcp.handle({ jsonrpc: '2.0', id: 3, method: 'tools/call', params: { name: 'fetch', arguments: { id: 'Acme Studio::Secret Plan.md' } } });
+  assert.equal(fetchPriv.result.isError, true);
+  assert.match(fetchPriv.result.content[0].text, /private/i);
+  const fetchExcl = await mcp.handle({ jsonrpc: '2.0', id: 4, method: 'tools/call', params: { name: 'fetch', arguments: { id: 'Acme Studio::00 Home/Diary.md' } } });
+  assert.equal(fetchExcl.result.isError, true);
+  assert.match(fetchExcl.result.content[0].text, /private/i);
+  // readNote itself (used directly by /api/note)
+  await assert.rejects(readNote(ctx, 'Acme Studio', 'Secret Plan.md'), /private/i);
+  await assert.rejects(readNote(ctx, 'Acme Studio', '00 Home/Diary.md'), /private/i);
+});
+
 test('per-connection vault scope: BRAINLINK_VAULTS hides other vaults', async () => {
   const { cfg } = await fixture();
   const ctx = ctxOf(cfg, { BRAINLINK_VAULTS: 'Acme Studio' });

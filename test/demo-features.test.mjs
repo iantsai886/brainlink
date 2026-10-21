@@ -45,6 +45,27 @@ test('/api/ask: answers from the vault with clickable source chips; /api/note op
   } finally { s.server.close(); }
 });
 
+test('/api/note refuses a private note and a note in an excluded folder', async () => {
+  const { s, api, vaultPath } = await withSampleVault('note-private');
+  try {
+    const { writeFile, mkdir } = await import('node:fs/promises');
+    await writeFile(path.join(vaultPath, 'Secret Plan.md'), '---\nprivate: true\n---\n# Secret Plan\n\nAcquire Globex quietly.');
+    await mkdir(path.join(vaultPath, '00 Home'), { recursive: true });
+    await writeFile(path.join(vaultPath, '00 Home', 'Diary.md'), '# Diary\n\nvery personal notes');
+    await writeFile(path.join(vaultPath, '.brainlinkignore'), '00 Home/\n');
+
+    const privRes = await api('/api/note', { vault: 'Acme Studio', path: 'Secret Plan.md' });
+    assert.equal(privRes.status, 400);
+    const privBody = await privRes.json();
+    assert.match(privBody.error, /private/i);
+    assert.ok(!JSON.stringify(privBody).includes('Globex'));
+
+    const exclRes = await api('/api/note', { vault: 'Acme Studio', path: '00 Home/Diary.md' });
+    assert.equal(exclRes.status, 400);
+    assert.match((await exclRes.json()).error, /private/i);
+  } finally { s.server.close(); }
+});
+
 test('/api/ask: a question with nothing in the vault says so instead of guessing', async () => {
   const { s, api } = await withSampleVault('ask-miss');
   try {
