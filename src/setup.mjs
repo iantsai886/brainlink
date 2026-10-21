@@ -234,7 +234,7 @@ export async function startSetup(opts = {}) {
       const index = await loadVault(ctx, name);
       // Big vaults: show the 600 most-connected notes so the map stays readable.
       const deg = (i) => index.backlinks[i].size + index.outlinks[i].size;
-      const keep = index.notes.map((n, i) => i).filter((i) => !index.notes[i].generated && !index.notes[i].minor && !index.notes[i].historical).sort((a, b) => deg(b) - deg(a)).slice(0, 600);
+      const keep = index.notes.map((n, i) => i).filter((i) => !index.notes[i].generated && !index.notes[i].minor && !index.notes[i].historical && !index.notes[i].private).sort((a, b) => deg(b) - deg(a)).slice(0, 600);
       const pos = new Map(keep.map((i, k) => [i, k]));
       const health = await vaultHealth(ctx, name);
       return {

@@ -136,6 +136,29 @@ test('readNote refuses private notes and notes in an excluded folder, everywhere
   await assert.rejects(readNote(ctx, 'Acme Studio', '00 Home/Diary.md'), /private/i);
 });
 
+test('S1: a private note never surfaces in search, related notes or the 2D graph', async () => {
+  const { cfg, company } = await fixture();
+  await writeFile(path.join(company, 'Secret Plan.md'), '---\nprivate: true\n---\n# Secret Plan\n\nzebracorn acquisition plan, linked from [[Home]].');
+  await writeFile(path.join(company, 'Home.md'), (await readFile(path.join(company, 'Home.md'), 'utf8')) + '\n\nSee [[Secret Plan]] for zebracorn details.\n');
+  const ctx = ctxOf(cfg);
+
+  const r = await search(ctx, 'Acme Studio', 'zebracorn');
+  assert.ok(!r.some((x) => x.path === 'Secret Plan.md'), JSON.stringify(r));
+
+  const rel = await related(ctx, 'Acme Studio', 'Home.md');
+  assert.ok(!rel.links_to.some((x) => x.path === 'Secret Plan.md'), JSON.stringify(rel.links_to));
+  await assert.rejects(related(ctx, 'Acme Studio', 'Secret Plan.md'), /not found/i);
+
+  const env = { BRAINLINK_HOME: await tmp('s1-graph-home'), BRAINLINK_SEMANTIC: '0' };
+  const s = await startSetup({ env, home: await tmp('s1-graph'), os: 'darwin', port: 0, useCli: false });
+  const api = (p, body) => fetch(`http://127.0.0.1:${s.port}${p}`, { method: 'POST', headers: { 'X-BrainLink-Token': s.token, 'Content-Type': 'application/json' }, body: JSON.stringify(body || {}) });
+  try {
+    await api('/api/vault', { path: company, name: 'Acme Studio', pack: 'simple', scaffold: false });
+    const g = await (await api('/api/graph', { vault: 'Acme Studio' })).json();
+    assert.ok(!g.nodes.some((n) => n.title === 'Secret Plan'), JSON.stringify(g.nodes));
+  } finally { s.server.close(); }
+});
+
 test('per-connection vault scope: BRAINLINK_VAULTS hides other vaults', async () => {
   const { cfg } = await fixture();
   const ctx = ctxOf(cfg, { BRAINLINK_VAULTS: 'Acme Studio' });

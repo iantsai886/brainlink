@@ -45,6 +45,17 @@ test('/api/ask: answers from the vault with clickable source chips; /api/note op
   } finally { s.server.close(); }
 });
 
+test('S1: /api/ask never answers from or cites a private note', async () => {
+  const { s, api, vaultPath } = await withSampleVault('ask-private');
+  try {
+    const { writeFile } = await import('node:fs/promises');
+    await writeFile(path.join(vaultPath, 'Secret Pricing.md'), '---\nprivate: true\n---\n# Secret Pricing\n\nThe real Brand Sprint price is secretly $1.');
+    const r = await (await api('/api/ask', { query: 'What is the price of the Brand Sprint?' })).json();
+    assert.ok(!r.sources.some((x) => x.path === 'Secret Pricing.md'), JSON.stringify(r.sources));
+    assert.ok(!String(r.answer).includes('secretly'));
+  } finally { s.server.close(); }
+});
+
 test('/api/note refuses a private note and a note in an excluded folder', async () => {
   const { s, api, vaultPath } = await withSampleVault('note-private');
   try {

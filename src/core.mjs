@@ -236,7 +236,7 @@ export async function loadVault(ctx, name) {
     const aliases = listValue(meta.aliases);
     const names = [title, ...aliases].join(' ');
     const chunks = chunkMarkdown(body).map((c, i) => ({ ...c, id: `${rel}#${i}`, tokens: termFrequencies(`${names} ${c.heading} ${c.text}`) }));
-    state.files.set(rel, { hash, mtime, bytes: stNow.size, note: { rel, title, aliases, raw, meta, body, chunks, mtime, minor: isMinor(rel, title), date: noteDate(rel, meta, mtime), tags: extractTags(body, meta), generated: meta.generated_by === 'brainlink' || /^BrainLink\/Commands\//i.test(rel), historical: isHistorical(rel, meta) } });
+    state.files.set(rel, { hash, mtime, bytes: stNow.size, note: { rel, title, aliases, raw, meta, body, chunks, mtime, minor: isMinor(rel, title), date: noteDate(rel, meta, mtime), tags: extractTags(body, meta), generated: meta.generated_by === 'brainlink' || /^BrainLink\/Commands\//i.test(rel), historical: isHistorical(rel, meta), private: isPrivateMeta(meta) } });
   }
   for (const rel of [...state.files.keys()]) if (!seen.has(rel)) { state.files.delete(rel); changed = true; }
   if (changed) state.index = buildIndex([...state.files.values()].map((f) => f.note).sort((a, b) => a.rel.localeCompare(b.rel)));
@@ -295,6 +295,7 @@ export function noteFilter(index, { folder, tag, since, until, exclude } = {}) {
   const t = tag ? String(tag).replace(/^#/, '').toLowerCase() : null;
   return (i) => {
     const n = index.notes[i];
+    if (n.private) return false; // frontmatter private: true — never surfaced outside readNote's own check
     if (f && !n.rel.toLowerCase().startsWith(f)) return false;
     if (t && !n.tags.has(t)) return false;
     if (since && n.date < since) return false;
@@ -541,14 +542,15 @@ const eligibleFor = (index) => (j) => { const n = index.notes[j]; return !(n.his
 export async function related(ctx, name, rel) {
   const index = await loadVault(ctx, name);
   const i = index.byRel.get(rel);
-  if (i === undefined) throw new Error(`Note not found in ${name}: ${rel}`);
+  if (i === undefined || index.notes[i].private) throw new Error(`Note not found in ${name}: ${rel}`);
   const { termSets, df } = noteTerms(index);
   const exclude = new Set([i, ...index.outlinks[i], ...index.backlinks[i]]);
+  const notPrivate = (j) => !index.notes[j].private;
   return {
     note: summarize(index, i),
-    links_to: [...index.outlinks[i]].map((j) => summarize(index, j)),
-    linked_from: [...index.backlinks[i]].map((j) => summarize(index, j)),
-    suggested: suggestRelated(termSets[i], termSets, df, { exclude, eligible: eligibleFor(index) }).map((s) => ({ ...summarize(index, s.j), score: +s.score.toFixed(3), shared_terms: s.shared })),
+    links_to: [...index.outlinks[i]].filter(notPrivate).map((j) => summarize(index, j)),
+    linked_from: [...index.backlinks[i]].filter(notPrivate).map((j) => summarize(index, j)),
+    suggested: suggestRelated(termSets[i], termSets, df, { exclude, eligible: (j) => eligibleFor(index)(j) && notPrivate(j) }).map((s) => ({ ...summarize(index, s.j), score: +s.score.toFixed(3), shared_terms: s.shared })),
   };
 }
 
