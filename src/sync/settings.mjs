@@ -7,7 +7,7 @@ import path from 'node:path';
 // The single BrainStore vault (brainlink-store interface.d.ts VaultInfo.name) sync ever touches.
 export const SYNC_VAULT = 'brain';
 export const PROVIDERS = ['local', 'gdrive', 'icloud', 'dropbox'];
-export const PROVIDER_LABELS = { local: 'Local only', gdrive: 'Google Drive folder', icloud: 'iCloud folder', dropbox: 'Dropbox folder' };
+export const PROVIDER_LABELS = { local: 'Local only', gdrive: 'Drive snapshot', icloud: 'iCloud folder', dropbox: 'Dropbox folder' };
 
 export function defaultSync() { return { provider: 'local', folder: null, device: hostname().split('.')[0] || 'device' }; }
 

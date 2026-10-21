@@ -1,6 +1,6 @@
 import {createHook,errText} from './state.mjs';
 export const PROVIDERS = Object.freeze(['local','gdrive','icloud','dropbox']);
-export const PROVIDER_LABELS = Object.freeze({local:'Local only',gdrive:'Google Drive folder',icloud:'iCloud folder',dropbox:'Dropbox folder'});
+export const PROVIDER_LABELS = Object.freeze({local:'Local only',gdrive:'Drive snapshot',icloud:'iCloud folder',dropbox:'Dropbox folder'});
 export function useSettings(api){
  const service=api.services?.settings;const available=['get','suggestFolders','validate','save'].every(k=>typeof service?.[k]==='function');
  const h=createHook({available,settings:{provider:'local',folder:null,device:'device'},suggestions:{},busy:false,message:'',error:'',theme:'light'});
