@@ -5,6 +5,7 @@ import { homedir, tmpdir } from 'node:os';
 import { stat, readFile, writeFile, mkdir, cp, mkdtemp } from 'node:fs/promises';
 import { randomBytes } from 'node:crypto';
 import { loadConfig, saveConfig, configPath, appHome, emptyConfig } from '../src/config.mjs';
+import { markConnected } from '../src/mcp-agents.mjs';
 import { buildPack, scaffold, mergePack, PACKS } from '../src/packs.mjs';
 import { CLIENTS, detect, connectClient, disconnectClient } from '../src/connectors.mjs';
 import { createMcp, serveStdio, serveHttp, VERSION } from '../src/server.mjs';
@@ -64,7 +65,15 @@ async function main() {
     case 'serve': {
       const { ctx, cfg } = await openContext();
       importAll({ env: ctx.env }).catch(() => {}); // keep the local session index warm at server start; cheap and incremental after the first run
-      const mcp = createMcp(ctx, { onCall: (e) => logActivity(process.env, { ...e, platform: ctx.platform || 'unknown', mode: flag('http') ? 'http' : 'stdio' }) });
+      const mcp = createMcp(ctx, { onCall: (e) => {
+        logActivity(process.env, { ...e, platform: ctx.platform || 'unknown', mode: flag('http') ? 'http' : 'stdio' });
+        // Connected only after a verified call that used that agent's token — same rule as the
+        // Connect buttons (clientHealthCheck in src/setup.mjs). Written once, not on every call.
+        if (ctx.mcpAgent && e.ok && !ctx.mcpAgent.connected) {
+          ctx.mcpAgent.connected = true; // avoid re-saving on every subsequent call this process makes
+          loadConfig().then((c) => saveConfig(markConnected(c, ctx.mcpAgent.id))).catch(() => {});
+        }
+      } });
       if (flag('http')) {
         const port = Number(opt('http', cfg.http.port)) || cfg.http.port;
         const token = process.env.BRAINLINK_MCP_TOKEN || cfg.http.token;

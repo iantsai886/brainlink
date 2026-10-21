@@ -1,0 +1,6 @@
+/* Agents panel extras; base look (cards, pills, buttons, colors) comes from index.html's shared styles. */
+.agent-reveal { border-color: var(--accent); background: var(--accent-soft); }
+.agent-key { font-size: 14px; padding: 6px 8px; background: var(--panel); border-radius: 6px; display: inline-block; overflow-wrap: anywhere; }
+.agent-snippet { white-space: pre-wrap; font-size: 12px; background: var(--bg); border: 1px solid var(--line); border-radius: 8px; padding: 10px; margin: 8px 0 0; overflow-wrap: anywhere; }
+.agent-card .agent-test-out:empty { display: none; }
+.agent-card .agent-test-out { margin-top: 6px; }

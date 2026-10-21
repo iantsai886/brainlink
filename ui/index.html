@@ -108,6 +108,9 @@ ol.todo li { padding-left: 4px; }
 #boot-error { color: #fff; background: var(--bad); border-radius: 8px; margin: 8px 20px; }
 #boot-error button { background: transparent; border-color: rgba(255,255,255,.6); color: #fff; }
 </style>
+<link rel="stylesheet" href="agents.css">
+<link rel="stylesheet" href="notes3d.css">
+<link rel="stylesheet" href="share.css">
 </head>
 <body>
 <header><h1>BrainLink</h1><select id="lang" aria-label="Language" style="margin-left:auto"></select><button class="link" id="done" data-i18n="header.done"></button></header>
@@ -164,7 +167,7 @@ ol.todo li { padding-left: 4px; }
     <h2 data-i18n="brain.title"></h2>
     <p class="hint" data-i18n="brain.hint"></p>
     <div class="brain">
-      <div><canvas id="graph" width="800" height="600" aria-label="Map of notes and links"></canvas><div class="legend" id="legend"></div></div>
+      <div><div id="notes3d-root" aria-label="Map of notes and links"></div></div>
       <div>
         <div class="stats"><div class="stat"><b id="st-notes">–</b><span data-i18n="brain.notes"></span></div><div class="stat"><b id="st-links">–</b><span data-i18n="brain.links"></span></div><div class="stat"><b id="st-orphans">–</b><span data-i18n="brain.orphans"></span></div></div>
         <div class="phrases"><b style="font-size:13px;color:var(--muted)" data-i18n="brain.phrasesTitle"></b>
@@ -177,6 +180,12 @@ ol.todo li { padding-left: 4px; }
         <p class="smart muted" id="smart"></p>
       </div>
     </div>
+  </section>
+
+  <section id="agents-panel" hidden>
+    <h2>Agents</h2>
+    <p class="hint">Any AI can connect with its own key — on this Mac now, or ready for the cloud once that is reachable.</p>
+    <div id="agents-root"></div>
   </section>
 
   <section id="sessions-panel" hidden>
@@ -216,8 +225,8 @@ ol.todo li { padding-left: 4px; }
   </section>
 
   <section id="s-agents">
-    <h2><span class="step" id="n2">2</span> <span data-i18n="agents.step2Title"></span></h2>
-    <p class="hint" data-i18n="agents.hint"></p>
+    <h2><span class="step" id="n2">2</span> <span data-i18n="rolePack.step2Title"></span></h2>
+    <p class="hint" data-i18n="rolePack.hint"></p>
     <div id="agents" class="cards"></div>
   </section>
 
@@ -252,6 +261,8 @@ ol.todo li { padding-left: 4px; }
     </div>
     <div class="row" style="margin-top:12px"><button class="primary" id="sync-save" data-i18n="sync.saveBtn"></button></div>
   </section>
+
+  <section id="s-share"><div id="share-root"></div></section>
   </div></details>
   <p class="muted" style="font-size:12px;text-align:center"><span data-i18n="settings.config"></span> <span class="mono" id="cfgpath"></span></p>
 </main>
@@ -577,11 +588,11 @@ async function load() {
   </div>`).join('') : `<p class="muted">${esc(t('vault.noneYet'))}</p>`;
   $('n2').className = 'step' + (S.agents.length ? ' done' : '');
   $('agents').innerHTML = S.agents.length ? S.agents.map((a, i) => `<div class="card"><b>${esc(a.name)} <span class="muted" style="font-weight:400">· ${esc(a.vault)} · close → ${esc(a.close_target.mode)} ${esc(a.close_target.path || a.close_target.dir || '')}</span></b>
-    <label>${esc(t('agents.roleLabel'))}<textarea data-a="${i}" data-f="role">${esc(a.role)}</textarea></label>
-    <div class="grid2"><label>${esc(t('agents.activationLabel'))}<textarea data-a="${i}" data-f="activation">${esc(a.activation.join('\n'))}</textarea></label>
-    <label>${esc(t('agents.closeLabel'))}<textarea data-a="${i}" data-f="close">${esc(a.close.join('\n'))}</textarea></label></div>
-    ${a.close_target.mode === 'proposal-only' ? `<label class="muted"><span><input type="checkbox" data-a="${i}" data-f="capture_approved" style="width:auto" ${a.capture_approved ? 'checked' : ''}> ${esc(t('agents.allowCaptures', { name: a.name }))}</span></label>` : ''}
-    <div class="row"><button data-save-agent="${i}">${esc(t('agents.saveBtn', { name: a.name }))}</button></div></div>`).join('') : `<p class="muted">${esc(t('agents.none'))}</p>`;
+    <label>${esc(t('rolePack.roleLabel'))}<textarea data-a="${i}" data-f="role">${esc(a.role)}</textarea></label>
+    <div class="grid2"><label>${esc(t('rolePack.activationLabel'))}<textarea data-a="${i}" data-f="activation">${esc(a.activation.join('\n'))}</textarea></label>
+    <label>${esc(t('rolePack.closeLabel'))}<textarea data-a="${i}" data-f="close">${esc(a.close.join('\n'))}</textarea></label></div>
+    ${a.close_target.mode === 'proposal-only' ? `<label class="muted"><span><input type="checkbox" data-a="${i}" data-f="capture_approved" style="width:auto" ${a.capture_approved ? 'checked' : ''}> ${esc(t('rolePack.allowCaptures', { name: a.name }))}</span></label>` : ''}
+    <div class="row"><button data-save-agent="${i}">${esc(t('rolePack.saveBtn', { name: a.name }))}</button></div></div>`).join('') : `<p class="muted">${esc(t('rolePack.none'))}</p>`;
   const first = S.agents[0];
   $('connect-http-hint').innerHTML = t('connect.httpHint', { cmd: '<span class="mono">brainlink serve --http</span>' });
   $('test-hint').innerHTML = t('test.hint', { phrase: `<b>"${esc(first ? first.activation[0] : t('test.defaultPhrase'))}"</b>` });
@@ -644,7 +655,7 @@ document.addEventListener('click', (e) => {
   if (d.saveAgent !== undefined) act(async () => {
     const i = d.saveAgent, a = S.agents[i], get = (f) => document.querySelector(`[data-a="${i}"][data-f="${f}"]`);
     await api('POST', '/api/agent', { name: a.name, role: get('role').value, activation: get('activation').value, close: get('close').value, ...(get('capture_approved') ? { capture_approved: get('capture_approved').checked } : {}) });
-    toast(t('agents.savedToast', { name: a.name }));
+    toast(t('rolePack.savedToast', { name: a.name }));
   });
   if (d.sessRead) (async (id) => {
     // Independent of whatever session is currently shown: proves any session can read any other.
@@ -688,5 +699,9 @@ setInterval(async () => {
   try { const s = await api('GET', '/api/state'); S.activity = s.activity; $('activity').innerHTML = s.activity.length ? s.activity.map((e) => `<tr><td>${esc(new Date(e.at).toLocaleString(LOCALE))}</td><td>${esc(e.platform)}</td><td class="mono">${esc(e.tool)}</td><td>${e.ok ? (e.written ? esc(t('test.written')) : esc(t('test.ok'))) : esc(t('test.refused'))}</td></tr>`).join('') : `<tr><td colspan="4" class="muted">${esc(t('ready.noCalls'))}</td></tr>`; $('n4').className = 'step' + (s.activity.length ? ' done' : ''); } catch {}
 }, 5000);
 </script>
+<script src="agents.js"></script>
+<script src="vendor/3d-force-graph/3d-force-graph.min.js"></script>
+<script src="notes3d.js"></script>
+<script src="share.js"></script>
 </body>
 </html>
