@@ -705,6 +705,39 @@ test('.brainlinkignore hides folders (e.g. sample vaults inside stored source co
   assert.deepEqual(r.map((x) => x.path), ['Projects/Tool/source/README.md']);
 });
 
+test('P0-2: a root .brainlinkignore exclusion applies at any depth, not only to its own directory\'s direct children', async () => {
+  const { cfg, company } = await fixture();
+  await writeFile(path.join(company, '.brainlinkignore'), '00 Home/\n');
+  await mkdir(path.join(company, 'sub', '00 Home'), { recursive: true });
+  await writeFile(path.join(company, 'sub', '00 Home', 'x.md'), 'zebracorn nested personal notes');
+  await writeFile(path.join(company, 'sub', 'Visible.md'), '# Visible\n\nzebracorn visible notes');
+
+  // index / search
+  const r = await search(ctxOf(cfg), 'Acme Studio', 'zebracorn');
+  assert.ok(!r.some((x) => x.path.includes('00 Home')), JSON.stringify(r));
+  assert.ok(r.some((x) => x.path === 'sub/Visible.md'));
+
+  // graph (/api/graph)
+  const env = { BRAINLINK_HOME: await tmp('p02-graph-home'), BRAINLINK_SEMANTIC: '0' };
+  const s = await startSetup({ env, home: await tmp('p02-graph'), os: 'darwin', port: 0, useCli: false });
+  const api = (p, body) => fetch(`http://127.0.0.1:${s.port}${p}`, { method: 'POST', headers: { 'X-BrainLink-Token': s.token, 'Content-Type': 'application/json' }, body: JSON.stringify(body || {}) });
+  try {
+    await api('/api/vault', { path: company, name: 'Acme Studio', pack: 'simple', scaffold: false });
+    const g = await (await api('/api/graph', { vault: 'Acme Studio' })).json();
+    assert.ok(!g.nodes.some((n) => n.title === 'x'), JSON.stringify(g.nodes));
+  } finally { s.server.close(); }
+
+  // snapshot
+  const dest = await tmp('p02-snapshot-dest');
+  const ctx = ctxOf(cfg);
+  const { chooseSnapshot, writeSnapshotOnce } = await import('../src/snapshot.mjs');
+  const withSnapshot = chooseSnapshot(cfg, { enabled: true, folder: dest });
+  await writeSnapshotOnce(ctx, withSnapshot, {});
+  const { existsSync } = await import('node:fs');
+  assert.ok(!existsSync(path.join(dest, 'Acme Studio', 'sub', '00 Home')), 'nested excluded folder never reaches the snapshot');
+  assert.ok(existsSync(path.join(dest, 'Acme Studio', 'sub', 'Visible.md')));
+});
+
 test('default .brainlinkignore: shipped on a fresh real vault, never overwrites one already there, folders stay out of search and answers', async () => {
   const home = await tmp('excluded');
   const vaultDir = path.join(home, 'Notes');

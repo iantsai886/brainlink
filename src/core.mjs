@@ -182,17 +182,34 @@ export async function writeExcludedFolders(vaultPath, folders) {
   return lines;
 }
 
-async function walk(root, dir = root, out = []) {
-  const rules = await ignoreRules(dir);
+// Ignore rules accumulate down the tree (like .gitignore) so a root-level rule such as
+// "00 Home/" also excludes "sub/00 Home/" at any depth, not just a direct child of root.
+async function walk(root, dir = root, out = [], inherited = []) {
+  const rules = inherited.concat(await ignoreRules(dir));
   if (rules.some((re) => re.test('*') || re.source === '^.*$')) return out;
   for (const f of await readdir(dir, { withFileTypes: true })) {
     if (f.name.startsWith('.') || SKIP_DIRS.has(f.name)) continue;
     if (rules.some((re) => re.test(f.name))) continue;
     const full = path.join(dir, f.name);
-    if (f.isDirectory()) await walk(root, full, out);
+    if (f.isDirectory()) await walk(root, full, out, rules);
     else if (f.isFile() && f.name.toLowerCase().endsWith('.md')) out.push(full);
   }
   return out;
+}
+
+// Same accumulated-rule logic as walk(), for a single already-known relative path (readNote()):
+// true if any ancestor folder, or the file itself, is excluded at any depth.
+export async function isExcludedPath(root, rel) {
+  const parts = String(rel).split('/');
+  let dir = root, rules = [];
+  for (const name of parts) {
+    if (name.startsWith('.') || SKIP_DIRS.has(name)) return true;
+    rules = rules.concat(await ignoreRules(dir));
+    if (rules.some((re) => re.test('*') || re.source === '^.*$')) return true;
+    if (rules.some((re) => re.test(name))) return true;
+    dir = path.join(dir, name);
+  }
+  return false;
 }
 
 // Hash-incremental: unchanged files are not re-chunked on the next call.
