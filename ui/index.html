@@ -110,6 +110,7 @@ ol.todo li { padding-left: 4px; }
 </style>
 <link rel="stylesheet" href="agents.css">
 <link rel="stylesheet" href="notes3d.css">
+<link rel="stylesheet" href="share.css">
 </head>
 <body>
 <header><h1>BrainLink</h1><span class="plan" id="plan">Loading…</span><button class="link" id="done" style="margin-left:auto">Done — close setup</button></header>
@@ -260,6 +261,8 @@ ol.todo li { padding-left: 4px; }
     </div>
     <div class="row" style="margin-top:12px"><button class="primary" id="sync-save">Save sync settings</button></div>
   </section>
+
+  <section id="s-share"><div id="share-root"></div></section>
 
   <section id="s-license">
     <h2><span class="step" id="n5">5</span> Licence</h2>
@@ -670,5 +673,6 @@ setInterval(async () => {
 <script src="agents.js"></script>
 <script src="vendor/3d-force-graph/3d-force-graph.min.js"></script>
 <script src="notes3d.js"></script>
+<script src="share.js"></script>
 </body>
 </html>

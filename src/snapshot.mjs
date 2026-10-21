@@ -17,7 +17,7 @@ export function snapshotSettings(cfg = {}) { return { ...defaultSnapshot(), ...(
 
 export function validateSnapshot(s) {
   const e = [];
-  if (s.enabled && (!s.folder || !path.isAbsolute(s.folder))) e.push('snapshot.folder must be an absolute path');
+  if (s.enabled && (!s.folder || !path.isAbsolute(s.folder))) e.push('Choose a folder using the folder picker.');
   return e;
 }
 

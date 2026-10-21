@@ -1,0 +1,3 @@
+/* Shared snapshot panel extras; base look (sections, inputs, buttons, pills) comes from
+   index.html's shared styles. */
+#s-share #share-folder { min-width: 0; }
