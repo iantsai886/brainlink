@@ -83,7 +83,7 @@
         if (d.shareUseSuggested !== undefined) { state.draft.folder = d.shareUseSuggested; draw(); return; }
         if (e.target.id === 'share-pick') {
           const r = await api('/api/snapshot/pick-folder');
-          const p = r.path || (r.unavailable ? (window.prompt?.('Folder to share (for example ~/Shared Notes):') || '').trim() : '');
+          const p = r.path || (r.unavailable ? await window.promptForFolder?.() : '');
           if (p) { state.draft.folder = p; draw(); }
           return;
         }

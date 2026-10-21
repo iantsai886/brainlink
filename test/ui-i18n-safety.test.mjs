@@ -19,3 +19,15 @@ test('ui/index.html: no data-i18n element directly wraps a live form control', a
   const offenders = [...html.matchAll(/<(\w+)[^>]*\bdata-i18n="[^"]+"[^>]*>\s*<(select|input|textarea)\b/g)];
   assert.deepEqual(offenders.map((m) => `<${m[1]} data-i18n> wraps <${m[2]}>`), []);
 });
+
+// A2: the folder picker's fallback (used when the OS has no GUI folder dialog available) must be
+// a real, labelled form -- never window.prompt(), a jargon-y browser dialog with no room for
+// plain-language instructions.
+test('ui/index.html and ui/share.js: the folder-picker fallback never uses window.prompt', async () => {
+  const html = await readFile(path.join(ROOT, 'ui', 'index.html'), 'utf8');
+  const shareJs = await readFile(path.join(ROOT, 'ui', 'share.js'), 'utf8');
+  assert.doesNotMatch(html, /\bwindow\.prompt\(/);
+  assert.doesNotMatch(shareJs, /\bwindow\.prompt\?\.\(/);
+  assert.match(html, /id="folder-fallback-modal"/);
+  assert.match(html, /window\.promptForFolder\s*=/);
+});

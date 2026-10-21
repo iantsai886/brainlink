@@ -275,6 +275,17 @@ ol.todo li { padding-left: 4px; }
     <div id="note-body" class="mono" style="margin-top:12px"></div>
   </div>
 </div>
+<div id="folder-fallback-modal" class="modal-overlay" hidden>
+  <div class="modal" role="dialog" aria-modal="true">
+    <b data-i18n="folderFallback.title"></b>
+    <p class="hint" style="margin-top:6px" data-i18n="folderFallback.hint"></p>
+    <input id="folder-fallback-input" class="mono" data-i18n-placeholder="folderFallback.placeholder" style="margin-top:4px">
+    <div class="row" style="margin-top:14px;justify-content:flex-end">
+      <button class="link" id="folder-fallback-cancel" data-i18n="folderFallback.cancel"></button>
+      <button class="primary" id="folder-fallback-use" data-i18n="folderFallback.use"></button>
+    </div>
+  </div>
+</div>
 <div id="toast" role="status" aria-live="polite"></div>
 <script>
 const T = new URLSearchParams(location.search).get('t') || '';
@@ -348,8 +359,9 @@ function renderStart(nested) {
     + `<button class="link" id="other-folder" style="justify-self:start">${esc(t('start.otherFolder'))}</button>`;
   $('other-folder').onclick = () => quick(async () => {
     const r = await api('POST', '/api/pick-folder');
-    // No folder dialog on this computer (some Linux desktops): ask for the path instead.
-    const p = r.path || (r.unavailable ? (window.prompt(t('start.folderPrompt')) || '').trim() : '');
+    // No folder dialog available on this computer: a plain-language fallback form, not a
+    // browser prompt() dialog (unrecoverable and jargon-y on a non-technical user's first run).
+    const p = r.path || (r.unavailable ? await window.promptForFolder() : '');
     return p ? { mode: 'folder', path: p } : null;
   });
 }
@@ -535,6 +547,24 @@ function closeNote() { $('note-modal').hidden = true; }
 $('note-close').onclick = closeNote;
 $('note-modal').addEventListener('click', (e) => { if (e.target.id === 'note-modal') closeNote(); });
 document.addEventListener('keydown', (e) => { if (e.key === 'Escape') closeNote(); });
+
+// ---- Plain-language fallback when the native folder picker is unavailable (e.g. no GUI access):
+// a real, labelled input with copy-the-path instructions, never a browser prompt() dialog. ----
+let resolveFolderFallback = null;
+function closeFolderFallback(value) { $('folder-fallback-modal').hidden = true; const r = resolveFolderFallback; resolveFolderFallback = null; if (r) r(value); }
+window.promptForFolder = function promptForFolder() {
+  return new Promise((resolve) => {
+    resolveFolderFallback = resolve;
+    $('folder-fallback-input').value = '';
+    $('folder-fallback-modal').hidden = false;
+    $('folder-fallback-input').focus();
+  });
+};
+$('folder-fallback-use').onclick = () => closeFolderFallback($('folder-fallback-input').value.trim());
+$('folder-fallback-cancel').onclick = () => closeFolderFallback('');
+$('folder-fallback-modal').addEventListener('click', (e) => { if (e.target.id === 'folder-fallback-modal') closeFolderFallback(''); });
+$('folder-fallback-input').onkeydown = (e) => { if (e.key === 'Enter') closeFolderFallback($('folder-fallback-input').value.trim()); };
+document.addEventListener('keydown', (e) => { if (e.key === 'Escape' && !$('folder-fallback-modal').hidden) closeFolderFallback(''); });
 document.addEventListener('click', (e) => {
   const b = e.target.closest('[data-open-note]');
   if (!b) return;
@@ -619,7 +649,7 @@ function openForm(p) {
   $('v-excluded').value = (S.default_excluded_folders || []).join('\n');
   $('v-excluded-hint').textContent = t('vault.excludedHint', { list: (S.suggested_excluded_folders || []).join(', ') });
 }
-$('pick').onclick = () => act(async () => { const r = await api('POST', '/api/pick-folder'); const p = r.path || (r.unavailable ? (window.prompt(t('start.folderPrompt')) || '').trim() : ''); if (p) openForm(p); });
+$('pick').onclick = () => act(async () => { const r = await api('POST', '/api/pick-folder'); const p = r.path || (r.unavailable ? await window.promptForFolder() : ''); if (p) openForm(p); });
 $('sample').onclick = () => act(async () => { const r = await api('POST', '/api/sample'); openForm(r.path); $('v-name').value = 'Acme Studio'; $('v-agent').value = 'Chief of Staff'; pack = 'founder-os'; });
 $('cancel-vault').onclick = () => ($('vault-form').hidden = true);
 $('packs').onchange = (e) => { if (e.target.name === 'pack') { pack = e.target.value; document.querySelectorAll('.pack').forEach((el) => el.classList.toggle('sel', el.querySelector('input').checked)); } };
