@@ -6,7 +6,7 @@ import { randomBytes, timingSafeEqual } from 'node:crypto';
 import { execFile } from 'node:child_process';
 import { homedir } from 'node:os';
 import path from 'node:path';
-import { loadConfig, saveConfig, configPath, normalize } from './config.mjs';
+import { loadConfig, saveConfig, configPath, normalize, appHome } from './config.mjs';
 import { verifyLicense, planFeatures, effectiveLicense, startTrial } from './license.mjs';
 import { PACKS, buildPack, scaffold, mergePack } from './packs.mjs';
 import { CLIENTS, detect, connectClient, disconnectClient, test } from './connectors.mjs';
@@ -21,6 +21,7 @@ import { syncSettings, chooseSync, suggestFolders, PROVIDERS, PROVIDER_LABELS } 
 import { sessionsService } from './host.mjs';
 import { addAgent, renameAgent, removeAgent, revokeAgent, markConnected, findAgentByToken, publicAgent, localAgentSnippet, remoteAgentSnippet } from './mcp-agents.mjs';
 import { buildGraph3D, noteDetail3D } from './graph3d.mjs';
+import { snapshotSettings, chooseSnapshot, suggestSnapshotFolder, clearSnapshot, startSnapshotWatcher, loadSnapshotStatus, saveSnapshotStatus } from './snapshot.mjs';
 
 const UI_STATIC_TYPES = { '.js': 'text/javascript; charset=utf-8', '.css': 'text/css; charset=utf-8', '.json': 'application/json; charset=utf-8' };
 const UI_DIR = path.join(ROOT, 'ui');
@@ -37,13 +38,13 @@ async function readUiStatic(rel) {
 
 const json = (res, code, body) => res.writeHead(code, { 'Content-Type': 'application/json', 'Cache-Control': 'no-store' }).end(JSON.stringify(body));
 
-export function pickFolder(os = process.platform) {
+export function pickFolder(os = process.platform, prompt = 'Choose your Obsidian / Markdown vault folder') {
   return new Promise((resolve) => {
     const done = (err, out) => resolve(err ? null : String(out).trim() || null);
-    if (os === 'darwin') execFile('osascript', ['-e', 'POSIX path of (choose folder with prompt "Choose your Obsidian / Markdown vault folder")'], done);
-    else if (os === 'win32') execFile('powershell', ['-NoProfile', '-STA', '-Command', 'Add-Type -AssemblyName System.Windows.Forms; $d = New-Object System.Windows.Forms.FolderBrowserDialog; $d.Description = "Choose your Obsidian / Markdown vault folder"; if ($d.ShowDialog() -eq "OK") { $d.SelectedPath }'], done);
+    if (os === 'darwin') execFile('osascript', ['-e', `POSIX path of (choose folder with prompt "${prompt.replace(/"/g, "'")}")`], done);
+    else if (os === 'win32') execFile('powershell', ['-NoProfile', '-STA', '-Command', `Add-Type -AssemblyName System.Windows.Forms; $d = New-Object System.Windows.Forms.FolderBrowserDialog; $d.Description = "${prompt.replace(/"/g, "'")}"; if ($d.ShowDialog() -eq "OK") { $d.SelectedPath }`], done);
     // Linux: GNOME's zenity, else KDE's kdialog; with neither, Setup asks for the path instead.
-    else execFile('zenity', ['--file-selection', '--directory', '--title=Choose your Obsidian / Markdown vault folder'], (err, out) => {
+    else execFile('zenity', ['--file-selection', '--directory', `--title=${prompt}`], (err, out) => {
       if (!err || err.code === 1) return done(err, out); // 1 = user cancelled
       execFile('kdialog', ['--getexistingdirectory', process.env.HOME || '/'], (e2, o2) => (e2 && e2.code !== 1 ? resolve(undefined) : done(e2, o2)));
     });
@@ -74,14 +75,31 @@ export async function startSetup(opts = {}) {
   const file = configPath(env);
   const token = opts.token || randomBytes(18).toString('base64url');
   const pick = opts.pick || (() => pickFolder(os));
+  const pickSnapshotFolder = opts.pickSnapshotFolder || (() => pickFolder(os, 'Choose a folder to share a read-only copy with cloud agents'));
   const clientOpts = () => ({ home, os, env, launch: launchSpec(env), useCli: opts.useCli });
   const sessions = sessionsService(env); // src/host.mjs: cross-session reads over src/sessions/* (importAll, session_list/read semantics)
   const html = await readFile(path.join(ROOT, 'ui', 'index.html'), 'utf8');
   let port = opts.port ?? 0;
   // When started from the app (no terminal), exit after idleMinutes without requests or on Done.
   let idleTimer = null;
-  const quit = () => setTimeout(() => (opts.onQuit ? opts.onQuit() : server.close()), 100);
+  const quit = () => setTimeout(() => { snapshotWatcher?.stop(); (opts.onQuit ? opts.onQuit() : server.close()); }, 100);
   const touch = () => { if (!opts.idleMinutes) return; clearTimeout(idleTimer); idleTimer = setTimeout(quit, opts.idleMinutes * 60e3); idleTimer.unref?.(); };
+
+  // Shared snapshot (Ian's RB8): runs for as long as this Setup process is open. Restarted
+  // whenever the setting changes so a just-picked folder, or turning it off, takes effect at once.
+  const snapshotStateFile = path.join(appHome(env), 'snapshot-state.json');
+  let snapshotWatcher = null;
+  async function refreshSnapshotWatcher(cfg) {
+    snapshotWatcher?.stop();
+    snapshotWatcher = null;
+    const settings = snapshotSettings(cfg);
+    if (!settings.enabled) return;
+    const ctx = createContext(cfg, { env, license: effectiveLicense(cfg) });
+    if (!ctx.enabled.length) { await saveSnapshotStatus(snapshotStateFile, { ok: false, error: 'Add a folder first, then turn sharing on.' }); return; }
+    snapshotWatcher = startSnapshotWatcher(ctx, cfg, env, { onResult: (r) => saveSnapshotStatus(snapshotStateFile, r).catch(() => {}) });
+    await snapshotWatcher.ready;
+  }
+  refreshSnapshotWatcher(await loadConfig(file)).catch(() => {});
 
   async function state() {
     const cfg = await loadConfig(file);
@@ -105,6 +123,7 @@ export async function startSetup(opts = {}) {
       semantic: await detectEmbedder(cfg, env),
       obsidian_vaults: (await findObsidianVaults({ home, os, env })).filter((o) => !cfg.vaults.some((v) => path.resolve(v.path) === path.resolve(o.path))),
       sync: { ...syncSettings(cfg), providers: PROVIDERS, provider_labels: PROVIDER_LABELS, suggested_folders: suggestFolders(home) },
+      snapshot: { ...snapshotSettings(cfg), suggested_folder: suggestSnapshotFolder(home), ...(await loadSnapshotStatus(snapshotStateFile)) },
     };
   }
 
@@ -383,6 +402,23 @@ export async function startSetup(opts = {}) {
     'POST /api/sessions': (b) => sessions.list({ q: b.q, client: b.client, project: b.project, since: b.since, limit: b.limit, include_private: Boolean(b.include_private) }),
     'POST /api/sessions/read': (b) => sessions.read({ id: b.id, include_private: Boolean(b.include_private) }),
     'POST /api/sessions/private': (b) => sessions.setPrivate(b.id, b.private),
+    // ---- Shared snapshot: a read-only copy of the notes for cloud agents (Ian's RB8) ----
+    'POST /api/snapshot/pick-folder': async () => { const p = await pickSnapshotFolder(); return p === undefined ? { path: null, unavailable: true } : { path: p }; },
+    'POST /api/snapshot': async (b) => {
+      const cfg = await loadConfig(file);
+      const next = chooseSnapshot(cfg, { enabled: b.enabled, folder: b.folder, includeSessions: b.includeSessions });
+      await saveConfig(next, file);
+      // Writes once immediately on enabling (or on any change), not just on the next interval or
+      // vault edit, and picks up errors (e.g. the folder disappeared) right away.
+      await refreshSnapshotWatcher(next);
+      const status = await loadSnapshotStatus(snapshotStateFile);
+      return { ok: true, snapshot: { ...snapshotSettings(next), suggested_folder: suggestSnapshotFolder(home), ...status } };
+    },
+    'POST /api/snapshot/clear': async () => {
+      const cfg = await loadConfig(file);
+      await clearSnapshot(snapshotSettings(cfg).folder);
+      return { ok: true };
+    },
     'POST /api/test': async (b) => {
       const cfg = normalize(await loadConfig(file));
       const ctx = createContext(cfg, { env: { ...env, BRAINLINK_AI_PLATFORM: '' }, license: effectiveLicense(cfg) });
@@ -446,6 +482,7 @@ export async function startSetup(opts = {}) {
     }
     try { json(res, 200, await route(body)); } catch (e) { json(res, 400, { error: String(e.message || e) }); }
   });
+  server.once('close', () => snapshotWatcher?.stop());
   await new Promise((resolve, reject) => { server.once('error', reject); server.listen(port, '127.0.0.1', resolve); });
   port = server.address().port;
   touch();
