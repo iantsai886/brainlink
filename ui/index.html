@@ -1,0 +1,740 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>BrainLink Setup</title>
+<style>
+:root {
+  --bg: #f6f5f1; --panel: #ffffff; --ink: #1d1d1b; --muted: #6b6a64; --line: #e3e1da;
+  --accent: #2f5d50; --accent-ink: #ffffff; --accent-soft: #e6efeb; --warn: #9a5b13; --warn-soft: #f8eedf; --bad: #a33a2b;
+  --c1: #2f7d6a; --c2: #c2652a; --c3: #3d6fb6; --c4: #a8407a; --c5: #b08a1e; --c6: #6a5bb5; --c7: #2a8ea6; --c8: #7d8b2e;
+  --radius: 10px; --mono: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+  color-scheme: light;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) { --c1: #5cc4a8; --c2: #f0935a; --c3: #78a6ec; --c4: #e07ab5; --c5: #e2bd4f; --c6: #a596ee; --c7: #5ac3dc; --c8: #b7c45a; --bg: #151614; --panel: #1e201d; --ink: #ecebe6; --muted: #a2a198; --line: #30332e; --accent: #7fb8a4; --accent-ink: #0f1a16; --accent-soft: #233029; --warn: #e0aa62; --warn-soft: #33291b; --bad: #ec8a7b; color-scheme: dark; }
+}
+* { box-sizing: border-box; }
+body { margin: 0; background: var(--bg); color: var(--ink); font: 15px/1.5 -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, sans-serif; }
+header { max-width: 860px; margin: 0 auto; padding: 32px 20px 8px; display: flex; align-items: baseline; gap: 14px; flex-wrap: wrap; }
+header h1 { font-size: 22px; margin: 0; letter-spacing: -0.01em; }
+header #lang { width: auto; font-size: 13px; padding: 4px 8px; }
+main { max-width: 860px; margin: 0 auto; padding: 8px 20px 60px; display: grid; gap: 16px; }
+section { background: var(--panel); border: 1px solid var(--line); border-radius: var(--radius); padding: 20px 22px; }
+section h2 { margin: 0 0 4px; font-size: 16px; display: flex; gap: 10px; align-items: center; }
+.step { width: 24px; height: 24px; border-radius: 50%; background: var(--accent-soft); color: var(--accent); font-size: 13px; display: inline-grid; place-items: center; font-weight: 600; flex: none; }
+.step.done { background: var(--accent); color: var(--accent-ink); }
+p.hint { margin: 0 0 14px; color: var(--muted); font-size: 14px; }
+.row { display: flex; gap: 10px; flex-wrap: wrap; align-items: center; }
+.grid2 { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+@media (max-width: 640px) { .grid2 { grid-template-columns: 1fr; } }
+label { display: grid; gap: 4px; font-size: 13px; color: var(--muted); }
+input, select, textarea { font: inherit; color: var(--ink); background: var(--bg); border: 1px solid var(--line); border-radius: 8px; padding: 8px 10px; width: 100%; }
+textarea { min-height: 64px; resize: vertical; }
+input:focus, select:focus, textarea:focus, button:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+button { font: inherit; border-radius: 8px; border: 1px solid var(--line); background: var(--panel); color: var(--ink); padding: 8px 14px; cursor: pointer; }
+button.primary { background: var(--accent); color: var(--accent-ink); border-color: var(--accent); font-weight: 600; }
+button:disabled { opacity: .5; cursor: default; }
+button.link { border: none; background: none; color: var(--muted); padding: 4px 6px; text-decoration: underline; }
+.card { border: 1px solid var(--line); border-radius: 8px; padding: 12px 14px; display: grid; gap: 6px; }
+.cards { display: grid; gap: 10px; }
+.clients { display: grid; grid-template-columns: repeat(auto-fill, minmax(230px, 1fr)); gap: 10px; }
+.client { border: 1px solid var(--line); border-radius: 8px; padding: 12px; display: grid; gap: 8px; align-content: space-between; }
+.client .name { font-weight: 600; }
+.pill { font-size: 12px; padding: 1px 8px; border-radius: 99px; background: var(--bg); color: var(--muted); border: 1px solid var(--line); width: fit-content; }
+.pill.on { background: var(--accent-soft); color: var(--accent); border-color: transparent; }
+.mono { font-family: var(--mono); font-size: 13px; overflow-wrap: anywhere; }
+.muted { color: var(--muted); }
+.packs { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 10px; margin: 10px 0 14px; }
+.pack { border: 1px solid var(--line); border-radius: 8px; padding: 10px 12px; cursor: pointer; display: grid; gap: 2px; }
+.pack input { width: auto; margin: 0 6px 0 0; }
+.pack.sel { border-color: var(--accent); background: var(--accent-soft); }
+.pack small { color: var(--muted); }
+#toast { position: fixed; left: 50%; bottom: 20px; transform: translateX(-50%); max-width: min(92vw, 640px); background: var(--ink); color: var(--bg); padding: 10px 16px; border-radius: 8px; font-size: 14px; opacity: 0; transition: opacity .2s; pointer-events: none; }
+#toast.show { opacity: 1; }
+#toast.bad { background: var(--bad); color: #fff; }
+.notice { background: var(--warn-soft); color: var(--warn); border-radius: 8px; padding: 10px 12px; font-size: 14px; }
+table { width: 100%; border-collapse: collapse; font-size: 13px; }
+td, th { text-align: left; padding: 6px 4px; border-bottom: 1px solid var(--line); }
+th { color: var(--muted); font-weight: 500; }
+details summary { cursor: pointer; color: var(--muted); font-size: 14px; }
+.big { padding: 28px 26px; }
+.big h2 { font-size: 22px; margin-bottom: 6px; }
+.choices { display: grid; gap: 10px; margin-top: 16px; }
+.choice { display: grid; grid-template-columns: 1fr auto; align-items: center; gap: 12px; text-align: left; padding: 14px 16px; border-radius: 10px; border: 1px solid var(--line); background: var(--panel); cursor: pointer; }
+.choice:hover { border-color: var(--accent); }
+.choice b { font-size: 16px; display: block; }
+.choice small { color: var(--muted); font-family: var(--mono); font-size: 12px; overflow-wrap: anywhere; }
+.choice .go { color: var(--accent); font-weight: 600; white-space: nowrap; }
+.choice.primary-choice { background: var(--accent); border-color: var(--accent); color: var(--accent-ink); }
+.choice.primary-choice small, .choice.primary-choice .go { color: var(--accent-ink); opacity: .85; }
+.say { font-size: 20px; font-weight: 600; background: var(--accent-soft); color: var(--accent); border-radius: 8px; padding: 6px 12px; display: inline-block; }
+ol.todo { margin: 14px 0 0; padding-left: 22px; display: grid; gap: 12px; }
+ol.todo li { padding-left: 4px; }
+.settings > summary { font-size: 15px; padding: 6px 0; list-style-position: inside; }
+.settings[open] > summary { margin-bottom: 12px; }
+.settings > div { display: grid; gap: 16px; }
+.working { opacity: .6; pointer-events: none; }
+.brain { display: grid; grid-template-columns: 1.4fr 1fr; gap: 18px; align-items: start; }
+@media (max-width: 720px) { .brain { grid-template-columns: 1fr; } }
+#graph { width: 100%; aspect-ratio: 4 / 3; max-width: 100%; border-radius: 10px; background: var(--bg); border: 1px solid var(--line); display: block; }
+.stats { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; }
+.stat { border: 1px solid var(--line); border-radius: 8px; padding: 8px 10px; }
+.stat b { display: block; font-size: 20px; font-variant-numeric: tabular-nums; }
+.stat span { font-size: 12px; color: var(--muted); }
+.phrases { display: grid; gap: 6px; margin-top: 12px; font-size: 14px; }
+.phrases code { font-family: var(--mono); background: var(--accent-soft); color: var(--accent); padding: 1px 6px; border-radius: 5px; font-size: 13px; }
+.smart { font-size: 13px; margin-top: 12px; }
+.legend { display: flex; flex-wrap: wrap; gap: 6px 14px; margin-top: 10px; font-size: 13px; color: var(--muted); }
+.legend span { display: inline-flex; align-items: center; gap: 6px; }
+.legend i { width: 10px; height: 10px; border-radius: 50%; display: inline-block; }
+.legend i.ring { background: transparent !important; border: 2px solid var(--muted); width: 8px; height: 8px; }
+.chip { font: inherit; border: 1px solid var(--line); border-radius: 999px; background: var(--accent-soft); color: var(--accent); padding: 5px 12px; font-size: 13px; cursor: pointer; display: inline-flex; gap: 6px; align-items: baseline; }
+.chip:hover { border-color: var(--accent); }
+.chip small { color: inherit; opacity: .75; }
+.badge { display: inline-flex; align-items: center; padding: 2px 10px; border-radius: 999px; color: #fff; font-size: 12px; font-weight: 600; white-space: nowrap; }
+.day-label { font-size: 12px; font-weight: 600; color: var(--muted); margin: 14px 0 2px; }
+.day-label:first-child { margin-top: 0; }
+.answer-card { display: grid; gap: 10px; }
+.answer-text { font-size: 15px; line-height: 1.6; margin: 0; }
+.error-box { background: var(--bad); color: #fff; border-radius: 8px; padding: 10px 12px; font-size: 14px; }
+.skeleton { color: var(--muted); font-size: 14px; }
+.modal-overlay { position: fixed; inset: 0; background: rgba(0,0,0,.45); display: grid; place-items: center; z-index: 80; padding: 24px; }
+.modal-overlay[hidden] { display: none; }
+.modal { background: var(--panel); border: 1px solid var(--line); border-radius: var(--radius); padding: 20px 22px; max-width: 640px; width: 100%; max-height: 80vh; overflow: auto; }
+.modal .mono { white-space: pre-wrap; }
+#boot-loading, #boot-error { max-width: 860px; margin: 8px auto 0; padding: 10px 20px; font-size: 14px; color: var(--muted); }
+#boot-error { color: #fff; background: var(--bad); border-radius: 8px; margin: 8px 20px; }
+#boot-error button { background: transparent; border-color: rgba(255,255,255,.6); color: #fff; }
+</style>
+<link rel="stylesheet" href="agents.css">
+<link rel="stylesheet" href="notes3d.css">
+<link rel="stylesheet" href="share.css">
+</head>
+<body>
+<header><h1>BrainLink</h1><select id="lang" aria-label="Language" style="margin-left:auto"></select><button class="link" id="done" data-i18n="header.done"></button></header>
+<div id="boot-loading" role="status" data-i18n="boot.loading"></div>
+<div id="boot-error" hidden role="alert"><b data-i18n="boot.errorTitle"></b> <span id="boot-error-msg"></span> <button id="boot-retry" data-i18n="boot.retry"></button></div>
+<main>
+  <section class="big" id="start" hidden>
+    <h2 data-i18n="start.title"></h2>
+    <p class="hint" data-i18n="start.hint"></p>
+    <div class="choices" id="choices"></div>
+  </section>
+
+  <section class="big" id="sync-onboarding" hidden>
+    <h2 data-i18n="syncOnb.title"></h2>
+    <p class="hint" data-i18n="syncOnb.hint"></p>
+    <div class="choices">
+      <button class="choice primary-choice" id="sync-onb-local"><span><b data-i18n="syncOnb.localTitle"></b><small data-i18n="syncOnb.localSub"></small></span><span class="go" data-i18n="syncOnb.continue"></span></button>
+      <button class="choice" id="sync-onb-pick"><span><b data-i18n="syncOnb.pickTitle"></b><small data-i18n="syncOnb.pickSub"></small></span><span class="go" data-i18n="syncOnb.choose"></span></button>
+    </div>
+    <div id="sync-onb-form" hidden style="margin-top:16px">
+      <div class="grid2">
+        <label><span data-i18n="syncOnb.where"></span><select id="sync-onb-provider"></select></label>
+        <label><span data-i18n="syncOnb.device"></span><input id="sync-onb-device" data-i18n-placeholder="syncOnb.devicePlaceholder"></label>
+      </div>
+      <div class="grid2" style="margin-top:10px">
+        <label><span data-i18n="syncOnb.syncedFolder"></span><input id="sync-onb-folder" class="mono" data-i18n-placeholder="syncOnb.folderPlaceholder"></label>
+        <div id="sync-onb-suggestions" class="muted" style="font-size:13px;align-self:end"></div>
+      </div>
+      <p class="error-box" id="sync-onb-error" hidden></p>
+      <div class="row" style="margin-top:14px"><button class="primary" id="sync-onb-save" data-i18n="syncOnb.saveContinue"></button><button class="link" id="sync-onb-cancel" data-i18n="syncOnb.back"></button></div>
+    </div>
+  </section>
+
+  <section id="ask-panel" hidden>
+    <h2 data-i18n="ask.title"></h2>
+    <p class="hint" data-i18n="ask.hint"></p>
+    <div class="row"><input id="ask-q" data-i18n-placeholder="ask.placeholder" style="flex:1;min-width:240px"><button class="primary" id="ask-go" data-i18n="ask.go"></button></div>
+    <div id="ask-out" style="margin-top:14px"></div>
+  </section>
+
+  <section class="big" id="ready" hidden>
+    <h2 id="ready-title"></h2>
+    <p class="hint" id="ready-sub"></p>
+    <ol class="todo">
+      <li id="todo-restart"></li>
+      <li><span data-i18n="ready.sayConnectIntro"></span> <span class="say" id="say-connect">Connect to my brain</span></li>
+      <li><span data-i18n="ready.sayCloseIntro"></span> <span class="say" id="say-close">Close loop</span> <span data-i18n="ready.sayCloseSuffix"></span></li>
+    </ol>
+    <div class="row" style="margin-top:18px" id="more-apps"></div>
+    <table style="margin-top:18px"><thead><tr><th data-i18n="ready.colWhen"></th><th data-i18n="ready.colAI"></th><th data-i18n="ready.colTool"></th><th data-i18n="ready.colResult"></th></tr></thead><tbody id="activity"></tbody></table>
+  </section>
+
+  <section id="brain-panel" hidden>
+    <h2 data-i18n="brain.title"></h2>
+    <p class="hint" data-i18n="brain.hint"></p>
+    <div class="brain">
+      <div><div id="notes3d-root" aria-label="Map of notes and links"></div></div>
+      <div>
+        <div class="stats"><div class="stat"><b id="st-notes">–</b><span data-i18n="brain.notes"></span></div><div class="stat"><b id="st-links">–</b><span data-i18n="brain.links"></span></div><div class="stat"><b id="st-orphans">–</b><span data-i18n="brain.orphans"></span></div></div>
+        <div class="phrases"><b style="font-size:13px;color:var(--muted)" data-i18n="brain.phrasesTitle"></b>
+          <span data-i18n="brain.phrase1"></span>
+          <span data-i18n="brain.phrase2"></span>
+          <span data-i18n="brain.phrase3"></span>
+          <span data-i18n="brain.phrase4"></span>
+          <span data-i18n="brain.phrase5"></span>
+        </div>
+        <p class="smart muted" id="smart"></p>
+      </div>
+    </div>
+  </section>
+
+  <section id="agents-panel" hidden>
+    <h2>Agents</h2>
+    <p class="hint">Any AI can connect with its own key — on this Mac now, or ready for the cloud once that is reachable.</p>
+    <div id="agents-root"></div>
+  </section>
+
+  <section id="sessions-panel" hidden>
+    <h2 data-i18n="sessions.title"></h2>
+    <p class="hint" id="sessions-hint"></p>
+    <div class="row" style="margin-bottom:10px"><label class="muted" style="display:flex;flex-direction:row;gap:6px;align-items:center"><input type="checkbox" id="sess-private" style="width:auto"><span data-i18n="sessions.showPrivate"></span></label></div>
+    <div id="sessions-list" class="cards"></div>
+    <div id="session-detail" style="margin-top:12px"></div>
+  </section>
+
+  <details class="settings" id="settings"><summary data-i18n="settings.summary"></summary><div>
+  <section id="s-vault">
+    <h2><span class="step" id="n1">1</span> <span data-i18n="vault.step1Title"></span></h2>
+    <p class="hint" data-i18n="vault.hint"></p>
+    <div id="vaults" class="cards"></div>
+    <div id="add-vault" style="margin-top:14px">
+      <div class="row">
+        <button class="primary" id="pick" data-i18n="vault.chooseFolder"></button>
+        <button id="sample" data-i18n="vault.useSample"></button>
+      </div>
+      <div id="vault-form" hidden style="margin-top:14px">
+        <div class="grid2">
+          <label><span data-i18n="vault.folderLabel"></span><input id="v-path" class="mono"></label>
+          <label><span data-i18n="vault.nameLabel"></span><input id="v-name"></label>
+        </div>
+        <div class="packs" id="packs"></div>
+        <div class="grid2">
+          <label><span data-i18n="vault.agentNameLabel"></span><input id="v-agent" data-i18n-placeholder="vault.agentNamePlaceholder"></label>
+          <label class="muted" style="align-self:end"><span><input type="checkbox" id="v-scaffold" checked style="width:auto"> <span data-i18n="vault.scaffold"></span></span></label>
+        </div>
+        <label class="muted" style="display:flex;flex-direction:row;gap:6px;align-items:center;margin-top:10px"><input type="checkbox" id="v-private" style="width:auto"> <span data-i18n="vault.privateLabel"></span></label>
+        <label style="margin-top:6px"><span data-i18n="vault.excludedLabel"></span><textarea id="v-excluded" class="mono" rows="4"></textarea></label>
+        <p class="hint" id="v-excluded-hint"></p>
+        <div class="row" style="margin-top:12px"><button class="primary" id="save-vault" data-i18n="vault.addVault"></button><button class="link" id="cancel-vault" data-i18n="vault.cancel"></button></div>
+      </div>
+    </div>
+  </section>
+
+  <section id="s-agents">
+    <h2><span class="step" id="n2">2</span> <span data-i18n="rolePack.step2Title"></span></h2>
+    <p class="hint" data-i18n="rolePack.hint"></p>
+    <div id="agents" class="cards"></div>
+  </section>
+
+  <section id="s-connect">
+    <h2><span class="step" id="n3">3</span> <span data-i18n="connect.step3Title"></span></h2>
+    <p class="hint" data-i18n="connect.hint"></p>
+    <div class="clients" id="clients"></div>
+    <details style="margin-top:14px"><summary data-i18n="connect.httpDetails"></summary>
+      <p class="hint" id="connect-http-hint" style="margin-top:8px"></p>
+      <div class="row"><button id="http-token" data-i18n="connect.createToken"></button></div>
+      <div id="http-out" class="mono" style="margin-top:8px"></div>
+    </details>
+  </section>
+
+  <section id="s-test">
+    <h2><span class="step" id="n4">4</span> <span data-i18n="test.step4Title"></span></h2>
+    <p class="hint" id="test-hint"></p>
+    <div class="row"><input id="q" data-i18n-placeholder="test.placeholder" style="max-width:420px"><button id="test" data-i18n="test.searchBtn"></button></div>
+    <div id="test-out" style="margin-top:10px"></div>
+  </section>
+
+  <section id="s-sync">
+    <h2 data-i18n="sync.title"></h2>
+    <p class="hint" data-i18n="sync.hint"></p>
+    <div class="grid2">
+      <label><span data-i18n="sync.where"></span><select id="sync-provider"></select></label>
+      <label><span data-i18n="sync.device"></span><input id="sync-device" data-i18n-placeholder="sync.devicePlaceholder"></label>
+    </div>
+    <div id="sync-folder-row" class="grid2" style="margin-top:10px" hidden>
+      <label><span data-i18n="sync.syncedFolder"></span><input id="sync-folder" class="mono" data-i18n-placeholder="sync.folderPlaceholder"></label>
+      <div id="sync-suggestions" class="muted" style="font-size:13px;align-self:end"></div>
+    </div>
+    <div class="row" style="margin-top:12px"><button class="primary" id="sync-save" data-i18n="sync.saveBtn"></button></div>
+  </section>
+
+  <section id="s-share"><div id="share-root"></div></section>
+  </div></details>
+  <p class="muted" style="font-size:12px;text-align:center"><span data-i18n="settings.config"></span> <span class="mono" id="cfgpath"></span></p>
+</main>
+<div id="note-modal" class="modal-overlay" hidden>
+  <div class="modal" role="dialog" aria-modal="true">
+    <div class="row" style="justify-content:space-between;align-items:flex-start">
+      <div><b id="note-title"></b><div class="mono muted" id="note-path" style="font-size:12px"></div></div>
+      <button class="link" id="note-close" data-i18n="note.close"></button>
+    </div>
+    <div id="note-body" class="mono" style="margin-top:12px"></div>
+  </div>
+</div>
+<div id="folder-fallback-modal" class="modal-overlay" hidden>
+  <div class="modal" role="dialog" aria-modal="true">
+    <b data-i18n="folderFallback.title"></b>
+    <p class="hint" style="margin-top:6px" data-i18n="folderFallback.hint"></p>
+    <input id="folder-fallback-input" class="mono" data-i18n-placeholder="folderFallback.placeholder" style="margin-top:4px">
+    <div class="row" style="margin-top:14px;justify-content:flex-end">
+      <button class="link" id="folder-fallback-cancel" data-i18n="folderFallback.cancel"></button>
+      <button class="primary" id="folder-fallback-use" data-i18n="folderFallback.use"></button>
+    </div>
+  </div>
+</div>
+<div id="toast" role="status" aria-live="polite"></div>
+<script>
+const T = new URLSearchParams(location.search).get('t') || '';
+const $ = (id) => document.getElementById(id);
+const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+let S = null, pack = 'founder-os';
+let pendingSyncOnboarding = false; // set when a first-run vault pick just succeeded; cleared once the sync choice is saved
+let healthByClient = {}; // client id -> last /api/client-health (or /api/connect's health) result, kept across re-renders
+const CLIENT_LABEL = { 'claude-code': 'Claude Code', 'claude-desktop': 'Claude Desktop', cursor: 'Cursor', codex: 'ChatGPT Codex', gemini: 'Gemini CLI', windsurf: 'Windsurf' };
+const clientLabel = (id) => CLIENT_LABEL[id] || (id ? id[0].toUpperCase() + id.slice(1) : 'Other');
+const CLIENT_COLOR_VARS = ['c1', 'c2', 'c3', 'c4', 'c5', 'c6', 'c7', 'c8'];
+function clientColor(id) { let h = 0; for (const c of String(id)) h = (h * 31 + c.charCodeAt(0)) >>> 0; return `var(--${CLIENT_COLOR_VARS[h % CLIENT_COLOR_VARS.length]})`; }
+
+async function api(method, url, body) {
+  const r = await fetch(url, { method, headers: { 'Content-Type': 'application/json', 'X-BrainLink-Token': T }, body: body ? JSON.stringify(body) : undefined });
+  const j = await r.json().catch(() => ({}));
+  if (!r.ok) throw new Error(j.error || r.statusText);
+  return j;
+}
+function toast(msg, bad) { const t = $('toast'); t.textContent = msg; t.className = 'show' + (bad ? ' bad' : ''); clearTimeout(t._h); t._h = setTimeout(() => (t.className = ''), bad ? 6000 : 3500); }
+async function act(fn) { try { await fn(); await load(); } catch (e) { toast(e.message, true); } }
+
+// ---- i18n: plain JSON locale files (ui/locales/*.json), no library ----
+const SUPPORTED_LOCALES = ['en', 'zh-TW', 'pt'];
+const LANG_NAMES = { en: 'English', 'zh-TW': '繁體中文', pt: 'Português' };
+let LOCALE = 'en', STR = {}, FALLBACK = {}, localeReady = false;
+function detectLocale() {
+  const langs = (navigator.languages && navigator.languages.length) ? navigator.languages : [navigator.language || 'en'];
+  for (const l of langs) {
+    if (SUPPORTED_LOCALES.includes(l)) return l;
+    const base = l.split('-')[0].toLowerCase();
+    if (base === 'zh') return 'zh-TW'; // any Chinese variant: we only ship Traditional
+    const hit = SUPPORTED_LOCALES.find((s) => s.split('-')[0].toLowerCase() === base);
+    if (hit) return hit;
+  }
+  return 'en';
+}
+function t(key, vars) {
+  let s = STR[key] ?? FALLBACK[key] ?? key;
+  if (vars) for (const k in vars) s = s.split(`{${k}}`).join(vars[k]);
+  return s;
+}
+function applyI18n() {
+  document.documentElement.lang = LOCALE;
+  document.querySelectorAll('[data-i18n]').forEach((el) => { el.innerHTML = t(el.dataset.i18n); });
+  document.querySelectorAll('[data-i18n-placeholder]').forEach((el) => { el.placeholder = t(el.dataset.i18nPlaceholder); });
+}
+async function fetchLocale(locale) { return fetch(`/locales/${locale}.json`).then((r) => r.json()); }
+async function setLocale(locale, { persist = true } = {}) {
+  LOCALE = SUPPORTED_LOCALES.includes(locale) ? locale : 'en';
+  STR = LOCALE === 'en' ? FALLBACK : await fetchLocale(LOCALE).catch(() => FALLBACK);
+  $('lang').value = LOCALE;
+  applyI18n();
+  if (persist) api('POST', '/api/locale', { locale: LOCALE }).catch(() => {});
+}
+async function ensureLocale(saved) {
+  if (localeReady) return;
+  localeReady = true;
+  FALLBACK = await fetchLocale('en').catch(() => ({}));
+  $('lang').innerHTML = SUPPORTED_LOCALES.map((l) => `<option value="${l}">${esc(LANG_NAMES[l])}</option>`).join('');
+  await setLocale(SUPPORTED_LOCALES.includes(saved) ? saved : detectLocale(), { persist: !saved });
+}
+$('lang').onchange = () => act(() => setLocale($('lang').value));
+
+function choiceHtml(cls, title, sub, go, attrs) { return `<button class="choice ${cls}" ${attrs}><span><b>${esc(title)}</b>${sub ? `<small>${esc(sub)}</small>` : ''}</span><span class="go">${esc(go)}</span></button>`; }
+function renderStart(nested) {
+  const list = nested || S.obsidian_vaults;
+  $('choices').innerHTML = (nested ? `<p class="notice">${esc(t('start.nested'))}</p>` : '')
+    + list.map((v, i) => choiceHtml(i === 0 ? 'primary-choice' : '', v.name, v.path, t('start.useThis'), `data-quick="${esc(v.path)}"`)).join('')
+    + (nested ? '' : choiceHtml(list.length ? '' : 'primary-choice', t('start.noNotes'), t('start.noNotesSub'), t('start.create'), 'data-quick-new="1"'))
+    + `<button class="link" id="other-folder" style="justify-self:start">${esc(t('start.otherFolder'))}</button>`;
+  $('other-folder').onclick = () => quick(async () => {
+    const r = await api('POST', '/api/pick-folder');
+    // No folder dialog available on this computer: a plain-language fallback form, not a
+    // browser prompt() dialog (unrecoverable and jargon-y on a non-technical user's first run).
+    const p = r.path || (r.unavailable ? await window.promptForFolder() : '');
+    return p ? { mode: 'folder', path: p } : null;
+  });
+}
+function renderReady(r) {
+  const v = S.vaults[S.vaults.length - 1];
+  const agent = S.agents.find((a) => a.vault === v.name) || S.agents[0];
+  const apps = Object.values(S.clients).filter((c) => c.connected).map((c) => c.title);
+  const fresh = r?.connected?.length ? r.connected : apps;
+  $('ready-title').textContent = apps.length ? t('ready.set') : t('ready.almost');
+  $('ready-sub').textContent = `${v.name} · ${v.notes} ${t('brain.notes')}${apps.length ? ' · ' + apps.join(', ') : ''}`;
+  const missing = Object.values(S.clients).filter((c) => c.present && !c.connected);
+  $('todo-restart').innerHTML = fresh.length ? t('ready.restartQuit', { apps: `<b>${esc(fresh.join(', '))}</b>` })
+    : missing.length ? t('ready.restartPress', { button: `<b>${esc(t('ready.connectAllShort'))}</b>` })
+    : t('ready.restartNoApps');
+  $('say-connect').textContent = agent ? `${agent.activation.includes('Connect to my brain') ? 'Connect to my brain' : agent.activation[0]}` : t('test.defaultPhrase');
+  $('say-close').textContent = agent ? (agent.close.includes('Close loop') ? 'Close loop' : agent.close[0]) : 'Close loop';
+  $('more-apps').innerHTML = missing.length ? `<button class="primary" id="connect-all">${esc(t('ready.connectAllBtn', { apps: missing.map((c) => c.title).join(', ') }))}</button>` : '';
+  if (missing.length) $('connect-all').onclick = () => act(async () => { const x = await api('POST', '/api/connect-all'); toast(x.connected.length ? t('ready.connectedToast', { apps: x.connected.join(', ') }) : t('ready.nothingToast')); });
+  if (r?.skipped?.length) toast(t('ready.skippedToast', { apps: r.skipped.join(', ') }), true);
+}
+
+async function loadSessions() {
+  $('sessions-list').innerHTML = `<p class="skeleton">${esc(t('sessions.loading'))}</p>`;
+  try { renderSessions((await api('POST', '/api/sessions', { include_private: $('sess-private').checked, limit: 20 })).sessions); }
+  catch (e) { $('sessions-list').innerHTML = `<p class="error-box">${esc(t('sessions.loadError', { msg: e.message }))}</p>`; }
+}
+function dayLabel(iso) {
+  const d = new Date(iso), days = Math.floor((new Date(new Date().toDateString()) - new Date(d.toDateString())) / 86400000);
+  if (days === 0) return t('sessions.today');
+  if (days === 1) return t('sessions.yesterday');
+  return d.toLocaleDateString(LOCALE, { weekday: 'long', month: 'short', day: 'numeric' });
+}
+function renderSessions(list) {
+  if (!list.length) { $('sessions-list').innerHTML = `<p class="muted">${esc(t('sessions.empty'))}</p>`; return; }
+  let lastDay = null, html = '';
+  for (const s of list) {
+    const day = dayLabel(s.started_at);
+    if (day !== lastDay) { html += `<div class="day-label">${esc(day)}</div>`; lastDay = day; }
+    html += `<div class="card">
+      <div class="row" style="justify-content:space-between">
+        <b><span class="badge" style="background:${clientColor(s.client)}">${esc(clientLabel(s.client))}</span>${s.project ? ' · ' + esc(s.project) : ''}</b>
+        <span class="pill ${s.private ? '' : 'on'}">${s.private ? esc(t('sessions.private')) : esc(t('sessions.shared'))}</span>
+      </div>
+      <div class="muted" style="font-size:14px">${esc(s.summary || t('sessions.noSummary'))}</div>
+      <div class="row muted" style="font-size:13px">${esc(new Date(s.started_at).toLocaleString(LOCALE))} · ${s.turns} ${s.turns === 1 ? esc(t('sessions.messageOne')) : esc(t('sessions.messageMany'))}
+        <button class="link" data-sess-read="${esc(s.id)}">${esc(t('sessions.open'))}</button>
+        <button class="link" data-sess-toggle="${esc(s.id)}" data-sess-private="${s.private ? '1' : ''}">${s.private ? esc(t('sessions.makeShared')) : esc(t('sessions.makePrivate'))}</button>
+      </div></div>`;
+  }
+  $('sessions-list').innerHTML = html;
+}
+function renderSyncSuggestions(provider, suggested) {
+  const list = (suggested && suggested[provider]) || [];
+  $('sync-suggestions').innerHTML = list.length ? t('syncOnb.found', { list: list.map((p) => `<button type="button" class="link" data-sync-pick="${esc(p)}">${esc(p)}</button>`).join(' ') }) : '';
+}
+
+// First-run Sync step: Local only (default, recommended) or pick a provider folder; either way
+// saves a real choice via /api/sync so it is not just a skipped screen.
+function renderSyncOnbSuggestions(provider) {
+  const list = (S.sync.suggested_folders && S.sync.suggested_folders[provider]) || [];
+  $('sync-onb-suggestions').innerHTML = list.length ? t('syncOnb.found', { list: list.map((p) => `<button type="button" class="link" data-sync-onb-pick="${esc(p)}">${esc(p)}</button>`).join(' ') }) : '';
+}
+function renderSyncOnboarding() {
+  $('sync-onb-form').hidden = true;
+  $('sync-onb-error').hidden = true;
+  $('sync-onb-provider').innerHTML = S.sync.providers.filter((p) => p !== 'local').map((p) => `<option value="${esc(p)}">${esc(S.sync.provider_labels[p] || p)}</option>`).join('');
+  $('sync-onb-device').value = S.sync.device || '';
+  renderSyncOnbSuggestions($('sync-onb-provider').value);
+}
+async function finishSyncOnboarding(fn) {
+  $('sync-onb-error').hidden = true;
+  try { await fn(); pendingSyncOnboarding = false; await load(); }
+  catch (e) { $('sync-onb-error').hidden = false; $('sync-onb-error').textContent = e.message; }
+}
+$('sync-onb-local').onclick = () => finishSyncOnboarding(() => api('POST', '/api/sync', { provider: 'local', device: $('sync-onb-device').value }));
+$('sync-onb-pick').onclick = () => { $('sync-onb-form').hidden = false; renderSyncOnbSuggestions($('sync-onb-provider').value); };
+$('sync-onb-provider').onchange = () => renderSyncOnbSuggestions($('sync-onb-provider').value);
+$('sync-onb-cancel').onclick = () => { $('sync-onb-form').hidden = true; };
+$('sync-onb-save').onclick = () => finishSyncOnboarding(async () => {
+  const folder = $('sync-onb-folder').value.trim();
+  if (!folder) throw new Error(t('syncOnb.needFolder'));
+  await api('POST', '/api/sync', { provider: $('sync-onb-provider').value, folder, device: $('sync-onb-device').value });
+});
+
+// Force-directed map of the vault, computed once per load (no library).
+async function drawGraph() {
+  $('legend').innerHTML = `<span class="skeleton">${esc(t('brain.mapLoading'))}</span>`;
+  let g;
+  try { g = await api('POST', '/api/graph', {}); }
+  catch (e) { $('legend').innerHTML = `<span class="error-box">${esc(t('brain.mapError', { msg: e.message }))}</span>`; return; }
+  $('st-notes').textContent = g.health?.notes ?? 0; $('st-links').textContent = g.health?.links ?? 0; $('st-orphans').textContent = g.health?.not_linked ?? 0;
+  if (!g.nodes.length) { $('legend').innerHTML = `<span class="muted">${esc(t('brain.mapEmpty'))}</span>`; const cv0 = $('graph'); cv0.getContext('2d').clearRect(0, 0, cv0.width, cv0.height); return; }
+  const cv = $('graph'), ctx2 = cv.getContext('2d'), W = cv.width, H = cv.height, n = g.nodes.length;
+  const css = getComputedStyle(document.documentElement);
+  // One colour per top-level folder, biggest folders first; the rest share grey.
+  const counts = new Map();
+  for (const x of g.nodes) counts.set(x.group, (counts.get(x.group) || 0) + 1);
+  const ranked = [...counts.entries()].sort((a, b) => b[1] - a[1]).map(([k]) => k);
+  const colorOf = (grp) => { const r = ranked.indexOf(grp); return r >= 0 && r < 8 ? css.getPropertyValue(`--c${r + 1}`).trim() : css.getPropertyValue('--muted').trim(); };
+  $('legend').innerHTML = ranked.slice(0, 8).map((k) => `<span><i style="background:${colorOf(k)}"></i>${esc(k || t('brain.topLevel'))} (${counts.get(k)})</span>`).join('')
+    + (ranked.length > 8 ? `<span><i style="background:${css.getPropertyValue('--muted').trim()}"></i>${esc(t('brain.otherFolders'))}</span>` : '')
+    + `<span><i class="ring"></i>${esc(t('brain.notLinkedYet'))}</span>`;
+  const P = g.nodes.map((_, i) => ({ x: W / 2 + Math.cos(i * 2.4) * (40 + i * 3) % (W / 2.2), y: H / 2 + Math.sin(i * 2.4) * (40 + i * 3) % (H / 2.2), vx: 0, vy: 0 }));
+  const k = Math.sqrt((W * H) / Math.max(1, n)) * 0.55;
+  const deg = new Array(n).fill(0);
+  for (const [a, b] of g.edges) { deg[a]++; deg[b]++; }
+  const iters = n > 300 ? 120 : 250;
+  for (let it = 0; it < iters; it++) {
+    const temp = (W / 8) * (1 - it / iters) + 0.5; // cooling: big moves first, then settle
+    for (let a = 0; a < n; a++) for (let b = a + 1; b < n; b++) {
+      const dx = P[a].x - P[b].x, dy = P[a].y - P[b].y, d2 = dx * dx + dy * dy + 0.01;
+      if (d2 > 9 * k * k) continue;
+      const f = (k * k) / d2 * 0.05;
+      P[a].vx += dx * f; P[a].vy += dy * f; P[b].vx -= dx * f; P[b].vy -= dy * f;
+    }
+    for (const [a, b] of g.edges) {
+      // Springs weaken for very connected notes so hubs don't overshoot.
+      const dx = P[a].x - P[b].x, dy = P[a].y - P[b].y, d = Math.sqrt(dx * dx + dy * dy) + 0.01, f = ((d - k) / d) * 0.06;
+      const fa = f / Math.sqrt(deg[a]), fb = f / Math.sqrt(deg[b]);
+      P[a].vx -= dx * fa; P[a].vy -= dy * fa; P[b].vx += dx * fb; P[b].vy += dy * fb;
+    }
+    for (const p of P) {
+      p.vx += (W / 2 - p.x) * 0.01; p.vy += (H / 2 - p.y) * 0.01;
+      const v = Math.sqrt(p.vx * p.vx + p.vy * p.vy);
+      if (v > temp) { p.vx *= temp / v; p.vy *= temp / v; }
+      p.x = Math.min(W - 40, Math.max(40, p.x + p.vx)); p.y = Math.min(H - 30, Math.max(30, p.y + p.vy));
+      p.vx *= 0.5; p.vy *= 0.5;
+    }
+  }
+  ctx2.clearRect(0, 0, W, H);
+  // Big vaults: label only the most-connected notes so names stay readable.
+  const labelled = new Set(g.nodes.map((x, i) => [x.degree, i]).sort((a, b) => b[0] - a[0]).slice(0, 12).map((x) => x[1]));
+  ctx2.lineWidth = n > 200 ? 1 : 2; ctx2.globalAlpha = n > 200 ? 0.35 : 0.5;
+  for (const [a, b] of g.edges) { ctx2.strokeStyle = colorOf(g.nodes[a].group); ctx2.beginPath(); ctx2.moveTo(P[a].x, P[a].y); ctx2.lineTo(P[b].x, P[b].y); ctx2.stroke(); }
+  ctx2.globalAlpha = 1;
+  g.nodes.forEach((node, i) => {
+    const r = n > 200 ? 2.5 + Math.min(7, Math.sqrt(node.degree) * 0.9) : 7 + Math.min(14, Math.sqrt(node.degree) * 3.2);
+    ctx2.beginPath(); ctx2.arc(P[i].x, P[i].y, r, 0, Math.PI * 2);
+    if (node.degree) { ctx2.fillStyle = colorOf(node.group); ctx2.fill(); }
+    else { ctx2.lineWidth = 3; ctx2.strokeStyle = colorOf(node.group); ctx2.stroke(); }
+    if (n <= 40 ? (node.degree >= 1 || n < 25) : labelled.has(i)) { ctx2.fillStyle = css.getPropertyValue('--ink').trim(); ctx2.font = '15px -apple-system, system-ui, sans-serif'; { const label = node.title.slice(0, 28), w = ctx2.measureText(label).width; ctx2.fillText(label, P[i].x + r + 3 + w > W ? P[i].x - r - 3 - w : P[i].x + r + 3, P[i].y + 4); } }
+  });
+}
+
+// ---- Ask your brain: cited instant answer ----
+function renderAskEmpty() { $('ask-out').innerHTML = `<p class="muted">${esc(t('ask.empty'))}</p>`; }
+function renderAskError(msg) { $('ask-out').innerHTML = `<p class="error-box">${esc(msg)}</p>`; }
+function renderAsk(r) {
+  if (r.status === 'not_in_brain') {
+    $('ask-out').innerHTML = `<div class="card"><span class="pill">${esc(t('ask.notInBrain'))}</span><p class="muted" style="margin:8px 0 0">${esc(t('ask.notInBrainBody', { vault: r.vault }))}</p></div>`;
+    return;
+  }
+  const badge = r.status === 'weak' ? `<span class="pill">${esc(t('ask.partial'))}</span>` : `<span class="pill on">${esc(t('ask.answered'))}</span>`;
+  const chip = (x) => `<button class="chip" data-open-note="${esc(x.vault)}::${esc(x.path)}" title="${esc(x.path)}"><b>${esc(x.title)}</b>${x.heading ? `<small>› ${esc(x.heading)}</small>` : ''}</button>`;
+  $('ask-out').innerHTML = `<div class="answer-card card">${badge}
+    <p class="answer-text">${esc(r.answer || t('ask.noSnippet'))}</p>
+    ${r.note ? `<p class="muted" style="font-size:13px;margin:0">${esc(r.note)}</p>` : ''}
+    <div class="row">${r.sources.map(chip).join('')}</div>
+  </div>`;
+}
+async function ask() {
+  const query = $('ask-q').value.trim();
+  if (!query) return;
+  $('ask-out').innerHTML = `<p class="skeleton">${esc(t('ask.searching'))}</p>`;
+  try { renderAsk(await api('POST', '/api/ask', { query })); }
+  catch (e) { renderAskError(e.message); }
+}
+$('ask-go').onclick = ask;
+$('ask-q').onkeydown = (e) => { if (e.key === 'Enter') ask(); };
+
+// ---- Source chips / session refs open the real note, read-only, in a modal ----
+async function openNote(vault, p) {
+  $('note-modal').hidden = false;
+  $('note-title').textContent = p.replace(/\.md$/i, '').split('/').pop();
+  $('note-path').textContent = `${vault} / ${p}`;
+  $('note-body').innerHTML = `<p class="skeleton">${esc(t('note.loading'))}</p>`;
+  try {
+    const n = await api('POST', '/api/note', { vault, path: p });
+    $('note-body').textContent = n.body.trim() || t('note.empty');
+  } catch (e) { $('note-body').innerHTML = `<p class="error-box">${esc(t('note.loadError', { msg: e.message }))}</p>`; }
+}
+function closeNote() { $('note-modal').hidden = true; }
+$('note-close').onclick = closeNote;
+$('note-modal').addEventListener('click', (e) => { if (e.target.id === 'note-modal') closeNote(); });
+document.addEventListener('keydown', (e) => { if (e.key === 'Escape') closeNote(); });
+
+// ---- Plain-language fallback when the native folder picker is unavailable (e.g. no GUI access):
+// a real, labelled input with copy-the-path instructions, never a browser prompt() dialog. ----
+let resolveFolderFallback = null;
+function closeFolderFallback(value) { $('folder-fallback-modal').hidden = true; const r = resolveFolderFallback; resolveFolderFallback = null; if (r) r(value); }
+window.promptForFolder = function promptForFolder() {
+  return new Promise((resolve) => {
+    resolveFolderFallback = resolve;
+    $('folder-fallback-input').value = '';
+    $('folder-fallback-modal').hidden = false;
+    $('folder-fallback-input').focus();
+  });
+};
+$('folder-fallback-use').onclick = () => closeFolderFallback($('folder-fallback-input').value.trim());
+$('folder-fallback-cancel').onclick = () => closeFolderFallback('');
+$('folder-fallback-modal').addEventListener('click', (e) => { if (e.target.id === 'folder-fallback-modal') closeFolderFallback(''); });
+$('folder-fallback-input').onkeydown = (e) => { if (e.key === 'Enter') closeFolderFallback($('folder-fallback-input').value.trim()); };
+document.addEventListener('keydown', (e) => { if (e.key === 'Escape' && !$('folder-fallback-modal').hidden) closeFolderFallback(''); });
+document.addEventListener('click', (e) => {
+  const b = e.target.closest('[data-open-note]');
+  if (!b) return;
+  const [vault, ...rest] = b.dataset.openNote.split('::');
+  openNote(vault, rest.join('::'));
+});
+
+let last = null;
+async function quick(getBody) {
+  const box = $('start'); box.classList.add('working');
+  try {
+    const body = await getBody();
+    if (!body) return;
+    const r = await api('POST', '/api/quick', body);
+    if (!r.ok && r.nested) { renderStart(r.nested); return; }
+    if (!r.ok) throw new Error(r.error);
+    last = r;
+    pendingSyncOnboarding = true; // first-run vault pick just succeeded: ask the Sync question once before Ready
+    await load();
+  } catch (e) { toast(e.message, true); } finally { box.classList.remove('working'); }
+}
+document.addEventListener('click', (e) => {
+  const b = e.target.closest('[data-quick],[data-quick-new]');
+  if (!b) return;
+  if (b.dataset.quickNew) quick(async () => ({ mode: 'new' })); else quick(async () => ({ mode: 'folder', path: b.dataset.quick }));
+});
+
+async function load() {
+  S = await api('GET', '/api/state');
+  await ensureLocale(S.locale);
+  const hasVault = S.vaults.length > 0;
+  const onboardingSync = hasVault && pendingSyncOnboarding;
+  $('start').hidden = hasVault;
+  $('sync-onboarding').hidden = !onboardingSync;
+  if (onboardingSync) renderSyncOnboarding();
+  $('ready').hidden = !hasVault || onboardingSync;
+  $('brain-panel').hidden = !hasVault || onboardingSync;
+  $('ask-panel').hidden = !hasVault || onboardingSync;
+  $('smart').textContent = S.semantic?.available ? t('brain.smartOn', { model: S.semantic.model }) : t('brain.smartOff');
+  if (!hasVault) renderStart(); else if (!onboardingSync) { renderReady(last); drawGraph().catch(() => {}); }
+  $('sessions-panel').hidden = !hasVault || onboardingSync;
+  $('sessions-hint').innerHTML = t('sessions.hint', { call: '<span class="mono">session_read</span>' });
+  if (hasVault && !onboardingSync) loadSessions().catch(() => {});
+  $('cfgpath').textContent = S.config_path;
+  $('n1').className = 'step' + (S.vaults.length ? ' done' : '');
+  $('vaults').innerHTML = S.vaults.length ? S.vaults.map((v, i) => `<div class="card"><div class="row" style="justify-content:space-between"><b>${esc(v.name)}</b><span class="pill ${v.exists ? 'on' : ''}">${v.exists ? esc(t('vault.notesCount', { n: v.notes })) : esc(t('vault.missing'))}</span></div><div class="mono muted">${esc(v.path)}</div><div class="row muted" style="font-size:13px">${v.private ? esc(t('vault.privateShort')) + ' · ' : ''}${esc(t('vault.writes'))}: ${esc(v.writes)} · ${esc(t('vault.intake'))}: ${esc(v.flat ? 'root' : v.intake_folder)}${v.decisions.length ? ' · ' + esc(t('vault.decisions')) + ' ' + esc(v.decisions.join('/')) : ''}<button class="link" data-remove="${esc(v.name)}">${esc(t('vault.removeBtn'))}</button></div>
+    <label class="muted" style="display:flex;flex-direction:row;gap:6px;align-items:center;margin-top:8px"><input type="checkbox" data-vault-private="${i}" ${v.private ? 'checked' : ''} style="width:auto"> ${esc(t('vault.privateLabel'))}</label>
+    <label style="margin-top:6px">${esc(t('vault.excludedLabel'))}<textarea data-vault-excluded="${i}" class="mono" rows="3">${esc((v.excluded_folders || []).join('\n'))}</textarea></label>
+    ${v.excluded_suggestions && v.excluded_suggestions.length ? `<div class="muted" style="font-size:12px;margin-top:4px">${esc(t('vault.suggestions', { list: v.excluded_suggestions.join(', ') }))}</div>` : ''}
+    <div class="row" style="margin-top:6px"><button data-vault-excluded-save="${i}">${esc(t('vault.saveExcluded'))}</button></div>
+  </div>`).join('') : `<p class="muted">${esc(t('vault.noneYet'))}</p>`;
+  $('n2').className = 'step' + (S.agents.length ? ' done' : '');
+  $('agents').innerHTML = S.agents.length ? S.agents.map((a, i) => `<div class="card"><b>${esc(a.name)} <span class="muted" style="font-weight:400">· ${esc(a.vault)} · close → ${esc(a.close_target.mode)} ${esc(a.close_target.path || a.close_target.dir || '')}</span></b>
+    <label>${esc(t('rolePack.roleLabel'))}<textarea data-a="${i}" data-f="role">${esc(a.role)}</textarea></label>
+    <div class="grid2"><label>${esc(t('rolePack.activationLabel'))}<textarea data-a="${i}" data-f="activation">${esc(a.activation.join('\n'))}</textarea></label>
+    <label>${esc(t('rolePack.closeLabel'))}<textarea data-a="${i}" data-f="close">${esc(a.close.join('\n'))}</textarea></label></div>
+    ${a.close_target.mode === 'proposal-only' ? `<label class="muted"><span><input type="checkbox" data-a="${i}" data-f="capture_approved" style="width:auto" ${a.capture_approved ? 'checked' : ''}> ${esc(t('rolePack.allowCaptures', { name: a.name }))}</span></label>` : ''}
+    <div class="row"><button data-save-agent="${i}">${esc(t('rolePack.saveBtn', { name: a.name }))}</button></div></div>`).join('') : `<p class="muted">${esc(t('rolePack.none'))}</p>`;
+  const first = S.agents[0];
+  $('connect-http-hint').innerHTML = t('connect.httpHint', { cmd: '<span class="mono">brainlink serve --http</span>' });
+  $('test-hint').innerHTML = t('test.hint', { phrase: `<b>"${esc(first ? first.activation[0] : t('test.defaultPhrase'))}"</b>` });
+  const cs = Object.entries(S.clients);
+  $('n3').className = 'step' + (cs.some(([, c]) => c.connected) ? ' done' : '');
+  $('clients').innerHTML = cs.length ? cs.map(([id, c]) => { const h = healthByClient[id]; return `<div class="client"><div><div class="name">${esc(c.title)}</div><span class="pill ${c.connected ? 'on' : ''}">${c.connected ? esc(t('connect.connected')) : c.present ? esc(t('connect.found')) : esc(t('connect.notFound'))}</span></div>
+    <div class="row">${c.connected ? `<button data-disconnect="${id}">${esc(t('connect.disconnectBtn'))}</button><button data-health="${id}">${esc(t('connect.testBtn'))}</button>` : c.present ? `<button class="primary" data-connect="${id}" ${S.vaults.length ? '' : `disabled title="${esc(t('connect.addVaultFirst'))}"`}>${esc(t('connect.connectBtn'))}</button>` : `<button class="primary" disabled title="${esc(t('connect.installFirst', { title: c.title }))}">${esc(t('connect.connectBtn'))}</button>`}</div>${c.connected ? `<small class="muted">${esc(c.note)}</small>` : !c.present ? `<small class="muted">${esc(t('connect.notFoundHint'))}</small>` : ''}${h ? `<span class="pill ${h.ok ? 'on' : ''}" style="width:fit-content">${h.ok ? esc(t('connect.liveOk')) : esc(t('connect.liveFailed'))} · ${esc(h.message)}</span>` : ''}</div>`; }).join('') : `<p class="muted">${esc(t('connect.none'))}</p>`;
+  $('n4').className = 'step' + (S.activity.length ? ' done' : '');
+  $('activity').innerHTML = S.activity.length ? S.activity.map((e) => `<tr><td>${esc(new Date(e.at).toLocaleString(LOCALE))}</td><td>${esc(e.platform)}</td><td class="mono">${esc(e.tool)}</td><td>${e.ok ? (e.written ? esc(t('test.written')) : esc(t('test.ok'))) : esc(t('test.refused'))}</td></tr>`).join('') : `<tr><td colspan="4" class="muted">${esc(t('ready.noCalls'))}</td></tr>`;
+  $('packs').innerHTML = S.packs.map((p) => `<label class="pack ${p.id === pack ? 'sel' : ''}"><span><input type="radio" name="pack" value="${p.id}" ${p.id === pack ? 'checked' : ''}><b>${esc(p.title)}</b></span><small>${esc(p.description)}</small></label>`).join('');
+  const SY = S.sync;
+  $('sync-provider').innerHTML = SY.providers.map((p) => `<option value="${esc(p)}" ${p === SY.provider ? 'selected' : ''}>${esc(SY.provider_labels[p] || p)}</option>`).join('');
+  $('sync-device').value = SY.device || '';
+  $('sync-folder').value = SY.folder || '';
+  $('sync-folder-row').hidden = SY.provider === 'local';
+  renderSyncSuggestions(SY.provider, SY.suggested_folders);
+  // Lets self-contained panels (agents.js, share.js) that keep their own hasVault copy drop their
+  // stale "Add a vault first" state the moment a vault is picked/created here, with no reload.
+  window.dispatchEvent(new CustomEvent('brainlink:state-updated', { detail: S }));
+}
+
+function openForm(p) {
+  $('vault-form').hidden = false;
+  $('v-path').value = p;
+  $('v-name').value = p.replace(/[\/\\]+$/, '').split(/[\/\\]/).pop();
+  $('v-private').checked = false;
+  $('v-excluded').value = (S.default_excluded_folders || []).join('\n');
+  $('v-excluded-hint').textContent = t('vault.excludedHint', { list: (S.suggested_excluded_folders || []).join(', ') });
+}
+$('pick').onclick = () => act(async () => { const r = await api('POST', '/api/pick-folder'); const p = r.path || (r.unavailable ? await window.promptForFolder() : ''); if (p) openForm(p); });
+$('sample').onclick = () => act(async () => { const r = await api('POST', '/api/sample'); openForm(r.path); $('v-name').value = 'Acme Studio'; $('v-agent').value = 'Chief of Staff'; pack = 'founder-os'; });
+$('cancel-vault').onclick = () => ($('vault-form').hidden = true);
+$('packs').onchange = (e) => { if (e.target.name === 'pack') { pack = e.target.value; document.querySelectorAll('.pack').forEach((el) => el.classList.toggle('sel', el.querySelector('input').checked)); } };
+$('save-vault').onclick = () => act(async () => {
+  const excludedFolders = $('v-excluded').value.split('\n').map((s) => s.trim()).filter(Boolean);
+  const r = await api('POST', '/api/vault', { path: $('v-path').value, name: $('v-name').value, pack, agentName: $('v-agent').value, scaffold: $('v-scaffold').checked, private: $('v-private').checked, excludedFolders });
+  $('vault-form').hidden = true;
+  toast(t('vault.addedToast', { vault: r.vault, extra: r.created.length ? t('vault.createdExtra', { n: r.created.length }) : '' }));
+});
+document.addEventListener('click', (e) => {
+  const d = e.target.dataset;
+  if (d.connect) act(async () => {
+    // /api/connect only returns once the live handshake verified the connection; an unverified
+    // write is rolled back server-side and surfaces as a rejected promise (toast via `act`).
+    const r = await api('POST', '/api/connect', { client: d.connect });
+    healthByClient[d.connect] = r.health;
+    toast(t('connect.connectedToast', { title: r.title, msg: r.health.message }));
+  });
+  if (d.disconnect) act(async () => { await api('POST', '/api/disconnect', { client: d.disconnect }); delete healthByClient[d.disconnect]; toast(t('connect.disconnectedToast')); });
+  if (d.health) act(async () => { const r = await api('POST', '/api/client-health', { client: d.health }); healthByClient[d.health] = r; toast(r.message, !r.ok); });
+  if (d.remove && confirm(t('vault.removeConfirm', { name: d.remove }))) act(() => api('POST', '/api/vault/remove', { name: d.remove }));
+  if (d.vaultPrivate !== undefined) act(async () => {
+    const v = S.vaults[+d.vaultPrivate];
+    await api('POST', '/api/vault/private', { name: v.name, private: e.target.checked });
+    toast(e.target.checked ? t('vault.privateOnToast', { name: v.name }) : t('vault.privateOffToast', { name: v.name }));
+  });
+  if (d.vaultExcludedSave !== undefined) act(async () => {
+    const i = +d.vaultExcludedSave, v = S.vaults[i];
+    const folders = document.querySelector(`[data-vault-excluded="${i}"]`).value.split('\n').map((s) => s.trim()).filter(Boolean);
+    await api('POST', '/api/vault/excluded', { name: v.name, folders });
+    toast(t('vault.savedExcludedToast', { name: v.name }));
+  });
+  if (d.saveAgent !== undefined) act(async () => {
+    const i = d.saveAgent, a = S.agents[i], get = (f) => document.querySelector(`[data-a="${i}"][data-f="${f}"]`);
+    await api('POST', '/api/agent', { name: a.name, role: get('role').value, activation: get('activation').value, close: get('close').value, ...(get('capture_approved') ? { capture_approved: get('capture_approved').checked } : {}) });
+    toast(t('rolePack.savedToast', { name: a.name }));
+  });
+  if (d.sessRead) (async (id) => {
+    // Independent of whatever session is currently shown: proves any session can read any other.
+    $('session-detail').innerHTML = `<p class="skeleton">${esc(t('sessions.detailLoading'))}</p>`;
+    try {
+      const s = await api('POST', '/api/sessions/read', { id, include_private: $('sess-private').checked });
+      $('session-detail').innerHTML = `<div class="card"><b><span class="badge" style="background:${clientColor(s.client)}">${esc(clientLabel(s.client))}</span> ${esc(s.title || t('sessions.untitled'))}</b>
+        <div class="muted" style="font-size:14px">${esc(s.summary || t('sessions.noSummary'))}</div>
+        <div class="muted" style="font-size:13px">${s.project ? esc(s.project) + ' · ' : ''}${s.message_count} ${s.message_count === 1 ? esc(t('sessions.messageOne')) : esc(t('sessions.messageMany'))} · ${esc(new Date(s.started_at).toLocaleString(LOCALE))}${s.note_refs?.length ? ' · ' + esc(t('sessions.refs', { list: s.note_refs.join(', ') })) : ''}</div></div>`;
+    } catch (e) { $('session-detail').innerHTML = `<p class="error-box">${esc(t('sessions.detailError', { msg: e.message }))}</p>`; }
+  })(d.sessRead);
+  if (d.sessToggle) act(() => api('POST', '/api/sessions/private', { id: d.sessToggle, private: !d.sessPrivate }));
+  if (d.syncPick) $('sync-folder').value = d.syncPick;
+  if (d.syncOnbPick) $('sync-onb-folder').value = d.syncOnbPick;
+});
+$('sess-private').onchange = () => loadSessions().catch(() => {});
+$('sync-provider').onchange = () => { const p = $('sync-provider').value; $('sync-folder-row').hidden = p === 'local'; renderSyncSuggestions(p, S.sync.suggested_folders); };
+$('sync-save').onclick = () => act(async () => {
+  const provider = $('sync-provider').value;
+  const r = await api('POST', '/api/sync', { provider, folder: provider === 'local' ? null : $('sync-folder').value, device: $('sync-device').value });
+  toast(provider === 'local' ? t('sync.localToast') : t('sync.providerToast', { folder: r.sync.folder }));
+});
+$('http-token').onclick = () => act(async () => { const r = await api('POST', '/api/http-token'); $('http-out').innerHTML = `URL: ${esc(r.url)}<br>Header: Authorization: Bearer ${esc(r.token)}<br>Start: ${esc(r.start)}`; });
+$('test').onclick = () => {
+  $('test-out').innerHTML = `<p class="skeleton">${esc(t('test.searching'))}</p>`;
+  act(async () => { const r = await api('POST', '/api/test', { query: $('q').value }); $('test-out').innerHTML = r.results.length ? `<div class="cards">${r.results.map((x) => `<div class="card"><b>${esc(x.title)}</b><span class="mono muted">${esc(r.vault)}/${esc(x.path)}${x.heading ? ' › ' + esc(x.heading) : ''}</span></div>`).join('')}</div>` : `<p class="muted">${esc(t('test.noMatches'))}</p>`; });
+};
+$('done').onclick = async () => { try { await api('POST', '/api/quit'); } catch {} document.body.innerHTML = `<main><section><h2>${esc(t('quit.closedTitle'))}</h2><p class="hint">${esc(t('quit.closedHint'))}</p></section></main>`; };
+$('q').onkeydown = (e) => { if (e.key === 'Enter') $('test').click(); };
+
+async function boot() {
+  $('boot-error').hidden = true;
+  try { await load(); renderAskEmpty(); $('boot-loading').hidden = true; }
+  catch (e) { $('boot-loading').hidden = true; $('boot-error').hidden = false; $('boot-error-msg').textContent = e.message; }
+}
+$('boot-retry').onclick = boot;
+boot();
+// Light refresh: only the activity table, so edits in progress are never wiped.
+setInterval(async () => {
+  if (document.visibilityState !== 'visible') return;
+  try { const s = await api('GET', '/api/state'); S.activity = s.activity; $('activity').innerHTML = s.activity.length ? s.activity.map((e) => `<tr><td>${esc(new Date(e.at).toLocaleString(LOCALE))}</td><td>${esc(e.platform)}</td><td class="mono">${esc(e.tool)}</td><td>${e.ok ? (e.written ? esc(t('test.written')) : esc(t('test.ok'))) : esc(t('test.refused'))}</td></tr>`).join('') : `<tr><td colspan="4" class="muted">${esc(t('ready.noCalls'))}</td></tr>`; $('n4').className = 'step' + (s.activity.length ? ' done' : ''); } catch {}
+}, 5000);
+</script>
+<script src="agents.js"></script>
+<script src="vendor/3d-force-graph/3d-force-graph.min.js"></script>
+<script src="notes3d.js"></script>
+<script src="share.js"></script>
+</body>
+</html>

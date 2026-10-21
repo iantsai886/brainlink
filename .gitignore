@@ -1,39 +1,4 @@
-# Secrets and local config — never commit
-.env
-.env.*
-!.env.example
-*.pem
-*.key
-id_rsa*
-config/config.yaml
-**/.jwt_secret
-secrets/
-# Personal data
-**/faces/
-**/known/
-data/
-digests/
-*.db
-*.db-*
-# Build output and large binaries
 node_modules/
+package-lock.json
 dist/
 build/
-*.zip
-*.tar
-*.tar.gz
-*.apk
-*.jar
-*.pt
-*.onnx
-*.mp4
-part-*
-# Logs and caches
-*.log
-*.err
-__pycache__/
-*.pyc
-.venv/
-venv/
-.DS_Store
-*.bak*

@@ -1,26 +1,61 @@
-# BrainLink
+# BrainLink MCP
 
-Private repo for **BrainLink**: the app, its build scripts, releases, Skills and code notes.
-Remote: https://github.com/iantsai886/brainlink
+One Obsidian / Markdown vault that every AI can search and write to safely: Claude Desktop and Claude Code, ChatGPT Codex, Cursor, Gemini CLI, Windsurf, and any Streamable-HTTP MCP client (such as Grok bots). Product spec: [docs/PRODUCT-SPEC.md](docs/PRODUCT-SPEC.md).
 
-## Layout (this initial import)
+## For customers
 
-- `vault-import/source-snapshot-2026-10-19/`: the BrainLink source tree that was stored in the Brain vault (`20 Iango/Projects/BrainLink/source`). **It's older than the live repo.**
-- `vault-import/eval/`: the retrieval eval script from the vault.
-- `vault-import/notes/project/`: BrainLink project note and change log.
-- `vault-import/notes/agents/<agent>/`: BrainLink build notes, gates, test scripts and prompts written by Claude 886/101, ChatGPT 886/101, Paulo, RSI Lab and Technical Reviewer. Superseded notes are under `superseded/`.
+1. Install `BrainLink-<version>.pkg` (macOS), `BrainLink-Setup-<version>.exe` (Windows), or on Linux the `.deb` or `brainlink-<version>-linux-<arch>.tar.gz` (run `./install.sh`).
+2. Setup opens in your browser: choose your vault folder and a rule pack, then name your agent.
+3. Press **Connect** for each AI app, then restart that app.
+4. In the AI, say **"Connect to <agent>"**. Say **"<agent> close loop"** to save the session to your vault.
 
-## Live source history: pending
+## Command line
 
-The main source, with full git history, lives on the Grok box at `/workspace/brainlink-rebuild` (branch `rebuild-v11`), plus the `feat-rb7` worktree.
-Claude 886 and Claude 101 are building there now. To avoid disrupting the live build, **Repo Keeper pushes that history as-is after the 12:00 freeze on 2026-10-21**:
-push `rebuild-v11` (and tags) as its own branch, then merge into `main` with `--allow-unrelated-histories`. If `README.md` or `.gitignore` conflict, keep the live versions and link `vault-import/`.
+```
+brainlink setup | init | connect <client|all> | disconnect <client> | clients | status | sync | ui | demo | serve [--http]
+```
 
-Release zips go to GitHub Releases, never into git.
+`connect` also accepts `--all`. `sync` runs one sync pass (local-only by default; choose Drive, iCloud or Dropbox in Setup).
 
-## Rules
+## Smart features
 
-- All AI code and Skills go here via Repo Keeper (Chairman rule, 2026-10-21).
-- No secrets, `.env` files, licence private keys or personal data. The licence signing key stays on Ian's Mac.
+- **Auto-linking:** every note an AI writes links the notes it mentions or is about, and `BrainLink/Home.md` links everything, so notes connect even without Obsidian.
+- **Search:** keyword (stemmed, filters, `#tag`, `[[Note]]`, fused rephrasings) plus meaning-based search when Ollama is installed (`ollama pull nomic-embed-text`).
+- **Tools:** `brain_brief`, `vault_recent`, `open_loops`, `vault_health`, `remember`, `append_daily`, `propose_note` templates (meeting, decision, person, project, idea). `session_list`, `session_read`, `session_log` read local AI session history (imported from Claude Code and Codex, or logged directly) — summary-first and private by default; see `docs/SESSION-INDEX.md`.
+- **Shared commands:** notes in `BrainLink/Commands/` become slash commands in every AI.
 
-Made by Grok Bot (Paulo), 2026-10-21. Managed by Repo Keeper (reports to Paulo).
+## How it is safe
+
+- New notes or appends only. Nothing is ever overwritten or deleted.
+- Every write is previewed first; `confirm=true` writes it. A close phrase authorises its capture.
+- Attribution on every write (`ai_platform`, `agent_or_role`, `session_or_task_id`, timestamp) in the vault's schema (`standard` or `provenance`).
+- Vault scope per AI connection (`BRAINLINK_VAULTS`), read-only connections (`BRAINLINK_READ_ONLY=1`), proposal-only vaults and agents.
+- Refuses secret-looking content (API keys, tokens, card or account numbers).
+- Private vaults are left out of connector `search`/`fetch`.
+- HTTP mode listens on 127.0.0.1 only and needs a bearer token. The Setup UI is local-only, uses a per-session token and checks the Host header.
+
+## Config
+
+`~/Library/Application Support/BrainLink/config.json` (macOS) or `%APPDATA%\BrainLink\config.json` (Windows). Vaults (`name, path, private, schema, intake_folder, decisions, read_first, folders, rules, writes, flat, protected, extra_fields`), agents (`name, vault, role, activation, close, connect_notes, tail_notes, recent_dir, close_target {mode: append-section | new-note | append-task | proposal-only}`), optional `handoff {vault, folder}`, `timezone`, `locale`, `http`, optional `sync {provider: local|gdrive|icloud|dropbox, folder, device}` (local by default).
+
+## Developers
+
+```bash
+npm install               # links the sibling brainlink-store checkout (file:../brainlink-store)
+npm test                  # one test suite, no external dependencies (Node 22+)
+node bin/brainlink.mjs demo   # try the milestone UI on a throwaway sample vault, nothing real touched
+node bin/brainlink.mjs ui     # same UI on the vaults in config.json
+npm run build:mac        # dist/BrainLink-<version>.pkg (unsigned build: packaging/macos/INSTALL-UNSIGNED.md)
+npm run build:win        # dist/BrainLink-Setup-<version>.exe + portable zip (needs makensis)
+npm run build:win-preview # dist/BrainLink-Preview-<version>-windows.zip — no installer, no bundled Node, Node 22+ required
+npm run build:linux      # dist/*.deb + linux tar.gz for x64 and arm64
+```
+
+Dependency: `brainlink-store` (`../brainlink-store`, this repo's sibling) — the Obsidian-independent store contract. Not vendored; see that repo's README for how the UI (`ui/app/`) resolves the same checkout. `src/store/folder-store.mjs` is the real vault backing it: every note is a plain Markdown file in the vault folder (frontmatter is left byte-for-byte untouched until that note is actually edited through the API), with CAS/versions/sessions/snapshots delegated to `brainlink-store`'s reference implementation and search routed through `src/core.mjs` (the same ranking the MCP tools use).
+
+Packaging notes: [Windows](packaging/windows/README.md), [macOS unsigned install](packaging/macos/INSTALL-UNSIGNED.md), [Linux](packaging/linux/README.md). Clean-room code: no code from Obsidian Copilot or Khoj (AGPL).
+
+## Change Log
+
+- 2026-10-19: `brainlink ui` and `brainlink demo` serve the milestone UI (`ui/app/`, unmodified) on 127.0.0.1 with a per-launch token, backed by a real Markdown-folder `BrainStore` (`src/host.mjs`, `src/store/folder-store.mjs`, `src/ui-server.mjs`). `demo` copies `samples/acme-studio` into a throwaway temp vault first, so trying it never touches a real vault or `config.json`. Windows: `packaging/windows/build-portable-zip.sh` (`npm run build:win-preview`) makes a no-installer preview zip for a machine that already has Node. macOS: `packaging/macos/INSTALL-UNSIGNED.md` plus a postinstall fix so a failed `/usr/local/bin` link shows up in the install log instead of silently vanishing.
+- 2026-10-19: Session tools (`session_list`, `session_read`, `session_log`) over a local, private-by-default session store, with read-only importers for Claude Code and Codex (`src/sessions/`, `docs/SESSION-INDEX.md`). `brainlink sync` wires `config.json`'s new optional `sync` key to the sync engine (local by default). `brainlink connect` accepts `--all`; `detect()` now reports ChatGPT honestly as needing a remote HTTPS connector (pending Ian). Depends on `brainlink-store` v0.2 (`search`, `Session.project`/`private`, `SessionRecord`).

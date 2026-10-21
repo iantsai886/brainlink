@@ -1,0 +1,115 @@
+#!/bin/bash
+# Builds dist/BrainLink-<version>.pkg: BrainLink.app (universal Node 22 runtime + app) and the
+# `brainlink` command. Signs and notarises when certificates are configured:
+#   DEVELOPER_ID_APP="Developer ID Application: Name (TEAMID)"
+#   DEVELOPER_ID_INSTALLER="Developer ID Installer: Name (TEAMID)"
+#   NOTARY_PROFILE=<profile saved with: xcrun notarytool store-credentials>
+# Without them it builds an ad-hoc signed test installer (right-click → Open to install).
+set -euo pipefail
+HERE="$(cd "$(dirname "$0")" && pwd)"
+ROOT="$(cd "$HERE/../.." && pwd)"
+VERSION="$(node -p "require('$ROOT/package.json').version")"
+BUNDLE_ID="${BUNDLE_ID:-com.iango.brainlink}"
+NODE_VERSION="$(cat "$ROOT/vendor/node/VERSION")"
+WORK="$ROOT/build/macos"
+DIST="$ROOT/dist"
+APP="$WORK/root/Applications/BrainLink.app"
+
+echo "BrainLink $VERSION · Node $NODE_VERSION · $BUNDLE_ID"
+rm -rf "$WORK" && mkdir -p "$WORK/node" "$APP/Contents/MacOS" "$APP/Contents/Resources/bin" "$APP/Contents/Resources/node/bin" "$DIST"
+
+# 1. Universal Node runtime from the checksum-verified official tarballs.
+(cd "$ROOT/vendor/node" && grep -E "darwin-(arm64|x64).tar.gz" SHASUMS256.txt | shasum -a 256 -c --quiet)
+for arch in arm64 x64; do
+  mkdir -p "$WORK/node/$arch"
+  tar -xzf "$ROOT/vendor/node/node-$NODE_VERSION-darwin-$arch.tar.gz" -C "$WORK/node/$arch" --strip-components=1 "node-$NODE_VERSION-darwin-$arch/bin/node" "node-$NODE_VERSION-darwin-$arch/LICENSE"
+done
+lipo -create "$WORK/node/arm64/bin/node" "$WORK/node/x64/bin/node" -output "$APP/Contents/Resources/node/bin/node"
+cp "$WORK/node/arm64/LICENSE" "$APP/Contents/Resources/node/LICENSE"
+
+# 2. App files (only what customers need: no tests, tools, vendor or issuer keys).
+mkdir -p "$APP/Contents/Resources/app"
+cp -R "$ROOT/bin" "$ROOT/src" "$ROOT/ui" "$ROOT/samples" "$ROOT/package.json" "$ROOT/LICENSE.txt" "$ROOT/README.md" "$APP/Contents/Resources/app/"
+cp "$HERE/icon/BrainLink.icns" "$APP/Contents/Resources/BrainLink.icns"
+
+cat > "$APP/Contents/Resources/bin/brainlink" <<'SH'
+#!/bin/bash
+# BrainLink command: runs the bundled Node runtime, so no system Node is needed.
+SELF="$0"; while [ -L "$SELF" ]; do T="$(readlink "$SELF")"; case "$T" in /*) SELF="$T";; *) SELF="$(dirname "$SELF")/$T";; esac; done
+RES="$(cd "$(dirname "$SELF")/.." && pwd)"
+exec "$RES/node/bin/node" "$RES/app/bin/brainlink.mjs" "$@"
+SH
+cat > "$APP/Contents/MacOS/BrainLink" <<'SH'
+#!/bin/bash
+# Finder launch: open Setup in the browser; it closes itself after 30 idle minutes or on Done.
+RES="$(cd "$(dirname "$0")/../Resources" && pwd)"
+exec "$RES/node/bin/node" "$RES/app/bin/brainlink.mjs" setup --app
+SH
+chmod +x "$APP/Contents/Resources/bin/brainlink" "$APP/Contents/MacOS/BrainLink"
+
+cat > "$APP/Contents/Info.plist" <<PLIST
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <key>CFBundleName</key><string>BrainLink</string>
+  <key>CFBundleDisplayName</key><string>BrainLink</string>
+  <key>CFBundleIdentifier</key><string>$BUNDLE_ID</string>
+  <key>CFBundleVersion</key><string>$VERSION</string>
+  <key>CFBundleShortVersionString</key><string>$VERSION</string>
+  <key>CFBundleExecutable</key><string>BrainLink</string>
+  <key>CFBundleIconFile</key><string>BrainLink</string>
+  <key>CFBundlePackageType</key><string>APPL</string>
+  <key>LSMinimumSystemVersion</key><string>11.0</string>
+  <key>LSUIElement</key><true/>
+  <key>LSApplicationCategoryType</key><string>public.app-category.productivity</string>
+  <key>NSHumanReadableCopyright</key><string>© $(date +%Y) Iango. All rights reserved.</string>
+</dict>
+</plist>
+PLIST
+
+# 3. Code signing (hardened runtime for notarisation; ad-hoc otherwise).
+if [ -n "${DEVELOPER_ID_APP:-}" ]; then
+  codesign --force --options runtime --timestamp --entitlements "$HERE/entitlements.plist" -s "$DEVELOPER_ID_APP" "$APP/Contents/Resources/node/bin/node"
+  codesign --force --options runtime --timestamp -s "$DEVELOPER_ID_APP" "$APP"
+else
+  codesign --force -s - "$APP/Contents/Resources/node/bin/node"
+  codesign --force -s - "$APP"
+fi
+codesign --verify --strict "$APP"
+
+# 4. Installer: component package (not relocatable) wrapped in a product archive.
+pkgbuild --analyze --root "$WORK/root" "$WORK/component.plist" >/dev/null
+/usr/libexec/PlistBuddy -c "Add :0:BundleIsRelocatable bool false" "$WORK/component.plist"
+pkgbuild --root "$WORK/root" --component-plist "$WORK/component.plist" --scripts "$HERE/scripts" --identifier "$BUNDLE_ID.pkg" --version "$VERSION" --install-location / "$WORK/BrainLink-component.pkg" >/dev/null
+cp "$ROOT/LICENSE.txt" "$HERE/resources/license.txt"
+cat > "$WORK/distribution.xml" <<XML
+<?xml version="1.0" encoding="utf-8"?>
+<installer-gui-script minSpecVersion="2">
+  <title>BrainLink MCP $VERSION</title>
+  <welcome file="welcome.html"/>
+  <license file="license.txt"/>
+  <conclusion file="conclusion.html"/>
+  <options customize="never" require-scripts="false" hostArchitectures="arm64,x86_64"/>
+  <domains enable_localSystem="true"/>
+  <os-version min="11.0"/>
+  <choices-outline><line choice="default"><line choice="$BUNDLE_ID"/></line></choices-outline>
+  <choice id="default"/>
+  <choice id="$BUNDLE_ID" visible="false"><pkg-ref id="$BUNDLE_ID.pkg"/></choice>
+  <pkg-ref id="$BUNDLE_ID.pkg" version="$VERSION" onConclusion="none">BrainLink-component.pkg</pkg-ref>
+</installer-gui-script>
+XML
+OUT="$DIST/BrainLink-$VERSION.pkg"
+SIGN_ARGS=()
+[ -n "${DEVELOPER_ID_INSTALLER:-}" ] && SIGN_ARGS=(--sign "$DEVELOPER_ID_INSTALLER" --timestamp)
+productbuild --distribution "$WORK/distribution.xml" --resources "$HERE/resources" --package-path "$WORK" ${SIGN_ARGS[@]+"${SIGN_ARGS[@]}"} "$OUT" >/dev/null
+
+# 5. Notarise + staple when configured.
+if [ -n "${NOTARY_PROFILE:-}" ] && [ -n "${DEVELOPER_ID_INSTALLER:-}" ]; then
+  xcrun notarytool submit "$OUT" --keychain-profile "$NOTARY_PROFILE" --wait
+  xcrun stapler staple "$OUT"
+fi
+(cd "$DIST" && shasum -a 256 "$(basename "$OUT")" > "$(basename "$OUT").sha256")
+echo "Built $OUT ($(du -h "$OUT" | cut -f1))"
+[ -z "${DEVELOPER_ID_INSTALLER:-}" ] && echo "Unsigned test build: right-click → Open in Finder to install (Gatekeeper blocks a double-click)."
+exit 0
