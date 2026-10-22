@@ -8,6 +8,7 @@ import { watch } from 'node:fs';
 import { createHash } from 'node:crypto';
 import path from 'node:path';
 import { loadVault } from './core.mjs';
+import { appHome } from './config.mjs';
 import { suggestFolders } from './sync/settings.mjs';
 import { openSessionStore, importAll } from './sessions/index.mjs';
 import { sessionList } from './sessions/mcp.mjs';
@@ -41,9 +42,22 @@ export function suggestSnapshotFolder(home) {
 }
 
 const sha12 = (text) => createHash('sha256').update(text).digest('hex').slice(0, 12);
-const isPrivateNote = (note) => /^(true|yes|1)$/i.test(String(note.meta?.private ?? ''));
+// note.private is already computed once, at index-build time, by core.mjs's isPrivateMeta —
+// reuse it instead of re-deriving it from note.meta.private with a second, independent regex
+// (that drift — "on", `Private:`, a trailing `# comment` — is exactly what let private notes
+// through here but not through readNote).
+const isPrivateNote = (note) => note.private;
 const relFor = (n) => path.posix.join(n.vault, n.rel);
-const manifestPath = (dest) => path.join(dest, 'manifest.json');
+// The manifest used to live inside `dest` itself — reachable by whatever remote peer or cloud
+// agent has write access to that synced folder, which could plant or edit keys in it and make
+// BrainLink delete arbitrary files there on the next write/clear (safeDeletePath only validates
+// that a key *resolves inside dest*, not that BrainLink itself ever wrote it). Keeping it under
+// appHome instead — out of reach of anything that only syncs `dest` — closes that off: a remote
+// edit to manifest.json inside the Drive folder no longer does anything, because this is a
+// different file entirely. Keyed by a hash of `dest` so switching folders doesn't collide.
+export function manifestPath(dest, env = process.env) {
+  return path.join(appHome(env), 'snapshot-manifests', `${sha12(path.resolve(dest))}.json`);
+}
 
 async function atomicWrite(file, data) {
   await mkdir(path.dirname(file), { recursive: true });
@@ -52,8 +66,8 @@ async function atomicWrite(file, data) {
   await rename(tmp, file);
 }
 
-async function readManifest(dest) {
-  try { return JSON.parse(await readFile(manifestPath(dest), 'utf8')); } catch { return { files: {} }; }
+async function readManifest(dest, env) {
+  try { return JSON.parse(await readFile(manifestPath(dest, env), 'utf8')); } catch { return { files: {} }; }
 }
 
 // The manifest read back from `dest` is untrusted (it lives in a folder a cloud sync client also
@@ -142,7 +156,7 @@ export async function writeSnapshotOnce(ctx, cfg, env = process.env) {
   const sessionsText = sessions ? JSON.stringify({ generated_at: new Date().toISOString(), sessions }, null, 1) : null;
   if (sessionsText !== null) files[SESSIONS_FILE] = { sha12: sha12(sessionsText), updated_at: new Date().toISOString() };
 
-  const prev = await readManifest(dest);
+  const prev = await readManifest(dest, env);
   for (const rel of Object.keys(prev.files || {})) if (!files[rel]) { const safe = await safeDeletePath(dest, rel); if (safe) { try { await unlink(safe); } catch {} } }
 
   for (const n of notes) {
@@ -154,17 +168,18 @@ export async function writeSnapshotOnce(ctx, cfg, env = process.env) {
   if (prev.files?.['index.md']?.sha12 !== files['index.md'].sha12) await atomicWrite(path.join(dest, 'index.md'), indexText);
   if (sessionsText !== null) await atomicWrite(path.join(dest, SESSIONS_FILE), sessionsText);
 
-  await atomicWrite(manifestPath(dest), JSON.stringify({ generated_at: new Date().toISOString(), files }, null, 1));
+  await atomicWrite(manifestPath(dest, env), JSON.stringify({ generated_at: new Date().toISOString(), files }, null, 1));
   return { ok: true, noteCount: notes.length, syncedAt: new Date().toISOString() };
 }
 
 // "Stop sharing" + clear: removes every file this feature ever wrote to `dest` (tracked in its
-// own manifest.json), and nothing else -- a foreign file placed in the same folder is untouched.
-export async function clearSnapshot(dest) {
+// own manifest, kept under appHome — see manifestPath above), and nothing else -- a foreign file
+// placed in the same folder is untouched.
+export async function clearSnapshot(dest, env = process.env) {
   if (!dest) return { ok: true };
-  const prev = await readManifest(dest);
+  const prev = await readManifest(dest, env);
   for (const rel of Object.keys(prev.files || {})) { const safe = await safeDeletePath(dest, rel); if (safe) { try { await unlink(safe); } catch {} } }
-  try { await unlink(manifestPath(dest)); } catch {}
+  try { await unlink(manifestPath(dest, env)); } catch {}
   return { ok: true };
 }
 

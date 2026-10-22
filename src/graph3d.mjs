@@ -5,8 +5,10 @@
 // frontmatter-flagged private notes are dropped before a single node is built.
 import { loadVault, summarize } from './core.mjs';
 
-const truthy = (v) => /^(1|true|yes|on)$/i.test(String(v || ''));
-const isPrivateNote = (n) => truthy(n.meta.private);
+// n.private is already computed once, at index-build time, by core.mjs's isPrivateMeta — reusing
+// it here (rather than re-deriving private-ness from n.meta.private with a second, independent
+// regex) is what keeps this module in lockstep with every other private check in the codebase.
+const isPrivateNote = (n) => n.private;
 
 // Every enabled vault that isn't private, each with its own loaded index.
 async function visibleVaults(ctx, only) {

@@ -267,6 +267,10 @@ export async function startSetup(opts = {}) {
       const cfg = await loadConfig(file);
       const next = { ...cfg, vaults: cfg.vaults.filter((v) => v.name !== b.name), agents: cfg.agents.filter((a) => a.vault !== b.name), handoff: cfg.handoff?.vault === b.name ? null : cfg.handoff };
       await saveConfig(next, file);
+      // S5: the snapshot watcher was started from whatever vault list existed at launch (or the
+      // last /api/snapshot call) and otherwise runs for the life of this process — removing a
+      // vault here must stop it from still syncing a now-gone folder until next restart.
+      await refreshSnapshotWatcher(next);
       return { ok: true };
     },
     // Excluded folders and the private flag stay editable after connecting, not just at
@@ -285,6 +289,10 @@ export async function startSetup(opts = {}) {
       if (!v) throw new Error(`Unknown vault "${b.name}".`);
       v.private = Boolean(b.private);
       await saveConfig(cfg, file);
+      // S5: a vault just marked private must stop being watched/synced into the shared snapshot
+      // right away, not only after the app restarts (startSnapshotWatcher already skips private
+      // vault roots — see src/snapshot.mjs — but only when it starts watching).
+      await refreshSnapshotWatcher(cfg);
       return { ok: true, private: v.private };
     },
     'POST /api/sync': async (b) => {
@@ -408,7 +416,7 @@ export async function startSetup(opts = {}) {
     },
     'POST /api/snapshot/clear': async () => {
       const cfg = await loadConfig(file);
-      await clearSnapshot(snapshotSettings(cfg).folder);
+      await clearSnapshot(snapshotSettings(cfg).folder, env);
       return { ok: true };
     },
     'POST /api/test': async (b) => {

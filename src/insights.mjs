@@ -12,7 +12,7 @@ export async function recentNotes(ctx, vaultName, { days = 7, since, until, limi
   const f = folder ? String(folder).replace(/^\/+|\/+$/g, '').toLowerCase() + '/' : null;
   const touched = (n) => [n.date, new Date(n.mtime).toISOString().slice(0, 10)].sort().pop();
   return index.notes.map((n, i) => ({ n, i, when: touched(n) }))
-    .filter(({ n, when }) => !n.generated && when >= from && (!until || when <= until) && (!f || n.rel.toLowerCase().startsWith(f)))
+    .filter(({ n, when }) => !n.generated && !n.private && when >= from && (!until || when <= until) && (!f || n.rel.toLowerCase().startsWith(f)))
     .sort((a, b) => b.n.mtime - a.n.mtime)
     .slice(0, limit)
     .map(({ i, n, when }) => summarize(index, i, { changed: when, snippet: n.body.replace(/^#.*$/m, '').replace(/\*\*Made by[^\n]*\n?/, '').trim().slice(0, 200) }));
@@ -38,7 +38,7 @@ export async function openLoops(ctx, vaultName, { days = 60, limit = 40 } = {}, 
   const from = daysAgo(ctx.tz, days, now);
   const tasks = [], next = [], questions = [], decisions = [];
   index.notes.forEach((n, i) => {
-    if (n.generated || n.historical) return;
+    if (n.generated || n.historical || n.private) return;
     const at = linkTarget(index, i);
     for (const m of n.body.matchAll(/^\s*[-*] \[ \] (.+)$/gm)) tasks.push({ task: m[1].trim(), note: at, path: n.rel, date: n.date });
     // Captures are dated sections; only recent ones count as open.
@@ -61,14 +61,15 @@ export async function openLoops(ctx, vaultName, { days = 60, limit = 40 } = {}, 
 
 export async function vaultHealth(ctx, vaultName, { staleDays = 180 } = {}, now = new Date()) {
   const index = await loadVault(ctx, vaultName);
-  const real = index.notes.map((_, i) => i).filter((i) => !index.notes[i].generated);
-  const linked = (i) => [...index.backlinks[i], ...index.outlinks[i]].some((j) => !index.notes[j].generated);
+  const visible = (i) => !index.notes[i].generated && !index.notes[i].private;
+  const real = index.notes.map((_, i) => i).filter(visible);
+  const linked = (i) => [...index.backlinks[i], ...index.outlinks[i]].some(visible);
   const orphans = real.filter((i) => !linked(i));
-  const dupes = [...index.byTitle.entries()].filter(([, ids]) => ids.length > 1).map(([title, ids]) => ({ title, paths: ids.map((i) => index.notes[i].rel) }));
+  const dupes = [...index.byTitle.entries()].map(([title, ids]) => [title, ids.filter(visible)]).filter(([, ids]) => ids.length > 1).map(([title, ids]) => ({ title, paths: ids.map((i) => index.notes[i].rel) }));
   const cutoff = now.getTime() - staleDays * 86400e3;
   const stale = real.filter((i) => index.notes[i].mtime < cutoff && /^(active|current)$/i.test(index.notes[i].meta.status || '') && !index.notes[i].historical);
-  const broken = index.broken.filter((b) => !index.notes[b.from].generated);
-  const links = index.edges.filter(([a, b]) => !index.notes[a].generated && !index.notes[b].generated).length;
+  const broken = index.broken.filter((b) => visible(b.from));
+  const links = index.edges.filter(([a, b]) => visible(a) && visible(b)).length;
   return {
     notes: real.length, links, orphan_count: orphans.length,
     orphans: orphans.slice(0, 30).map((i) => summarize(index, i)),

@@ -101,7 +101,20 @@ function splitByWords(text, ancestry) {
   return out;
 }
 
-export const isPrivateMeta = (meta) => /^(true|yes|1)$/i.test(String(meta?.private ?? ''));
+// The one shared, fail-closed "is this note private?" predicate — used by core.mjs itself,
+// snapshot.mjs and graph3d.mjs (import from here instead of keeping a local copy; three
+// independent regexes drifting out of sync is exactly how `Private: true`, `private: true #
+// comment` and `private: on` used to fall through on some paths but not others). Case-insensitive
+// key lookup (parseFrontmatter keeps the YAML key's original case); strips a trailing `# comment`
+// and surrounding quotes from the value. Allow-listing "true-ish" spellings is how new spellings
+// slip through — deny-list instead, so private:true is the floor: anything not explicitly one of
+// the recognized "off" spellings is treated as private.
+export const isPrivateMeta = (meta = {}) => {
+  const k = Object.keys(meta || {}).find((x) => x.toLowerCase() === 'private');
+  if (k === undefined) return false;
+  const v = String(meta[k]).replace(/\s+#.*$/, '').replace(/^["']|["']$/g, '').trim();
+  return !/^(false|no|0|off|null|~|)$/i.test(v);
+};
 
 export function isHistorical(rel, meta) {
   const name = path.posix.basename(rel);
@@ -531,13 +544,25 @@ export async function readNote(ctx, name, rel) {
   if (!full.toLowerCase().endsWith('.md')) throw new Error('Only Markdown notes can be read');
   const relNorm = path.relative(root, full).split(path.sep).join('/');
   if (await isExcludedPath(root, relNorm)) throw new Error(PRIVATE_NOTE_ERROR);
+  // safeJoin only resolves `..`/absolute-path tricks (path.resolve), not symlinks: a file or
+  // directory symlink that *looks* like it's inside the vault can still point at 00 Home or
+  // anywhere else on disk. walk() (the index builder) already skips symlinks entirely, so
+  // requiring the note to be indexed under this exact relative path closes that gap for free —
+  // a symlinked path is simply never in index.byRel, no matter what it resolves to on disk.
+  const index = await loadVault(ctx, name);
+  const i = index.byRel.get(relNorm);
+  if (i === undefined || index.notes[i].private) throw new Error(PRIVATE_NOTE_ERROR);
   const raw = await readFile(full, 'utf8');
   const { meta, body } = parseFrontmatter(raw);
   if (isPrivateMeta(meta)) throw new Error(PRIVATE_NOTE_ERROR);
   return { path: rel, meta, body, historical: isHistorical(rel, meta) };
 }
 
-const eligibleFor = (index) => (j) => { const n = index.notes[j]; return !(n.historical || n.generated || ROUTING_NOTE.test(n.title) || n.body.trim().length < 120); };
+// Fails closed on n.private: every caller (vault_related's own "suggested" list below, and
+// links.mjs's suggestLinks/buildHomeMap) must never surface a private note's title, whether as a
+// suggested link, an auto-linked [[mention]] in a newly written note, or an entry in the
+// generated Home map.
+const eligibleFor = (index) => (j) => { const n = index.notes[j]; return !(n.historical || n.generated || n.private || ROUTING_NOTE.test(n.title) || n.body.trim().length < 120); };
 
 export async function related(ctx, name, rel) {
   const index = await loadVault(ctx, name);
