@@ -9,7 +9,7 @@ import { fileURLToPath } from 'node:url';
 
 import { normalize, validate, saveConfig } from '../src/config.mjs';
 import { tokens, extractLinks, linkGraph } from '../src/graph.mjs';
-import { createContext, chunkMarkdown, search, readNote, related, zonedNow, findSecrets, DEFAULT_EXCLUDED_FOLDERS, SUGGESTED_EXCLUDED_FOLDERS, ensureDefaultIgnore, readExcludedFolders, writeExcludedFolders } from '../src/core.mjs';
+import { createContext, chunkMarkdown, search, readNote, related, zonedNow, findSecrets, DEFAULT_EXCLUDED_FOLDERS, SUGGESTED_EXCLUDED_FOLDERS, ensureDefaultIgnore, readExcludedFolders, writeExcludedFolders, parseFrontmatter, isPrivateMeta } from '../src/core.mjs';
 import { findObsidianVaults, nestedVaults } from '../src/obsidian.mjs';
 import { proposeNote, sendHandoff, listHandoffs, frontmatter, resolveIdentity } from '../src/writes.mjs';
 import { connectAgent, closeLoop, resolveAgent, latestCaptures } from '../src/agents.mjs';
@@ -134,6 +134,33 @@ test('readNote refuses private notes and notes in an excluded folder, everywhere
   // readNote itself (used directly by /api/note)
   await assert.rejects(readNote(ctx, 'Acme Studio', 'Secret Plan.md'), /private/i);
   await assert.rejects(readNote(ctx, 'Acme Studio', '00 Home/Diary.md'), /private/i);
+});
+
+test('parseFrontmatter: a leading UTF-8 BOM or blank lines before --- still detect private: true', () => {
+  const bom = '﻿---\nprivate: true\n---\n# Secret\n\nbody text';
+  const blank = '\n\n---\nprivate: true\n---\n# Secret\n\nbody text';
+  const both = '﻿\n\n---\nprivate: true\n---\n# Secret\n\nbody text';
+  const hidden = '\n---\nprivate: false\n---\n# Not secret\n\nbody text';
+  for (const text of [bom, blank, both]) {
+    const { meta, body } = parseFrontmatter(text);
+    assert.equal(meta.private, 'true');
+    assert.ok(isPrivateMeta(meta));
+    assert.match(body, /^# Secret/);
+    assert.ok(!body.includes('﻿'), 'the BOM itself never leaks into the body');
+  }
+  const { meta: hiddenMeta } = parseFrontmatter(hidden);
+  assert.ok(!isPrivateMeta(hiddenMeta), 'private: false after leading blank lines is still not private');
+});
+
+test('BOM and leading-blank-line private notes are hidden from readNote and search, same as any other private note', async () => {
+  const { cfg, company } = await fixture();
+  await writeFile(path.join(company, 'Secret BOM.md'), '﻿---\nprivate: true\n---\n# Secret BOM\n\nAcquire Initech quietly.');
+  await writeFile(path.join(company, 'Secret Blank Lines.md'), '\n\n---\nprivate: true\n---\n# Secret Blank Lines\n\nAcquire Umbrella quietly.');
+  const ctx = ctxOf(cfg);
+  await assert.rejects(readNote(ctx, 'Acme Studio', 'Secret BOM.md'), /private/i);
+  await assert.rejects(readNote(ctx, 'Acme Studio', 'Secret Blank Lines.md'), /private/i);
+  const r = await search(ctx, 'Acme Studio', 'Initech Umbrella quietly');
+  assert.ok(!r.some((x) => /Secret BOM|Secret Blank Lines/.test(x.path)));
 });
 
 test('S1: a private note never surfaces in search, related notes or the 2D graph', async () => {

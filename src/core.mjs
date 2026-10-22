@@ -60,9 +60,13 @@ export function zonedNow(tz, d = new Date()) {
   return `${parts.year}-${parts.month}-${parts.day}T${parts.hour}:${parts.minute}:${parts.second}${off}`;
 }
 
+// A leading UTF-8 BOM (some editors/OSes write one) or blank lines before the opening `---` must
+// not stop `private: true` (or any other field) from being detected — such a note reads identically
+// once opened in Obsidian, so it must be gated the same as one with no stray leading bytes/lines.
 export function parseFrontmatter(text) {
-  const m = text.match(/^---\r?\n([\s\S]*?)\r?\n---\r?\n?/);
-  if (!m) return { meta: {}, body: text };
+  const stripped = String(text).replace(/^\uFEFF/, '');
+  const m = stripped.match(/^(?:[ \t]*\r?\n)*---\r?\n([\s\S]*?)\r?\n---\r?\n?/);
+  if (!m) return { meta: {}, body: stripped };
   const meta = {};
   let listKey = null;
   for (const line of m[1].split(/\r?\n/)) {
@@ -72,7 +76,7 @@ export function parseFrontmatter(text) {
     const item = listKey && line.match(/^\s*-\s+(.*)$/);
     if (item) { const v = item[1].replace(/^["']|["']$/g, '').trim(); meta[listKey] = meta[listKey] ? `${meta[listKey].replace(/\]$/, '')}, ${v}]` : `[${v}]`; }
   }
-  return { meta, body: text.slice(m[0].length) };
+  return { meta, body: stripped.slice(m[0].length) };
 }
 
 const MAX_WORDS = 256;
