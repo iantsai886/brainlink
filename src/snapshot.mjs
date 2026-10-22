@@ -4,10 +4,11 @@
 // opens a network connection or listens on anything but 127.0.0.1 -- whatever gets this folder to
 // the cloud is the user's own desktop sync client, not us.
 import { readFile, writeFile, rename, mkdir, unlink, stat, lstat, realpath } from 'node:fs/promises';
+import { existsSync } from 'node:fs';
 import { watch } from 'node:fs';
 import { createHash } from 'node:crypto';
 import path from 'node:path';
-import { loadVault } from './core.mjs';
+import { loadVault, safeJoin } from './core.mjs';
 import { appHome } from './config.mjs';
 import { suggestFolders } from './sync/settings.mjs';
 import { openSessionStore, importAll } from './sessions/index.mjs';
@@ -68,17 +69,50 @@ async function atomicWrite(file, data) {
 
 const LEGACY_MANIFEST = 'manifest.json';
 
-// v1.2.0/v1.2.1 kept the manifest inside `dest` itself; it moved under appHome above so a synced
-// peer can no longer plant one (see manifestPath's comment). That move also means the new manifest
-// starts empty for anyone upgrading, so without this fallback the prune pass below has nothing
-// to diff against: any note a pre-1.2.2 privacy bug once copied into `dest` (a private note, one
-// under an excluded folder like 00 Home) would sit there untouched forever, since nothing it wrote
-// is tracked anymore. Read the old in-folder manifest once, purely to seed that diff -- it is
-// still only ever used as input to the same safeDeletePath-contained prune loop every other
-// manifest read already goes through, so this reopens no trust it didn't already have.
+// The current manifest lives only under appHome (manifestPath above). A missing or corrupt file
+// here means "nothing tracked yet" -- it must never fall back to anything inside `dest`, which a
+// synced peer (or just a user's own unrelated manifest.json, e.g. from a web/extension project)
+// can write to. That fallback was the R1 regression: it made a planted or pre-existing
+// dest/manifest.json drive the delete loop below on first enable, after a clear, after a folder
+// switch, or whenever the appHome file fails to parse.
 async function readManifest(dest, env) {
-  try { return JSON.parse(await readFile(manifestPath(dest, env), 'utf8')); } catch { /* fall through */ }
-  try { return JSON.parse(await readFile(path.join(dest, LEGACY_MANIFEST), 'utf8')); } catch { return { files: {} }; }
+  try { return JSON.parse(await readFile(manifestPath(dest, env), 'utf8')); } catch { return { files: {} }; }
+}
+
+function legacyMigrationMarker(dest, env) {
+  return `${manifestPath(dest, env)}.legacy-migrated`;
+}
+
+// v1.2.0/v1.2.1 kept the manifest inside `dest` itself. That old file is untrusted input (anyone
+// with write access to `dest` can edit it or compute its sha12), so unlike the pre-fix code this
+// never deletes a key just because the legacy manifest says to. Run at most once per dest (gated
+// by a marker under appHome, written before any deletion so a crash can't retry forever), and only
+// ever remove a legacy key whose on-disk bytes, in the shared output location, are byte-for-byte
+// identical to the real vault file that key names right now. Deleting an exact copy of the user's
+// own current note loses nothing; anything that doesn't match (changed, renamed, or the source no
+// longer exists) is left in place rather than guessed about. The legacy file itself is never
+// deleted -- it may not even be ours.
+async function migrateLegacyManifestOnce(ctx, dest, outRoot, env) {
+  const marker = legacyMigrationMarker(dest, env);
+  if (existsSync(marker)) return;
+  await atomicWrite(marker, String(Date.now()));
+  let legacy;
+  try { legacy = JSON.parse(await readFile(path.join(dest, LEGACY_MANIFEST), 'utf8')); } catch { return; }
+  for (const rel of Object.keys(legacy.files || {})) {
+    const m = typeof rel === 'string' && rel.match(/^([^/]+)\/(.+)$/);
+    if (!m) continue; // only "<vault>/<relpath>" keys are in scope; README/index/sessions are regenerated every run anyway
+    const v = ctx.cfg.vaults.find((x) => x.name === m[1]);
+    if (!v || !v.path) continue;
+    let sourceFull;
+    try { sourceFull = safeJoin(path.resolve(v.path), m[2]); } catch { continue; }
+    let sourceBytes;
+    try { sourceBytes = await readFile(sourceFull); } catch { continue; } // can't verify: leave it alone
+    const safe = await safeDeletePath(outRoot, rel);
+    if (!safe) continue;
+    let distBytes;
+    try { distBytes = await readFile(safe); } catch { continue; }
+    if (Buffer.compare(distBytes, sourceBytes) === 0) { try { await unlink(safe); } catch {} }
+  }
 }
 
 // The manifest read back from `dest` is untrusted (it lives in a folder a cloud sync client also
@@ -167,12 +201,10 @@ export async function writeSnapshotOnce(ctx, cfg, env = process.env) {
   const sessionsText = sessions ? JSON.stringify({ generated_at: new Date().toISOString(), sessions }, null, 1) : null;
   if (sessionsText !== null) files[SESSIONS_FILE] = { sha12: sha12(sessionsText), updated_at: new Date().toISOString() };
 
+  await migrateLegacyManifestOnce(ctx, dest, dest, env);
+
   const prev = await readManifest(dest, env);
   for (const rel of Object.keys(prev.files || {})) if (!files[rel]) { const safe = await safeDeletePath(dest, rel); if (safe) { try { await unlink(safe); } catch {} } }
-  // One-time migration cleanup: once its entries have been diffed above, the pre-1.2.2 in-folder
-  // manifest itself is dead weight (nothing reads it anymore) -- remove it too. Fixed literal name
-  // at dest's own root, not resolved from file content, so no safeDeletePath containment is needed.
-  try { await unlink(path.join(dest, LEGACY_MANIFEST)); } catch {}
 
   for (const n of notes) {
     const rel = relFor(n);
@@ -195,7 +227,6 @@ export async function clearSnapshot(dest, env = process.env) {
   const prev = await readManifest(dest, env);
   for (const rel of Object.keys(prev.files || {})) { const safe = await safeDeletePath(dest, rel); if (safe) { try { await unlink(safe); } catch {} } }
   try { await unlink(manifestPath(dest, env)); } catch {}
-  try { await unlink(path.join(dest, LEGACY_MANIFEST)); } catch {}
   return { ok: true };
 }
 

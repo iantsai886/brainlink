@@ -154,15 +154,21 @@ test('snapshot: safeDeletePath still contains a traversal attempt in the real (a
 // 5b: v1.2.0/v1.2.1 tracked the manifest inside `dest` itself (see the P0-3 tests above); a bug of
 // that era could have copied a private note or one under an excluded folder (e.g. 00 Home) into
 // `dest` before it was fixed. Moving the manifest under appHome means a fresh install sees no
-// history for that dest, so without the legacy-manifest fallback in readManifest, such a leaked
-// copy would never again be compared against and pruned. Simulate that upgrade: a leaked private
-// note and a leaked 00-Home note sit in `dest`, tracked only by an old-location manifest.json.
+// history for that dest. The one-time, marker-gated migration (readManifest no longer falls back
+// to the legacy file at all — see R1/N1 below) re-reads that old manifest exactly once and deletes
+// a legacy key only when the bytes it names in `dest` are byte-for-byte identical to the real
+// vault file at that path right now — simulating a leaked *exact* copy, which is what the old bug
+// actually produced (it copied raw file bytes verbatim).
 test('snapshot: upgrading from 1.2.1 purges a stale private-note/00-Home copy left in the shared folder', async () => {
-  const { ctx, cfg, env } = await setupVaults();
+  const { vaultDir, ctx, cfg, env } = await setupVaults();
   const dest = await tmp('dest-upgrade');
+  const privateRaw = await readFile(path.join(vaultDir, 'Private.md'), 'utf8'); // '---\nprivate: true\n---\nshh'
+  await writeFile(path.join(vaultDir, '.brainlinkignore'), 'Secret/\n00 Home/\n');
+  await mkdir(path.join(vaultDir, '00 Home'), { recursive: true });
+  await writeFile(path.join(vaultDir, '00 Home', 'Diary.md'), 'very personal notes'); // excluded, but still a real vault file
   await mkdir(path.join(dest, 'Brain', '00 Home'), { recursive: true });
-  await writeFile(path.join(dest, 'Brain', 'Private.md'), 'shh'); // leaked by the pre-fix bug
-  await writeFile(path.join(dest, 'Brain', '00 Home', 'Diary.md'), 'very personal notes');
+  await writeFile(path.join(dest, 'Brain', 'Private.md'), privateRaw); // leaked by the pre-fix bug: byte-identical to the vault file
+  await writeFile(path.join(dest, 'Brain', '00 Home', 'Diary.md'), 'very personal notes'); // also byte-identical
   const legacyManifest = { generated_at: 'x', files: {
     'Brain/Public.md': { sha12: 'x', updated_at: 'x' },
     'Brain/Private.md': { sha12: 'x', updated_at: 'x' },
@@ -178,7 +184,71 @@ test('snapshot: upgrading from 1.2.1 purges a stale private-note/00-Home copy le
   assert.ok(!existsSync(path.join(dest, 'Brain', 'Private.md')), 'stale leaked private note is purged on the first post-upgrade write');
   assert.ok(!existsSync(path.join(dest, 'Brain', '00 Home', 'Diary.md')), 'stale leaked 00 Home copy is purged on the first post-upgrade write');
   assert.ok(existsSync(path.join(dest, 'Brain', 'Public.md')), 'still-current note is untouched');
-  assert.ok(!existsSync(path.join(dest, 'manifest.json')), 'the old in-folder manifest itself is cleaned up too');
+  assert.ok(existsSync(path.join(dest, 'manifest.json')), 'the old in-folder manifest is never deleted by BrainLink -- it may not even be ours (N1)');
+});
+
+// R1/N1: the fix. readManifest no longer falls back to dest/manifest.json at all (that fallback is
+// what let a planted or pre-existing manifest.json drive deletion on first enable, after a clear,
+// after a folder switch, or on a corrupt appHome manifest), and neither write nor clear ever
+// unlinks dest/manifest.json unconditionally (that file might not be BrainLink's).
+test('snapshot R1/N1: a planted dest/manifest.json never deletes real user files, on first enable, after clear, after a folder switch, or with a corrupt appHome manifest', async () => {
+  const { ctx, cfg, env } = await setupVaults();
+  const plant = async (dest) => {
+    await mkdir(path.join(dest, 'user'), { recursive: true });
+    await mkdir(path.join(dest, 'Brain'), { recursive: true });
+    await writeFile(path.join(dest, 'user', 'mine.txt'), 'my own file');
+    await writeFile(path.join(dest, 'Brain', 'user-written.md'), 'not written by BrainLink');
+    await writeFile(path.join(dest, 'manifest.json'), JSON.stringify({ generated_at: 'x', files: {
+      'user/mine.txt': { sha12: 'x', updated_at: 'x' },
+      'Brain/user-written.md': { sha12: 'x', updated_at: 'x' },
+    } }));
+  };
+  const survives = async (dest) => {
+    assert.equal(await readFile(path.join(dest, 'user', 'mine.txt'), 'utf8'), 'my own file');
+    assert.equal(await readFile(path.join(dest, 'Brain', 'user-written.md'), 'utf8'), 'not written by BrainLink');
+  };
+
+  // First enable.
+  const destFirst = await tmp('dest-r1-first');
+  await plant(destFirst);
+  await writeSnapshotOnce(ctx, chooseSnapshot(cfg, { enabled: true, folder: destFirst }), env);
+  await survives(destFirst);
+
+  // After a clear + re-plant + re-enable.
+  const destClear = await tmp('dest-r1-clear');
+  await writeSnapshotOnce(ctx, chooseSnapshot(cfg, { enabled: true, folder: destClear }), env);
+  await clearSnapshot(destClear, env);
+  await plant(destClear);
+  await writeSnapshotOnce(ctx, chooseSnapshot(cfg, { enabled: true, folder: destClear }), env);
+  await survives(destClear);
+
+  // Folder switch: a fresh dest, never seen before, with a planted legacy manifest.
+  const destSwitch = await tmp('dest-r1-switch');
+  await plant(destSwitch);
+  await writeSnapshotOnce(ctx, chooseSnapshot(cfg, { enabled: true, folder: destSwitch }), env);
+  await survives(destSwitch);
+
+  // Corrupt appHome manifest: must never fall back to the in-folder one.
+  const destCorrupt = await tmp('dest-r1-corrupt');
+  await writeSnapshotOnce(ctx, chooseSnapshot(cfg, { enabled: true, folder: destCorrupt }), env); // seed a real appHome manifest + migration marker
+  await writeFile(manifestPath(destCorrupt, env), '{not valid json');
+  await plant(destCorrupt);
+  await writeSnapshotOnce(ctx, chooseSnapshot(cfg, { enabled: true, folder: destCorrupt }), env);
+  await survives(destCorrupt);
+});
+
+// A user's own manifest.json sitting in the shared folder (e.g. a web or extension project also
+// synced there) must never be modified or deleted by BrainLink, on write or on clear.
+test('snapshot R1/N1: a user\'s own dest/manifest.json survives write and clear untouched', async () => {
+  const { ctx, cfg, env } = await setupVaults();
+  const dest = await tmp('dest-r1-ownmanifest');
+  const ownManifest = JSON.stringify({ not: 'ours', version: 3 });
+  await writeFile(path.join(dest, 'manifest.json'), ownManifest);
+  const withSnapshot = chooseSnapshot(cfg, { enabled: true, folder: dest });
+  await writeSnapshotOnce(ctx, withSnapshot, env);
+  assert.equal(await readFile(path.join(dest, 'manifest.json'), 'utf8'), ownManifest, 'untouched after write');
+  await clearSnapshot(dest, env);
+  assert.equal(await readFile(path.join(dest, 'manifest.json'), 'utf8'), ownManifest, 'untouched after clear');
 });
 
 test('snapshot: removing or excluding a note propagates, without touching foreign files', async () => {
