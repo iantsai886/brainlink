@@ -186,6 +186,56 @@ test('S1: a private note never surfaces in search, related notes or the 2D graph
   } finally { s.server.close(); }
 });
 
+test('canary: a planted private note (ZQXCANARYPRIV) and 00 Home note (ZQXCANARYHOME) never surface anywhere', async () => {
+  const { cfg, company } = await fixture();
+  const CANARY = /ZQXCANARYPRIV|ZQXCANARYHOME/;
+  // Filenames deliberately do NOT contain the marker: agent_connect legitimately echoes a missing
+  // connect note's configured *path* in a warning (see item 1's test), which would false-positive
+  // this canary if the marker were in the filename itself. Only the title/body/tasks carry it, so
+  // a match here can only mean real note content leaked.
+  await writeFile(path.join(company, 'Secret Note.md'), '---\nprivate: true\n---\n# ZQXCANARYPRIV\n\nSecret body mentioning ZQXCANARYPRIV plans.\n\n- [ ] ZQXCANARYPRIV next step\n\n- **Unresolved questions:** ZQXCANARYPRIV question\n');
+  await mkdir(path.join(company, '00 Home'), { recursive: true });
+  await writeFile(path.join(company, '00 Home', 'Diary.md'), '# ZQXCANARYHOME\n\nHome content mentioning ZQXCANARYHOME plans.\n\n- [ ] ZQXCANARYHOME next step\n');
+  await writeFile(path.join(company, '.brainlinkignore'), '00 Home/\n');
+  // An agent pointed straight at both canary files, so agent_connect / agents.mjs readSource is
+  // exercised directly, not just incidentally.
+  cfg.agents.push({
+    ...cfg.agents[0], name: 'Canary', activation: ['Connect to Canary'], close: ['Canary close loop'],
+    connect_notes: ['Secret Note.md'], recent_dir: '00 Home',
+    close_target: { mode: 'append-section', path: 'Chief of Staff Office/Session Captures.md' },
+  });
+  const ctx = ctxOf(cfg);
+  const mcp = createMcp(ctx);
+  const call = async (name, args) => { const r = await mcp.handle({ jsonrpc: '2.0', id: 1, method: 'tools/call', params: { name, arguments: args } }); return r.result; };
+
+  const vs = await call('vault_search', { vault: 'Acme Studio', query: 'ZQXCANARYPRIV ZQXCANARYHOME plans', limit: 20 });
+  assert.ok(!CANARY.test(JSON.stringify(vs)), JSON.stringify(vs));
+
+  const recent = await call('vault_recent', { vault: 'Acme Studio', days: 365, limit: 50 });
+  assert.ok(!CANARY.test(JSON.stringify(recent)), JSON.stringify(recent));
+
+  const loops = await call('open_loops', { vault: 'Acme Studio', days: 365 });
+  assert.ok(!CANARY.test(JSON.stringify(loops)), JSON.stringify(loops));
+
+  const brief = await call('brain_brief', { vault: 'Acme Studio', days: 365 });
+  assert.ok(!CANARY.test(JSON.stringify(brief)), JSON.stringify(brief));
+
+  const connected = await call('agent_connect', { agent: 'Connect to Canary' });
+  assert.ok(!CANARY.test(JSON.stringify(connected)), JSON.stringify(connected));
+
+  const map = await buildHomeMap(ctx, 'Acme Studio');
+  assert.ok(!CANARY.test(map), map);
+
+  const suggestions = await suggestLinks(ctx, 'Acme Studio', 'Thinking about ZQXCANARYPRIV and ZQXCANARYHOME plans today');
+  assert.ok(!CANARY.test(JSON.stringify(suggestions)), JSON.stringify(suggestions));
+
+  // Link suggestions as surfaced through a real write (propose_note's auto-linked "Related"
+  // section): the new note's own body legitimately contains the marker text the caller gave it,
+  // so what matters is that the private/00-Home note titles are never auto-linked to.
+  const proposed = await proposeNote(ctx, { title: 'Note about plans', body: 'Thinking about ZQXCANARYPRIV and ZQXCANARYHOME plans today.', source: 'chat', decision: 'MONITOR' });
+  assert.ok(!/\[\[Secret Note\]\]|\[\[Diary\]\]/.test(proposed.preview), proposed.preview);
+});
+
 test('per-connection vault scope: BRAINLINK_VAULTS hides other vaults', async () => {
   const { cfg } = await fixture();
   const ctx = ctxOf(cfg, { BRAINLINK_VAULTS: 'Acme Studio' });
@@ -596,7 +646,7 @@ test('CLI: `brainlink init` needs no licence and sets up writes and agents immed
 import { stem, extractTags, findMentions, makeResolver } from '../src/graph.mjs';
 import { remember, appendDaily } from '../src/writes.mjs';
 import { recentNotes, openLoops, vaultHealth, brief } from '../src/insights.mjs';
-import { buildHomeMap } from '../src/links.mjs';
+import { buildHomeMap, suggestLinks } from '../src/links.mjs';
 import { createServer as httpServer } from 'node:http';
 
 test('stemming, tags, unlinked mentions, Obsidian-style link resolution', () => {
