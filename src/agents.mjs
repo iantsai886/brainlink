@@ -1,9 +1,9 @@
 // Configurable agents: activation phrases ("Connect to Max") load the agent's role and live
 // notes from its own vault; close phrases ("Max close loop") capture the session's durable
 // outcome where the agent's config says. Each agent is bound to one vault.
-import { readFile, readdir, stat, writeFile } from 'node:fs/promises';
+import { readdir, stat, writeFile } from 'node:fs/promises';
 import path from 'node:path';
-import { vault, vaultRoot, safeJoin, parseFrontmatter, zonedNow } from './core.mjs';
+import { vault, vaultRoot, safeJoin, parseFrontmatter, zonedNow, readNote } from './core.mjs';
 import { resolveIdentity, appendTo, frontmatter, madeBy, checkCommon, slug, readMemories } from './writes.mjs';
 import { suggestLinks, relatedSection, safeUpdateMap } from './links.mjs';
 import { recentNotes, openLoops } from './insights.mjs';
@@ -18,12 +18,15 @@ export function resolveAgent(ctx, name) {
   return hit;
 }
 
-async function readSource(root, rel, tz, staleDays) {
+// Every source an agent reads — connect notes, tail notes, the close target's capture log —
+// goes through readNote, so a private note or one under an excluded folder (e.g. 00 Home) is
+// never surfaced to the agent, same as any other read path.
+async function readSource(ctx, name, rel, tz, staleDays) {
   try {
-    const full = safeJoin(root, rel);
-    const [raw, st] = await Promise.all([readFile(full, 'utf8'), stat(full)]);
+    const root = vaultRoot(ctx, name);
+    const [note, st] = await Promise.all([readNote(ctx, name, rel), stat(safeJoin(root, rel))]);
     const age = Math.floor((Date.now() - st.mtime.getTime()) / 86400e3);
-    return { path: rel, raw, modified: zonedNow(tz, st.mtime), age_days: age, stale: age > staleDays };
+    return { path: rel, raw: note.body, modified: zonedNow(tz, st.mtime), age_days: age, stale: age > staleDays };
   } catch { return null; }
 }
 
@@ -52,23 +55,31 @@ export async function connectAgent(ctx, { agent, ai_platform } = {}) {
     if (s.stale) out.warnings.push(`${s.path} last changed ${s.age_days} days ago; treat its facts as historical.`);
   };
   for (const rel of a.connect_notes) {
-    const s = await readSource(root, rel, ctx.tz, a.stale_days);
+    const s = await readSource(ctx, a.vault, rel, ctx.tz, a.stale_days);
     if (s) { out.role_notes.push({ path: rel, excerpt: excerpt(s.raw, 1800) }); note(s); }
     else out.warnings.push(`connect note missing: ${rel}`);
   }
   for (const rel of a.tail_notes) {
-    const s = await readSource(root, rel, ctx.tz, a.stale_days);
+    const s = await readSource(ctx, a.vault, rel, ctx.tz, a.stale_days);
     if (s) { (out.inbox_tail ||= []).push({ path: rel, text: s.raw.slice(-1500) }); note(s); }
   }
   if (a.recent_dir) {
     try {
-      const names = (await readdir(safeJoin(root, a.recent_dir))).filter((f) => /^\d{4}-\d{2}-\d{2}.*\.md$/.test(f) && live(f)).sort().reverse().slice(0, 6);
-      out.recent_notes = names.map((f) => `${a.recent_dir}/${f}`);
+      const candidates = (await readdir(safeJoin(root, a.recent_dir))).filter((f) => /^\d{4}-\d{2}-\d{2}.*\.md$/.test(f) && live(f)).sort().reverse();
+      // Fail closed: a private note or one under an excluded folder (e.g. a nested 00 Home) never
+      // reaches recent_notes — readNote is the same private + 00 Home gate every other read uses.
+      const kept = [];
+      for (const f of candidates) {
+        if (kept.length >= 6) break;
+        const rel = `${a.recent_dir}/${f}`;
+        if (await readNote(ctx, a.vault, rel).then(() => true, () => false)) kept.push(rel);
+      }
+      out.recent_notes = kept;
     } catch { out.warnings.push(`recent_dir missing: ${a.recent_dir}`); }
   }
   const t = a.close_target;
   if (t.mode === 'append-section' || t.mode === 'proposal-only') {
-    const s = await readSource(root, t.path, ctx.tz, a.stale_days);
+    const s = await readSource(ctx, a.vault, t.path, ctx.tz, a.stale_days);
     if (s) { out.recent_captures = latestCaptures(s.raw); note(s); }
   }
   // What changed and what is still open, so the agent starts from the current state.

@@ -270,6 +270,21 @@ test('agent_connect loads role notes, newest captures and stale warnings', async
   assert.match(r.instructions, /Chief of Staff close loop/);
 });
 
+test('agent_connect: private connect notes and private recent_dir entries never reach the agent', async () => {
+  const { cfg, company } = await fixture();
+  const office = 'Chief of Staff Office';
+  await writeFile(path.join(company, office, 'Current Goal.md'), '---\nprivate: true\n---\n# Current Goal\n\nZQXGOALMARK should stay hidden.');
+  await writeFile(path.join(company, office, '2026-10-17 — Secret.md'), '---\nprivate: true\n---\n# Secret\n\nZQXRECENTMARK should stay hidden.');
+  await writeFile(path.join(company, office, '2026-10-16 — Public.md'), '# Public\n\nnothing sensitive here');
+  const r = await connectAgent(ctxOf(cfg), { agent: 'Connect to Chief of Staff' });
+  const dump = JSON.stringify(r);
+  assert.ok(!dump.includes('ZQXGOALMARK'));
+  assert.ok(!dump.includes('ZQXRECENTMARK'));
+  assert.ok(r.warnings.some((w) => /Current Goal/.test(w)), 'private connect note reported as missing, not private');
+  assert.ok(!r.recent_notes.some((p) => /Secret/.test(p)));
+  assert.ok(r.recent_notes.some((p) => /Public/.test(p)));
+});
+
 test('latestCaptures sorts by date, not file order', () => {
   const c = latestCaptures('## 2026-08-01 — a\n\nx\n\n## 2026-10-15 — c\n\nz\n\n## 2026-09-07 — b\n\ny');
   assert.deepEqual(c.map((x) => x.heading), ['2026-10-15 — c', '2026-09-07 — b']);
