@@ -141,15 +141,35 @@ test('token budget: representative session_list/session_read calls average <=105
 // ---- regression: S2 (commit 1c18d80) hard-coded include_private=false for both tools, and every
 // import defaults private:true, so a connected AI client saw 0 sessions and every session_read
 // errored, with no way for the user to ever let an AI see their own imported history again. The
-// fix is a local-only BrainLink Settings choice (cfg.sessions, src/config.mjs), defaulting ON for
-// imported-session summaries, that session_list/session_read read instead of a hard-coded false —
-// while still never taking that choice from the caller. ----
+// fix is a local-only BrainLink Settings choice (cfg.sessions, src/config.mjs) that
+// session_list/session_read read instead of a hard-coded false, while still never taking that
+// choice from the caller. Technical Reviewer's v1.2.2 privacy pass then flipped shareSummaries's
+// default to OFF (shareSummaries ON by default meant an AI client could see imported-session
+// summaries with no action from the user) — the toggle mechanism itself, and session_read's
+// no-throw "private" result, are unchanged; only the out-of-the-box default is. ----
 
-test('regression: imported sessions are visible by default under a fake HOME (import count > 0)', async () => {
+test('imported sessions stay hidden by default under a fake HOME; session_read points at Settings', async () => {
   await withFakeHome(async () => {
-    const { mcp } = await mcpWithHome(); // cfg.sessions defaults: shareSummaries true, shareFullText false
+    const { mcp, env } = await mcpWithHome(); // cfg.sessions defaults: shareSummaries false, shareFullText false
     const list = await call(mcp, 'session_list', {});
-    assert.ok(list.sessions.length > 0, 'at least one imported session is visible with the default setting');
+    assert.deepEqual(list.sessions, [], 'imported sessions are not visible until the user opts in, in BrainLink Settings');
+    const store = await openSessionStore(env);
+    const [imported] = (await store.listSessions({ limit: 10 })).filter((s) => s.private);
+    assert.ok(imported, 'the import itself still happened; it is only hidden from AI clients');
+    const read = await call(mcp, 'session_read', { id: imported.id });
+    assert.equal(read.private, true);
+    assert.match(read.message, /private; change it in BrainLink Settings/i);
+    assert.equal(read.key_turns, undefined, 'a hidden read never leaks key-turn snippets');
+  });
+});
+
+test('session sharing settings: shareSummaries=true opts in to imported-session summaries', async () => {
+  await withFakeHome(async () => {
+    const { env } = await mcpWithHome();
+    const ctx = createContext(normalize({ sessions: { shareSummaries: true, shareFullText: false } }), { env });
+    const mcp = createMcp(ctx);
+    const list = await call(mcp, 'session_list', {});
+    assert.ok(list.sessions.length > 0, 'at least one imported session is visible once the user opts in');
     assert.ok(list.sessions.every((s) => s.private === true), 'imports are still private by default, just visible as summaries');
     const id = list.sessions[0].id;
     const read = await call(mcp, 'session_read', { id });
@@ -160,7 +180,9 @@ test('regression: imported sessions are visible by default under a fake HOME (im
 
 test('regression: a caller-supplied include_private=true has no effect, on session_list or session_read, full or not', async () => {
   await withFakeHome(async () => {
-    const { mcp } = await mcpWithHome();
+    const { env } = await mcpWithHome();
+    const ctx = createContext(normalize({ sessions: { shareSummaries: true, shareFullText: false } }), { env });
+    const mcp = createMcp(ctx);
     const withFlag = await call(mcp, 'session_list', { include_private: true });
     const without = await call(mcp, 'session_list', {});
     assert.deepEqual(withFlag.sessions, without.sessions, 'include_private from the caller changes nothing');

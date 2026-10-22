@@ -111,7 +111,7 @@ export function createMcp(ctx, { onCall = () => {} } = {}) {
       inputSchema: { type: 'object', properties: { vault: vaultProp, path: { type: 'string' } }, required: ['vault', 'path'] },
       run: (a) => related(ctx, a.vault, a.path) },
     { name: 'session_list', title: 'List recent AI sessions', annotations: RO,
-      description: 'Summary-only, newest first: imported Claude Code / Codex history plus anything logged with session_log. Whether private sessions (the default for imports) are included is the user\'s own BrainLink Settings choice (on by default for summaries); a caller cannot change this.',
+      description: 'Summary-only, newest first: imported Claude Code / Codex history plus anything logged with session_log. Whether private sessions (the default for imports) are included is the user\'s own BrainLink Settings choice (off by default for summaries); a caller cannot change this.',
       inputSchema: { type: 'object', properties: {
         q: { type: 'string', description: 'Keyword filter over title + summary.' }, client: { type: 'string' }, project: { type: 'string', description: 'Substring match on the session\'s project/working-directory label.' },
         since: { type: 'string', description: 'ISO date/time.' }, limit: { type: 'integer', minimum: 1, maximum: 20, default: 8 } } },
@@ -124,7 +124,7 @@ export function createMcp(ctx, { onCall = () => {} } = {}) {
       // overwritten, not honoured.
       run: async (a) => { await importSessions(); return sessionList(await sessionStore(), { ...a, include_private: false, allow_imported_private: cfg.sessions.shareSummaries }); } },
     { name: 'session_read', title: 'Read one AI session', annotations: RO,
-      description: 'Defaults to the summary plus up to 3 short key-turn snippets (no raw messages, ~800 tokens); needs the user\'s BrainLink Settings "share summaries" choice (on by default). Pass full=true to page the real message text at ~4k tokens via next_offset; needs the separate "share full text" choice (off by default). Either way, a private session you are not allowed to see returns a private:true message, not an error.',
+      description: 'Defaults to the summary plus up to 3 short key-turn snippets (no raw messages, ~800 tokens); needs the user\'s BrainLink Settings "share summaries" choice (off by default). Pass full=true to page the real message text at ~4k tokens via next_offset; needs the separate "share full text" choice (also off by default). Either way, a private session you are not allowed to see returns a private:true message, not an error.',
       inputSchema: { type: 'object', properties: {
         id: { type: 'string' }, offset: { type: 'integer', minimum: 0, default: 0 },
         full: { type: 'boolean', default: false } }, required: ['id'] },

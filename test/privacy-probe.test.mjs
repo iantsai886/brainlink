@@ -7,15 +7,15 @@
 // themselves — is unchanged) so it keeps catching the exact class of bug the original 153 tests
 // didn't.
 //
-// Three rows are EXPECTED to fail here and are carved out below, not silently dropped: S2's probe
-// fixture creates a private session with client:'claude-code', which after item 1's regression fix
-// (src/sessions/mcp.mjs isRelaxableImport, src/config.mjs cfg.sessions) is now, by design,
-// surfaced as a summary by default — the same client id a real Claude Code import uses. That is
-// the intentional, instructed behavior change (imported-session summaries default visible), not a
-// privacy regression: a caller-supplied include_private still has no effect either way (see the
-// "tools/list schemas drop include_private" row, still PASS), and session_log's own private
-// sessions (not using an import client id) are still never relaxed (see
-// test/sessions-mcp.test.mjs's dedicated regression test for that).
+// One row is EXPECTED to fail here and is carved out below, not silently dropped. Item 1's
+// regression fix changed session_read's private-and-not-allowed result from a thrown MCP error
+// to a normal, non-error {private:true, message} result (src/sessions/mcp.mjs) so an AI client
+// gets a clear "it's private" message instead of an exception. The probe's "refused" check
+// (`sr.every(r => r.isError)`) still assumes the old throw-based contract, so this one row fails
+// even though the session stays correctly hidden either way — the no-throw result still carries
+// no session content (see test/sessions-mcp.test.mjs for the dedicated regression coverage of
+// that no-throw contract, and of shareSummaries defaulting OFF as of v1.2.2 so S2's planted
+// claude-code-client session is hidden by default, same as everything else here).
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { mkdir, writeFile, symlink, readFile, readdir, rm } from 'node:fs/promises';
@@ -31,12 +31,10 @@ import { startSetup } from '../src/setup.mjs';
 import { openSessionStore } from '../src/sessions/index.mjs';
 
 const EXPECTED_FAIL_IDS = new Set([
-  "S2 session_list: private session never listed (incl. include_private from client)",
   'S2 session_read private refused even with include_private/full',
-  'S2 session_log(session_id, private:false) cannot unhide a private session',
 ]);
 
-test('Technical Reviewer privacy probe: every row passes except the 3 known, documented item-1 exceptions', async () => {
+test('Technical Reviewer privacy probe: every row passes except the 1 known, documented item-1 exception', async () => {
   const B = path.join(tmpdir(), `brainlink-tr-probe-${process.pid}-${Date.now()}`);
   await rm(B, { recursive: true, force: true }); await mkdir(B, { recursive: true });
 
@@ -193,11 +191,11 @@ test('Technical Reviewer privacy probe: every row passes except the 3 known, doc
   assert.deepEqual(
     unexpectedFails.map((r) => `${r.id} :: ${r.evidence}`),
     [],
-    'every probe row must pass except the 3 documented item-1 exceptions',
+    'every probe row must pass except the 1 documented item-1 exception',
   );
   assert.deepEqual(
     expectedButPassed,
     [],
-    'a previously-documented exception started passing — either the isRelaxableImport scoping changed (update this test) or something widened privacy again (investigate)',
+    'a previously-documented exception started passing — either session_read\'s no-throw contract changed (update this test) or something widened privacy again (investigate)',
   );
 });

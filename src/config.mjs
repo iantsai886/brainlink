@@ -32,7 +32,7 @@ export const LOCALES = ['en', 'zh-TW', 'pt'];
 export const AGENT_KINDS = ['local', 'remote'];
 
 export function emptyConfig() {
-  return { version: 1, timezone: null, locale: null, vaults: [], agents: [], ai_agents: [], handoff: null, platforms: DEFAULT_PLATFORMS, http: { port: 8765, token: null }, connections: {}, sessions: { shareSummaries: true, shareFullText: false } };
+  return { version: 1, timezone: null, locale: null, vaults: [], agents: [], ai_agents: [], handoff: null, platforms: DEFAULT_PLATFORMS, http: { port: 8765, token: null }, connections: {}, sessions: { shareSummaries: false, shareFullText: false } };
 }
 
 // Fill defaults so the rest of the code never checks for missing keys.
@@ -50,9 +50,9 @@ export function normalize(raw = {}) {
   // client can never set or override this (see src/sessions/mcp.mjs / src/server.mjs): only the
   // user, in BrainLink Settings, changes it. shareSummaries covers session_list + the default
   // session_read (summary + short key-turn snippets); shareFullText additionally covers full=true
-  // (the raw message text). Imports still default private per-session; this only controls whether
-  // the private default is still visible to AI clients as a summary.
-  cfg.sessions = { shareSummaries: true, shareFullText: false, ...(raw.sessions || {}) };
+  // (the raw message text). Imports still default private per-session, and this now defaults OFF
+  // too: an AI client sees none of a user's imported session history until the user opts in.
+  cfg.sessions = { shareSummaries: false, shareFullText: false, ...(raw.sessions || {}) };
   return cfg;
 }
 
