@@ -43,7 +43,9 @@ test('createFolderHost: services.sessions.list/read/setPrivate round-trip a logg
   assert.equal(visible.sessions.length, 1);
   assert.equal(visible.sessions[0].id, s.id);
 
-  await assert.rejects(host.services.sessions.read({ id: s.id }), /private/i);
+  const blocked = await host.services.sessions.read({ id: s.id });
+  assert.equal(blocked.private, true);
+  assert.match(blocked.message, /private/i, 'private session_read returns a clear message instead of throwing');
   const read = await host.services.sessions.read({ id: s.id, include_private: true });
   assert.equal(read.title, 'Fix the kiln');
 

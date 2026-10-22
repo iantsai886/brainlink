@@ -20,7 +20,7 @@ import { syncSettings, chooseSync, suggestFolders, PROVIDERS, PROVIDER_LABELS } 
 import { sessionsService } from './host.mjs';
 import { addAgent, renameAgent, removeAgent, revokeAgent, markConnected, findAgentByToken, publicAgent, localAgentSnippet, remoteAgentSnippet } from './mcp-agents.mjs';
 import { buildGraph3D, noteDetail3D } from './graph3d.mjs';
-import { snapshotSettings, chooseSnapshot, suggestSnapshotFolder, clearSnapshot, startSnapshotWatcher, loadSnapshotStatus, saveSnapshotStatus } from './snapshot.mjs';
+import { snapshotSettings, chooseSnapshot, suggestSnapshotFolder, clearSnapshot, startSnapshotWatcher, writeSnapshotOnce, loadSnapshotStatus, saveSnapshotStatus } from './snapshot.mjs';
 
 const UI_STATIC_TYPES = { '.js': 'text/javascript; charset=utf-8', '.css': 'text/css; charset=utf-8', '.json': 'application/json; charset=utf-8' };
 const UI_DIR = path.join(ROOT, 'ui');
@@ -93,7 +93,14 @@ export async function startSetup(opts = {}) {
     const settings = snapshotSettings(cfg);
     if (!settings.enabled) return;
     const ctx = createContext(cfg, { env });
-    if (!ctx.enabled.length) { await saveSnapshotStatus(snapshotStateFile, { ok: false, error: 'Add a folder first, then turn sharing on.' }); return; }
+    if (!ctx.enabled.length) {
+      // No vault left to watch (e.g. the last one was just removed) — still run one write so a
+      // previously-synced snapshot's note copies are cleared from the destination folder, not
+      // left there indefinitely with nothing left enabled to ever clean them up again.
+      const result = await writeSnapshotOnce(ctx, cfg, env).catch((e) => ({ ok: false, error: e.message || String(e) }));
+      await saveSnapshotStatus(snapshotStateFile, result.ok ? result : { ok: false, error: result.error || 'Add a folder first, then turn sharing on.' });
+      return;
+    }
     snapshotWatcher = startSnapshotWatcher(ctx, cfg, env, { onResult: (r) => saveSnapshotStatus(snapshotStateFile, r).catch(() => {}) });
     await snapshotWatcher.ready;
   }
@@ -118,6 +125,7 @@ export async function startSetup(opts = {}) {
       semantic: await detectEmbedder(cfg, env),
       obsidian_vaults: (await findObsidianVaults({ home, os, env })).filter((o) => !cfg.vaults.some((v) => path.resolve(v.path) === path.resolve(o.path))),
       sync: { ...syncSettings(cfg), providers: PROVIDERS, provider_labels: PROVIDER_LABELS, suggested_folders: suggestFolders(home) },
+      sessions_sharing: cfg.sessions,
       snapshot: { ...snapshotSettings(cfg), suggested_folder: suggestSnapshotFolder(home), ...(await loadSnapshotStatus(snapshotStateFile)) },
     };
   }
@@ -266,6 +274,10 @@ export async function startSetup(opts = {}) {
       const cfg = await loadConfig(file);
       const next = { ...cfg, vaults: cfg.vaults.filter((v) => v.name !== b.name), agents: cfg.agents.filter((a) => a.vault !== b.name), handoff: cfg.handoff?.vault === b.name ? null : cfg.handoff };
       await saveConfig(next, file);
+      // S5: the snapshot watcher was started from whatever vault list existed at launch (or the
+      // last /api/snapshot call) and otherwise runs for the life of this process — removing a
+      // vault here must stop it from still syncing a now-gone folder until next restart.
+      await refreshSnapshotWatcher(next);
       return { ok: true };
     },
     // Excluded folders and the private flag stay editable after connecting, not just at
@@ -284,6 +296,10 @@ export async function startSetup(opts = {}) {
       if (!v) throw new Error(`Unknown vault "${b.name}".`);
       v.private = Boolean(b.private);
       await saveConfig(cfg, file);
+      // S5: a vault just marked private must stop being watched/synced into the shared snapshot
+      // right away, not only after the app restarts (startSnapshotWatcher already skips private
+      // vault roots — see src/snapshot.mjs — but only when it starts watching).
+      await refreshSnapshotWatcher(cfg);
       return { ok: true, private: v.private };
     },
     'POST /api/sync': async (b) => {
@@ -383,6 +399,16 @@ export async function startSetup(opts = {}) {
     'POST /api/sessions': (b) => sessions.list({ q: b.q, client: b.client, project: b.project, since: b.since, limit: b.limit, include_private: Boolean(b.include_private) }),
     'POST /api/sessions/read': (b) => sessions.read({ id: b.id, include_private: Boolean(b.include_private) }),
     'POST /api/sessions/private': (b) => sessions.setPrivate(b.id, b.private),
+    // What connected AI apps (not this local UI) may see of imported/logged sessions. The user's
+    // own choice; session_list/session_read in src/server.mjs always read this, never a caller flag.
+    'POST /api/sessions/sharing': async (b) => {
+      const cfg = await loadConfig(file);
+      const shareSummaries = typeof b.shareSummaries === 'boolean' ? b.shareSummaries : cfg.sessions.shareSummaries;
+      const shareFullText = typeof b.shareFullText === 'boolean' ? b.shareFullText : cfg.sessions.shareFullText;
+      const next = { ...cfg, sessions: { shareSummaries, shareFullText: shareSummaries && shareFullText } };
+      await saveConfig(next, file);
+      return { ok: true, sessions: next.sessions };
+    },
     // ---- Shared snapshot: a read-only copy of the notes for cloud agents (Ian's RB8) ----
     'POST /api/snapshot/pick-folder': async () => { const p = await pickSnapshotFolder(); return p === undefined ? { path: null, unavailable: true } : { path: p }; },
     'POST /api/snapshot': async (b) => {
@@ -397,7 +423,7 @@ export async function startSetup(opts = {}) {
     },
     'POST /api/snapshot/clear': async () => {
       const cfg = await loadConfig(file);
-      await clearSnapshot(snapshotSettings(cfg).folder);
+      await clearSnapshot(snapshotSettings(cfg).folder, env);
       return { ok: true };
     },
     'POST /api/test': async (b) => {

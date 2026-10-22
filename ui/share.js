@@ -19,38 +19,40 @@
     return j;
   }
   function toast(msg, bad) {
-    const t = document.getElementById('toast');
-    if (!t) return;
-    t.textContent = msg; t.className = 'show' + (bad ? ' bad' : '');
-    clearTimeout(t._shareToastTimer); t._shareToastTimer = setTimeout(() => (t.className = ''), bad ? 6000 : 3500);
+    const el = document.getElementById('toast');
+    if (!el) return;
+    el.textContent = msg; el.className = 'show' + (bad ? ' bad' : '');
+    clearTimeout(el._shareToastTimer); el._shareToastTimer = setTimeout(() => (el.className = ''), bad ? 6000 : 3500);
   }
 
+  const header = () => `<h2>${esc(t('share.title'))}</h2>`;
+
   function statusHtml(snap) {
-    if (snap.error) return `<p class="error-box">Could not finish sharing: ${esc(snap.error)}</p>`;
-    if (!snap.lastSyncedAt) return '<p class="muted">Not shared yet.</p>';
+    if (snap.error) return `<p class="error-box">${esc(t('share.statusError', { error: snap.error }))}</p>`;
+    if (!snap.lastSyncedAt) return `<p class="muted">${esc(t('share.statusNeverSynced'))}</p>`;
     const when = new Date(snap.lastSyncedAt).toLocaleString();
-    return `<p class="muted">Last synced ${esc(when)} · ${snap.noteCount} note${snap.noteCount === 1 ? '' : 's'} shared.</p>`;
+    return `<p class="muted">${esc(snap.noteCount === 1 ? t('share.statusLastSyncedOne', { when }) : t('share.statusLastSynced', { when, count: snap.noteCount }))}</p>`;
   }
 
   function render(root, state) {
     const { loading, error, hasVault, snap, draft } = state;
-    if (loading) { root.innerHTML = '<h2>Share with cloud agents</h2><p class="skeleton">Loading sharing settings…</p>'; return; }
-    if (error) { root.innerHTML = `<h2>Share with cloud agents</h2><p class="error-box">Could not load sharing settings: ${esc(error)} <button data-share-retry>Retry</button></p>`; return; }
-    if (!hasVault) { root.innerHTML = '<h2>Share with cloud agents</h2><p class="muted">Add a folder first (above), then come back to share it.</p>'; return; }
+    if (loading) { root.innerHTML = `${header()}<p class="skeleton">${esc(t('share.loading'))}</p>`; return; }
+    if (error) { root.innerHTML = `${header()}<p class="error-box">${esc(t('share.loadError', { error }))} <button data-share-retry>${esc(t('share.retry'))}</button></p>`; return; }
+    if (!hasVault) { root.innerHTML = `${header()}<p class="muted">${esc(t('share.needVault'))}</p>`; return; }
     const folderArea = draft.enabled ? `
       <div class="grid2" style="margin-top:12px">
-        <label>Shared folder<input id="share-folder" class="mono" value="${esc(draft.folder || '')}" placeholder="Choose a folder…"></label>
-        <div class="row" style="align-self:end"><button id="share-pick">Choose folder…</button></div>
+        <label>${esc(t('share.folderLabel'))}<input id="share-folder" class="mono" value="${esc(draft.folder || '')}" placeholder="${esc(t('share.folderPlaceholder'))}"></label>
+        <div class="row" style="align-self:end"><button id="share-pick">${esc(t('share.pickFolder'))}</button></div>
       </div>
-      ${!draft.folder && snap.suggested_folder ? `<p class="hint" style="margin:8px 0 0">Found: <button type="button" class="link" data-share-use-suggested="${esc(snap.suggested_folder)}">${esc(snap.suggested_folder)}</button></p>` : ''}
-      <label class="muted" style="display:flex;flex-direction:row;gap:6px;align-items:center;margin-top:10px"><input type="checkbox" id="share-sessions" ${draft.includeSessions ? 'checked' : ''} style="width:auto"> Also include non-private chat sessions</label>
+      ${!draft.folder && snap.suggested_folder ? `<p class="hint" style="margin:8px 0 0">${t('share.suggestedFound', { path: `<button type="button" class="link" data-share-use-suggested="${esc(snap.suggested_folder)}">${esc(snap.suggested_folder)}</button>` })}</p>` : ''}
+      <label class="muted" style="display:flex;flex-direction:row;gap:6px;align-items:center;margin-top:10px"><input type="checkbox" id="share-sessions" ${draft.includeSessions ? 'checked' : ''} style="width:auto"> ${esc(t('share.includeSessions'))}</label>
     ` : '';
     root.innerHTML = `
-      <h2>Share with cloud agents</h2>
-      <p class="hint">Give a cloud AI (for example a bot that only reads files) a read-only copy of your notes through a folder it can already reach. BrainLink never opens a network connection itself.</p>
-      <label class="muted" style="display:flex;flex-direction:row;gap:6px;align-items:center"><input type="checkbox" id="share-enabled" ${draft.enabled ? 'checked' : ''} style="width:auto"> Share a read-only copy with cloud agents</label>
+      ${header()}
+      <p class="hint">${esc(t('share.hint'))}</p>
+      <label class="muted" style="display:flex;flex-direction:row;gap:6px;align-items:center"><input type="checkbox" id="share-enabled" ${draft.enabled ? 'checked' : ''} style="width:auto"> ${esc(t('share.toggleLabel'))}</label>
       ${folderArea}
-      <div class="row" style="margin-top:12px"><button class="primary" id="share-save">Save</button></div>
+      <div class="row" style="margin-top:12px"><button class="primary" id="share-save">${esc(t('share.save'))}</button></div>
       ${snap.enabled ? `<div id="share-status" style="margin-top:10px">${statusHtml(snap)}</div>` : ''}`;
   }
 
@@ -58,6 +60,7 @@
     const section = document.getElementById('s-share');
     const root = document.getElementById('share-root');
     if (!section || !root) return;
+    await window.brainlinkLocaleBooted;
     let state = { loading: true, error: null, hasVault: false, snap: null, draft: { enabled: false, folder: null, includeSessions: false } };
     const draw = () => render(root, state);
     draw();
@@ -92,18 +95,18 @@
           const sessionsInput = document.getElementById('share-sessions');
           const folder = folderInput ? folderInput.value.trim() : state.draft.folder;
           const includeSessions = sessionsInput ? sessionsInput.checked : state.draft.includeSessions;
-          if (state.draft.enabled && !folder) { toast('Choose a folder first.', true); return; }
+          if (state.draft.enabled && !folder) { toast(t('share.toastNeedFolder'), true); return; }
           const turningOff = state.snap.enabled && !state.draft.enabled;
-          if (turningOff && !window.confirm?.('Stop sharing? Cloud agents will no longer see new changes.')) { state.draft.enabled = true; draw(); return; }
+          if (turningOff && !window.confirm?.(t('share.confirmStop'))) { state.draft.enabled = true; draw(); return; }
           const prevFolder = state.snap.folder;
           const r = await api('/api/snapshot', { enabled: state.draft.enabled, folder: state.draft.enabled ? folder : prevFolder, includeSessions });
           state.snap = r.snapshot;
           state.draft = { enabled: r.snapshot.enabled, folder: r.snapshot.folder, includeSessions: r.snapshot.includeSessions };
           draw();
-          toast(turningOff ? 'Sharing turned off.' : 'Saved.');
-          if (turningOff && prevFolder && window.confirm?.('Also delete the files already shared in that folder?')) {
+          toast(turningOff ? t('share.toastStopped') : t('share.toastSaved'));
+          if (turningOff && prevFolder && window.confirm?.(t('share.confirmClear'))) {
             await api('/api/snapshot/clear');
-            toast('Shared files removed.');
+            toast(t('share.toastCleared'));
           }
           return;
         }

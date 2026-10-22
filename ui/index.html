@@ -183,14 +183,19 @@ ol.todo li { padding-left: 4px; }
   </section>
 
   <section id="agents-panel" hidden>
-    <h2>Agents</h2>
-    <p class="hint">Any AI can connect with its own key — on this Mac now, or ready for the cloud once that is reachable.</p>
+    <h2 data-i18n="agents.title"></h2>
+    <p class="hint" data-i18n="agents.hint"></p>
     <div id="agents-root"></div>
   </section>
 
   <section id="sessions-panel" hidden>
     <h2 data-i18n="sessions.title"></h2>
     <p class="hint" id="sessions-hint"></p>
+    <div class="card" style="margin-bottom:10px">
+      <b data-i18n="sessions.shareTitle"></b>
+      <label class="muted" style="display:flex;flex-direction:row;gap:6px;align-items:center;margin-top:6px"><input type="checkbox" id="sess-share-summaries" style="width:auto"><span data-i18n="sessions.shareSummariesLabel"></span></label>
+      <label class="muted" style="display:flex;flex-direction:row;gap:6px;align-items:center;margin-top:6px"><input type="checkbox" id="sess-share-full" style="width:auto"><span data-i18n="sessions.shareFullTextLabel"></span></label>
+    </div>
     <div class="row" style="margin-bottom:10px"><label class="muted" style="display:flex;flex-direction:row;gap:6px;align-items:center"><input type="checkbox" id="sess-private" style="width:auto"><span data-i18n="sessions.showPrivate"></span></label></div>
     <div id="sessions-list" class="cards"></div>
     <div id="session-detail" style="margin-top:12px"></div>
@@ -312,6 +317,12 @@ async function act(fn) { try { await fn(); await load(); } catch (e) { toast(e.m
 const SUPPORTED_LOCALES = ['en', 'zh-TW', 'pt'];
 const LANG_NAMES = { en: 'English', 'zh-TW': '繁體中文', pt: 'Português' };
 let LOCALE = 'en', STR = {}, FALLBACK = {}, localeReady = false;
+// Self-contained panels loaded as later <script> tags (agents.js, share.js) share this page's
+// global `t()`/`esc()` (classic scripts, same realm) but boot and fetch /api/state concurrently
+// with this page's own load() — so without this signal their first render can race ahead of
+// FALLBACK being populated and briefly show raw translation keys instead of text.
+let resolveLocaleBooted;
+window.brainlinkLocaleBooted = new Promise((resolve) => { resolveLocaleBooted = resolve; });
 function detectLocale() {
   const langs = (navigator.languages && navigator.languages.length) ? navigator.languages : [navigator.language || 'en'];
   for (const l of langs) {
@@ -347,6 +358,7 @@ async function ensureLocale(saved) {
   FALLBACK = await fetchLocale('en').catch(() => ({}));
   $('lang').innerHTML = SUPPORTED_LOCALES.map((l) => `<option value="${l}">${esc(LANG_NAMES[l])}</option>`).join('');
   await setLocale(SUPPORTED_LOCALES.includes(saved) ? saved : detectLocale(), { persist: !saved });
+  resolveLocaleBooted();
 }
 $('lang').onchange = () => act(() => setLocale($('lang').value));
 
@@ -427,7 +439,7 @@ function renderSyncOnbSuggestions(provider) {
 function renderSyncOnboarding() {
   $('sync-onb-form').hidden = true;
   $('sync-onb-error').hidden = true;
-  $('sync-onb-provider').innerHTML = S.sync.providers.filter((p) => p !== 'local').map((p) => `<option value="${esc(p)}">${esc(S.sync.provider_labels[p] || p)}</option>`).join('');
+  $('sync-onb-provider').innerHTML = S.sync.providers.filter((p) => p !== 'local').map((p) => `<option value="${esc(p)}">${esc(t('sync.provider.' + p))}</option>`).join('');
   $('sync-onb-device').value = S.sync.device || '';
   renderSyncOnbSuggestions($('sync-onb-provider').value);
 }
@@ -607,6 +619,9 @@ async function load() {
   if (!hasVault) renderStart(); else if (!onboardingSync) { renderReady(last); drawGraph().catch(() => {}); }
   $('sessions-panel').hidden = !hasVault || onboardingSync;
   $('sessions-hint').innerHTML = t('sessions.hint', { call: '<span class="mono">session_read</span>' });
+  $('sess-share-summaries').checked = Boolean(S.sessions_sharing?.shareSummaries);
+  $('sess-share-full').checked = Boolean(S.sessions_sharing?.shareFullText);
+  $('sess-share-full').disabled = !$('sess-share-summaries').checked;
   if (hasVault && !onboardingSync) loadSessions().catch(() => {});
   $('cfgpath').textContent = S.config_path;
   $('n1').className = 'step' + (S.vaults.length ? ' done' : '');
@@ -634,7 +649,7 @@ async function load() {
   $('activity').innerHTML = S.activity.length ? S.activity.map((e) => `<tr><td>${esc(new Date(e.at).toLocaleString(LOCALE))}</td><td>${esc(e.platform)}</td><td class="mono">${esc(e.tool)}</td><td>${e.ok ? (e.written ? esc(t('test.written')) : esc(t('test.ok'))) : esc(t('test.refused'))}</td></tr>`).join('') : `<tr><td colspan="4" class="muted">${esc(t('ready.noCalls'))}</td></tr>`;
   $('packs').innerHTML = S.packs.map((p) => `<label class="pack ${p.id === pack ? 'sel' : ''}"><span><input type="radio" name="pack" value="${p.id}" ${p.id === pack ? 'checked' : ''}><b>${esc(p.title)}</b></span><small>${esc(p.description)}</small></label>`).join('');
   const SY = S.sync;
-  $('sync-provider').innerHTML = SY.providers.map((p) => `<option value="${esc(p)}" ${p === SY.provider ? 'selected' : ''}>${esc(SY.provider_labels[p] || p)}</option>`).join('');
+  $('sync-provider').innerHTML = SY.providers.map((p) => `<option value="${esc(p)}" ${p === SY.provider ? 'selected' : ''}>${esc(t('sync.provider.' + p))}</option>`).join('');
   $('sync-device').value = SY.device || '';
   $('sync-folder').value = SY.folder || '';
   $('sync-folder-row').hidden = SY.provider === 'local';
@@ -705,6 +720,17 @@ document.addEventListener('click', (e) => {
   if (d.syncOnbPick) $('sync-onb-folder').value = d.syncOnbPick;
 });
 $('sess-private').onchange = () => loadSessions().catch(() => {});
+$('sess-share-summaries').onchange = () => act(async () => {
+  const shareSummaries = $('sess-share-summaries').checked;
+  const r = await api('POST', '/api/sessions/sharing', { shareSummaries, shareFullText: $('sess-share-full').checked });
+  S.sessions_sharing = r.sessions;
+  toast(t('sessions.shareToastSaved'));
+});
+$('sess-share-full').onchange = () => act(async () => {
+  const r = await api('POST', '/api/sessions/sharing', { shareSummaries: $('sess-share-summaries').checked, shareFullText: $('sess-share-full').checked });
+  S.sessions_sharing = r.sessions;
+  toast(t('sessions.shareToastSaved'));
+});
 $('sync-provider').onchange = () => { const p = $('sync-provider').value; $('sync-folder-row').hidden = p === 'local'; renderSyncSuggestions(p, S.sync.suggested_folders); };
 $('sync-save').onclick = () => act(async () => {
   const provider = $('sync-provider').value;

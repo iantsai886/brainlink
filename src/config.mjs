@@ -32,7 +32,7 @@ export const LOCALES = ['en', 'zh-TW', 'pt'];
 export const AGENT_KINDS = ['local', 'remote'];
 
 export function emptyConfig() {
-  return { version: 1, timezone: null, locale: null, vaults: [], agents: [], ai_agents: [], handoff: null, platforms: DEFAULT_PLATFORMS, http: { port: 8765, token: null }, connections: {} };
+  return { version: 1, timezone: null, locale: null, vaults: [], agents: [], ai_agents: [], handoff: null, platforms: DEFAULT_PLATFORMS, http: { port: 8765, token: null }, connections: {}, sessions: { shareSummaries: false, shareFullText: false } };
 }
 
 // Fill defaults so the rest of the code never checks for missing keys.
@@ -46,6 +46,13 @@ export function normalize(raw = {}) {
   cfg.ai_agents = (raw.ai_agents || []).map((a) => ({ kind: 'local', tokenHash: null, revoked: false, connected: false, createdAt: null, lastSeenAt: null, ...a }));
   cfg.http = { port: 8765, token: null, ...(raw.http || {}) };
   cfg.connections = raw.connections || {};
+  // Local-only choice that decides what connected AI apps may see of imported sessions. An AI
+  // client can never set or override this (see src/sessions/mcp.mjs / src/server.mjs): only the
+  // user, in BrainLink Settings, changes it. shareSummaries covers session_list + the default
+  // session_read (summary + short key-turn snippets); shareFullText additionally covers full=true
+  // (the raw message text). Imports still default private per-session, and this now defaults OFF
+  // too: an AI client sees none of a user's imported session history until the user opts in.
+  cfg.sessions = { shareSummaries: false, shareFullText: false, ...(raw.sessions || {}) };
   return cfg;
 }
 
@@ -81,6 +88,8 @@ export function validate(cfg) {
   if (cfg.handoff && (!names.has(cfg.handoff.vault) || !cfg.handoff.folder)) errors.push('handoff needs an existing vault and a folder');
   if (cfg.timezone) { try { new Intl.DateTimeFormat('en', { timeZone: cfg.timezone }); } catch { errors.push(`unknown timezone "${cfg.timezone}"`); } }
   if (cfg.locale && !LOCALES.includes(cfg.locale)) errors.push(`locale must be one of ${LOCALES.join(', ')}`);
+  if (typeof cfg.sessions?.shareSummaries !== 'boolean') errors.push('sessions.shareSummaries must be a boolean');
+  if (typeof cfg.sessions?.shareFullText !== 'boolean') errors.push('sessions.shareFullText must be a boolean');
   if (cfg.sync) errors.push(...validateSync(cfg.sync));
   return errors;
 }

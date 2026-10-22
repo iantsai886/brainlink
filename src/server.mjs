@@ -13,7 +13,7 @@ import { connectAgent, closeLoop } from './agents.mjs';
 import { openSessionStore, importAll } from './sessions/index.mjs';
 import { sessionList, sessionRead, sessionLog } from './sessions/mcp.mjs';
 
-export const VERSION = '1.2.1';
+export const VERSION = '1.2.3';
 export const SERVER_NAME = 'brainlink';
 const SUPPORTED_PROTOCOLS = ['2025-06-18', '2025-03-26', '2024-11-05'];
 const RO = { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: false };
@@ -40,7 +40,7 @@ export function createMcp(ctx, { onCall = () => {} } = {}) {
       ? 'This connection is READ-ONLY.'
       : 'WRITE: never overwrite. Every write needs your identity (ai_platform, agent_or_role, session_or_task_id) and returns a preview unless confirm=true; show the preview to the user before confirming unless their own phrase (e.g. a close-loop phrase) already authorised it. Never store credentials, tokens or account numbers. Keep each vault\'s material in that vault.',
     'SMART: vault_search accepts rephrasings and translations (queries) — add an English translation for non-English questions; respect status not_in_brain, folder, tag and since/until filters. "What changed / what\'s open?" → brain_brief, vault_recent, open_loops. "Remember …" → remember. Quick thoughts → append_daily. Meetings, decisions, people, projects, ideas → propose_note with a template. Mention existing notes by their exact title; BrainLink links them and adds a Related section automatically.',
-    'SESSIONS: session_list / session_read cover imported Claude Code and Codex history plus anything logged with session_log (for clients with no readable local history). Private sessions need include_private=true.',
+    'SESSIONS: session_list / session_read cover imported Claude Code and Codex history plus anything logged with session_log (for clients with no readable local history). Whether private sessions (the default for imports) are visible to you at all is the user\'s own choice in BrainLink Settings, not something you can request or set.',
     agents.length ? `AGENTS: ${agents.map((a) => `${a.name} (${a.vault}) — "${a.activation[0]}" → agent_connect; "${a.close[0]}" → agent_close_loop`).join('; ')}.` : '',
     hasHandoff ? `INTER-AI: send_handoff / list_handoffs use the ${cfg.handoff.vault}/${cfg.handoff.folder} mailbox.` : '',
   ].filter(Boolean).join('\n');
@@ -111,19 +111,27 @@ export function createMcp(ctx, { onCall = () => {} } = {}) {
       inputSchema: { type: 'object', properties: { vault: vaultProp, path: { type: 'string' } }, required: ['vault', 'path'] },
       run: (a) => related(ctx, a.vault, a.path) },
     { name: 'session_list', title: 'List recent AI sessions', annotations: RO,
-      description: 'Summary-only, newest first: imported Claude Code / Codex history plus anything logged with session_log. Private sessions (the default for imports) are never included here; the user can read them in BrainLink Settings.',
+      description: 'Summary-only, newest first: imported Claude Code / Codex history plus anything logged with session_log. Whether private sessions (the default for imports) are included is the user\'s own BrainLink Settings choice (off by default for summaries); a caller cannot change this.',
       inputSchema: { type: 'object', properties: {
         q: { type: 'string', description: 'Keyword filter over title + summary.' }, client: { type: 'string' }, project: { type: 'string', description: 'Substring match on the session\'s project/working-directory label.' },
         since: { type: 'string', description: 'ISO date/time.' }, limit: { type: 'integer', minimum: 1, maximum: 20, default: 8 } } },
-      // include_private is never taken from the caller: an AI client cannot grant itself access to
-      // private sessions. Only the local user, in BrainLink Settings (/api/sessions), can see them.
-      run: async (a) => { await importSessions(); return sessionList(await sessionStore(), { ...a, include_private: false }); } },
+      // include_private is never taken from the caller and is always false here: an AI client
+      // cannot grant itself full private access. allow_imported_private is the user's own choice
+      // in BrainLink Settings (cfg.sessions.shareSummaries, /api/sessions/sharing) and only ever
+      // un-hides imported Claude Code / Codex sessions, never anything logged via session_log
+      // (src/sessions/mcp.mjs isRelaxableImport). The spread order below (cfg values after ...a)
+      // makes sure anything the caller sneaks in under these names as undeclared arguments is
+      // overwritten, not honoured.
+      run: async (a) => { await importSessions(); return sessionList(await sessionStore(), { ...a, include_private: false, allow_imported_private: cfg.sessions.shareSummaries }); } },
     { name: 'session_read', title: 'Read one AI session', annotations: RO,
-      description: 'Defaults to the summary plus up to 3 short key-turn snippets (no raw messages, ~800 tokens). Pass full=true to page the real message text at ~4k tokens via next_offset. Private sessions are never readable here; the user can read them in BrainLink Settings.',
+      description: 'Defaults to the summary plus up to 3 short key-turn snippets (no raw messages, ~800 tokens); needs the user\'s BrainLink Settings "share summaries" choice (off by default). Pass full=true to page the real message text at ~4k tokens via next_offset; needs the separate "share full text" choice (also off by default). Either way, a private session you are not allowed to see returns a private:true message, not an error.',
       inputSchema: { type: 'object', properties: {
         id: { type: 'string' }, offset: { type: 'integer', minimum: 0, default: 0 },
         full: { type: 'boolean', default: false } }, required: ['id'] },
-      run: async (a) => sessionRead(await sessionStore(), { ...a, include_private: false }) },
+      // Same fail-closed pattern as session_list: include_private is always false here, and the
+      // allow_imported_private / allow_imported_full_private flags (from the user's own BrainLink
+      // Settings choice) are always overwritten after the caller's arguments, never honoured from them.
+      run: async (a) => sessionRead(await sessionStore(), { ...a, include_private: false, allow_imported_private: cfg.sessions.shareSummaries, allow_imported_full_private: cfg.sessions.shareFullText }) },
     { name: 'session_log', title: 'Log a note to an AI session', annotations: WR,
       description: 'For clients with no readable local history (ChatGPT, Claude Desktop, Grok…): append a short note/turn to a session, creating one for today if session_id is omitted. Secret-filtered before it is stored; defaults to private.',
       inputSchema: { type: 'object', properties: {

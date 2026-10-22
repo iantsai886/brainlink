@@ -3,11 +3,21 @@
 import { toSessionRecord } from 'brainlink-store';
 import { estTokens, clip } from './tokens.mjs';
 import { redactText } from './redact.mjs';
+import { CLIENT as CLAUDE_CODE_CLIENT } from './claude-code.mjs';
+import { CLIENT as CODEX_CLIENT } from './codex.mjs';
 
 const FULL_PAGE_TOKENS = 3800; // leaves headroom for the summary fields wrapped around the page
 const FULL_PAGE_FETCH = 200; // messages fetched per page before trimming to the token budget
 const KEY_TURN_CHARS = 200; // snippet length for the default (non-full) response
 const MAX_KEY_TURNS = 3;
+
+// Importers (src/sessions/claude-code.mjs, codex.mjs) always set private:true with no per-session
+// choice — that is what BrainLink Settings' "share summaries of imported sessions" toggle
+// (cfg.sessions, src/config.mjs) relaxes. Anything logged by an AI via session_log keeps its
+// private flag fully opaque to every other AI client no matter that setting: it is a deliberate
+// per-note privacy choice, not the import default, and must not be loosened by a global toggle.
+const IMPORTED_CLIENTS = new Set([CLAUDE_CODE_CLIENT, CODEX_CLIENT]);
+const isRelaxableImport = (s) => IMPORTED_CLIENTS.has(s.client);
 
 export const clientIdFor = (platform) => {
   const id = String(platform || '').trim().toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '');
@@ -32,11 +42,17 @@ function fitByTokens(messages, budget) {
   return kept;
 }
 
-// a: { q?, client?, project?, since?, limit?<=20 default 8, include_private? }
+// a: { q?, client?, project?, since?, limit?<=20 default 8, include_private?, allow_imported_private? }.
+// include_private = a fully trusted local caller asking to see every private session (the user's
+// own BrainLink UI). allow_imported_private = the Settings "share summaries" choice, which only
+// ever un-hides imported sessions (see isRelaxableImport above), never session_log entries.
 export async function sessionList(store, a = {}) {
   const limit = Math.max(1, Math.min(a.limit ?? 8, 20));
   const fetched = await store.listSessions({ q: a.q, client: a.client, since: a.since, limit: Math.min(limit * 4, 80) });
-  const visible = fetched.filter((s) => (a.include_private ? true : !s.private) && (!a.project || s.project.includes(a.project)));
+  const visible = fetched.filter((s) => {
+    const allowed = !s.private || a.include_private || (a.allow_imported_private && isRelaxableImport(s));
+    return allowed && (!a.project || s.project.includes(a.project));
+  });
   return { sessions: visible.slice(0, limit).map(toSessionRecord) };
 }
 
@@ -49,20 +65,32 @@ async function keyTurns(store, id, messageCount) {
   return picked.map(({ messages: [m] }) => ({ role: m.role, at: m.at, text: clip(redactText(m.text), KEY_TURN_CHARS / 4) }));
 }
 
-// a: { id, offset?, full?, include_private? }
+const PRIVATE_MESSAGE = 'This session is private; change it in BrainLink Settings.';
+const PRIVATE_FULL_MESSAGE = 'Full message text for this session is private; change it in BrainLink Settings.';
+
+// a: { id, offset?, full?, include_private?, allow_imported_private?, allow_imported_full_private? }.
+// include_private is the same fully-trusted local-caller bypass as sessionList's; the MCP transport
+// (src/server.mjs) always passes it as false so an AI client can never reach it. The two
+// allow_imported_* flags are the Settings "share summaries" / "share full text" choices and, like
+// sessionList's allow_imported_private, only ever apply to imported sessions (isRelaxableImport).
 export async function sessionRead(store, a = {}) {
   if (!a.id) throw new Error('id is required');
   const peek = await store.readSession(a.id, {});
-  if (peek.session.private && !a.include_private) throw new Error('This session is private; pass include_private=true to read it.');
-  const base = summaryOf(peek.session);
+  const session = peek.session;
+  const relaxable = isRelaxableImport(session);
+  const summaryOk = a.include_private || (a.allow_imported_private && relaxable);
+  if (session.private && !summaryOk) return { id: session.id, private: true, message: PRIVATE_MESSAGE };
+  const base = summaryOf(session);
   if (a.full) {
+    const fullOk = a.include_private || (a.allow_imported_full_private && relaxable);
+    if (session.private && !fullOk) return { ...base, message: PRIVATE_FULL_MESSAGE };
     const batch = await store.readSession(a.id, { offset: a.offset || 0, limit: FULL_PAGE_FETCH });
     const messages = fitByTokens(batch.messages, FULL_PAGE_TOKENS);
-    const nextOffset = (a.offset || 0) + messages.length < peek.session.message_count ? (a.offset || 0) + messages.length : null;
+    const nextOffset = (a.offset || 0) + messages.length < session.message_count ? (a.offset || 0) + messages.length : null;
     return { ...base, messages: messages.map((m) => ({ ...m, text: redactText(m.text) })), next_offset: nextOffset };
   }
   // summary + metadata + up to 3 key-turn snippets — comfortably under the ~800 token default budget
-  return { ...base, key_turns: await keyTurns(store, a.id, peek.session.message_count) };
+  return { ...base, key_turns: await keyTurns(store, a.id, session.message_count) };
 }
 
 // a: { title?, text, role?, session_id?, project?, private? }. platform = ctx.platform (BRAINLINK_AI_PLATFORM).

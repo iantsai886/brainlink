@@ -122,3 +122,37 @@ test('/api/graph3d and /api/graph3d/note: same exclusion guarantee over HTTP', a
     assert.ok(refused.error || refused.message, 'a private note must error, not return its content');
   } finally { s.server.close(); }
 });
+
+// ---- Frontend (ui/notes3d.js, ui/notes3d.css): click-to-open, readable labels, sizing ----
+// No browser is available in this suite, so these are structural checks on the actual shipped
+// code (not a DOM/visual test) guarding the specific regressions this item fixed: clicking a node
+// must open its note (same as any other entry point into the detail panel), the hover label must
+// be escaped (nodeLabel is rendered as the tooltip's innerHTML — unescaped note titles would be
+// an HTML-injection hole), the selected node must be visibly distinguished, and the canvas must
+// never be sized just once from a possibly-stale clientWidth read at construction time.
+
+test('ui/notes3d.js: clicking a node opens its note via the same path as a wikilink/backlink chip', async () => {
+  const { readFile } = await import('node:fs/promises');
+  const src = await readFile(new URL('../ui/notes3d.js', import.meta.url), 'utf8');
+  assert.match(src, /\.onNodeClick\(\(n\) => openById\(n\.id\)\)/, 'node click must call openById, the same function wikilinks/chips use');
+  assert.match(src, /function openById\(id\) \{[\s\S]*?openPanel\(node\);/, 'openById must open the detail panel (title, body, backlinks/outlinks)');
+});
+
+test('ui/notes3d.js: hover label is escaped, and the selected node is visibly highlighted', async () => {
+  const { readFile } = await import('node:fs/promises');
+  const src = await readFile(new URL('../ui/notes3d.js', import.meta.url), 'utf8');
+  assert.match(src, /\.nodeLabel\(\(n\) => esc\(n\.title\)\)/, 'nodeLabel is rendered as the tooltip innerHTML and must be escaped like any other note-derived HTML');
+  assert.match(src, /selectedId/, 'the currently-open node must be tracked so it can be highlighted');
+  assert.match(src, /\.nodeColor\(\(n\) => \(n\.id === selectedId/, 'the selected node must render in a distinct color');
+  assert.match(src, /\.nodeVal\(\(n\) => \(n\.id === selectedId/, 'the selected node must render larger, reinforcing which note is open');
+});
+
+test('ui/notes3d.js + ui/notes3d.css: the canvas is resized from the real container size more than once (construction races a 0/stale clientWidth), and CSS caps it from overflowing', async () => {
+  const { readFile } = await import('node:fs/promises');
+  const src = await readFile(new URL('../ui/notes3d.js', import.meta.url), 'utf8');
+  const css = await readFile(new URL('../ui/notes3d.css', import.meta.url), 'utf8');
+  assert.match(src, /function resizeToContainer\(\)/);
+  assert.match(src, /new ResizeObserver\(resizeToContainer\)/, 'every container resize must re-apply the real size');
+  assert.match(src, /requestAnimationFrame\(resizeToContainer\)/, 'the initial size must be re-applied a frame later too, after layout has definitely settled');
+  assert.match(css, /\.notes3d-canvas\s*>\s*div,\s*\.notes3d-canvas canvas\s*\{[^}]*max-width:\s*100%[^}]*max-height:\s*100%/, 'a hard CSS cap so a stale/0 clientWidth read can never visibly overflow the container');
+});

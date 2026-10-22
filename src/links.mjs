@@ -44,11 +44,15 @@ export const mapPath = (v) => (v.map_note === null ? null : v.map_note || 'Brain
 
 export async function buildHomeMap(ctx, vaultName, now = new Date()) {
   const index = await loadVault(ctx, vaultName);
-  const real = index.notes.map((n, i) => i).filter((i) => !index.notes[i].generated);
-  // Orphans ignore links from generated notes (like this map), which would hide them.
-  const linkedReal = (i) => [...index.backlinks[i], ...index.outlinks[i]].some((j) => !index.notes[j].generated);
+  // A private note must never appear in the Home map — not as an entry, a recently-changed row,
+  // a folder-group member or a "not linked yet" orphan — since the map itself is a regular,
+  // readable note once written to the vault.
+  const visible = (i) => !index.notes[i].generated && !index.notes[i].private;
+  const real = index.notes.map((n, i) => i).filter(visible);
+  // Orphans ignore links from generated/private notes (like this map), which would hide them.
+  const linkedReal = (i) => [...index.backlinks[i], ...index.outlinks[i]].some(visible);
   const orphans = real.filter((i) => !linkedReal(i));
-  const links = index.edges.filter(([a, b]) => !index.notes[a].generated && !index.notes[b].generated).length;
+  const links = index.edges.filter(([a, b]) => visible(a) && visible(b)).length;
   const recent = real.slice().sort((a, b) => index.notes[b].mtime - index.notes[a].mtime).slice(0, 12);
   const groups = new Map();
   for (const i of real) { const g = collection(index.notes[i].rel); if (!groups.has(g)) groups.set(g, []); groups.get(g).push(i); }

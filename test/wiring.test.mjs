@@ -85,9 +85,12 @@ test('importAll wiring: `brainlink sync` and `session_list` both see real ~/.cla
   assert.deepEqual(afterSync.map((s) => s.client).sort(), ['claude-code', 'codex']);
 
   // 2) `brainlink serve`'s session_list must independently trigger its own lazy import, starting
-  // from a fresh BRAINLINK_HOME with nothing imported yet. The imported sessions are private by
-  // default, and an MCP caller can never self-grant include_private, so session_list itself must
-  // report them as hidden; the lazy import is instead confirmed by reading the store directly.
+  // from a fresh BRAINLINK_HOME with nothing imported yet. Imported sessions are private by
+  // default, and BrainLink Settings' "share summaries of imported sessions" toggle (cfg.sessions,
+  // src/config.mjs) also defaults OFF (v1.2.2 privacy fix: an AI client sees none of a user's
+  // imported session history until the user opts in) — so session_list reports 0 sessions here. A
+  // caller-supplied include_private is still never honoured: it changes nothing here either way.
+  // The import itself still happens lazily regardless of the sharing setting (checked below).
   const serveEnv = { ...env, BRAINLINK_HOME: path.join(home, 'app-serve') };
   const child = spawn(process.execPath, [path.join(ROOT, 'bin', 'brainlink.mjs'), 'serve'], { env: serveEnv });
   const lines = [];
@@ -99,7 +102,7 @@ test('importAll wiring: `brainlink sync` and `session_list` both see real ~/.cla
   child.kill();
   assert.equal(lines.length, 2, 'expected an initialize + tools/call response');
   const result = JSON.parse(lines[1].result.content[0].text);
-  assert.deepEqual(result.sessions, [], 'imported sessions are private; include_private from an MCP caller is never honoured');
+  assert.equal(result.sessions.length, 0, 'imported sessions stay hidden by default until the user opts in, and include_private from a caller has no effect');
 
   const afterServe = await (await openSessionStore(serveEnv)).listSessions({ limit: 10 });
   assert.equal(afterServe.length, 2, 'session_list must still trigger its own lazy import behind the scenes');
