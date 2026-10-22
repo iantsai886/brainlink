@@ -132,7 +132,7 @@ test('Technical Reviewer privacy probe: every row passes except the 1 known, doc
   // ---- snapshot contents ----
   const dest = path.join(B, 'snapdest'); await mkdir(dest, { recursive: true });
   const withSnap = snap.chooseSnapshot(cfg, { enabled: true, folder: dest });
-  const r1 = await snap.writeSnapshotOnce(ctx, withSnap, {});
+  const r1 = await snap.writeSnapshotOnce(ctx, withSnap, env);
   const listAll = async (d, pre = '') => (await Promise.all((await readdir(d, { withFileTypes: true })).map(async (e) => e.isDirectory() ? listAll(path.join(d, e.name), pre + e.name + '/') : [pre + e.name]))).flat();
   const snapFiles = await listAll(dest);
   let snapText = ''; for (const f of snapFiles) snapText += await readFile(path.join(dest, f), 'utf8').catch(() => '');
@@ -145,19 +145,24 @@ test('Technical Reviewer privacy probe: every row passes except the 1 known, doc
   await symlink(OUT, path.join(dest, 'evil-dir'));
   await symlink(path.join(OUT, 'v-symfile.txt'), path.join(dest, 'evil-file.md'));
   await mkdir(path.join(dest, 'user-own'), { recursive: true }); await writeFile(path.join(dest, 'user-own', 'mine.txt'), 'USER FILE NOT WRITTEN BY BRAINLINK');
-  const mfPath = path.join(dest, 'manifest.json');
+  // The manifest moved out of `dest` itself and under appHome (src/snapshot.mjs manifestPath) so
+  // a remote peer syncing `dest` can no longer plant one; a stale planted manifest.json left
+  // inside `dest` is now just an ordinary, inert file BrainLink never reads. Plant at the real
+  // location (same env as writeSnapshotOnce below resolves it with) so this row still exercises
+  // the actual traversal-containment logic instead of silently no-op'ing against dead code.
+  const mfPath = snap.manifestPath(dest, env);
   const rel = path.relative(dest, OUT);
   const plant = async () => { const mf = JSON.parse(await readFile(mfPath, 'utf8').catch(() => '{"files":{}}')); Object.assign(mf.files, {
     [`${rel}/v-dotdot.txt`]: {}, [path.join(OUT, 'v-abs.txt')]: {}, 'evil-dir/v-symdir.txt': {}, 'evil-file.md': {},
     [`Brain/../../${path.basename(B)}/outside/v-deep.txt`]: {}, ['..%2Foutside%2Fv-encoded.txt']: {}, ['..\\outside\\v-backslash.txt']: {}, 'user-own/mine.txt': {} }); await writeFile(mfPath, JSON.stringify(mf)); };
   await plant();
-  const r2 = await snap.writeSnapshotOnce(ctx, withSnap, {});
+  const r2 = await snap.writeSnapshotOnce(ctx, withSnap, env);
   const surv = Object.fromEntries(victims.map((v) => [v, existsSync(path.join(OUT, v))]));
   rec('P0-3 writeSnapshotOnce manifest traversal contained', Object.values(surv).every(Boolean) && existsSync(path.join(dest, 'evil-file.md')), `ok=${r2.ok} outside survivors=${JSON.stringify(surv)} evil-file symlink still present=${existsSync(path.join(dest, 'evil-file.md'))}`);
   rec('P0-3 residual (informational): planted manifest key for a non-BrainLink file INSIDE the share folder', true, `user-own/mine.txt still exists=${existsSync(path.join(dest, 'user-own', 'mine.txt'))} (false = it was deleted)`);
   for (const v of victims) await writeFile(path.join(OUT, v), 'VICTIM');
   await plant();
-  await snap.clearSnapshot(dest);
+  await snap.clearSnapshot(dest, env);
   const surv2 = Object.fromEntries(victims.map((v) => [v, existsSync(path.join(OUT, v))]));
   rec('P0-3 clearSnapshot manifest traversal contained', Object.values(surv2).every(Boolean), `outside survivors=${JSON.stringify(surv2)}`);
 
