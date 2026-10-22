@@ -66,7 +66,7 @@ export function zonedNow(tz, d = new Date()) {
 export function parseFrontmatter(text) {
   const stripped = String(text).replace(/^\uFEFF/, '');
   const m = stripped.match(/^(?:[ \t]*\r?\n)*---\r?\n([\s\S]*?)\r?\n---\r?\n?/);
-  if (!m) return { meta: {}, body: stripped };
+  if (!m) return { meta: {}, body: stripped, frontmatter: '' };
   const meta = {};
   let listKey = null;
   for (const line of m[1].split(/\r?\n/)) {
@@ -76,7 +76,7 @@ export function parseFrontmatter(text) {
     const item = listKey && line.match(/^\s*-\s+(.*)$/);
     if (item) { const v = item[1].replace(/^["']|["']$/g, '').trim(); meta[listKey] = meta[listKey] ? `${meta[listKey].replace(/\]$/, '')}, ${v}]` : `[${v}]`; }
   }
-  return { meta, body: stripped.slice(m[0].length) };
+  return { meta, body: stripped.slice(m[0].length), frontmatter: m[1] };
 }
 
 const MAX_WORDS = 256;
@@ -119,6 +119,19 @@ export const isPrivateMeta = (meta = {}) => {
   const v = String(meta[k]).replace(/\s+#.*$/, '').replace(/^["']|["']$/g, '').trim();
   return !/^(false|no|0|off|null|~|)$/i.test(v);
 };
+
+// isPrivateMeta's line-by-line key parser (above) is strict on purpose -- a looser leading-\s*
+// key regex would also match a `private:` line nested under an unrelated block key (e.g.
+// `settings:\n  private: false` or a `|` block scalar), which can flip an actually-private note
+// to public. Spellings that strict parser legitimately misses (`private : true` with a space
+// before the colon, indented `  private: true`, a quoted `"private": true` key) must still be
+// caught, so this is a second, independent, fail-closed scan of the *raw* frontmatter block: any
+// line or flow-style occurrence of a `private` key is treated as private unless its value is one
+// of a short list of explicit "off" spellings. Over-blocking (e.g. `title: my private: thoughts`)
+// is the acceptable failure mode here, not under-blocking.
+const PRIV_RE = /(?:^|[\s{,])["']?private["']?\s*:[ \t]*([^\n,}#]*)/gim;
+export const fmSaysPrivate = (block) => [...String(block || '').matchAll(PRIV_RE)].some((m) =>
+  !/^(false|no|0|off|null|~)$/i.test(m[1].replace(/^["']|["']$/g, '').trim()));
 
 export function isHistorical(rel, meta) {
   const name = path.posix.basename(rel);
@@ -247,13 +260,13 @@ export async function loadVault(ctx, name) {
     const stNow = await stat(full);
     if (prev?.hash === hash) { prev.mtime = stNow.mtimeMs; prev.bytes = stNow.size; continue; }
     changed = true;
-    const { meta, body } = parseFrontmatter(raw);
+    const { meta, body, frontmatter } = parseFrontmatter(raw);
     const mtime = stNow.mtimeMs;
     const title = path.posix.basename(rel).replace(/\.md$/i, '');
     const aliases = listValue(meta.aliases);
     const names = [title, ...aliases].join(' ');
     const chunks = chunkMarkdown(body).map((c, i) => ({ ...c, id: `${rel}#${i}`, tokens: termFrequencies(`${names} ${c.heading} ${c.text}`) }));
-    state.files.set(rel, { hash, mtime, bytes: stNow.size, note: { rel, title, aliases, raw, meta, body, chunks, mtime, minor: isMinor(rel, title), date: noteDate(rel, meta, mtime), tags: extractTags(body, meta), generated: meta.generated_by === 'brainlink' || /^BrainLink\/Commands\//i.test(rel), historical: isHistorical(rel, meta), private: isPrivateMeta(meta) } });
+    state.files.set(rel, { hash, mtime, bytes: stNow.size, note: { rel, title, aliases, raw, meta, body, chunks, mtime, minor: isMinor(rel, title), date: noteDate(rel, meta, mtime), tags: extractTags(body, meta), generated: meta.generated_by === 'brainlink' || /^BrainLink\/Commands\//i.test(rel), historical: isHistorical(rel, meta), private: isPrivateMeta(meta) || fmSaysPrivate(frontmatter) } });
   }
   for (const rel of [...state.files.keys()]) if (!seen.has(rel)) { state.files.delete(rel); changed = true; }
   if (changed) state.index = buildIndex([...state.files.values()].map((f) => f.note).sort((a, b) => a.rel.localeCompare(b.rel)));
@@ -557,8 +570,8 @@ export async function readNote(ctx, name, rel) {
   const i = index.byRel.get(relNorm);
   if (i === undefined || index.notes[i].private) throw new Error(PRIVATE_NOTE_ERROR);
   const raw = await readFile(full, 'utf8');
-  const { meta, body } = parseFrontmatter(raw);
-  if (isPrivateMeta(meta)) throw new Error(PRIVATE_NOTE_ERROR);
+  const { meta, body, frontmatter } = parseFrontmatter(raw);
+  if (isPrivateMeta(meta) || fmSaysPrivate(frontmatter)) throw new Error(PRIVATE_NOTE_ERROR);
   return { path: rel, meta, body, historical: isHistorical(rel, meta) };
 }
 
