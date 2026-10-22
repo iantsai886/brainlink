@@ -1,6 +1,13 @@
 import {createHook,errText} from './state.mjs';
 export const PROVIDERS = Object.freeze(['local','gdrive','icloud','dropbox']);
 export const PROVIDER_LABELS = Object.freeze({local:'Local only',gdrive:'Drive snapshot',icloud:'iCloud folder',dropbox:'Dropbox folder'});
+// Translated labels for the same four providers, keyed by locale (src/config.mjs LOCALES: en, zh-TW, pt).
+export const PROVIDER_LABELS_I18N = Object.freeze({
+ en: PROVIDER_LABELS,
+ 'zh-TW': Object.freeze({local:'僅本機',gdrive:'Drive 快照',icloud:'iCloud 資料夾',dropbox:'Dropbox 資料夾'}),
+ pt: Object.freeze({local:'Somente local',gdrive:'Snapshot do Drive',icloud:'Pasta do iCloud',dropbox:'Pasta do Dropbox'}),
+});
+export function providerLabel(provider,locale='en'){return (PROVIDER_LABELS_I18N[locale]||PROVIDER_LABELS_I18N.en)[provider]||provider;}
 export function useSettings(api){
  const service=api.services?.settings;const available=['get','suggestFolders','validate','save'].every(k=>typeof service?.[k]==='function');
  const h=createHook({available,settings:{provider:'local',folder:null,device:'device'},suggestions:{},busy:false,message:'',error:'',theme:'light'});

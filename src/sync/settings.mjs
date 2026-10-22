@@ -8,6 +8,15 @@ import path from 'node:path';
 export const SYNC_VAULT = 'brain';
 export const PROVIDERS = ['local', 'gdrive', 'icloud', 'dropbox'];
 export const PROVIDER_LABELS = { local: 'Local only', gdrive: 'Drive snapshot', icloud: 'iCloud folder', dropbox: 'Dropbox folder' };
+// Same labels, translated. The live Setup UI (ui/index.html) looks these up through its own
+// ui/locales/<id>.json catalog under the sync.provider.* keys instead (so a locale switch takes
+// effect without a new request); this map is for any other caller that only has a locale code.
+export const PROVIDER_LABELS_I18N = {
+  en: PROVIDER_LABELS,
+  'zh-TW': { local: '僅本機', gdrive: 'Drive 快照', icloud: 'iCloud 資料夾', dropbox: 'Dropbox 資料夾' },
+  pt: { local: 'Somente local', gdrive: 'Snapshot do Drive', icloud: 'Pasta do iCloud', dropbox: 'Pasta do Dropbox' },
+};
+export function providerLabel(provider, locale = 'en') { return (PROVIDER_LABELS_I18N[locale] || PROVIDER_LABELS_I18N.en)[provider] || provider; }
 
 export function defaultSync() { return { provider: 'local', folder: null, device: hostname().split('.')[0] || 'device' }; }
 
