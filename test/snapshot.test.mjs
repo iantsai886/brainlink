@@ -324,6 +324,10 @@ test('setup UI: /api/vault/private and /api/vault/remove restart the snapshot wa
 
     await (await api('POST', '/api/vault/remove', { name: 'Brain' })).json();
     const st2 = await (await api('GET', '/api/state')).json();
-    assert.ok(st2.snapshot.error, 'removing the last vault refreshed the watcher immediately, which now reports it has nothing to share');
+    // Item 5: removing the last vault must not leave its notes sitting in the shared folder
+    // (e.g. synced to the cloud via Google Drive) forever just because nothing is left enabled
+    // to ever clean them up on a later write.
+    assert.ok(!existsSync(path.join(dest, 'Brain', 'A.md')), "removing the last vault clears its notes from the shared snapshot folder right away");
+    assert.equal(st2.snapshot.noteCount, 0, 'removing the last vault refreshed the watcher immediately, which now reports nothing to share');
   } finally { s.server.close(); }
 });

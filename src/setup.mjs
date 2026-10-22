@@ -20,7 +20,7 @@ import { syncSettings, chooseSync, suggestFolders, PROVIDERS, PROVIDER_LABELS } 
 import { sessionsService } from './host.mjs';
 import { addAgent, renameAgent, removeAgent, revokeAgent, markConnected, findAgentByToken, publicAgent, localAgentSnippet, remoteAgentSnippet } from './mcp-agents.mjs';
 import { buildGraph3D, noteDetail3D } from './graph3d.mjs';
-import { snapshotSettings, chooseSnapshot, suggestSnapshotFolder, clearSnapshot, startSnapshotWatcher, loadSnapshotStatus, saveSnapshotStatus } from './snapshot.mjs';
+import { snapshotSettings, chooseSnapshot, suggestSnapshotFolder, clearSnapshot, startSnapshotWatcher, writeSnapshotOnce, loadSnapshotStatus, saveSnapshotStatus } from './snapshot.mjs';
 
 const UI_STATIC_TYPES = { '.js': 'text/javascript; charset=utf-8', '.css': 'text/css; charset=utf-8', '.json': 'application/json; charset=utf-8' };
 const UI_DIR = path.join(ROOT, 'ui');
@@ -93,7 +93,14 @@ export async function startSetup(opts = {}) {
     const settings = snapshotSettings(cfg);
     if (!settings.enabled) return;
     const ctx = createContext(cfg, { env });
-    if (!ctx.enabled.length) { await saveSnapshotStatus(snapshotStateFile, { ok: false, error: 'Add a folder first, then turn sharing on.' }); return; }
+    if (!ctx.enabled.length) {
+      // No vault left to watch (e.g. the last one was just removed) — still run one write so a
+      // previously-synced snapshot's note copies are cleared from the destination folder, not
+      // left there indefinitely with nothing left enabled to ever clean them up again.
+      const result = await writeSnapshotOnce(ctx, cfg, env).catch((e) => ({ ok: false, error: e.message || String(e) }));
+      await saveSnapshotStatus(snapshotStateFile, result.ok ? result : { ok: false, error: result.error || 'Add a folder first, then turn sharing on.' });
+      return;
+    }
     snapshotWatcher = startSnapshotWatcher(ctx, cfg, env, { onResult: (r) => saveSnapshotStatus(snapshotStateFile, r).catch(() => {}) });
     await snapshotWatcher.ready;
   }
