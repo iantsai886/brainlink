@@ -66,8 +66,19 @@ async function atomicWrite(file, data) {
   await rename(tmp, file);
 }
 
+const LEGACY_MANIFEST = 'manifest.json';
+
+// v1.2.0/v1.2.1 kept the manifest inside `dest` itself; it moved under appHome above so a synced
+// peer can no longer plant one (see manifestPath's comment). That move also means the new manifest
+// starts empty for anyone upgrading, so without this fallback the prune pass below has nothing
+// to diff against: any note a pre-1.2.2 privacy bug once copied into `dest` (a private note, one
+// under an excluded folder like 00 Home) would sit there untouched forever, since nothing it wrote
+// is tracked anymore. Read the old in-folder manifest once, purely to seed that diff -- it is
+// still only ever used as input to the same safeDeletePath-contained prune loop every other
+// manifest read already goes through, so this reopens no trust it didn't already have.
 async function readManifest(dest, env) {
-  try { return JSON.parse(await readFile(manifestPath(dest, env), 'utf8')); } catch { return { files: {} }; }
+  try { return JSON.parse(await readFile(manifestPath(dest, env), 'utf8')); } catch { /* fall through */ }
+  try { return JSON.parse(await readFile(path.join(dest, LEGACY_MANIFEST), 'utf8')); } catch { return { files: {} }; }
 }
 
 // The manifest read back from `dest` is untrusted (it lives in a folder a cloud sync client also
@@ -158,6 +169,10 @@ export async function writeSnapshotOnce(ctx, cfg, env = process.env) {
 
   const prev = await readManifest(dest, env);
   for (const rel of Object.keys(prev.files || {})) if (!files[rel]) { const safe = await safeDeletePath(dest, rel); if (safe) { try { await unlink(safe); } catch {} } }
+  // One-time migration cleanup: once its entries have been diffed above, the pre-1.2.2 in-folder
+  // manifest itself is dead weight (nothing reads it anymore) -- remove it too. Fixed literal name
+  // at dest's own root, not resolved from file content, so no safeDeletePath containment is needed.
+  try { await unlink(path.join(dest, LEGACY_MANIFEST)); } catch {}
 
   for (const n of notes) {
     const rel = relFor(n);
@@ -180,6 +195,7 @@ export async function clearSnapshot(dest, env = process.env) {
   const prev = await readManifest(dest, env);
   for (const rel of Object.keys(prev.files || {})) { const safe = await safeDeletePath(dest, rel); if (safe) { try { await unlink(safe); } catch {} } }
   try { await unlink(manifestPath(dest, env)); } catch {}
+  try { await unlink(path.join(dest, LEGACY_MANIFEST)); } catch {}
   return { ok: true };
 }
 

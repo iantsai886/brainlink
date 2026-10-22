@@ -151,6 +151,36 @@ test('snapshot: safeDeletePath still contains a traversal attempt in the real (a
   assert.equal(await readFile(victim, 'utf8'), 'do not delete me');
 });
 
+// 5b: v1.2.0/v1.2.1 tracked the manifest inside `dest` itself (see the P0-3 tests above); a bug of
+// that era could have copied a private note or one under an excluded folder (e.g. 00 Home) into
+// `dest` before it was fixed. Moving the manifest under appHome means a fresh install sees no
+// history for that dest, so without the legacy-manifest fallback in readManifest, such a leaked
+// copy would never again be compared against and pruned. Simulate that upgrade: a leaked private
+// note and a leaked 00-Home note sit in `dest`, tracked only by an old-location manifest.json.
+test('snapshot: upgrading from 1.2.1 purges a stale private-note/00-Home copy left in the shared folder', async () => {
+  const { ctx, cfg, env } = await setupVaults();
+  const dest = await tmp('dest-upgrade');
+  await mkdir(path.join(dest, 'Brain', '00 Home'), { recursive: true });
+  await writeFile(path.join(dest, 'Brain', 'Private.md'), 'shh'); // leaked by the pre-fix bug
+  await writeFile(path.join(dest, 'Brain', '00 Home', 'Diary.md'), 'very personal notes');
+  const legacyManifest = { generated_at: 'x', files: {
+    'Brain/Public.md': { sha12: 'x', updated_at: 'x' },
+    'Brain/Private.md': { sha12: 'x', updated_at: 'x' },
+    'Brain/00 Home/Diary.md': { sha12: 'x', updated_at: 'x' },
+  } };
+  await writeFile(path.join(dest, 'manifest.json'), JSON.stringify(legacyManifest)); // old (pre-1.2.2) location
+  assert.ok(!existsSync(manifestPath(dest, env)), 'no manifest at the new location yet: a genuine fresh upgrade');
+
+  const withSnapshot = chooseSnapshot(cfg, { enabled: true, folder: dest });
+  const r = await writeSnapshotOnce(ctx, withSnapshot, env);
+  assert.equal(r.ok, true);
+
+  assert.ok(!existsSync(path.join(dest, 'Brain', 'Private.md')), 'stale leaked private note is purged on the first post-upgrade write');
+  assert.ok(!existsSync(path.join(dest, 'Brain', '00 Home', 'Diary.md')), 'stale leaked 00 Home copy is purged on the first post-upgrade write');
+  assert.ok(existsSync(path.join(dest, 'Brain', 'Public.md')), 'still-current note is untouched');
+  assert.ok(!existsSync(path.join(dest, 'manifest.json')), 'the old in-folder manifest itself is cleaned up too');
+});
+
 test('snapshot: removing or excluding a note propagates, without touching foreign files', async () => {
   const { vaultDir, ctx, cfg, env } = await setupVaults();
   const dest = await tmp('dest-removal');
