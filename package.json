@@ -13,6 +13,8 @@
     "build:mac-zip": "bash packaging/macos/build-zip.sh",
     "test:mac-zip": "bash packaging/macos/test-zip.sh",
     "build:win": "bash packaging/windows/build-windows.sh",
+    "build:win-zip": "bash packaging/windows/build-zip.sh",
+    "test:win-zip": "bash packaging/windows/test-zip.sh",
     "build:win-preview": "bash packaging/windows/build-portable-zip.sh",
     "build:linux": "bash packaging/linux/build-linux.sh"
   },
