@@ -152,6 +152,22 @@ test('parseFrontmatter: a leading UTF-8 BOM or blank lines before --- still dete
   assert.ok(!isPrivateMeta(hiddenMeta), 'private: false after leading blank lines is still not private');
 });
 
+// F4: a trailing space or tab on either fence line (e.g. the opening line is literally "--- ",
+// which some editors write) must not stop detection, and CRLF line endings on the fence must still
+// be accepted with trailing whitespace too.
+test('F4: trailing spaces/tabs (and CRLF) on either frontmatter fence still detect private: true', () => {
+  const openSpace = '--- \nprivate: true\n---\n# Secret\n\nbody text';
+  const openTab = '---\t\nprivate: true\n---\n# Secret\n\nbody text';
+  const closeSpace = '---\nprivate: true\n--- \n# Secret\n\nbody text';
+  const bothCrlf = '--- \r\nprivate: true\r\n--- \r\n# Secret\r\n\r\nbody text';
+  for (const text of [openSpace, openTab, closeSpace, bothCrlf]) {
+    const { meta, body } = parseFrontmatter(text);
+    assert.equal(meta.private, 'true');
+    assert.ok(isPrivateMeta(meta));
+    assert.match(body, /^# Secret/);
+  }
+});
+
 // R3: isPrivateMeta's line-by-line key parser is deliberately strict (a looser leading-\s* regex
 // would also match a `private:` line nested under an unrelated key, flipping a genuinely private
 // note to public -- see the two "must stay private" cases below). fmSaysPrivate is a second,
