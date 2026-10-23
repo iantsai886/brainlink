@@ -9,7 +9,7 @@ import { fileURLToPath } from 'node:url';
 
 import { normalize, validate, saveConfig } from '../src/config.mjs';
 import { tokens, extractLinks, linkGraph } from '../src/graph.mjs';
-import { createContext, chunkMarkdown, search, readNote, related, zonedNow, findSecrets, DEFAULT_EXCLUDED_FOLDERS, SUGGESTED_EXCLUDED_FOLDERS, ensureDefaultIgnore, readExcludedFolders, writeExcludedFolders, parseFrontmatter, isPrivateMeta } from '../src/core.mjs';
+import { createContext, chunkMarkdown, search, readNote, related, zonedNow, findSecrets, DEFAULT_EXCLUDED_FOLDERS, SUGGESTED_EXCLUDED_FOLDERS, ensureDefaultIgnore, readExcludedFolders, writeExcludedFolders, parseFrontmatter, isPrivateMeta, fmSaysPrivate, loadVault } from '../src/core.mjs';
 import { findObsidianVaults, nestedVaults } from '../src/obsidian.mjs';
 import { proposeNote, sendHandoff, listHandoffs, frontmatter, resolveIdentity } from '../src/writes.mjs';
 import { connectAgent, closeLoop, resolveAgent, latestCaptures } from '../src/agents.mjs';
@@ -150,6 +150,55 @@ test('parseFrontmatter: a leading UTF-8 BOM or blank lines before --- still dete
   }
   const { meta: hiddenMeta } = parseFrontmatter(hidden);
   assert.ok(!isPrivateMeta(hiddenMeta), 'private: false after leading blank lines is still not private');
+});
+
+// R3: isPrivateMeta's line-by-line key parser is deliberately strict (a looser leading-\s* regex
+// would also match a `private:` line nested under an unrelated key, flipping a genuinely private
+// note to public -- see the two "must stay private" cases below). fmSaysPrivate is a second,
+// fail-closed scan of the raw frontmatter block that catches the spellings the strict parser
+// misses. A note's real privacy check is isPrivateMeta(meta) || fmSaysPrivate(frontmatter).
+test('R3: fail-closed frontmatter private detection covers spellings the strict parser misses, without being fooled by nested false', () => {
+  const isPrivate = (text) => { const { meta, frontmatter } = parseFrontmatter(text); return isPrivateMeta(meta) || fmSaysPrivate(frontmatter); };
+
+  const mustBePrivate = {
+    'space before the colon': '---\nprivate : true\n---\nbody',
+    'indented key': '---\n  private: true\n---\nbody',
+    'quoted key': '---\n"private": true\n---\nbody',
+    'value on the next line (block/empty)': '---\nprivate:\n---\nbody',
+    'flow-style mapping': '---\nx: {private: true}\n---\nbody',
+    'duplicate key, different case (first hit is false)': '---\nPrivate: false\nprivate: true\n---\nbody',
+    // The two override cases: a real `private: true` must not be undone by an unrelated nested
+    // `private: false` elsewhere in the block (that's exactly what a looser leading-\s* regex gets
+    // wrong, per the Claude review).
+    'nested private:false under another key does not override the real one': '---\nprivate: true\nsettings:\n  private: false\n---\nbody',
+    'private:false inside a block scalar does not override the real one': '---\nprivate: true\nnotes: |\n  private: false\n---\nbody',
+  };
+  for (const [name, text] of Object.entries(mustBePrivate)) assert.ok(isPrivate(text), name);
+
+  const mustStayPublic = {
+    'explicit private: false': '---\nprivate: false\n---\nbody',
+    'tags: [private] is not the private key': '---\ntags: [private]\n---\nbody',
+    'is_private is not the private key': '---\nis_private: true\n---\nbody',
+    'no frontmatter at all': '# Title\nbody',
+  };
+  for (const [name, text] of Object.entries(mustStayPublic)) assert.ok(!isPrivate(text), name);
+});
+
+test('R3: a note using one of the previously-missed private spellings is gated end to end (readNote + index)', async () => {
+  const vaultDir = await tmp('r3-vault');
+  await writeFile(path.join(vaultDir, 'Spacecolon.md'), '---\nprivate : true\n---\n# Spacecolon\nshh');
+  await writeFile(path.join(vaultDir, 'Indented.md'), '---\n  private: true\n---\n# Indented\nshh');
+  await writeFile(path.join(vaultDir, 'Quotedkey.md'), '---\n"private": true\n---\n# Quotedkey\nshh');
+  await writeFile(path.join(vaultDir, 'Public.md'), '# Public\nhello');
+  const cfg = normalize({ vaults: [{ name: 'Co', path: vaultDir }] });
+  const ctx = createContext(cfg, { env: { BRAINLINK_HOME: await tmp('r3-home'), BRAINLINK_SEMANTIC: '0' } });
+  for (const rel of ['Spacecolon.md', 'Indented.md', 'Quotedkey.md']) {
+    await assert.rejects(readNote(ctx, 'Co', rel), /private/i, `${rel} is gated by readNote`);
+  }
+  const index = await loadVault(ctx, 'Co');
+  const privateFlags = index.notes.filter((n) => n.rel !== 'Public.md').map((n) => n.private);
+  assert.ok(privateFlags.every(Boolean), 'all three spellings are marked private in the vault index');
+  assert.ok(!index.notes.find((n) => n.rel === 'Public.md').private);
 });
 
 test('BOM and leading-blank-line private notes are hidden from readNote and search, same as any other private note', async () => {
@@ -877,8 +926,8 @@ test('P0-2: a root .brainlinkignore exclusion applies at any depth, not only to 
   const withSnapshot = chooseSnapshot(cfg, { enabled: true, folder: dest });
   await writeSnapshotOnce(ctx, withSnapshot, {});
   const { existsSync } = await import('node:fs');
-  assert.ok(!existsSync(path.join(dest, 'Acme Studio', 'sub', '00 Home')), 'nested excluded folder never reaches the snapshot');
-  assert.ok(existsSync(path.join(dest, 'Acme Studio', 'sub', 'Visible.md')));
+  assert.ok(!existsSync(path.join(dest, 'BrainLink Shared', 'Acme Studio', 'sub', '00 Home')), 'nested excluded folder never reaches the snapshot');
+  assert.ok(existsSync(path.join(dest, 'BrainLink Shared', 'Acme Studio', 'sub', 'Visible.md')));
 });
 
 test('default .brainlinkignore: shipped on a fresh real vault, never overwrites one already there, folders stay out of search and answers', async () => {

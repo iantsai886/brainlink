@@ -31,8 +31,15 @@ export const LOCALES = ['en', 'zh-TW', 'pt'];
 // hash (sha256 hex, see src/mcp-agents.mjs); never persisted in plain text.
 export const AGENT_KINDS = ['local', 'remote'];
 
+// Bumped for R2: a config saved by any version before this one (v1.2.3 and earlier) could have
+// sessions.shareSummaries=true on disk -- v1.2.2's own Setup wrote that normalized default the
+// first time it saved anything, before shareSummaries defaulted to off. normalize() below forces
+// both session-sharing flags back to false for any config whose on-disk version is older than
+// this, exactly once (the config is then saved at the new version, so it is never re-migrated).
+export const CONFIG_SCHEMA_VERSION = 2;
+
 export function emptyConfig() {
-  return { version: 1, timezone: null, locale: null, vaults: [], agents: [], ai_agents: [], handoff: null, platforms: DEFAULT_PLATFORMS, http: { port: 8765, token: null }, connections: {}, sessions: { shareSummaries: false, shareFullText: false } };
+  return { version: CONFIG_SCHEMA_VERSION, timezone: null, locale: null, vaults: [], agents: [], ai_agents: [], handoff: null, platforms: DEFAULT_PLATFORMS, http: { port: 8765, token: null }, connections: {}, sessions: { shareSummaries: false, shareFullText: false } };
 }
 
 // Fill defaults so the rest of the code never checks for missing keys.
@@ -52,7 +59,14 @@ export function normalize(raw = {}) {
   // session_read (summary + short key-turn snippets); shareFullText additionally covers full=true
   // (the raw message text). Imports still default private per-session, and this now defaults OFF
   // too: an AI client sees none of a user's imported session history until the user opts in.
-  cfg.sessions = { shareSummaries: false, shareFullText: false, ...(raw.sessions || {}) };
+  // R2: a config from before CONFIG_SCHEMA_VERSION is force-reset to off here instead of trusting
+  // whatever it already has on disk -- that's the only way to fix the sessions a pre-2 install
+  // already saved with shareSummaries=true without the user ever having chosen that.
+  const upgrading = !(Number(raw.version) >= CONFIG_SCHEMA_VERSION);
+  cfg.sessions = upgrading
+    ? { shareSummaries: false, shareFullText: false }
+    : { shareSummaries: false, shareFullText: false, ...(raw.sessions || {}) };
+  cfg.version = CONFIG_SCHEMA_VERSION;
   return cfg;
 }
 

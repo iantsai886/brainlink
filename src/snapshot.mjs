@@ -4,10 +4,11 @@
 // opens a network connection or listens on anything but 127.0.0.1 -- whatever gets this folder to
 // the cloud is the user's own desktop sync client, not us.
 import { readFile, writeFile, rename, mkdir, unlink, stat, lstat, realpath } from 'node:fs/promises';
+import { existsSync } from 'node:fs';
 import { watch } from 'node:fs';
 import { createHash } from 'node:crypto';
 import path from 'node:path';
-import { loadVault } from './core.mjs';
+import { loadVault, safeJoin } from './core.mjs';
 import { appHome } from './config.mjs';
 import { suggestFolders } from './sync/settings.mjs';
 import { openSessionStore, importAll } from './sessions/index.mjs';
@@ -68,17 +69,50 @@ async function atomicWrite(file, data) {
 
 const LEGACY_MANIFEST = 'manifest.json';
 
-// v1.2.0/v1.2.1 kept the manifest inside `dest` itself; it moved under appHome above so a synced
-// peer can no longer plant one (see manifestPath's comment). That move also means the new manifest
-// starts empty for anyone upgrading, so without this fallback the prune pass below has nothing
-// to diff against: any note a pre-1.2.2 privacy bug once copied into `dest` (a private note, one
-// under an excluded folder like 00 Home) would sit there untouched forever, since nothing it wrote
-// is tracked anymore. Read the old in-folder manifest once, purely to seed that diff -- it is
-// still only ever used as input to the same safeDeletePath-contained prune loop every other
-// manifest read already goes through, so this reopens no trust it didn't already have.
+// The current manifest lives only under appHome (manifestPath above). A missing or corrupt file
+// here means "nothing tracked yet" -- it must never fall back to anything inside `dest`, which a
+// synced peer (or just a user's own unrelated manifest.json, e.g. from a web/extension project)
+// can write to. That fallback was the R1 regression: it made a planted or pre-existing
+// dest/manifest.json drive the delete loop below on first enable, after a clear, after a folder
+// switch, or whenever the appHome file fails to parse.
 async function readManifest(dest, env) {
-  try { return JSON.parse(await readFile(manifestPath(dest, env), 'utf8')); } catch { /* fall through */ }
-  try { return JSON.parse(await readFile(path.join(dest, LEGACY_MANIFEST), 'utf8')); } catch { return { files: {} }; }
+  try { return JSON.parse(await readFile(manifestPath(dest, env), 'utf8')); } catch { return { files: {} }; }
+}
+
+function legacyMigrationMarker(dest, env) {
+  return `${manifestPath(dest, env)}.legacy-migrated`;
+}
+
+// v1.2.0/v1.2.1 kept the manifest inside `dest` itself. That old file is untrusted input (anyone
+// with write access to `dest` can edit it or compute its sha12), so unlike the pre-fix code this
+// never deletes a key just because the legacy manifest says to. Run at most once per dest (gated
+// by a marker under appHome, written before any deletion so a crash can't retry forever), and only
+// ever remove a legacy key whose on-disk bytes, in the shared output location, are byte-for-byte
+// identical to the real vault file that key names right now. Deleting an exact copy of the user's
+// own current note loses nothing; anything that doesn't match (changed, renamed, or the source no
+// longer exists) is left in place rather than guessed about. The legacy file itself is never
+// deleted -- it may not even be ours.
+async function migrateLegacyManifestOnce(ctx, dest, outRoot, env) {
+  const marker = legacyMigrationMarker(dest, env);
+  if (existsSync(marker)) return;
+  await atomicWrite(marker, String(Date.now()));
+  let legacy;
+  try { legacy = JSON.parse(await readFile(path.join(dest, LEGACY_MANIFEST), 'utf8')); } catch { return; }
+  for (const rel of Object.keys(legacy.files || {})) {
+    const m = typeof rel === 'string' && rel.match(/^([^/]+)\/(.+)$/);
+    if (!m) continue; // only "<vault>/<relpath>" keys are in scope; README/index/sessions are regenerated every run anyway
+    const v = ctx.cfg.vaults.find((x) => x.name === m[1]);
+    if (!v || !v.path) continue;
+    let sourceFull;
+    try { sourceFull = safeJoin(path.resolve(v.path), m[2]); } catch { continue; }
+    let sourceBytes;
+    try { sourceBytes = await readFile(sourceFull); } catch { continue; } // can't verify: leave it alone
+    const safe = await safeDeletePath(outRoot, rel);
+    if (!safe) continue;
+    let distBytes;
+    try { distBytes = await readFile(safe); } catch { continue; }
+    if (Buffer.compare(distBytes, sourceBytes) === 0) { try { await unlink(safe); } catch {} }
+  }
 }
 
 // The manifest read back from `dest` is untrusted (it lives in a folder a cloud sync client also
@@ -145,57 +179,78 @@ function renderIndex(notes) {
 
 const SESSIONS_FILE = 'sessions.json';
 
+// N2: every write/delete this feature ever does happens inside this dedicated subfolder of the
+// chosen destination, never in `dest` itself. That alone keeps BrainLink's hand off anything a
+// user already has sitting at the top level of a synced folder (a root README.md, an unrelated
+// project, etc.) -- there is no longer a name BrainLink writes that could collide with one.
+const SHARED_SUBDIR = 'BrainLink Shared';
+function sharedRoot(dest) { return path.join(dest, SHARED_SUBDIR); }
+
+// N2, second layer: even inside the dedicated subfolder, never overwrite a file that already
+// exists there but isn't one this feature wrote before (tracked by the previous manifest). A
+// brand-new key with nothing in its way writes normally; a key that collides with something
+// already present and unowned is left alone and simply never claimed, so a later run doesn't
+// delete it either (it's not considered "ours" to remove).
+async function writeOwned(file, rel, data, prevFiles) {
+  if (!prevFiles[rel] && await stat(file).then(() => true, () => false)) return false;
+  await atomicWrite(file, data);
+  return true;
+}
+
 // One pass: write the filtered snapshot, delete anything we wrote before that no longer belongs
-// (removed note, newly excluded, newly private, sessions turned off), and never touch a file in
-// the destination folder we did not write ourselves (tracked in manifest.json).
+// (removed note, newly excluded, newly private, sessions turned off), and never touch a file we
+// did not create ourselves, inside or outside the shared subfolder (tracked in manifest.json).
 export async function writeSnapshotOnce(ctx, cfg, env = process.env) {
   const settings = snapshotSettings(cfg);
   if (!settings.enabled) return { ok: true, skipped: true, noteCount: 0 };
   if (!settings.folder) return { ok: false, error: 'No shared folder chosen yet.' };
   const dest = settings.folder;
   if (!(await stat(dest).then((s) => s.isDirectory(), () => false))) return { ok: false, error: `Shared folder not found: ${dest}` };
+  const outRoot = sharedRoot(dest);
 
   const notes = await snapshotNotes(ctx);
   const sessions = settings.includeSessions ? await snapshotSessions(env).catch(() => []) : null;
   const readmeText = README;
   const indexText = renderIndex(notes);
 
-  const files = {};
-  for (const n of notes) files[relFor(n)] = { sha12: sha12(n.raw), updated_at: new Date(n.mtime).toISOString() };
-  files['README.md'] = { sha12: sha12(readmeText), updated_at: new Date().toISOString() };
-  files['index.md'] = { sha12: sha12(indexText), updated_at: new Date().toISOString() };
+  const wanted = {};
+  for (const n of notes) wanted[relFor(n)] = { sha12: sha12(n.raw), data: n.raw };
+  wanted['README.md'] = { sha12: sha12(readmeText), data: readmeText };
+  wanted['index.md'] = { sha12: sha12(indexText), data: indexText };
   const sessionsText = sessions ? JSON.stringify({ generated_at: new Date().toISOString(), sessions }, null, 1) : null;
-  if (sessionsText !== null) files[SESSIONS_FILE] = { sha12: sha12(sessionsText), updated_at: new Date().toISOString() };
+  if (sessionsText !== null) wanted[SESSIONS_FILE] = { sha12: sha12(sessionsText), data: sessionsText };
+
+  // The pre-1.2.2 legacy manifest, if any, named paths at `dest`'s own root (the shared subfolder
+  // didn't exist yet when it was written) -- migrate against `dest`, not the new subfolder.
+  await migrateLegacyManifestOnce(ctx, dest, dest, env);
 
   const prev = await readManifest(dest, env);
-  for (const rel of Object.keys(prev.files || {})) if (!files[rel]) { const safe = await safeDeletePath(dest, rel); if (safe) { try { await unlink(safe); } catch {} } }
-  // One-time migration cleanup: once its entries have been diffed above, the pre-1.2.2 in-folder
-  // manifest itself is dead weight (nothing reads it anymore) -- remove it too. Fixed literal name
-  // at dest's own root, not resolved from file content, so no safeDeletePath containment is needed.
-  try { await unlink(path.join(dest, LEGACY_MANIFEST)); } catch {}
+  const prevFiles = prev.files || {};
+  for (const rel of Object.keys(prevFiles)) if (!wanted[rel]) { const safe = await safeDeletePath(outRoot, rel); if (safe) { try { await unlink(safe); } catch {} } }
 
-  for (const n of notes) {
-    const rel = relFor(n);
-    if (prev.files?.[rel]?.sha12 === files[rel].sha12) continue;
-    await atomicWrite(path.join(dest, rel), n.raw);
+  const files = {};
+  const now = new Date().toISOString();
+  for (const [rel, w] of Object.entries(wanted)) {
+    const full = path.join(outRoot, rel);
+    if (prevFiles[rel]?.sha12 === w.sha12 && existsSync(full)) { files[rel] = prevFiles[rel]; continue; }
+    if (await writeOwned(full, rel, w.data, prevFiles)) files[rel] = { sha12: w.sha12, updated_at: now };
+    // else: something we didn't create already occupies this path in the shared subfolder --
+    // leave it untouched and don't claim it in the manifest.
   }
-  if (prev.files?.['README.md']?.sha12 !== files['README.md'].sha12) await atomicWrite(path.join(dest, 'README.md'), readmeText);
-  if (prev.files?.['index.md']?.sha12 !== files['index.md'].sha12) await atomicWrite(path.join(dest, 'index.md'), indexText);
-  if (sessionsText !== null) await atomicWrite(path.join(dest, SESSIONS_FILE), sessionsText);
 
-  await atomicWrite(manifestPath(dest, env), JSON.stringify({ generated_at: new Date().toISOString(), files }, null, 1));
-  return { ok: true, noteCount: notes.length, syncedAt: new Date().toISOString() };
+  await atomicWrite(manifestPath(dest, env), JSON.stringify({ generated_at: now, files }, null, 1));
+  return { ok: true, noteCount: notes.length, syncedAt: now };
 }
 
-// "Stop sharing" + clear: removes every file this feature ever wrote to `dest` (tracked in its
-// own manifest, kept under appHome — see manifestPath above), and nothing else -- a foreign file
-// placed in the same folder is untouched.
+// "Stop sharing" + clear: removes every file this feature ever wrote (tracked in its own
+// manifest, kept under appHome — see manifestPath above) from inside the shared subfolder, and
+// nothing else -- a foreign file there, or anywhere else in `dest`, is untouched.
 export async function clearSnapshot(dest, env = process.env) {
   if (!dest) return { ok: true };
+  const outRoot = sharedRoot(dest);
   const prev = await readManifest(dest, env);
-  for (const rel of Object.keys(prev.files || {})) { const safe = await safeDeletePath(dest, rel); if (safe) { try { await unlink(safe); } catch {} } }
+  for (const rel of Object.keys(prev.files || {})) { const safe = await safeDeletePath(outRoot, rel); if (safe) { try { await unlink(safe); } catch {} } }
   try { await unlink(manifestPath(dest, env)); } catch {}
-  try { await unlink(path.join(dest, LEGACY_MANIFEST)); } catch {}
   return { ok: true };
 }
 

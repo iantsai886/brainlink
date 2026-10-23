@@ -1,11 +1,11 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtemp, cp } from 'node:fs/promises';
+import { mkdtemp, cp, readFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
-import { normalize } from '../src/config.mjs';
+import { normalize, CONFIG_SCHEMA_VERSION, loadConfig, saveConfig } from '../src/config.mjs';
 import { createContext } from '../src/core.mjs';
 import { createMcp } from '../src/server.mjs';
 import { openSessionStore } from '../src/sessions/index.mjs';
@@ -163,10 +163,35 @@ test('imported sessions stay hidden by default under a fake HOME; session_read p
   });
 });
 
+// R2: v1.2.2's own Setup wrote the normalized defaults the first time it saved anything, so any
+// config saved by that version (or earlier) has sessions.shareSummaries=true on disk even though
+// the user never chose that. Bumping CONFIG_SCHEMA_VERSION means normalize() can tell such a
+// config apart from a fresh/already-migrated one (whose on-disk version is current) and force both
+// sharing flags off exactly once, regardless of what raw.sessions says.
+test('R2: a config saved before the schema-version bump has shareSummaries forced off on load, and does not re-migrate after that', async () => {
+  const home = await tmp('r2-config');
+  const file = path.join(home, 'config.json');
+  // What v1.2.2 wrote: no `version` field recognized by the current schema, shareSummaries=true.
+  await saveConfig({ vaults: [], agents: [], ai_agents: [], connections: {}, platforms: [], http: { port: 8765, token: null }, sessions: { shareSummaries: true, shareFullText: false } }, file);
+  const onDisk = JSON.parse(await readFile(file, 'utf8'));
+  assert.equal(onDisk.sessions.shareSummaries, true, 'the file on disk really does have the old, unsafe default');
+
+  const upgraded = await loadConfig(file);
+  assert.equal(upgraded.sessions.shareSummaries, false, 'forced off on first load after the schema bump');
+  assert.equal(upgraded.sessions.shareFullText, false);
+  assert.equal(upgraded.version, CONFIG_SCHEMA_VERSION);
+
+  // A deliberate post-upgrade opt-in must stick: the just-loaded config already carries the
+  // current version, so re-saving it does not get force-reset again on the next load.
+  await saveConfig({ ...upgraded, sessions: { shareSummaries: true, shareFullText: false } }, file);
+  const reloaded = await loadConfig(file);
+  assert.equal(reloaded.sessions.shareSummaries, true, "a deliberate opt-in after the upgrade is respected, not wiped again");
+});
+
 test('session sharing settings: shareSummaries=true opts in to imported-session summaries', async () => {
   await withFakeHome(async () => {
     const { env } = await mcpWithHome();
-    const ctx = createContext(normalize({ sessions: { shareSummaries: true, shareFullText: false } }), { env });
+    const ctx = createContext(normalize({ version: CONFIG_SCHEMA_VERSION, sessions: { shareSummaries: true, shareFullText: false } }), { env });
     const mcp = createMcp(ctx);
     const list = await call(mcp, 'session_list', {});
     assert.ok(list.sessions.length > 0, 'at least one imported session is visible once the user opts in');
@@ -181,7 +206,7 @@ test('session sharing settings: shareSummaries=true opts in to imported-session 
 test('regression: a caller-supplied include_private=true has no effect, on session_list or session_read, full or not', async () => {
   await withFakeHome(async () => {
     const { env } = await mcpWithHome();
-    const ctx = createContext(normalize({ sessions: { shareSummaries: true, shareFullText: false } }), { env });
+    const ctx = createContext(normalize({ version: CONFIG_SCHEMA_VERSION, sessions: { shareSummaries: true, shareFullText: false } }), { env });
     const mcp = createMcp(ctx);
     const withFlag = await call(mcp, 'session_list', { include_private: true });
     const without = await call(mcp, 'session_list', {});
@@ -196,12 +221,12 @@ test('regression: a caller-supplied include_private=true has no effect, on sessi
 test('session sharing settings: shareSummaries=false hides imports again; shareFullText=true (with shareSummaries) unlocks full=true', async () => {
   await withFakeHome(async () => {
     const off = await mcpWithHome();
-    const ctxOff = createContext(normalize({ sessions: { shareSummaries: false, shareFullText: false } }), { env: off.env });
+    const ctxOff = createContext(normalize({ version: CONFIG_SCHEMA_VERSION, sessions: { shareSummaries: false, shareFullText: false } }), { env: off.env });
     const mcpOff = createMcp(ctxOff);
     assert.deepEqual((await call(mcpOff, 'session_list', {})).sessions, [], 'turning shareSummaries off hides imports again, matching the pre-fix default');
 
     const on = await mcpWithHome();
-    const ctxOn = createContext(normalize({ sessions: { shareSummaries: true, shareFullText: true } }), { env: on.env });
+    const ctxOn = createContext(normalize({ version: CONFIG_SCHEMA_VERSION, sessions: { shareSummaries: true, shareFullText: true } }), { env: on.env });
     const mcpOn = createMcp(ctxOn);
     const id = (await call(mcpOn, 'session_list', {})).sessions[0].id;
     const full = await call(mcpOn, 'session_read', { id, full: true });
