@@ -3,7 +3,7 @@
 // BM25 over stemmed terms, fused (reciprocal rank) across the query, its rephrasings and the
 // optional semantic ranking; capped graph boost from links, co-citations and shared tags;
 // title boost; demotion of superseded / archived notes; date, folder and tag filters.
-import { readdir, readFile, writeFile, stat } from 'node:fs/promises';
+import { readdir, readFile, writeFile, stat, open } from 'node:fs/promises';
 import { createHash } from 'node:crypto';
 import path from 'node:path';
 import { termFrequencies, terms, linkGraph, collection, suggestRelated, extractTags } from './graph.mjs';
@@ -246,6 +246,26 @@ export async function isExcludedPath(root, rel) {
   return false;
 }
 
+// Inspect only a bounded frontmatter prefix before reading/indexing a note body. A malformed
+// or overlong frontmatter is hidden until the owner fixes it; never guess "public" when the
+// privacy marker might be beyond the bounded header.
+async function indexableFromHeader(full, size) {
+  const fd = await open(full, 'r');
+  const buffer = Buffer.alloc(Math.min(size, 65536));
+  let bytesRead;
+  try { ({ bytesRead } = await fd.read(buffer, 0, buffer.length, 0)); }
+  finally { await fd.close(); }
+  const prefix = buffer.subarray(0, bytesRead).toString('utf8').replace(/^\uFEFF/, '');
+  const start = prefix.match(/^(?:[ \t]*\r?\n)*---[^\S\r\n]*\r?\n/);
+  if (!start) return /\S/.test(prefix) || bytesRead >= size;
+  const tail = prefix.slice(start[0].length);
+  const end = tail.match(/^---[^\S\r\n]*(?:\r?\n|$)/m);
+  if (!end) return false;
+  const header = tail.slice(0, end.index);
+  const { meta } = parseFrontmatter(prefix.slice(0, start[0].length + end.index + end[0].length));
+  return !(isPrivateMeta(meta) || fmSaysPrivate(header));
+}
+
 // Hash-incremental: unchanged files are not re-chunked on the next call.
 export async function loadVault(ctx, name) {
   const root = vaultRoot(ctx, name);
@@ -257,9 +277,14 @@ export async function loadVault(ctx, name) {
     seen.add(rel);
     const prev = state.files.get(rel);
     if (prev) { const st = await stat(full); if (st.mtimeMs === prev.mtime && st.size === prev.bytes) continue; }
+    const stNow = await stat(full);
+    if (!(await indexableFromHeader(full, stNow.size))) {
+      changed = true;
+      state.files.set(rel, { hash: null, mtime: stNow.mtimeMs, bytes: stNow.size, note: null });
+      continue;
+    }
     const raw = await readFile(full, 'utf8');
     const hash = createHash('sha1').update(raw).digest('hex');
-    const stNow = await stat(full);
     if (prev?.hash === hash) { prev.mtime = stNow.mtimeMs; prev.bytes = stNow.size; continue; }
     changed = true;
     const { meta, body, frontmatter } = parseFrontmatter(raw);
@@ -268,15 +293,21 @@ export async function loadVault(ctx, name) {
     const aliases = listValue(meta.aliases);
     const names = [title, ...aliases].join(' ');
     const chunks = chunkMarkdown(body).map((c, i) => ({ ...c, id: `${rel}#${i}`, tokens: termFrequencies(`${names} ${c.heading} ${c.text}`) }));
-    state.files.set(rel, { hash, mtime, bytes: stNow.size, note: { rel, title, aliases, raw, meta, body, chunks, mtime, minor: isMinor(rel, title), date: noteDate(rel, meta, mtime), tags: extractTags(body, meta), generated: meta.generated_by === 'brainlink' || /^BrainLink\/Commands\//i.test(rel), historical: isHistorical(rel, meta), private: isPrivateMeta(meta) || fmSaysPrivate(frontmatter) } });
+    // Recheck after the full read in case the file changed between the header and body reads.
+    if (isPrivateMeta(meta) || fmSaysPrivate(frontmatter)) {
+      state.files.set(rel, { hash: null, mtime: stNow.mtimeMs, bytes: stNow.size, note: null });
+      continue;
+    }
+    state.files.set(rel, { hash, mtime, bytes: stNow.size, note: { rel, title, aliases, raw, meta, body, chunks, mtime, minor: isMinor(rel, title), date: noteDate(rel, meta, mtime), tags: extractTags(body, meta), generated: meta.generated_by === 'brainlink' || /^BrainLink\/Commands\//i.test(rel), historical: isHistorical(rel, meta), private: false } });
   }
   for (const rel of [...state.files.keys()]) if (!seen.has(rel)) { state.files.delete(rel); changed = true; }
-  if (changed) state.index = buildIndex([...state.files.values()].map((f) => f.note).sort((a, b) => a.rel.localeCompare(b.rel)));
+  if (changed) state.index = buildIndex([...state.files.values()].map((f) => f.note).filter(Boolean).sort((a, b) => a.rel.localeCompare(b.rel)));
   ctx.cache.set(name, state);
   return state.index;
 }
 
 export function buildIndex(notes) {
+  notes = notes.filter((n) => n && !n.private); // defensive: even direct callers cannot rank private content
   const { edges, broken } = linkGraph(notes);
   const backlinks = notes.map(() => new Set()), outlinks = notes.map(() => new Set());
   for (const [a, b] of edges) { backlinks[b].add(a); outlinks[a].add(b); }

@@ -16,6 +16,7 @@ import { startSetup, openInBrowser } from '../src/setup.mjs';
 import { runSync } from '../src/sync-cli.mjs';
 import { PROVIDER_LABELS } from '../src/sync/settings.mjs';
 import { importAll } from '../src/sessions/index.mjs';
+import { evaluateRetrieval } from '../src/retrieval-eval.mjs';
 
 // `brainlink brief | head` closes the pipe early: exit quietly instead of crashing.
 process.stdout.on('error', (e) => { if (e.code === 'EPIPE') process.exit(0); throw e; });
@@ -51,6 +52,7 @@ const HELP = `BrainLink MCP ${VERSION} — one Markdown brain for every AI
   brainlink clients                    show detected / connected AI apps
   brainlink status                     config, vaults, timezone
   brainlink brief [--vault V] [--days 7]  what changed and what is open
+  brainlink eval --fixture FILE       compare retrieval with a labelled fixture (read-only)
   brainlink map                        rebuild each vault's Home map
   brainlink sync                       one sync pass (local by default; set up in Setup)
   brainlink ui [--no-open] [--port N]  open the milestone UI (notes, search, graph) on your vaults
@@ -171,6 +173,14 @@ async function main() {
       const l = b.open_loops;
       out(`\nOpen: ${l.counts.tasks} tasks, ${l.counts.next_actions} next actions, ${l.counts.decisions_waiting} decisions waiting, ${l.counts.unresolved_questions} questions`);
       for (const x of [...l.decisions_waiting.map((d) => `decision: ${d.decision}`), ...l.next_actions.map((n) => `next: ${n.action}`)].slice(0, 8)) out(`  · ${x}`);
+      return;
+    }
+    case 'eval': {
+      const fixtureFile = opt('fixture');
+      if (!fixtureFile) fail('--fixture FILE is required');
+      const fixture = JSON.parse(await readFile(path.resolve(fixtureFile), 'utf8'));
+      const { ctx } = await openContext();
+      out(JSON.stringify(await evaluateRetrieval(ctx, fixture), null, 2));
       return;
     }
     case 'map': {

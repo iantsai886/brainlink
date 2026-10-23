@@ -1,0 +1,87 @@
+import test from 'node:test';
+import assert from 'node:assert/strict';
+import { mkdtemp, mkdir, writeFile } from 'node:fs/promises';
+import { execFile } from 'node:child_process';
+import { promisify } from 'node:util';
+import { tmpdir } from 'node:os';
+import path from 'node:path';
+import { normalize, saveConfig } from '../src/config.mjs';
+import { createContext, loadVault } from '../src/core.mjs';
+import { VectorStore, fillVectors } from '../src/embed.mjs';
+import { evaluateRetrieval, validateRetrievalFixture } from '../src/retrieval-eval.mjs';
+const execFileAsync = promisify(execFile);
+
+test('retrieval experiment is scoped, privacy-safe, token-measured and never self-promotes on too few cases', async () => {
+  const root = await mkdtemp(path.join(tmpdir(), 'bl-rsi-eval-'));
+  const vaultPath = path.join(root, 'Company');
+  await mkdir(vaultPath);
+  await writeFile(path.join(vaultPath, 'Launch.md'), '# Launch\nThe fictional bluebird product will launch next month.');
+  await writeFile(path.join(vaultPath, 'Schedule.md'), '# Schedule\nA fictional conference schedule for attendees.');
+  await writeFile(path.join(vaultPath, 'Private.md'), '---\nprivate: true\n---\nZQXPRIVATECANARY launch budget');
+  const ctx = createContext(normalize({ vaults: [{ name: 'Company', path: vaultPath }] }), { env: { BRAINLINK_HOME: path.join(root, 'app'), BRAINLINK_VAULTS: 'Company', BRAINLINK_SEMANTIC: '0' } });
+  const fixture = { schema: 1, vault: 'Company', topK: 2, cases: [
+    { id: 'case_01', query: 'when is the bluebird launch', queries: ['fictional bluebird product launch next month'], expected: ['Launch.md'], forbidden: ['Private.md'] },
+    { id: 'case_02', query: 'conference schedule', expected: ['Schedule.md'], forbidden: ['Private.md'] },
+  ] };
+  const report = await evaluateRetrieval(ctx, fixture);
+  assert.equal(report.case_count, 2);
+  assert.equal(report.decision, 'needs_more_cases');
+  assert.equal(report.baseline.privacy_violations, 0);
+  assert.equal(report.result.privacy_violations, 0);
+  assert.ok(report.baseline.mean_estimated_output_tokens > 0);
+  assert.match(report.fixture_sha256, /^[a-f0-9]{64}$/);
+  assert.doesNotMatch(JSON.stringify(report), /ZQXPRIVATECANARY|fictional bluebird product|Private\.md|Launch\.md/);
+  await assert.rejects(evaluateRetrieval(ctx, { ...fixture, cases: [{ ...fixture.cases[0], expected: ['Private.md'] }] }), /private/i);
+  const excluded = createContext(ctx.cfg, { env: { BRAINLINK_HOME: path.join(root, 'app'), BRAINLINK_VAULTS: 'Other' } });
+  await assert.rejects(evaluateRetrieval(excluded, fixture), /not enabled/);
+});
+
+test('retrieval fixture rejects missing labels, duplicate IDs and oversized rephrasings', () => {
+  const invalid = { schema: 1, vault: 'Company', topK: 3, cases: [
+    { id: 'same', query: 'a', expected: ['Note.md'] }, { id: 'same', query: 'b', expected: [], queries: Array(5).fill('x') },
+  ] };
+  assert.match(validateRetrievalFixture(invalid).join('; '), /unique/);
+  assert.match(validateRetrievalFixture(invalid).join('; '), /expected/);
+  assert.match(validateRetrievalFixture(invalid).join('; '), /rephrasings/);
+});
+
+test('semantic cache prunes vectors from notes no longer visible in the vault index', async () => {
+  const root = await mkdtemp(path.join(tmpdir(), 'bl-vector-prune-'));
+  const vaultPath = path.join(root, 'Vault');
+  await mkdir(vaultPath);
+  await writeFile(path.join(vaultPath, 'Private.md'), '---\nprivate: true\n---\nZQXVECTORPRIVATE');
+  const ctx = createContext(normalize({ vaults: [{ name: 'Company', path: vaultPath }] }), { env: { BRAINLINK_HOME: path.join(root, 'app') } });
+  const index = await loadVault(ctx, 'Company');
+  assert.equal(index.chunks.length, 0);
+  const store = new VectorStore(path.join(root, 'app'), vaultPath, 'fictional-model');
+  await store.load();
+  store.vectors.set('old-private-chunk-key', Float32Array.of(1, 2));
+  store.dirty = true;
+  await store.save();
+  await fillVectors({ url: 'unused', model: 'fictional-model' }, store, index);
+  assert.equal(store.vectors.size, 0);
+  const reopened = new VectorStore(path.join(root, 'app'), vaultPath, 'fictional-model');
+  await reopened.load();
+  assert.equal(reopened.vectors.size, 0);
+});
+
+test('CLI evaluation prints only aggregate evidence for a fictional fixture', async () => {
+  const root = await mkdtemp(path.join(tmpdir(), 'bl-rsi-cli-'));
+  const vaultPath = path.join(root, 'Vault');
+  const home = path.join(root, 'home');
+  await mkdir(vaultPath);
+  await writeFile(path.join(vaultPath, 'Public.md'), '# Public\nFictional bluebird garden project.');
+  await writeFile(path.join(vaultPath, 'Secret.md'), '---\nprivate: true\n---\nZQXCLI_PRIVATE_CANARY');
+  await saveConfig(normalize({ vaults: [{ name: 'Company', path: vaultPath }] }), path.join(home, 'config.json'));
+  const fixturePath = path.join(root, 'fixture.json');
+  await writeFile(fixturePath, JSON.stringify({ schema: 1, vault: 'Company', topK: 2, cases: [
+    { id: 'opaque01', query: 'bluebird garden', expected: ['Public.md'], forbidden: ['Secret.md'] },
+  ] }));
+  const { stdout } = await execFileAsync(process.execPath, [path.resolve('bin/brainlink.mjs'), 'eval', '--fixture', fixturePath], {
+    cwd: process.cwd(), env: { ...process.env, BRAINLINK_HOME: home, HOME: root, BRAINLINK_SEMANTIC: '0' },
+  });
+  const report = JSON.parse(stdout);
+  assert.equal(report.decision, 'needs_more_cases');
+  assert.equal(report.baseline.privacy_violations, 0);
+  assert.doesNotMatch(stdout, /ZQXCLI_PRIVATE_CANARY|Secret\.md|Public\.md|bluebird garden/);
+});

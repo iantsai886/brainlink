@@ -2,6 +2,7 @@
 // Never follows symlinks, overwrites an earlier backup, or writes inside a source vault.
 import { createHash, randomBytes } from 'node:crypto';
 import { lstat, realpath, readdir, readFile, writeFile, mkdir, rename, unlink } from 'node:fs/promises';
+import { setTimeout as delay } from 'node:timers/promises';
 import path from 'node:path';
 
 const hash = (data) => createHash('sha256').update(data).digest('hex');
@@ -23,7 +24,15 @@ export async function saveBackupStatus(file, status) {
   const tmp = `${file}.${randomBytes(4).toString('hex')}.tmp`;
   try {
     await writeFile(tmp, JSON.stringify(status, null, 2) + '\n', { flag: 'wx', mode: 0o600 });
-    await rename(tmp, file);
+    // Windows can briefly lock the destination while Setup reads it (or antivirus scans it).
+    // Keep the old valid receipt until one atomic replacement succeeds; never remove it first.
+    for (let attempt = 0; ; attempt++) {
+      try { await rename(tmp, file); break; }
+      catch (error) {
+        if (!['EPERM', 'EACCES', 'EBUSY'].includes(error.code) || attempt >= 19) throw error;
+        await delay(25);
+      }
+    }
   } catch (error) {
     await unlink(tmp).catch(() => {});
     throw error;

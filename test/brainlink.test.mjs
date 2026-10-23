@@ -212,9 +212,22 @@ test('R3: a note using one of the previously-missed private spellings is gated e
     await assert.rejects(readNote(ctx, 'Co', rel), /private/i, `${rel} is gated by readNote`);
   }
   const index = await loadVault(ctx, 'Co');
-  const privateFlags = index.notes.filter((n) => n.rel !== 'Public.md').map((n) => n.private);
-  assert.ok(privateFlags.every(Boolean), 'all three spellings are marked private in the vault index');
-  assert.ok(!index.notes.find((n) => n.rel === 'Public.md').private);
+  assert.deepEqual(index.notes.map((n) => n.rel), ['Public.md'], 'private notes never enter the vault index');
+  assert.equal(index.chunks.every((c) => c.noteIdx === 0), true);
+});
+
+test('private content cannot affect term frequencies, links or ranking candidates', async () => {
+  const vaultDir = await tmp('private-index-isolation');
+  await writeFile(path.join(vaultDir, 'Public.md'), '# Public\nFictional project calendar.');
+  const ctx = createContext(normalize({ vaults: [{ name: 'Co', path: vaultDir }] }), { env: { BRAINLINK_HOME: await tmp('private-index-home'), BRAINLINK_SEMANTIC: '0' } });
+  const before = await loadVault(ctx, 'Co');
+  const baselineTerms = [...before.df.entries()];
+  await writeFile(path.join(vaultDir, 'Secret.md'), '---\nprivate: true\n---\n# Secret\nZQXPRIVATECANARY [[Public]] launch budget');
+  const after = await loadVault(ctx, 'Co');
+  assert.deepEqual(after.notes.map((n) => n.rel), ['Public.md']);
+  assert.deepEqual([...after.df.entries()], baselineTerms);
+  assert.deepEqual(after.edges, []);
+  assert.ok(!after.chunks.some((c) => c.text.includes('ZQXPRIVATECANARY')));
 });
 
 test('BOM and leading-blank-line private notes are hidden from readNote and search, same as any other private note', async () => {

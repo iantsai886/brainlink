@@ -68,7 +68,7 @@ test('noteDetail3D: refuses a private note, an excluded-folder note, and a priva
   const cfg = normalize({ vaults: [{ name: 'Main', path: dir }, { name: 'Diary', path: privDir, private: true }] });
   const ctx = createContext(cfg, { env: { BRAINLINK_SEMANTIC: '0' } });
 
-  await assert.rejects(() => noteDetail3D(ctx, 'Main', 'Hidden Note.md'), /private/i);
+  await assert.rejects(() => noteDetail3D(ctx, 'Main', 'Hidden Note.md'), /not found/i);
   await assert.rejects(() => noteDetail3D(ctx, 'Main', 'Secret Stuff/Buried.md'), /not found/i);
   await assert.rejects(() => noteDetail3D(ctx, 'Diary', 'Diary Entry.md'), /private/i);
 });
