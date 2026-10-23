@@ -711,7 +711,7 @@ test('CLI: `brainlink init` needs no licence and sets up writes and agents immed
 import { stem, extractTags, findMentions, makeResolver } from '../src/graph.mjs';
 import { remember, appendDaily } from '../src/writes.mjs';
 import { recentNotes, openLoops, vaultHealth, brief } from '../src/insights.mjs';
-import { buildHomeMap, suggestLinks } from '../src/links.mjs';
+import { buildHomeMap, suggestLinks, resolveNoteWikilinks } from '../src/links.mjs';
 import { createServer as httpServer } from 'node:http';
 
 test('stemming, tags, unlinked mentions, Obsidian-style link resolution', () => {
@@ -779,6 +779,65 @@ test('auto-linking: new notes link what they mention plus similar notes, and the
   await proposeNote(ctx, { vault: 'Acme Studio', folder: 'Projects', title: 'Second', body: 'x', source: 's', confirm: true }, NOW);
   assert.equal(await readFile(path.join(company, 'BrainLink/Home.md'), 'utf8'), '# My own home');
   assert.match(await buildHomeMap(ctx, 'Acme Studio', NOW), /not linked to anything yet/);
+});
+
+test('P1b resolver: resolveNoteWikilinks resolves a real link, but a private note and an excluded-folder note are both just "not resolved" — indistinguishable from each other or a typo', async () => {
+  const { cfg, company } = await fixture();
+  await writeFile(path.join(company, 'Secret Note.md'), '---\nprivate: true\n---\n# Secret Note\n\nshh');
+  await mkdir(path.join(company, '00 Home'), { recursive: true });
+  await writeFile(path.join(company, '00 Home', 'Diary.md'), '# Diary\n\npersonal');
+  await writeFile(path.join(company, '.brainlinkignore'), '00 Home/\n');
+  const ctx = ctxOf(cfg);
+  const index = await loadVault(ctx, 'Acme Studio');
+  const body = 'See [[Northwind Coffee]], [[Secret Note]], [[Diary]], [[Totally Made Up Note]] and [[Northwind Coffee|the client]].';
+  const links = resolveNoteWikilinks(index, body);
+  assert.equal(links.length, 5);
+
+  const real = links[0];
+  assert.equal(real.target, 'Northwind Coffee');
+  assert.ok(real.resolved && real.resolved.path && real.resolved.title === 'Northwind Coffee');
+
+  const privateLink = links[1];
+  assert.equal(privateLink.target, 'Secret Note');
+  assert.equal(privateLink.resolved, null);
+
+  const excludedLink = links[2];
+  assert.equal(excludedLink.target, 'Diary');
+  assert.equal(excludedLink.resolved, null);
+
+  const deadLink = links[3];
+  assert.equal(deadLink.target, 'Totally Made Up Note');
+  assert.equal(deadLink.resolved, null);
+  // Private, excluded and dead all come back exactly `null` — no extra field (e.g. a reason, or
+  // the real path) that could let a reader tell a private note from one that never existed.
+  assert.deepEqual(new Set([privateLink.resolved, excludedLink.resolved, deadLink.resolved]), new Set([null]));
+
+  // An alias (`|the client`) uses the alias as the display label but still resolves the real target.
+  const aliased = links[4];
+  assert.equal(aliased.target, 'Northwind Coffee');
+  assert.equal(aliased.label, 'the client');
+  assert.ok(aliased.resolved);
+});
+
+test('P1b resolver over HTTP: /api/note returns wikilinks resolved the same way, private/dead both null, and never exposes a private note\'s real path', async () => {
+  const { cfg, company } = await fixture();
+  await writeFile(path.join(company, 'Secret Note.md'), '---\nprivate: true\n---\n# Secret Note\n\nshh');
+  await writeFile(path.join(company, 'Cites Things.md'), 'Mentions [[Northwind Coffee]] and [[Secret Note]] and [[Nope]].');
+  const home = await tmp('p1b-note-api');
+  const env = { BRAINLINK_HOME: home };
+  await saveConfig(cfg, path.join(home, 'config.json'));
+  const s = await startSetup({ env, home, os: 'linux', port: 0, useCli: false });
+  try {
+    const r = await fetch(`http://127.0.0.1:${s.port}/api/note`, {
+      method: 'POST', headers: { 'X-BrainLink-Token': s.token, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ vault: 'Acme Studio', path: 'Cites Things.md' }),
+    }).then((x) => x.json());
+    assert.equal(r.wikilinks.length, 3);
+    assert.ok(r.wikilinks[0].resolved?.path === 'Northwind Coffee.md' || r.wikilinks[0].resolved?.title === 'Northwind Coffee');
+    assert.equal(r.wikilinks[1].resolved, null);
+    assert.equal(r.wikilinks[2].resolved, null);
+    assert.ok(!JSON.stringify(r).includes('Secret Note.md'), 'the private note\'s real path must never appear in the response');
+  } finally { s.server.close(); }
 });
 
 test('templates: meeting note with linked attendees, tasks and its own folder', async () => {

@@ -14,6 +14,7 @@ import { ROOT, launchSpec, readActivity, refreshMap, logActivity } from './runti
 import { detectEmbedder } from './embed.mjs';
 import { vaultHealth } from './insights.mjs';
 import { loadVault } from './core.mjs';
+import { resolveNoteWikilinks } from './links.mjs';
 import { VERSION, createMcp } from './server.mjs';
 import { findObsidianVaults, nestedVaults } from './obsidian.mjs';
 import { syncSettings, chooseSync, suggestFolders, PROVIDERS, PROVIDER_LABELS } from './sync/settings.mjs';
@@ -454,12 +455,17 @@ export async function startSetup(opts = {}) {
         sources: top.map((x) => ({ vault: v, path: x.path, title: x.title, heading: x.heading || '', score: x.score })),
       };
     },
-    // Opens one of the answer's source chips: full frontmatter + body, read-only.
+    // Opens one of the answer's source chips (or a citation modal's own wikilink): full
+    // frontmatter + body, read-only, plus each [[wikilink]] in the body already resolved (or not)
+    // against this vault's privacy-filtered index — P1b: the modal renders formatted text and
+    // real links, and a dead/private target must never be distinguishable from the other.
     'POST /api/note': async (b) => {
       const cfg = normalize(await loadConfig(file));
       const ctx = createContext(cfg, { env: { ...env, BRAINLINK_AI_PLATFORM: '' } });
       if (!b.vault || !ctx.enabled.includes(b.vault)) throw new Error('Unknown vault.');
-      return { vault: b.vault, ...(await readNote(ctx, b.vault, String(b.path || ''))) };
+      const note = await readNote(ctx, b.vault, String(b.path || ''));
+      const index = await loadVault(ctx, b.vault);
+      return { vault: b.vault, ...note, wikilinks: resolveNoteWikilinks(index, note.body) };
     },
   };
 

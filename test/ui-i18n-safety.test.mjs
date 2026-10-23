@@ -97,3 +97,63 @@ test('P1g: share.subfolderHint names "BrainLink Shared" and is rendered in the f
   }
 });
 function catalogsOf(raw) { return JSON.parse(raw); }
+
+// P1b: the citation/source note modal (ui/index.html's #note-modal, openNote()) must render the
+// note as formatted text, not raw Markdown, and must resolve [[wikilinks]] against what the
+// server already decided is visible (src/links.mjs's resolveNoteWikilinks, see test/brainlink.test.mjs
+// for that resolver's own tests) -- a dead link and a link to a private/excluded note must both
+// come back as identical plain text, never a clue either way. These tests actually execute the
+// shipped renderer (extracted from ui/index.html, no browser available) rather than just
+// grepping for patterns, since this is exactly the kind of string-munging logic regexes miss.
+async function loadNoteRenderer() {
+  const html = await readFile(path.join(ROOT, 'ui', 'index.html'), 'utf8');
+  const esc = html.match(/const esc = \([^)]*\) => [^\n]+;/)[0];
+  const inline = html.match(/function renderNoteInline\(text, linkMap\) \{[\s\S]*?\n\}/)[0];
+  const body = html.match(/function renderNoteBody\(md, wikilinks, vault\) \{[\s\S]*?\n\}/)[0];
+  const t = (key) => (key === 'note.empty' ? '(This note is empty.)' : key);
+  return new Function('t', `${esc}\n${inline}\n${body}\nreturn renderNoteBody;`)(t);
+}
+
+test('P1b: note modal renders formatted text (headings/bold/code), never raw [[ ]] or ** syntax', async () => {
+  const renderNoteBody = await loadNoteRenderer();
+  const html = renderNoteBody('# Title\n\nSome **bold** and `code` and [[Resolved Note]].', [
+    { raw: '[[Resolved Note]]', target: 'Resolved Note', label: 'Resolved Note', resolved: { path: 'Resolved Note.md', title: 'Resolved Note' } },
+  ], 'Acme Studio');
+  assert.match(html, /<h3>Title<\/h3>/);
+  assert.match(html, /<strong>bold<\/strong>/);
+  assert.match(html, /<code>code<\/code>/);
+  assert.doesNotMatch(html, /\*\*/, 'no raw Markdown bold syntax should survive');
+  assert.doesNotMatch(html, /\[\[|\]\]/, 'no raw wikilink brackets should survive, resolved or not');
+});
+
+test('P1b: a resolved wikilink becomes a real link; a dead or private one is identical plain text', async () => {
+  const renderNoteBody = await loadNoteRenderer();
+  const wikilinks = [
+    { raw: '[[Real Note]]', target: 'Real Note', label: 'Real Note', resolved: { path: 'Real Note.md', title: 'Real Note' } },
+    { raw: '[[Secret Note]]', target: 'Secret Note', label: 'Secret Note', resolved: null }, // private
+    { raw: '[[Nope]]', target: 'Nope', label: 'Nope', resolved: null }, // dead
+  ];
+  const html = renderNoteBody('See [[Real Note]], [[Secret Note]] and [[Nope]].', wikilinks, 'Acme Studio');
+  assert.match(html, /<a href="#" data-open-note="Acme Studio::Real Note\.md">Real Note<\/a>/);
+  // Identical rendering for private and dead -- plain text, no <a>, no path, no hint.
+  assert.doesNotMatch(html, /Secret Note\.md/);
+  assert.doesNotMatch(html, /data-open-note="[^"]*Secret/);
+  assert.doesNotMatch(html, /data-open-note="[^"]*Nope/);
+  assert.match(html, /Secret Note/); // the label text itself still reads naturally
+  assert.match(html, /Nope/);
+});
+
+test('P1b: an ordinary number in the note text is never mistaken for a code/wikilink placeholder', async () => {
+  const renderNoteBody = await loadNoteRenderer();
+  const html = renderNoteBody('Section 2 covers `step 0` and [[Plan]].', [
+    { raw: '[[Plan]]', target: 'Plan', label: 'Plan', resolved: { path: 'Plan.md', title: 'Plan' } },
+  ], 'Acme Studio');
+  assert.match(html, /Section 2 covers/);
+  assert.match(html, /<code>step 0<\/code>/);
+  assert.match(html, /<a href="#" data-open-note="Acme Studio::Plan\.md">Plan<\/a>/);
+});
+
+test('P1b: an empty note body renders the empty-state message, not blank', async () => {
+  const renderNoteBody = await loadNoteRenderer();
+  assert.match(renderNoteBody('', [], 'Acme Studio'), /This note is empty/);
+});

@@ -277,7 +277,7 @@ ol.todo li { padding-left: 4px; }
       <div><b id="note-title"></b><div class="mono muted" id="note-path" style="font-size:12px"></div></div>
       <button class="link" id="note-close" data-i18n="note.close"></button>
     </div>
-    <div id="note-body" class="mono" style="margin-top:12px"></div>
+    <div id="note-body" style="margin-top:12px"></div>
   </div>
 </div>
 <div id="folder-fallback-modal" class="modal-overlay" hidden>
@@ -544,6 +544,60 @@ async function ask() {
 $('ask-go').onclick = ask;
 $('ask-q').onkeydown = (e) => { if (e.key === 'Enter') ask(); };
 
+// ---- P1b: the citation/source note modal renders formatted text, not raw Markdown, and turns
+// [[wikilinks]] into real links -- but only for a target the server already confirmed is visible
+// (api/note's `wikilinks`, from resolveNoteWikilinks in src/links.mjs). A dead link and a link to
+// a private/excluded note both come back `resolved: null` and render as identical plain text:
+// nothing here can tell a reader which one it was. ----
+function renderNoteInline(text, linkMap) {
+  // Unprintable control characters as placeholders: they never occur in real note text and are
+  // left untouched by esc(), so a code span or wikilink can always be swapped back in afterward
+  // without any risk of colliding with an ordinary number already in the note (e.g. "Section 2").
+  const codes = [];
+  let s = String(text).replace(/`([^`]+)`/g, (_, c) => { codes.push(c); return `\x00${codes.length - 1}\x00`; });
+  const wikis = [];
+  s = s.replace(/\[\[[^\]]+\]\]/g, (raw) => { wikis.push(raw); return `\x01${wikis.length - 1}\x01`; });
+  s = esc(s);
+  s = s.replace(/\[([^\]]+)\]\(([^)\s]+)\)/g, (_, label, url) => (/^(https?:|obsidian:)/i.test(url) ? `<a href="${esc(url)}" target="_blank" rel="noopener">${esc(label)}</a>` : esc(label)));
+  s = s.replace(/\*\*([^*]+)\*\*/g, '<strong>$1</strong>');
+  s = s.replace(/\*([^*]+)\*/g, '<em>$1</em>');
+  s = s.replace(/(^|[^\w])_([^_]+)_(?!\w)/g, '$1<em>$2</em>');
+  s = s.replace(/\x00(\d+)\x00/g, (_, i) => `<code>${esc(codes[i])}</code>`);
+  s = s.replace(/\x01(\d+)\x01/g, (_, i) => {
+    const w = linkMap.get(wikis[i]);
+    if (!w) return esc(wikis[i].replace(/^\[\[|\]\]$/g, '').split('|').pop().trim());
+    return w.resolved ? `<a href="#" data-open-note="${esc(w.resolved.vault)}::${esc(w.resolved.path)}">${esc(w.label)}</a>` : esc(w.label);
+  });
+  return s;
+}
+function renderNoteBody(md, wikilinks, vault) {
+  const linkMap = new Map((wikilinks || []).map((w) => [w.raw, { ...w, resolved: w.resolved ? { ...w.resolved, vault } : null }]));
+  const lines = String(md || '').replace(/\r\n/g, '\n').split('\n');
+  const out = [];
+  let list = null;
+  const flush = () => { if (list) { out.push(`<${list.type}>${list.items.map((it) => `<li>${renderNoteInline(it, linkMap)}</li>`).join('')}</${list.type}>`); list = null; } };
+  let i = 0;
+  while (i < lines.length) {
+    const line = lines[i];
+    if (/^```/.test(line)) { flush(); const buf = []; i++; while (i < lines.length && !/^```/.test(lines[i])) { buf.push(lines[i]); i++; } i++; out.push(`<pre><code>${esc(buf.join('\n'))}</code></pre>`); continue; }
+    const h = line.match(/^(#{1,6})\s+(.*)$/);
+    if (h) { flush(); const lvl = Math.min(6, h[1].length + 2); out.push(`<h${lvl}>${renderNoteInline(h[2], linkMap)}</h${lvl}>`); i++; continue; }
+    const bq = line.match(/^>\s?(.*)$/);
+    if (bq) { flush(); out.push(`<blockquote>${renderNoteInline(bq[1], linkMap)}</blockquote>`); i++; continue; }
+    const ul = line.match(/^[-*]\s+(.*)$/);
+    if (ul) { if (!list || list.type !== 'ul') { flush(); list = { type: 'ul', items: [] }; } list.items.push(ul[1]); i++; continue; }
+    const ol = line.match(/^\d+\.\s+(.*)$/);
+    if (ol) { if (!list || list.type !== 'ol') { flush(); list = { type: 'ol', items: [] }; } list.items.push(ol[1]); i++; continue; }
+    if (!line.trim()) { flush(); i++; continue; }
+    flush();
+    const buf = [line]; i++;
+    while (i < lines.length && lines[i].trim() && !/^(#{1,6}\s|>|[-*]\s|\d+\.\s|```)/.test(lines[i])) { buf.push(lines[i]); i++; }
+    out.push(`<p>${renderNoteInline(buf.join(' '), linkMap)}</p>`);
+  }
+  flush();
+  return out.join('\n') || `<p class="muted">${esc(t('note.empty'))}</p>`;
+}
+
 // ---- Source chips / session refs open the real note, read-only, in a modal ----
 async function openNote(vault, p) {
   $('note-modal').hidden = false;
@@ -552,7 +606,7 @@ async function openNote(vault, p) {
   $('note-body').innerHTML = `<p class="skeleton">${esc(t('note.loading'))}</p>`;
   try {
     const n = await api('POST', '/api/note', { vault, path: p });
-    $('note-body').textContent = n.body.trim() || t('note.empty');
+    $('note-body').innerHTML = renderNoteBody(n.body, n.wikilinks, vault);
   } catch (e) { $('note-body').innerHTML = `<p class="error-box">${esc(t('note.loadError', { msg: e.message }))}</p>`; }
 }
 function closeNote() { $('note-modal').hidden = true; }
