@@ -390,6 +390,33 @@ test('handoffs: send to a mailbox and filter by recipient', async () => {
   assert.equal((await listHandoffs(ctx, {})).length, 2);
 });
 
+test('P0: listHandoffs carries ack_of/sent_at for pickup pairing, and never surfaces a private or excluded handoff', async () => {
+  const { cfg, company } = await fixture();
+  const ctx = ctxOf(cfg);
+  const r1 = await sendHandoff(ctx, { to: 'Grok', subject: 'Check pricing page', body: 'Please review.', confirm: true }, NOW);
+  const r2 = await sendHandoff(ctx, { to: 'Claude', subject: 'Pricing page reviewed', body: 'Done, looks good.', ack_of: r1.path, confirm: true }, new Date(NOW.getTime() + 3600000));
+  const list = await listHandoffs(ctx, {});
+  const original = list.find((x) => x.path === r1.path);
+  const ack = list.find((x) => x.path === r2.path);
+  assert.equal(ack.ack_of, r1.path);
+  assert.match(original.sent_at, /^2026-10-18T09:30/);
+  assert.match(ack.sent_at, /^2026-10-18T10:30/);
+
+  // Hand-edited frontmatter (sendHandoff never writes private:true itself, but the same
+  // fail-closed rule readNote() applies to ordinary notes must apply here too).
+  const dir = path.join(company, 'Chief of Staff Office', 'Handoffs');
+  await writeFile(path.join(dir, '2026-10-19-0900-from-claude-to-grok-secret-plan.md'), '---\ntype: handoff\nprivate: true\nsubject: "Secret plan"\nto: "Grok"\n---\n# Secret plan\n');
+  const withPrivate = await listHandoffs(ctx, {});
+  assert.ok(!withPrivate.some((x) => x.subject === 'Secret plan'), 'a handoff hand-marked private must never be listed');
+  assert.equal(withPrivate.length, list.length, 'the private handoff must be dropped, not added, from the count');
+
+  // A user excluding the whole mailbox folder (e.g. via the vault's excluded-folders setting)
+  // must empty the list, exactly like it would for ordinary notes under that folder. Rules
+  // accumulate by folder name at any depth (see isExcludedPath), so "Handoffs/" alone covers it.
+  await writeFile(path.join(company, '.brainlinkignore'), 'Handoffs/\n');
+  assert.deepEqual(await listHandoffs(ctx, {}), []);
+});
+
 // ---- agents ----
 
 test('agents resolve by name or phrase, case and punctuation insensitive', async () => {
@@ -628,6 +655,53 @@ test('P1a: the vault card\'s note count matches what is actually visible (privat
     assert.equal(after, before, 'adding one private and one excluded-folder note must not move the visible count');
     const g1 = await (await api('POST', '/api/graph', {})).json();
     assert.equal(after, g1.health.notes);
+  } finally { s.server.close(); }
+});
+
+test('P0: POST /api/handoffs shows a clear receipt (who sent, who picked up, when) and a "not picked up yet" state; never leaks a private or excluded handoff', async () => {
+  const home = await tmp('p0-handoffs');
+  const env = { BRAINLINK_HOME: path.join(home, 'app'), BRAINLINK_SEMANTIC: '0' };
+  const vaultDir = path.join(home, 'Notes');
+  await cp(SAMPLE, vaultDir, { recursive: true });
+  const s = await startSetup({ env, home, os: 'darwin', port: 0, pick: async () => vaultDir, useCli: false });
+  const base = `http://127.0.0.1:${s.port}`;
+  const api = (method, p, body) => fetch(base + p, { method, headers: { 'X-BrainLink-Token': s.token, 'Content-Type': 'application/json' }, body: body && JSON.stringify(body) });
+  try {
+    const add = await (await api('POST', '/api/vault', { path: vaultDir, name: 'Acme', pack: 'founder-os', agentName: 'Chief of Staff' })).json();
+    assert.equal(add.ok, true);
+    const dir = path.join(vaultDir, 'Chief of Staff Office', 'Handoffs');
+    // A: handed off by Claude, picked up (acked) by Grok.
+    await writeFile(path.join(dir, '2026-10-18-0930-from-claude-to-grok-check-pricing-page.md'),
+      '---\ntype: handoff\nstatus: REQUEST\nai_platform: "Claude"\nwritten_at: 2026-10-18T09:30:00+08:00\nto: "Grok"\npriority: P1\nsubject: "Check pricing page"\n---\n# Check pricing page\n');
+    await writeFile(path.join(dir, '2026-10-18-1030-from-grok-to-claude-pricing-page-done.md'),
+      `---\ntype: handoff\nstatus: DONE\nai_platform: "Grok"\nwritten_at: 2026-10-18T10:30:00+08:00\nto: "Claude"\npriority: P1\nsubject: "Pricing page done"\nack_of: "Acme/Chief of Staff Office/Handoffs/2026-10-18-0930-from-claude-to-grok-check-pricing-page.md"\n---\n# Pricing page done\n`);
+    // B: handed off by Claude to Codex, no reply yet.
+    await writeFile(path.join(dir, '2026-10-19-0900-from-claude-to-codex-deploy-the-fix.md'),
+      '---\ntype: handoff\nstatus: REQUEST\nai_platform: "Claude"\nwritten_at: 2026-10-19T09:00:00+08:00\nto: "Codex"\npriority: P1\nsubject: "Deploy the fix"\n---\n# Deploy the fix\n');
+    // Hand-marked private: must never appear in the receipt, title included.
+    await writeFile(path.join(dir, '2026-10-20-0900-from-claude-to-grok-secret-plan.md'),
+      '---\ntype: handoff\nprivate: true\nsubject: "Secret plan"\nto: "Grok"\n---\n# Secret plan\n');
+
+    const r = await (await api('POST', '/api/handoffs', {})).json();
+    assert.equal(r.enabled, true);
+    // 3, not 4: the sample vault ships one pre-existing handoff of its own, and an ack is a
+    // reply (paired into its original's receipt), never a top-level receipt on its own.
+    assert.equal(r.receipts.length, 3);
+    assert.ok(!JSON.stringify(r).includes('Secret plan'), 'a private handoff title must never reach the UI');
+
+    const picked = r.receipts.find((x) => x.subject === 'Check pricing page');
+    assert.equal(picked.from, 'claude');
+    assert.equal(picked.to, 'grok');
+    assert.equal(picked.picked_up, true);
+    assert.equal(picked.picked_up_by, 'grok');
+    assert.match(picked.picked_up_at, /^2026-10-18T10:30/);
+    assert.match(picked.sent_at, /^2026-10-18T09:30/);
+
+    const pending = r.receipts.find((x) => x.subject === 'Deploy the fix');
+    assert.equal(pending.from, 'claude');
+    assert.equal(pending.to, 'codex');
+    assert.equal(pending.picked_up, false, 'not picked up yet');
+    assert.equal(pending.picked_up_by, null);
   } finally { s.server.close(); }
 });
 

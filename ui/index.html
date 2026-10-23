@@ -205,6 +205,12 @@ ol.todo li { padding-left: 4px; }
     <div id="session-detail" style="margin-top:12px"></div>
   </section>
 
+  <section id="handoffs-panel" hidden>
+    <h2 data-i18n="handoffs.title"></h2>
+    <p class="hint" data-i18n="handoffs.hint"></p>
+    <div id="handoffs-list" class="cards"></div>
+  </section>
+
   <details class="settings" id="settings"><summary data-i18n="settings.summary"></summary><div>
   <section id="s-vault">
     <h2><span class="step" id="n1">1</span> <span data-i18n="vault.step1Title"></span></h2>
@@ -428,6 +434,29 @@ function renderSessions(list) {
       </div></div>`;
   }
   $('sessions-list').innerHTML = html;
+}
+
+// P0: two-AI handoff receipt. /api/handoffs already drops anything private or under an
+// excluded ("00 Home"-style) folder server-side (see src/writes.mjs listHandoffs), so this only
+// has to render what comes back -- never a reason to re-check privacy here.
+async function loadHandoffs() {
+  $('handoffs-list').innerHTML = `<p class="skeleton">${esc(t('handoffs.loading'))}</p>`;
+  try {
+    const r = await api('POST', '/api/handoffs', {});
+    $('handoffs-panel').hidden = !r.enabled;
+    if (r.enabled) renderHandoffs(r.receipts);
+  } catch (e) { $('handoffs-list').innerHTML = `<p class="error-box">${esc(t('handoffs.loadError', { msg: e.message }))}</p>`; }
+}
+function renderHandoffs(list) {
+  if (!list.length) { $('handoffs-list').innerHTML = `<p class="muted">${esc(t('handoffs.empty'))}</p>`; return; }
+  $('handoffs-list').innerHTML = list.map((h) => `<div class="card">
+      <div class="row" style="justify-content:space-between">
+        <b><span class="badge" style="background:${clientColor(h.from)}">${esc(clientLabel(h.from))}</span> → <span class="badge" style="background:${clientColor(h.to)}">${esc(clientLabel(h.to))}</span></b>
+        <span class="pill ${h.picked_up ? 'on' : ''}">${h.picked_up ? esc(t('handoffs.pickedUp')) : esc(t('handoffs.notPickedUp'))}</span>
+      </div>
+      <div style="font-size:14px">${esc(h.subject)}</div>
+      <div class="muted" style="font-size:13px">${esc(t('handoffs.sentAt', { when: h.sent_at ? new Date(h.sent_at).toLocaleString(LOCALE) : '' }))}${h.picked_up ? ' · ' + esc(t('handoffs.pickedUpBy', { who: clientLabel(h.picked_up_by), when: h.picked_up_at ? new Date(h.picked_up_at).toLocaleString(LOCALE) : '' })) : ''}</div>
+    </div>`).join('');
 }
 function renderSyncSuggestions(provider, suggested) {
   const list = (suggested && suggested[provider]) || [];
@@ -685,6 +714,8 @@ async function load() {
   // of a silent gap between "sessions exist" and "no AI can ever see them".
   $('sessions-private-notice').hidden = !(S.sessions_has_private && !S.sessions_sharing?.shareSummaries);
   if (hasVault && !onboardingSync) loadSessions().catch(() => {});
+  $('handoffs-panel').hidden = !hasVault || onboardingSync;
+  if (hasVault && !onboardingSync) loadHandoffs().catch(() => {});
   $('cfgpath').textContent = S.config_path;
   $('n1').className = 'step' + (S.vaults.length ? ' done' : '');
   $('vaults').innerHTML = S.vaults.length ? S.vaults.map((v, i) => `<div class="card"><div class="row" style="justify-content:space-between"><b>${esc(v.name)}</b><span class="pill ${v.exists ? 'on' : ''}">${v.exists ? esc(t('vault.notesCount', { n: v.notes })) : esc(t('vault.missing'))}</span></div><div class="mono muted">${esc(v.path)}</div><div class="row muted" style="font-size:13px">${v.private ? esc(t('vault.privateShort')) + ' · ' : ''}${esc(t('vault.writes'))}: ${esc(v.writes)} · ${esc(t('vault.intake'))}: ${esc(v.flat ? 'root' : v.intake_folder)}${v.decisions.length ? ' · ' + esc(t('vault.decisions')) + ' ' + esc(v.decisions.join('/')) : ''}<button class="link" data-remove="${esc(v.name)}">${esc(t('vault.removeBtn'))}</button></div>

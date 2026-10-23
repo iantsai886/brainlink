@@ -22,6 +22,7 @@ import { sessionsService } from './host.mjs';
 import { addAgent, renameAgent, removeAgent, revokeAgent, markConnected, findAgentByToken, publicAgent, localAgentSnippet, remoteAgentSnippet } from './mcp-agents.mjs';
 import { buildGraph3D, noteDetail3D } from './graph3d.mjs';
 import { snapshotSettings, chooseSnapshot, suggestSnapshotFolder, clearSnapshot, startSnapshotWatcher, writeSnapshotOnce, loadSnapshotStatus, saveSnapshotStatus } from './snapshot.mjs';
+import { listHandoffs } from './writes.mjs';
 
 const UI_STATIC_TYPES = { '.js': 'text/javascript; charset=utf-8', '.css': 'text/css; charset=utf-8', '.json': 'application/json; charset=utf-8' };
 const UI_DIR = path.join(ROOT, 'ui');
@@ -417,6 +418,25 @@ export async function startSetup(opts = {}) {
       const next = { ...cfg, sessions: { shareSummaries, shareFullText: shareSummaries && shareFullText } };
       await saveConfig(next, file);
       return { ok: true, sessions: next.sessions };
+    },
+    // P0: two-AI handoff receipt -- who handed off, who picked it up (if anyone yet), and when.
+    // listHandoffs() already drops anything under an excluded ("00 Home"-style) folder or marked
+    // private, so this never has to re-check that itself; it only has to pair each handoff with
+    // the later handoff (if any) that acks it via `ack_of` to know whether it was picked up.
+    'POST /api/handoffs': async (b) => {
+      const cfg = await loadConfig(file);
+      const ctx = createContext(cfg, { env: { ...env, BRAINLINK_SEMANTIC: '0' } });
+      if (!cfg.handoff || !ctx.enabled.includes(cfg.handoff.vault)) return { enabled: false, receipts: [] };
+      const list = await listHandoffs(ctx, { limit: b.limit || 30 });
+      const ackByTarget = new Map(list.filter((x) => x.ack_of).map((a) => [a.ack_of, a]));
+      const receipts = list.filter((x) => !x.ack_of).map((x) => {
+        const ack = ackByTarget.get(x.path);
+        return {
+          from: x.from, to: x.to, subject: x.subject, sent_at: x.sent_at, status: x.status, priority: x.priority,
+          picked_up: Boolean(ack), picked_up_by: ack ? ack.from : null, picked_up_at: ack ? ack.sent_at : null,
+        };
+      });
+      return { enabled: true, receipts };
     },
     // ---- Shared snapshot: a read-only copy of the notes for cloud agents (Ian's RB8) ----
     'POST /api/snapshot/pick-folder': async () => { const p = await pickSnapshotFolder(); return p === undefined ? { path: null, unavailable: true } : { path: p }; },
