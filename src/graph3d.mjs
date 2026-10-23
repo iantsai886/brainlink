@@ -8,6 +8,7 @@ import path from 'node:path';
 import { loadVault, summarize, vault, vaultRoot, safeJoin, readNote } from './core.mjs';
 import { resolveNoteWikilinks } from './links.mjs';
 import { appHome } from './config.mjs';
+import { isWithin } from './pathsafe.mjs';
 
 // n.private is already computed once, at index-build time, by core.mjs's isPrivateMeta — reusing
 // it here (rather than re-deriving private-ness from n.meta.private with a second, independent
@@ -107,10 +108,13 @@ export async function editNote3D(ctx, vaultName, rel, { content, mtime } = {}) {
   const root = vaultRoot(ctx, vaultName);
   const full = safeJoin(root, rel);
   const before = await lstat(full);
+  // Windows note: libuv reports NTFS junctions and other reparse points through the same
+  // S_IFLNK bit as a real symlink, so isSymbolicLink() already refuses them here too -- not
+  // verifiable on this Linux box, which has no junctions, only confirmed from Node's own docs.
   if (before.isSymbolicLink()) throw new Error('Refusing to edit: this note is a symlink.');
   const realRoot = await realpath(root);
   const realFull = await realpath(full);
-  if (realFull !== realRoot && !realFull.startsWith(realRoot + path.sep)) throw new Error('Refusing to edit: this note is outside the vault.');
+  if (!isWithin(realRoot, realFull)) throw new Error('Refusing to edit: this note is outside the vault.');
   if (typeof mtime !== 'number' || before.mtimeMs !== mtime) throw new Error('This note changed on disk since you opened it. Reopen it and try again.');
   const previous = await readFile(full, 'utf8');
   const dir = backupDir(ctx.env, vaultName);

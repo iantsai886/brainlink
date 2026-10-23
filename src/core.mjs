@@ -10,6 +10,7 @@ import { termFrequencies, terms, linkGraph, collection, suggestRelated, extractT
 import { appHome } from './config.mjs';
 import { detectEmbedder, VectorStore, fillVectors, embedTexts, nearest } from './embed.mjs';
 import { findAgentByToken, publicAgent } from './mcp-agents.mjs';
+import { isWithin } from './pathsafe.mjs';
 
 const truthy = (v) => /^(1|true|yes|on)$/i.test(String(v || ''));
 
@@ -55,9 +56,13 @@ export function vault(ctx, name) {
 
 export const vaultRoot = (ctx, name) => path.resolve(vault(ctx, name).path);
 
-export function safeJoin(root, rel) {
+// Windows note: a drive-letter/UNC/case difference between `root` and `rel`'s resolved path (both
+// came from path.resolve, which never changes case) can't itself create an escape -- isWithin's
+// case-insensitive comparison on win32 exists so a *legitimate* same-folder path is never wrongly
+// refused, not to allow anything through that the plain comparison would have blocked.
+export function safeJoin(root, rel, os = process.platform) {
   const full = path.resolve(root, String(rel));
-  if (full !== root && !full.startsWith(root + path.sep)) throw new Error('Path escapes the vault');
+  if (!isWithin(root, full, os)) throw new Error('Path escapes the vault');
   return full;
 }
 

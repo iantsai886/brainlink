@@ -10,6 +10,7 @@ import { createHash } from 'node:crypto';
 import path from 'node:path';
 import { loadVault, safeJoin } from './core.mjs';
 import { appHome } from './config.mjs';
+import { isWithin } from './pathsafe.mjs';
 import { suggestFolders } from './sync/settings.mjs';
 import { openSessionStore, importAll } from './sessions/index.mjs';
 import { sessionList } from './sessions/mcp.mjs';
@@ -145,7 +146,7 @@ async function vaultRealRoots(vaults = []) {
   return roots;
 }
 
-function isWithinRoot(root, real) { return real === root || real.startsWith(root + path.sep); }
+function isWithinRoot(root, real) { return isWithin(root, real); }
 // N6/N5b: "a vault overlaps a path" has to catch both directions -- the vault sitting at or
 // inside that path (isWithinRoot), and the path itself sitting at or inside the vault (a vault
 // configured as an ancestor of outRoot/dest, however unlikely) -- a destructive rm -rf must
@@ -187,12 +188,12 @@ async function safeDeletePath(dest, rel, vaultRoots = [], sourceFull = null) {
   if (typeof rel !== 'string' || !rel || path.isAbsolute(rel)) return null;
   const destResolved = path.resolve(dest);
   const resolved = path.resolve(destResolved, rel);
-  if (resolved !== destResolved && !resolved.startsWith(destResolved + path.sep)) return null;
+  if (!isWithin(destResolved, resolved)) return null;
   let realDest;
   try { realDest = await realpath(destResolved); } catch { return null; }
   let realDir;
   try { realDir = await realpath(path.dirname(resolved)); } catch { return null; } // containing dir must really exist
-  if (realDir !== realDest && !realDir.startsWith(realDest + path.sep)) return null;
+  if (!isWithin(realDest, realDir)) return null;
   try { if ((await lstat(resolved)).isSymbolicLink()) return null; } catch { /* nothing there yet: fine, unlink is a no-op */ }
   if (await isProtectedVaultFile(vaultRoots, resolved, sourceFull)) return null;
   return resolved;
@@ -259,7 +260,9 @@ function sharedRoot(dest) { return path.join(dest, SHARED_SUBDIR); }
 // Walked one path segment at a time (rather than a single recursive mkdir followed by one
 // realpath check at the end) so a symlink planted mid-tree by a concurrent sync client is caught
 // -- and never mkdir'd through -- before any directory below it is created, instead of only being
-// noticed once the whole chain already exists.
+// noticed once the whole chain already exists. (Windows: libuv's lstat reports NTFS junctions and
+// other reparse points as symlinks too -- isSymbolicLink() already refuses them here; unverifiable
+// on this Linux box, which has no junctions.)
 async function assertContainedForWrite(outRoot, full) {
   const outRootLink = await lstat(outRoot).catch(() => null);
   if (outRootLink?.isSymbolicLink()) throw new Error(`Refusing to write: ${outRoot} is a symlink`);
@@ -274,7 +277,7 @@ async function assertContainedForWrite(outRoot, full) {
       if (segLink?.isSymbolicLink()) throw new Error(`Refusing to write: ${cur} is a symlink`);
       if (!segLink) await mkdir(cur);
       const realCur = await realpath(cur);
-      if (realCur !== realOutRoot && !realCur.startsWith(realOutRoot + path.sep)) {
+      if (!isWithin(realOutRoot, realCur)) {
         throw new Error(`Refusing to write: ${full} would escape ${outRoot}`);
       }
     }
