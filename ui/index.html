@@ -277,6 +277,24 @@ ol.todo li { padding-left: 4px; }
     <div class="row" style="margin-top:12px"><button class="primary" id="sync-save" data-i18n="sync.saveBtn"></button></div>
   </section>
 
+  <section id="s-backup">
+    <h2 data-i18n="backup.title"></h2>
+    <p class="hint" data-i18n="backup.hint"></p>
+    <label class="muted" style="display:flex;flex-direction:row;gap:6px;align-items:center"><input type="checkbox" id="backup-enabled" style="width:auto"><span data-i18n="backup.enabled"></span></label>
+    <div class="grid2" style="margin-top:10px">
+      <label><span data-i18n="backup.folder"></span><input id="backup-folder" class="mono"></label>
+      <label><span data-i18n="backup.interval"></span><select id="backup-hours"><option value="6">6</option><option value="12">12</option><option value="24">24</option><option value="48">48</option><option value="168">168</option></select></label>
+    </div>
+    <div class="row" style="margin-top:12px"><button id="backup-pick" data-i18n="backup.choose"></button><button class="primary" id="backup-save" data-i18n="backup.save"></button><button id="backup-run" data-i18n="backup.run"></button></div>
+    <p id="backup-status" class="muted" role="status"></p>
+    <details><summary data-i18n="backup.restoreTitle"></summary>
+      <p class="hint" data-i18n="backup.restoreHint"></p>
+      <div class="grid2"><label><span data-i18n="backup.restoreSource"></span><input id="backup-restore-source" class="mono"></label>
+      <label><span data-i18n="backup.restoreDestination"></span><input id="backup-restore-destination" class="mono"></label></div>
+      <div class="row" style="margin-top:10px"><button id="backup-restore" data-i18n="backup.restoreBtn"></button></div>
+    </details>
+  </section>
+
   <section id="s-share"><div id="share-root"></div></section>
   </div></details>
   <p class="muted" style="font-size:12px;text-align:center"><span data-i18n="settings.config"></span> <span class="mono" id="cfgpath"></span></p>
@@ -745,6 +763,13 @@ async function load() {
   $('sync-provider').innerHTML = SY.providers.map((p) => `<option value="${esc(p)}" ${p === SY.provider ? 'selected' : ''}>${esc(t('sync.provider.' + p))}</option>`).join('');
   $('sync-device').value = SY.device || '';
   $('sync-folder').value = SY.folder || '';
+  $('backup-enabled').checked = Boolean(S.backup?.enabled);
+  $('backup-folder').value = S.backup?.folder || '';
+  $('backup-hours').value = String(S.backup?.intervalHours || 24);
+  $('backup-status').textContent = S.backup?.status ? (S.backup.status.ok
+    ? t('backup.lastVerified', { count: S.backup.status.file_count, folder: S.backup.status.folder })
+    : t('backup.failed', { error: S.backup.status.error })) : t('backup.notRun');
+  if (S.backup?.status?.ok && !$('backup-restore-source').value) $('backup-restore-source').value = S.backup.status.folder;
   $('sync-folder-row').hidden = SY.provider === 'local';
   renderSyncSuggestions(SY.provider, SY.suggested_folders);
   // Lets self-contained panels (agents.js, share.js) that keep their own hasVault copy drop their
@@ -835,6 +860,30 @@ $('sync-save').onclick = () => act(async () => {
   const r = await api('POST', '/api/sync', { provider, folder: provider === 'local' ? null : $('sync-folder').value, device: $('sync-device').value });
   toast(provider === 'local' ? t('sync.localToast') : t('sync.providerToast', { folder: r.sync.folder }));
 });
+$('backup-pick').onclick = async () => {
+  try {
+    const r = await api('POST', '/api/backup/pick-folder');
+    if (r.path) $('backup-folder').value = r.path;
+    else if (r.unavailable) toast(t('backup.pickerUnavailable'), true);
+  } catch (e) { toast(e.message, true); }
+};
+$('backup-save').onclick = () => act(async () => {
+  const r = await api('POST', '/api/backup', { enabled: $('backup-enabled').checked,
+    folder: $('backup-folder').value, intervalHours: Number($('backup-hours').value) });
+  toast(r.backup.enabled ? t('backup.saved') : t('backup.disabled'));
+});
+$('backup-run').onclick = () => act(async () => {
+  const r = await api('POST', '/api/backup/run');
+  toast(t('backup.lastVerified', { count: r.file_count, folder: r.folder }));
+});
+$('backup-restore').onclick = () => {
+  if (!confirm(t('backup.restoreConfirm'))) return;
+  act(async () => {
+    const r = await api('POST', '/api/backup/restore', { backupFolder: $('backup-restore-source').value,
+      destination: $('backup-restore-destination').value, confirm: true });
+    toast(t('backup.restored', { count: r.file_count, folder: r.folder }));
+  });
+};
 $('http-token').onclick = () => act(async () => { const r = await api('POST', '/api/http-token'); $('http-out').innerHTML = `URL: ${esc(r.url)}<br>Header: Authorization: Bearer ${esc(r.token)}<br>Start: ${esc(r.start)}`; });
 $('test').onclick = () => {
   $('test-out').innerHTML = `<p class="skeleton">${esc(t('test.searching'))}</p>`;

@@ -39,7 +39,7 @@ export const AGENT_KINDS = ['local', 'remote'];
 export const CONFIG_SCHEMA_VERSION = 2;
 
 export function emptyConfig() {
-  return { version: CONFIG_SCHEMA_VERSION, timezone: null, locale: null, vaults: [], agents: [], ai_agents: [], handoff: null, platforms: DEFAULT_PLATFORMS, http: { port: 8765, token: null }, connections: {}, sessions: { shareSummaries: false, shareFullText: false } };
+  return { version: CONFIG_SCHEMA_VERSION, timezone: null, locale: null, vaults: [], agents: [], ai_agents: [], handoff: null, platforms: DEFAULT_PLATFORMS, http: { port: 8765, token: null }, connections: {}, sessions: { shareSummaries: false, shareFullText: false }, backup: { enabled: false, folder: null, intervalHours: 24 } };
 }
 
 // Fill defaults so the rest of the code never checks for missing keys.
@@ -53,6 +53,7 @@ export function normalize(raw = {}) {
   cfg.ai_agents = (raw.ai_agents || []).map((a) => ({ kind: 'local', tokenHash: null, revoked: false, connected: false, createdAt: null, lastSeenAt: null, ...a }));
   cfg.http = { port: 8765, token: null, ...(raw.http || {}) };
   cfg.connections = raw.connections || {};
+  cfg.backup = { enabled: false, folder: null, intervalHours: 24, ...(raw.backup || {}) };
   // Local-only choice that decides what connected AI apps may see of imported sessions. An AI
   // client can never set or override this (see src/sessions/mcp.mjs / src/server.mjs): only the
   // user, in BrainLink Settings, changes it. shareSummaries covers session_list + summary
@@ -104,6 +105,9 @@ export function validate(cfg) {
   if (cfg.locale && !LOCALES.includes(cfg.locale)) errors.push(`locale must be one of ${LOCALES.join(', ')}`);
   if (typeof cfg.sessions?.shareSummaries !== 'boolean') errors.push('sessions.shareSummaries must be a boolean');
   if (typeof cfg.sessions?.shareFullText !== 'boolean') errors.push('sessions.shareFullText must be a boolean');
+  if (typeof cfg.backup.enabled !== 'boolean') errors.push('backup.enabled must be a boolean');
+  if (cfg.backup.enabled && (!cfg.backup.folder || !path.isAbsolute(cfg.backup.folder))) errors.push('backup.folder must be an absolute path when enabled');
+  if (!Number.isInteger(cfg.backup.intervalHours) || cfg.backup.intervalHours < 1 || cfg.backup.intervalHours > 168) errors.push('backup.intervalHours must be 1–168');
   if (cfg.sync) errors.push(...validateSync(cfg.sync));
   return errors;
 }

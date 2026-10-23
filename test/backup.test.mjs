@@ -1,0 +1,95 @@
+import test from 'node:test';
+import assert from 'node:assert/strict';
+import { mkdtemp, mkdir, writeFile, readFile, readdir, symlink } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import path from 'node:path';
+import { backupOnce, verifyBackup, restoreBackupToEmpty } from '../src/backup.mjs';
+import { normalize, saveConfig } from '../src/config.mjs';
+import { startSetup } from '../src/setup.mjs';
+
+const tmp = (name) => mkdtemp(path.join(tmpdir(), `bl-backup-${name}-`));
+
+test('backup preserves private and public files and verifies their hashes', async () => {
+  const root = await tmp('source');
+  const dest = await tmp('destination');
+  await mkdir(path.join(root, '.obsidian'));
+  await writeFile(path.join(root, 'Private.md'), '---\nprivate: true\n---\nfictional-private-note');
+  await writeFile(path.join(root, '.obsidian', 'app.json'), '{}');
+  const result = await backupOnce([{ name: 'Personal', path: root }], dest, new Date('2026-10-23T00:00:00Z'));
+  assert.equal(result.file_count, 2);
+  assert.equal((await verifyBackup(result.folder)).ok, true);
+  const manifest = JSON.parse(await readFile(path.join(result.folder, 'manifest.json'), 'utf8'));
+  const privateFile = manifest.files.find((f) => f.path === 'Private.md');
+  assert.match(await readFile(path.join(result.folder, ...privateFile.stored.split('/')), 'utf8'), /fictional-private-note/);
+  await writeFile(path.join(result.folder, ...privateFile.stored.split('/')), 'corrupted');
+  assert.deepEqual((await verifyBackup(result.folder)).errors, [`Hash mismatch: ${privateFile.stored}`]);
+});
+
+test('backup rejects a destination within a vault', async () => {
+  const root = await tmp('nested');
+  const nested = path.join(root, 'Backups');
+  await mkdir(nested);
+  await assert.rejects(backupOnce([{ name: 'Personal', path: root }], nested), /outside every vault/);
+});
+
+test('verified backup restores to an empty folder without touching the original', async () => {
+  const root = await tmp('restore-source');
+  const dest = await tmp('restore-backup');
+  const recovered = await tmp('restore-output');
+  await writeFile(path.join(root, 'Private.md'), 'private original');
+  const made = await backupOnce([{ name: 'Personal', path: root }], dest);
+  await writeFile(path.join(root, 'Private.md'), 'changed original');
+  const result = await restoreBackupToEmpty(made.folder, recovered);
+  assert.equal(result.file_count, 1);
+  assert.equal(await readFile(path.join(recovered, '1-Personal', 'Private.md'), 'utf8'), 'private original');
+  assert.equal(await readFile(path.join(root, 'Private.md'), 'utf8'), 'changed original');
+  await assert.rejects(restoreBackupToEmpty(made.folder, recovered), /must be empty/);
+});
+
+test('backup rejects symlinked files when the host permits symlinks', async (t) => {
+  const root = await tmp('symlink');
+  const dest = await tmp('symlink-destination');
+  const outside = path.join(dest, 'outside.md');
+  await writeFile(outside, 'outside');
+  try { await symlink(outside, path.join(root, 'link.md')); }
+  catch (error) {
+    if (error.code === 'EPERM' && process.platform === 'win32') { t.skip('Windows symlink privilege unavailable'); return; }
+    throw error;
+  }
+  await assert.rejects(backupOnce([{ name: 'Personal', path: root }], dest), /symbolic link/);
+});
+
+test('authenticated Setup enables scheduled backup only after a verified first copy', async () => {
+  const root = await tmp('api-source');
+  const dest = await tmp('api-destination');
+  const restore = await tmp('api-restore');
+  const home = await tmp('api-home');
+  await writeFile(path.join(root, 'Private.md'), '---\nprivate: true\n---\nprivate fixture');
+  const env = { BRAINLINK_HOME: home, HOME: home, BRAINLINK_SEMANTIC: '0' };
+  await saveConfig(normalize({ vaults: [{ name: 'Personal', path: root, private: true }] }), path.join(home, 'config.json'));
+  const app = await startSetup({ env, home, os: 'win32', port: 0, useCli: false, backupIntervalMs: 50, idleMinutes: 0.01 });
+  const api = (route, body, token = app.token) => fetch(`http://127.0.0.1:${app.port}${route}`, {
+    method: 'POST', headers: { 'Content-Type': 'application/json', 'X-BrainLink-Token': token }, body: JSON.stringify(body || {}),
+  });
+  try {
+    assert.equal((await api('/api/backup', { enabled: true, folder: dest, intervalHours: 24 }, 'wrong')).status, 401);
+    const response = await api('/api/backup', { enabled: true, folder: dest, intervalHours: 24 });
+    assert.equal(response.status, 200);
+    const result = await response.json();
+    assert.equal(result.backup.status.ok, true);
+    assert.equal((await verifyBackup(result.backup.status.folder)).ok, true);
+    const state = await fetch(`http://127.0.0.1:${app.port}/api/state`, { headers: { 'X-BrainLink-Token': app.token } }).then((r) => r.json());
+    assert.equal(state.backup.enabled, true);
+    assert.equal(state.backup.status.file_count, 1);
+    for (let i = 0; i < 40 && (await readdir(dest)).length < 2; i++) await new Promise((resolve) => setTimeout(resolve, 25));
+    assert.ok((await readdir(dest)).length >= 2, 'scheduled backup creates another verified copy');
+    await new Promise((resolve) => setTimeout(resolve, 650));
+    assert.equal((await fetch(`http://127.0.0.1:${app.port}/health`)).status, 200, 'scheduled backup keeps the app running while idle');
+    assert.equal((await api('/api/backup/restore', { backupFolder: result.backup.status.folder, destination: restore })).status, 400);
+    const restored = await api('/api/backup/restore', { backupFolder: result.backup.status.folder, destination: restore, confirm: true });
+    assert.equal(restored.status, 200);
+    assert.match(await readFile(path.join(restore, '1-Personal', 'Private.md'), 'utf8'), /private fixture/);
+    const off = await api('/api/backup', { enabled: false, folder: dest, intervalHours: 24 });
+    assert.equal((await off.json()).backup.enabled, false);
+  } finally { app.server.close(); }
+});

@@ -23,6 +23,7 @@ import { addAgent, renameAgent, removeAgent, revokeAgent, markConnected, findAge
 import { buildGraph3D, noteDetail3D } from './graph3d.mjs';
 import { snapshotSettings, chooseSnapshot, suggestSnapshotFolder, clearSnapshot, startSnapshotWatcher, writeSnapshotOnce, loadSnapshotStatus, saveSnapshotStatus } from './snapshot.mjs';
 import { listHandoffs } from './writes.mjs';
+import { backupOnce, verifyBackup, restoreBackupToEmpty } from './backup.mjs';
 
 const UI_STATIC_TYPES = { '.js': 'text/javascript; charset=utf-8', '.css': 'text/css; charset=utf-8', '.json': 'application/json; charset=utf-8' };
 const UI_DIR = path.join(ROOT, 'ui');
@@ -77,6 +78,7 @@ export async function startSetup(opts = {}) {
   const token = opts.token || randomBytes(18).toString('base64url');
   const pick = opts.pick || (() => pickFolder(os));
   const pickSnapshotFolder = opts.pickSnapshotFolder || (() => pickFolder(os, 'Choose a folder to share a read-only copy with cloud agents'));
+  const pickBackupFolder = opts.pickBackupFolder || (() => pickFolder(os, 'Choose a private backup destination'));
   const clientOpts = () => ({ home, os, env, launch: launchSpec(env), useCli: opts.useCli });
   const sessions = sessionsService(env); // src/host.mjs: cross-session reads over src/sessions/* (importAll, session_list/read semantics)
   const html = await readFile(path.join(ROOT, 'ui', 'index.html'), 'utf8');
@@ -85,13 +87,49 @@ export async function startSetup(opts = {}) {
   // the Done button in the browser only hides that tab's view (see ui/index.html) — it must
   // never stop this background process, so idle timeout is the only thing that quits it here.
   let idleTimer = null;
+  let backupEnabled = false;
   const quit = () => setTimeout(() => { snapshotWatcher?.stop(); (opts.onQuit ? opts.onQuit() : server.close()); }, 100);
-  const touch = () => { if (!opts.idleMinutes) return; clearTimeout(idleTimer); idleTimer = setTimeout(quit, opts.idleMinutes * 60e3); idleTimer.unref?.(); };
+  const touch = () => {
+    clearTimeout(idleTimer);
+    if (!opts.idleMinutes || backupEnabled) return;
+    idleTimer = setTimeout(quit, opts.idleMinutes * 60e3);
+    idleTimer.unref?.();
+  };
 
   // Shared snapshot (Ian's RB8): runs for as long as this Setup process is open. Restarted
   // whenever the setting changes so a just-picked folder, or turning it off, takes effect at once.
   const snapshotStateFile = path.join(appHome(env), 'snapshot-state.json');
   let snapshotWatcher = null;
+  let backupTimer = null;
+  let backupRunning = false;
+  let backupStatus = null;
+  async function runBackup(cfg) {
+    if (backupRunning) throw new Error('A backup is already running.');
+    if (!cfg.backup?.folder) throw new Error('Choose a backup destination first.');
+    backupRunning = true;
+    try {
+      const result = await backupOnce(cfg.vaults, cfg.backup.folder);
+      const check = await verifyBackup(result.folder);
+      if (!check.ok) throw new Error(`Backup verification failed: ${check.errors.join('; ')}`);
+      backupStatus = { ok: true, ...result, verified_at: new Date().toISOString() };
+      return backupStatus;
+    } catch (error) {
+      backupStatus = { ok: false, error: error.message || String(error), at: new Date().toISOString() };
+      throw error;
+    } finally { backupRunning = false; }
+  }
+  function refreshBackupTimer(cfg) {
+    if (backupTimer) clearInterval(backupTimer);
+    backupTimer = null;
+    backupEnabled = Boolean(cfg.backup?.enabled);
+    touch(); // scheduled backups must survive the app's ordinary inactivity timeout
+    if (!cfg.backup?.enabled) return;
+    backupTimer = setInterval(() => loadConfig(file).then((latest) => {
+      if (latest.backup.enabled) return runBackup(latest);
+    }).catch((error) => { backupStatus = { ok: false, error: error.message || String(error), at: new Date().toISOString() }; }),
+    opts.backupIntervalMs ?? cfg.backup.intervalHours * 3600e3);
+    backupTimer.unref?.();
+  }
   async function refreshSnapshotWatcher(cfg) {
     snapshotWatcher?.stop();
     snapshotWatcher = null;
@@ -110,6 +148,7 @@ export async function startSetup(opts = {}) {
     await snapshotWatcher.ready;
   }
   refreshSnapshotWatcher(await loadConfig(file)).catch(() => {});
+  refreshBackupTimer(await loadConfig(file));
 
   async function state() {
     const cfg = await loadConfig(file);
@@ -138,6 +177,7 @@ export async function startSetup(opts = {}) {
       // at a small page is enough to know "at least one exists"; the UI doesn't need the full list.
       sessions_has_private: ((await sessions.list({ include_private: true, limit: 20 }).catch(() => ({ sessions: [] }))).sessions || []).some((x) => x.private),
       snapshot: { ...snapshotSettings(cfg), suggested_folder: suggestSnapshotFolder(home), ...(await loadSnapshotStatus(snapshotStateFile)) },
+      backup: { ...cfg.backup, status: backupStatus, running: backupRunning },
     };
   }
 
@@ -458,6 +498,23 @@ export async function startSetup(opts = {}) {
       if (b?.force) await refreshSnapshotWatcher(cfg);
       return { ok: true };
     },
+    'POST /api/backup/pick-folder': async () => { const p = await pickBackupFolder(); return p === undefined ? { path: null, unavailable: true } : { path: p }; },
+    'POST /api/backup': async (b) => {
+      const cfg = await loadConfig(file);
+      const next = { ...cfg, backup: { enabled: Boolean(b.enabled), folder: b.folder || null, intervalHours: Number(b.intervalHours || 24) } };
+      if (next.backup.enabled) await runBackup(next); // verify before enabling the schedule
+      await saveConfig(next, file);
+      refreshBackupTimer(next);
+      return { ok: true, backup: { ...next.backup, status: backupStatus } };
+    },
+    'POST /api/backup/run': async () => {
+      const cfg = await loadConfig(file);
+      return runBackup(cfg);
+    },
+    'POST /api/backup/restore': async (b) => {
+      if (b.confirm !== true) throw new Error('Confirm restoring into an empty folder first.');
+      return { ok: true, ...(await restoreBackupToEmpty(String(b.backupFolder || ''), String(b.destination || ''))) };
+    },
     'POST /api/test': async (b) => {
       const cfg = normalize(await loadConfig(file));
       const ctx = createContext(cfg, { env: { ...env, BRAINLINK_AI_PLATFORM: '' } });
@@ -535,7 +592,7 @@ export async function startSetup(opts = {}) {
     }
     try { json(res, 200, await route(body)); } catch (e) { json(res, 400, { error: String(e.message || e) }); }
   });
-  server.once('close', () => snapshotWatcher?.stop());
+  server.once('close', () => { snapshotWatcher?.stop(); if (backupTimer) clearInterval(backupTimer); });
   await new Promise((resolve, reject) => { server.once('error', reject); server.listen(port, '127.0.0.1', resolve); });
   port = server.address().port;
   touch();
