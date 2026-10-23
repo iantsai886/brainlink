@@ -45,8 +45,13 @@ export function emptyConfig() {
 // Fill defaults so the rest of the code never checks for missing keys.
 export function normalize(raw = {}) {
   const cfg = { ...emptyConfig(), ...raw };
+  // A2: `connected` is distinct from `private` -- private still shares a vault's own notes with
+  // nothing (snapshot, MCP tools); disconnected additionally removes the vault from every AI tool
+  // and from Settings' own "active" list, without touching the vault's files or its agents'
+  // config. Defaults to true so an existing config (one vault, or several from before this field
+  // existed) migrates with every vault already connected -- nothing a current user sees changes.
   cfg.vaults = (raw.vaults || []).map((v) => ({
-    private: false, schema: 'standard', intake_folder: 'Inbox', decisions: [], read_first: [], folders: {}, rules: [],
+    private: false, connected: true, schema: 'standard', intake_folder: 'Inbox', decisions: [], read_first: [], folders: {}, rules: [],
     writes: 'on', flat: false, protected: ['00 INDEX', '00 MAP'], extra_fields: {}, purpose: '', ...v,
   }));
   cfg.agents = (raw.agents || []).map((a) => ({ role: '', activation: [`Connect to ${a.name}`], close: [`${a.name} close loop`], connect_notes: [], tail_notes: [], recent_dir: null, stale_days: 14, capture_approved: false, ...a }));
@@ -80,6 +85,7 @@ export function validate(cfg) {
     if (!v.path || !path.isAbsolute(v.path)) errors.push(`vault "${v.name}": path must be absolute`);
     if (!SCHEMAS.includes(v.schema)) errors.push(`vault "${v.name}": schema must be ${SCHEMAS.join(' | ')}`);
     if (!WRITE_MODES.includes(v.writes)) errors.push(`vault "${v.name}": writes must be ${WRITE_MODES.join(' | ')}`);
+    if (typeof v.connected !== 'boolean') errors.push(`vault "${v.name}": connected must be a boolean`);
   }
   const agents = new Set();
   for (const a of cfg.agents) {

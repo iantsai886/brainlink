@@ -18,7 +18,15 @@ export const FEATURES = Object.freeze({ plan: 'full', writes: true, agents: true
 
 export function createContext(cfg, { env = process.env } = {}) {
   const byName = new Map(cfg.vaults.map((v) => [v.name, v]));
-  const enabled = env.BRAINLINK_VAULTS ? env.BRAINLINK_VAULTS.split(',').map((s) => s.trim()).filter((v) => byName.has(v)) : cfg.vaults.map((v) => v.name);
+  // A2: every AI tool (search, brain_brief, agents, snapshot, handoffs, graph, sessions...) reads
+  // this one list, by construction (vault()/vaultRoot() refuse anything not in it) -- so filtering
+  // out a disconnected vault here, in the one place `enabled` is computed, is what makes it
+  // disappear from all of them at once, the same way BRAINLINK_VAULTS already narrows a single
+  // connection's view. A disconnected vault can never be let back in by that env var either.
+  const connectedNames = cfg.vaults.filter((v) => v.connected !== false).map((v) => v.name);
+  const enabled = env.BRAINLINK_VAULTS
+    ? env.BRAINLINK_VAULTS.split(',').map((s) => s.trim()).filter((v) => byName.has(v) && connectedNames.includes(v))
+    : connectedNames;
   const readOnly = truthy(env.BRAINLINK_READ_ONLY);
   // An AI agent the user added themselves (src/mcp-agents.mjs), identified by the token it was
   // launched with. Revoked or unknown tokens resolve to no agent — never a guess at identity.

@@ -118,7 +118,11 @@ export async function startSetup(opts = {}) {
     for (const v of cfg.vaults) {
       const ok = await stat(v.path).then((s) => s.isDirectory(), () => false);
       const excluded = ok ? await readExcludedFolders(v.path) : { active: [], suggested: [] };
-      vaults.push({ ...v, exists: ok, notes: ok ? await visibleNoteCount(ctx, v.name) : 0, excluded_folders: excluded.active, excluded_suggestions: excluded.suggested });
+      // A2: Settings must still list a disconnected vault (name, path, exists) so it can be
+      // reconnected -- but it is, by definition, not in ctx.enabled, so skip the note count
+      // rather than ask loadVault for a vault this ctx doesn't consider enabled.
+      const notes = ok && v.connected !== false ? await visibleNoteCount(ctx, v.name) : 0;
+      vaults.push({ ...v, exists: ok, notes, excluded_folders: excluded.active, excluded_suggestions: excluded.suggested });
     }
     return {
       version: VERSION, config_path: file, os, locale: cfg.locale,
@@ -201,6 +205,27 @@ export async function startSetup(opts = {}) {
     return { ok, agent: agent.name, tool: 'brainlink_guide', took_ms, message: ok ? `Live call succeeded (${took_ms}ms). This agent is now connected.` : 'The call failed; see Activity below.' };
   }
 
+  // Shared by POST /api/vault ("Add vault") and the new-folder branch of POST /api/vault/switch
+  // ("Switch vault" when the picked folder isn't a configured vault yet): scaffold it, add it to
+  // config, and connect it by default.
+  async function addVault(cfg, b) {
+    const vaultPath = path.resolve(String(b.path || '').replace(/^~(?=$|[\/\\])/, home));
+    if (!(await stat(vaultPath).then((s) => s.isDirectory(), () => false))) throw new Error(`Folder not found: ${vaultPath}`);
+    const name = String(b.name || path.basename(vaultPath)).trim();
+    // A real vault folder: write the shipped default excluded-folder list (unless the caller
+    // already chose one, e.g. from the "connect a vault" form), or keep an existing one as-is.
+    if (Array.isArray(b.excludedFolders)) await writeExcludedFolders(vaultPath, b.excludedFolders);
+    else await ensureDefaultIgnore(vaultPath);
+    const built = buildPack(b.pack || 'simple', { vaultName: name, vaultPath, agentName: String(b.agentName || '').trim() || undefined });
+    if (b.private !== undefined) built.vault.private = Boolean(b.private);
+    const created = b.scaffold === false ? [] : await scaffold(vaultPath, built.scaffold);
+    const next = mergePack(cfg, built);
+    if (!next.timezone) next.timezone = Intl.DateTimeFormat().resolvedOptions().timeZone;
+    await saveConfig(next, file);
+    await refreshMap(next, name, env);
+    return { vault: name, created };
+  }
+
   // The one-click path: use an Obsidian vault, a folder, or a brand-new vault; then connect all AIs.
   async function quickStart(b) {
     const cfg = await loadConfig(file);
@@ -262,26 +287,11 @@ export async function startSetup(opts = {}) {
       };
     },
     'POST /api/connect-all': async () => connectAll(await loadConfig(file)),
-    'POST /api/vault': async (b) => {
-      const cfg = await loadConfig(file);
-      const vaultPath = path.resolve(String(b.path || '').replace(/^~(?=$|[\/\\])/, home));
-      if (!(await stat(vaultPath).then((s) => s.isDirectory(), () => false))) throw new Error(`Folder not found: ${vaultPath}`);
-      const name = String(b.name || path.basename(vaultPath)).trim();
-      // A real vault folder: write the shipped default excluded-folder list (unless the caller
-      // already chose one, e.g. from the "connect a vault" form), or keep an existing one as-is.
-      if (Array.isArray(b.excludedFolders)) await writeExcludedFolders(vaultPath, b.excludedFolders);
-      else await ensureDefaultIgnore(vaultPath);
-      const built = buildPack(b.pack || 'simple', { vaultName: name, vaultPath, agentName: String(b.agentName || '').trim() || undefined });
-      if (b.private !== undefined) built.vault.private = Boolean(b.private);
-      const created = b.scaffold === false ? [] : await scaffold(vaultPath, built.scaffold);
-      const next = mergePack(cfg, built);
-      if (!next.timezone) next.timezone = Intl.DateTimeFormat().resolvedOptions().timeZone;
-      await saveConfig(next, file);
-      await refreshMap(next, name, env);
-      return { ok: true, vault: name, created };
-    },
+    'POST /api/vault': async (b) => ({ ok: true, ...(await addVault(await loadConfig(file), b)) }),
     'POST /api/vault/remove': async (b) => {
       const cfg = await loadConfig(file);
+      // A2: unlinks only -- cfg.vaults/agents/handoff are BrainLink's own config entries, never
+      // the vault's files on disk. Nothing under the vault's own folder is ever touched here.
       const next = { ...cfg, vaults: cfg.vaults.filter((v) => v.name !== b.name), agents: cfg.agents.filter((a) => a.vault !== b.name), handoff: cfg.handoff?.vault === b.name ? null : cfg.handoff };
       await saveConfig(next, file);
       // S5: the snapshot watcher was started from whatever vault list existed at launch (or the
@@ -289,6 +299,35 @@ export async function startSetup(opts = {}) {
       // vault here must stop it from still syncing a now-gone folder until next restart.
       await refreshSnapshotWatcher(next);
       return { ok: true };
+    },
+    // A2: the Settings vault list's "Switch" control -- connect or disconnect one already-added
+    // vault without removing it (its config, agents and files are all untouched either way). A
+    // disconnected vault disappears from every AI tool immediately (createContext filters on it),
+    // the same way a removed one does, because both read from the one `enabled` list.
+    'POST /api/vault/connected': async (b) => {
+      const cfg = await loadConfig(file);
+      const v = cfg.vaults.find((x) => x.name === b.name);
+      if (!v) throw new Error(`Unknown vault "${b.name}".`);
+      v.connected = Boolean(b.connected);
+      await saveConfig(cfg, file);
+      await refreshSnapshotWatcher(cfg);
+      return { ok: true, connected: v.connected };
+    },
+    // A2: "Switch vault" -- the same native folder picker "Add vault" uses, but for a folder that
+    // may already be a configured vault (just disconnected, or on another drive now remounted at
+    // the same path): reconnect it in place rather than erroring out or creating a duplicate
+    // entry. A genuinely new folder is added exactly like "Add vault" would, and connected by
+    // default.
+    'POST /api/vault/switch': async (b) => {
+      const cfg = await loadConfig(file);
+      const vaultPath = path.resolve(String(b.path || '').replace(/^~(?=$|[\/\\])/, home));
+      if (!(await stat(vaultPath).then((s) => s.isDirectory(), () => false))) throw new Error(`Folder not found: ${vaultPath}`);
+      const existing = cfg.vaults.find((v) => path.resolve(v.path) === vaultPath);
+      if (!existing) return { ok: true, switched: false, ...(await addVault(cfg, b)) };
+      existing.connected = true;
+      await saveConfig(cfg, file);
+      await refreshSnapshotWatcher(cfg);
+      return { ok: true, switched: true, vault: existing.name, created: [] };
     },
     // Excluded folders and the private flag stay editable after connecting, not just at
     // first-connect time (Technical Reviewer's Mac-zip safety review).

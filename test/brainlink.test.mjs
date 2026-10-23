@@ -341,6 +341,45 @@ test('zonedNow formats the configured zone with its offset', () => {
   assert.equal(zonedNow('America/New_York', NOW), '2026-10-17T21:30:00-04:00');
 });
 
+// A2: migrating a config saved before `connected` existed (one vault, or several) must not
+// disconnect anything a user already has working -- every vault comes back connected.
+test('A2: config migration defaults every existing vault to connected', () => {
+  const cfg = normalize({ vaults: [{ name: 'Old', path: '/x' }, { name: 'Older', path: '/y' }] });
+  assert.equal(cfg.vaults[0].connected, true);
+  assert.equal(cfg.vaults[1].connected, true);
+  // An explicit false already on disk (a config saved by a build that has this field) survives.
+  const explicit = normalize({ vaults: [{ name: 'Off', path: '/z', connected: false }] });
+  assert.equal(explicit.vaults[0].connected, false);
+});
+
+// A2: a disconnected vault must disappear from every AI tool at once -- search, agents, the MCP
+// tool schema's own vault enum, and resolveAgent -- while staying fully configured (its files,
+// agents and settings are untouched, so reconnecting brings it straight back).
+test('A2: a disconnected vault is invisible to every AI tool; reconnecting brings it right back', async () => {
+  const { cfg: baseCfg } = await fixture();
+  const cfg = { ...baseCfg, vaults: baseCfg.vaults.map((v) => (v.name === 'Journal' ? { ...v, connected: false } : v)) };
+  const ctx = ctxOf(cfg);
+  assert.deepEqual(ctx.enabled, ['Acme Studio']);
+  assert.ok(!ctx.agents.some((a) => a.vault === 'Journal'), 'the disconnected vault\'s own agent is gone too');
+  await assert.rejects(search(ctx, 'Journal', 'diary'), /not enabled/);
+  const vaultProp = createMcp(ctx).tools.find((t) => t.name === 'vault_search').inputSchema.properties.vault;
+  assert.deepEqual(vaultProp.enum, ['Acme Studio'], 'the MCP tool schema never even offers the disconnected vault');
+
+  const reconnected = { ...cfg, vaults: cfg.vaults.map((v) => (v.name === 'Journal' ? { ...v, connected: true } : v)) };
+  const ctx2 = ctxOf(reconnected);
+  assert.deepEqual(ctx2.enabled.sort(), ['Acme Studio', 'Journal']);
+  assert.ok((await search(ctx2, 'Journal', 'diary')).length > 0, 'reconnecting needs no re-add -- the vault\'s files were never touched');
+});
+
+// A2: BRAINLINK_VAULTS (used to scope a single AI connection to specific vaults) must never be
+// able to grant access back to a vault the user has disconnected in Settings.
+test('A2: BRAINLINK_VAULTS cannot re-admit a disconnected vault', async () => {
+  const { cfg: baseCfg } = await fixture();
+  const cfg = { ...baseCfg, vaults: baseCfg.vaults.map((v) => (v.name === 'Journal' ? { ...v, connected: false } : v)) };
+  const ctx = ctxOf(cfg, { BRAINLINK_VAULTS: 'Acme Studio,Journal' });
+  assert.deepEqual(ctx.enabled, ['Acme Studio']);
+});
+
 test('every install is fully unlocked: every vault enabled, writes and agents on, no licence needed', async () => {
   const { cfg } = await fixture();
   const ctx = createContext(cfg, { env: {} });
@@ -645,6 +684,66 @@ test('setup UI: host check, token check, add vault, connect with no plan limits'
     // fetch() drops custom Host headers, so use node:http to simulate DNS rebinding.
     const status = await new Promise((resolve) => request({ host: '127.0.0.1', port: s.port, path: '/api/state', headers: { 'X-BrainLink-Token': s.token, Host: `evil.example:${s.port}` } }, (r) => { r.resume(); resolve(r.statusCode); }).end());
     assert.equal(status, 421);
+  } finally { s.server.close(); }
+});
+
+// A2: the Settings vault list's Add vault / Switch control / Remove, plus "Switch vault" (the
+// same native folder picker, for a folder that may already be configured). Remove must only
+// unlink -- the vault's own files on disk must survive it untouched.
+test('A2: Settings vault list -- add, switch (connect/disconnect), switch vault, and remove unlinks only', async () => {
+  const home = await tmp('a2-setup');
+  const env = { BRAINLINK_HOME: path.join(home, 'app'), BRAINLINK_SEMANTIC: '0' };
+  const vaultDir = path.join(home, 'Notes');
+  await cp(SAMPLE, vaultDir, { recursive: true });
+  const otherDir = path.join(home, 'Other');
+  await mkdir(otherDir, { recursive: true });
+  const { existsSync } = await import('node:fs');
+  const s = await startSetup({ env, home, os: 'darwin', port: 0, useCli: false });
+  const base = `http://127.0.0.1:${s.port}`;
+  const api = (method, p, body) => fetch(base + p, { method, headers: { 'X-BrainLink-Token': s.token, 'Content-Type': 'application/json' }, body: body && JSON.stringify(body) }).then((r) => r.json());
+  try {
+    const add = await api('POST', '/api/vault', { path: vaultDir, name: 'Acme', pack: 'founder-os', agentName: 'Chief of Staff' });
+    assert.equal(add.ok, true);
+    let st = await api('GET', '/api/state');
+    assert.equal(st.vaults[0].connected, true, 'a newly added vault is connected by default');
+
+    // Switch control: disconnect without removing.
+    const off = await api('POST', '/api/vault/connected', { name: 'Acme', connected: false });
+    assert.equal(off.ok, true);
+    assert.equal(off.connected, false);
+    st = await api('GET', '/api/state');
+    assert.equal(st.vaults[0].connected, false);
+    assert.ok(existsSync(path.join(vaultDir, 'Pricing and Packages.md')), 'disconnecting never touches the vault\'s own files');
+
+    // Reconnect with the same control.
+    const on = await api('POST', '/api/vault/connected', { name: 'Acme', connected: true });
+    assert.equal(on.connected, true);
+
+    // "Switch vault" with a brand-new folder behaves like Add vault.
+    const switchedNew = await api('POST', '/api/vault/switch', { path: otherDir, name: 'Other' });
+    assert.equal(switchedNew.ok, true);
+    assert.equal(switchedNew.switched, false);
+    assert.equal(switchedNew.vault, 'Other');
+    st = await api('GET', '/api/state');
+    assert.equal(st.vaults.length, 2);
+    assert.ok(st.vaults.every((v) => v.connected));
+
+    // Disconnect Acme, then "Switch vault" back to its same path: reconnects in place, no duplicate.
+    await api('POST', '/api/vault/connected', { name: 'Acme', connected: false });
+    const switchedBack = await api('POST', '/api/vault/switch', { path: vaultDir });
+    assert.equal(switchedBack.ok, true);
+    assert.equal(switchedBack.switched, true);
+    assert.equal(switchedBack.vault, 'Acme');
+    st = await api('GET', '/api/state');
+    assert.equal(st.vaults.length, 2, 'no duplicate vault entry was created');
+    assert.ok(st.vaults.find((v) => v.name === 'Acme').connected);
+
+    // Remove: unlinks only, never deletes the vault's files.
+    const removed = await api('POST', '/api/vault/remove', { name: 'Acme' });
+    assert.equal(removed.ok, true);
+    st = await api('GET', '/api/state');
+    assert.deepEqual(st.vaults.map((v) => v.name), ['Other']);
+    assert.ok(existsSync(path.join(vaultDir, 'Pricing and Packages.md')), 'Remove unlinks BrainLink\'s config entry only -- the vault folder and its notes are untouched');
   } finally { s.server.close(); }
 });
 

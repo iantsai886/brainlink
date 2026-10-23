@@ -219,6 +219,7 @@ ol.todo li { padding-left: 4px; }
     <div id="add-vault" style="margin-top:14px">
       <div class="row">
         <button class="primary" id="pick" data-i18n="vault.chooseFolder"></button>
+        <button id="switch-vault" data-i18n="vault.switchVaultBtn"></button>
         <button id="sample" data-i18n="vault.useSample"></button>
       </div>
       <div id="vault-form" hidden style="margin-top:14px">
@@ -718,7 +719,8 @@ async function load() {
   if (hasVault && !onboardingSync) loadHandoffs().catch(() => {});
   $('cfgpath').textContent = S.config_path;
   $('n1').className = 'step' + (S.vaults.length ? ' done' : '');
-  $('vaults').innerHTML = S.vaults.length ? S.vaults.map((v, i) => `<div class="card"><div class="row" style="justify-content:space-between"><b>${esc(v.name)}</b><span class="pill ${v.exists ? 'on' : ''}">${v.exists ? esc(t('vault.notesCount', { n: v.notes })) : esc(t('vault.missing'))}</span></div><div class="mono muted">${esc(v.path)}</div><div class="row muted" style="font-size:13px">${v.private ? esc(t('vault.privateShort')) + ' · ' : ''}${esc(t('vault.writes'))}: ${esc(v.writes)} · ${esc(t('vault.intake'))}: ${esc(v.flat ? 'root' : v.intake_folder)}${v.decisions.length ? ' · ' + esc(t('vault.decisions')) + ' ' + esc(v.decisions.join('/')) : ''}<button class="link" data-remove="${esc(v.name)}">${esc(t('vault.removeBtn'))}</button></div>
+  $('vaults').innerHTML = S.vaults.length ? S.vaults.map((v, i) => `<div class="card"><div class="row" style="justify-content:space-between"><b>${esc(v.name)}</b><span class="row" style="gap:6px"><span class="pill ${v.connected !== false ? 'on' : ''}">${v.connected !== false ? esc(t('vault.active')) : esc(t('vault.notConnected'))}</span><span class="pill ${v.exists ? 'on' : ''}">${v.exists ? esc(t('vault.notesCount', { n: v.notes })) : esc(t('vault.missing'))}</span></span></div><div class="mono muted">${esc(v.path)}</div><div class="row muted" style="font-size:13px">${v.private ? esc(t('vault.privateShort')) + ' · ' : ''}${esc(t('vault.writes'))}: ${esc(v.writes)} · ${esc(t('vault.intake'))}: ${esc(v.flat ? 'root' : v.intake_folder)}${v.decisions.length ? ' · ' + esc(t('vault.decisions')) + ' ' + esc(v.decisions.join('/')) : ''}<button class="link" data-remove="${esc(v.name)}">${esc(t('vault.removeBtn'))}</button></div>
+    <label class="muted" style="display:flex;flex-direction:row;gap:6px;align-items:center;margin-top:8px"><input type="checkbox" data-vault-connected="${i}" ${v.connected !== false ? 'checked' : ''} style="width:auto"> ${esc(t('vault.connectedLabel'))}</label>
     <label class="muted" style="display:flex;flex-direction:row;gap:6px;align-items:center;margin-top:8px"><input type="checkbox" data-vault-private="${i}" ${v.private ? 'checked' : ''} style="width:auto"> ${esc(t('vault.privateLabel'))}</label>
     <label style="margin-top:6px">${esc(t('vault.excludedLabel'))}<textarea data-vault-excluded="${i}" class="mono" rows="3">${esc((v.excluded_folders || []).join('\n'))}</textarea></label>
     ${v.excluded_suggestions && v.excluded_suggestions.length ? `<div class="muted" style="font-size:12px;margin-top:4px">${esc(t('vault.suggestions', { list: v.excluded_suggestions.join(', ') }))}</div>` : ''}
@@ -761,6 +763,17 @@ function openForm(p) {
   $('v-excluded-hint').textContent = t('vault.excludedHint', { list: (S.suggested_excluded_folders || []).join(', ') });
 }
 $('pick').onclick = () => act(async () => { const r = await api('POST', '/api/pick-folder'); const p = r.path || (r.unavailable ? await window.promptForFolder() : ''); if (p) openForm(p); });
+// A2: "Switch vault" -- same native folder picker as "Choose folder", but for a vault you may
+// already have configured (just disconnected, or back at the same path on another drive): it
+// reconnects in place instead of opening the full add-vault form. A genuinely new folder is added
+// with sensible defaults, exactly like "Choose folder" would.
+$('switch-vault').onclick = () => act(async () => {
+  const r = await api('POST', '/api/pick-folder');
+  const p = r.path || (r.unavailable ? await window.promptForFolder() : '');
+  if (!p) return;
+  const res = await api('POST', '/api/vault/switch', { path: p });
+  toast(res.switched ? t('vault.switchedToast', { vault: res.vault }) : t('vault.addedToast', { vault: res.vault, extra: res.created.length ? t('vault.createdExtra', { n: res.created.length }) : '' }));
+});
 $('sample').onclick = () => act(async () => { const r = await api('POST', '/api/sample'); openForm(r.path); $('v-name').value = 'Acme Studio'; $('v-agent').value = 'Chief of Staff'; pack = 'founder-os'; });
 $('cancel-vault').onclick = () => ($('vault-form').hidden = true);
 $('packs').onchange = (e) => { if (e.target.name === 'pack') { pack = e.target.value; document.querySelectorAll('.pack').forEach((el) => el.classList.toggle('sel', el.querySelector('input').checked)); } };
@@ -786,6 +799,11 @@ document.addEventListener('click', (e) => {
     const v = S.vaults[+d.vaultPrivate];
     await api('POST', '/api/vault/private', { name: v.name, private: e.target.checked });
     toast(e.target.checked ? t('vault.privateOnToast', { name: v.name }) : t('vault.privateOffToast', { name: v.name }));
+  });
+  if (d.vaultConnected !== undefined) act(async () => {
+    const v = S.vaults[+d.vaultConnected];
+    await api('POST', '/api/vault/connected', { name: v.name, connected: e.target.checked });
+    toast(e.target.checked ? t('vault.connectedToast', { name: v.name }) : t('vault.disconnectedToast', { name: v.name }));
   });
   if (d.vaultExcludedSave !== undefined) act(async () => {
     const i = +d.vaultExcludedSave, v = S.vaults[i];

@@ -60,6 +60,21 @@ test('snapshot: nothing is written while the toggle is off', async () => {
   assert.ok(!existsSync(manifestPath(dest, env)));
 });
 
+// A2: a disconnected vault must be invisible to the shared snapshot too, exactly like a private
+// one -- snapshotNotes/the watcher both read ctx.enabled, which a disconnected vault is excluded
+// from the moment createContext computes it (src/core.mjs), so this needs no snapshot-specific code.
+test('snapshot A2: a disconnected vault\'s notes never appear in the shared snapshot', async () => {
+  const { cfg, env } = await setupVaults();
+  const disconnected = { ...cfg, vaults: cfg.vaults.map((v) => (v.name === 'Brain' ? { ...v, connected: false } : v)) };
+  const ctx = createContext(disconnected, { env });
+  const dest = await tmp('dest-a2-disconnected');
+  const withSnapshot = chooseSnapshot(disconnected, { enabled: true, folder: dest });
+  const r = await writeSnapshotOnce(ctx, withSnapshot, env);
+  assert.equal(r.ok, true);
+  assert.equal(r.noteCount, 0, 'the disconnected vault contributes nothing');
+  assert.ok(!existsSync(path.join(shared(dest), 'Brain')));
+});
+
 test('snapshot: excluded and private notes never appear; foreign files are left untouched', async () => {
   const { ctx, cfg, env } = await setupVaults();
   const dest = await tmp('dest');
