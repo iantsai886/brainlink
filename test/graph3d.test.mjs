@@ -2,13 +2,13 @@
 // appear in the graph, the side panel, or backlinks/outlinks — same promise as search/answers.
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtemp, mkdir, writeFile } from 'node:fs/promises';
+import { mkdtemp, mkdir, writeFile, readFile, readdir, stat, symlink, utimes } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 
-import { normalize } from '../src/config.mjs';
+import { normalize, appHome } from '../src/config.mjs';
 import { createContext } from '../src/core.mjs';
-import { buildGraph3D, noteDetail3D } from '../src/graph3d.mjs';
+import { buildGraph3D, noteDetail3D, editNote3D } from '../src/graph3d.mjs';
 import { startSetup } from '../src/setup.mjs';
 
 const tmp = (p) => mkdtemp(path.join(tmpdir(), `brainlink-${p}-`));
@@ -87,6 +87,104 @@ test('noteDetail3D: a visible note returns its Markdown body, tags, backlinks an
   assert.ok(alpha.outlinks.some((o) => o.title === 'Beta'));
 });
 
+// A3: noteDetail3D also feeds the panel's Edit button -- the raw file (frontmatter included, so
+// an edit never drops it), a conflict-check mtime, and wikilinks resolved by the one shared P1b
+// resolver (src/links.mjs's resolveNoteWikilinks), not a second independent one.
+test('noteDetail3D: carries raw (frontmatter included), mtime and P1b-resolved wikilinks for the Edit button', async () => {
+  const dir = await buildVault(await tmp('graph3d-detail-edit-fields'));
+  const ctx = await ctxFor(dir);
+  const beta = await noteDetail3D(ctx, 'Main', 'Beta.md');
+  assert.equal(beta.raw, await readFile(path.join(dir, 'Beta.md'), 'utf8'));
+  assert.equal(beta.mtime, (await stat(path.join(dir, 'Beta.md'))).mtimeMs);
+  const buried = beta.wikilinks.find((w) => w.target === 'Secret Stuff/Buried');
+  assert.ok(buried, JSON.stringify(beta.wikilinks));
+  assert.equal(buried.resolved, null, 'a link into an excluded folder must resolve to null, same as P1b');
+});
+
+// ---- A3: editNote3D -- the 3D graph panel's Edit button backend ----
+
+test('editNote3D: happy path -- atomic write, and a backup of the previous version lands under appHome, never in the vault', async () => {
+  const dir = await buildVault(await tmp('graph3d-edit-ok'));
+  const env = { BRAINLINK_HOME: await tmp('graph3d-edit-ok-home'), BRAINLINK_SEMANTIC: '0' };
+  const cfg = normalize({ vaults: [{ name: 'Main', path: dir }] });
+  const ctx = createContext(cfg, { env });
+  const before = await noteDetail3D(ctx, 'Main', 'Beta.md');
+  const next = '# Beta\n\nEdited from the 3D graph panel.\n';
+  const r = await editNote3D(ctx, 'Main', 'Beta.md', { content: next, mtime: before.mtime });
+  assert.equal(r.ok, true);
+  assert.equal(await readFile(path.join(dir, 'Beta.md'), 'utf8'), next);
+  assert.ok(!(await readdir(dir)).some((f) => f.includes('.tmp-')), 'no leftover temp file in the vault');
+
+  const backupRoot = path.join(appHome(env), 'note-edit-backups', 'Main');
+  const backups = await readdir(backupRoot);
+  assert.equal(backups.length, 1, JSON.stringify(backups));
+  assert.equal(await readFile(path.join(backupRoot, backups[0]), 'utf8'), before.raw, 'the backup holds the pre-edit content');
+  assert.ok(path.resolve(backupRoot) !== dir && !path.resolve(backupRoot).startsWith(dir + path.sep), 'the backup must never live inside the vault');
+});
+
+test('editNote3D: refuses when the note changed on disk since it was opened', async () => {
+  const dir = await buildVault(await tmp('graph3d-edit-conflict'));
+  const ctx = await ctxFor(dir);
+  const before = await noteDetail3D(ctx, 'Main', 'Beta.md');
+  await utimes(path.join(dir, 'Beta.md'), new Date(), new Date(Date.now() + 5000)); // someone else touched it
+  await assert.rejects(() => editNote3D(ctx, 'Main', 'Beta.md', { content: 'New text.\n', mtime: before.mtime }), /changed on disk/i);
+  assert.equal(await readFile(path.join(dir, 'Beta.md'), 'utf8'), before.raw, 'the file on disk must be untouched after a refused edit');
+});
+
+test('editNote3D: refuses a missing or wrong-typed mtime outright (no accidental "undefined === undefined" pass)', async () => {
+  const dir = await buildVault(await tmp('graph3d-edit-no-mtime'));
+  const ctx = await ctxFor(dir);
+  await assert.rejects(() => editNote3D(ctx, 'Main', 'Beta.md', { content: 'New text.\n' }), /changed on disk/i);
+  await assert.rejects(() => editNote3D(ctx, 'Main', 'Beta.md', { content: 'New text.\n', mtime: 'not-a-number' }), /changed on disk/i);
+});
+
+test('editNote3D: refuses a private note (raw-frontmatter fail-closed) even with a fresh mtime', async () => {
+  const dir = await buildVault(await tmp('graph3d-edit-private'));
+  const ctx = await ctxFor(dir);
+  const st = await stat(path.join(dir, 'Hidden Note.md'));
+  await assert.rejects(() => editNote3D(ctx, 'Main', 'Hidden Note.md', { content: 'Tampered.\n', mtime: st.mtimeMs }), /private/i);
+  assert.match(await readFile(path.join(dir, 'Hidden Note.md'), 'utf8'), /Should never surface/);
+});
+
+test('editNote3D: refuses a note in an excluded (00-Home-style) folder', async () => {
+  const dir = await buildVault(await tmp('graph3d-edit-excluded'));
+  const ctx = await ctxFor(dir);
+  const st = await stat(path.join(dir, 'Secret Stuff', 'Buried.md'));
+  await assert.rejects(() => editNote3D(ctx, 'Main', 'Secret Stuff/Buried.md', { content: 'Tampered.\n', mtime: st.mtimeMs }), /private/i);
+});
+
+test('editNote3D: refuses editing in a private vault, and in a disconnected vault', async () => {
+  const dir = await buildVault(await tmp('graph3d-edit-privvault'));
+  const cfgPriv = normalize({ vaults: [{ name: 'Main', path: dir, private: true }] });
+  const ctxPriv = createContext(cfgPriv, { env: { BRAINLINK_SEMANTIC: '0' } });
+  const st = await stat(path.join(dir, 'Beta.md'));
+  await assert.rejects(() => editNote3D(ctxPriv, 'Main', 'Beta.md', { content: 'x\n', mtime: st.mtimeMs }), /private/i);
+
+  const cfgOff = normalize({ vaults: [{ name: 'Main', path: dir, connected: false }] });
+  const ctxOff = createContext(cfgOff, { env: { SEMANTIC: '0' } });
+  await assert.rejects(() => editNote3D(ctxOff, 'Main', 'Beta.md', { content: 'x\n', mtime: st.mtimeMs }), /Unknown vault|not enabled/i);
+});
+
+test('editNote3D: refuses a symlinked note (no escaping the vault through a symlink)', async () => {
+  const dir = await buildVault(await tmp('graph3d-edit-symlink'));
+  const outside = await tmp('graph3d-edit-symlink-outside');
+  await writeFile(path.join(outside, 'secret.md'), '# Not in the vault\n');
+  await symlink(path.join(outside, 'secret.md'), path.join(dir, 'Linked.md'));
+  const ctx = await ctxFor(dir);
+  // A symlinked file is never followed by the vault walker, so it was never indexed -- editNote3D
+  // must refuse the same way it would a note that simply doesn't exist, never by reading through it.
+  await assert.rejects(() => editNote3D(ctx, 'Main', 'Linked.md', { content: 'Tampered.\n', mtime: Date.now() }), /private/i);
+  assert.equal(await readFile(path.join(outside, 'secret.md'), 'utf8'), '# Not in the vault\n');
+});
+
+test('editNote3D: refuses empty content', async () => {
+  const dir = await buildVault(await tmp('graph3d-edit-empty'));
+  const ctx = await ctxFor(dir);
+  const st = await stat(path.join(dir, 'Beta.md'));
+  await assert.rejects(() => editNote3D(ctx, 'Main', 'Beta.md', { content: '   \n', mtime: st.mtimeMs }), /empty/i);
+  await assert.rejects(() => editNote3D(ctx, 'Main', 'Beta.md', { mtime: st.mtimeMs }), /empty/i);
+});
+
 test('buildGraph3D: stays bounded for a large vault (smoothness for ~2,000 nodes)', async () => {
   const dir = await tmp('graph3d-big');
   for (let i = 0; i < 300; i++) await writeFile(path.join(dir, `Note ${i}.md`), `# Note ${i}\n\nSee [[Note ${(i + 1) % 300}]].\n`);
@@ -120,6 +218,34 @@ test('/api/graph3d and /api/graph3d/note: same exclusion guarantee over HTTP', a
 
     const refused = await api('/api/graph3d/note', { vault: 'Main', path: 'Hidden Note.md' });
     assert.ok(refused.error || refused.message, 'a private note must error, not return its content');
+  } finally { s.server.close(); }
+});
+
+// A3: /api/graph3d/note/edit -- the Edit button's save call, over the same local-only, token-gated route.
+test('/api/graph3d/note/edit: saves with the right mtime, refuses a stale mtime and a private note, over HTTP', async () => {
+  const home = await tmp('graph3d-edit-api-home');
+  const vaultPath = await buildVault(path.join(home, 'vault'));
+  const env = { BRAINLINK_HOME: path.join(home, 'app'), BRAINLINK_SEMANTIC: '0' };
+  const s = await startSetup({ env, home, os: 'linux', port: 0, useCli: false });
+  const base = `http://127.0.0.1:${s.port}`;
+  const api = (p, body) => fetch(base + p, { method: 'POST', headers: { 'X-BrainLink-Token': s.token, 'Content-Type': 'application/json' }, body: JSON.stringify(body || {}) }).then((r) => r.json());
+  try {
+    const added = await api('/api/vault', { path: vaultPath, name: 'Main', pack: 'simple', scaffold: false });
+    assert.equal(added.ok, true, JSON.stringify(added));
+
+    const note = await api('/api/graph3d/note', { vault: 'Main', path: 'Beta.md' });
+    assert.ok(note.mtime, JSON.stringify(note));
+
+    const stale = await api('/api/graph3d/note/edit', { vault: 'Main', path: 'Beta.md', content: 'x\n', mtime: note.mtime - 1 });
+    assert.ok(stale.error || stale.message, 'a wrong mtime must be refused');
+
+    const saved = await api('/api/graph3d/note/edit', { vault: 'Main', path: 'Beta.md', content: '# Beta\n\nSaved from the panel.\n', mtime: note.mtime });
+    assert.equal(saved.ok, true, JSON.stringify(saved));
+    const reread = await api('/api/graph3d/note', { vault: 'Main', path: 'Beta.md' });
+    assert.match(reread.body, /Saved from the panel/);
+
+    const refused = await api('/api/graph3d/note/edit', { vault: 'Main', path: 'Hidden Note.md', content: 'Tampered.\n', mtime: Date.now() });
+    assert.ok(refused.error || refused.message, 'a private note must refuse the edit, not write it');
   } finally { s.server.close(); }
 });
 

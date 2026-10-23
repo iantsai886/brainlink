@@ -20,3 +20,6 @@
 .notes3d-body blockquote { margin: 6px 0; padding-left: 10px; border-left: 3px solid var(--line); color: var(--muted); }
 .notes3d-body a.wikilink { color: var(--accent); text-decoration: none; border-bottom: 1px dashed var(--accent); }
 .notes3d-links .chip { margin: 2px 4px 2px 0; }
+.notes3d-actions { display: flex; justify-content: flex-end; }
+.notes3d-editor textarea { min-height: 220px; font-size: 13px; }
+.notes3d-editor .error-box { margin-top: 8px; }

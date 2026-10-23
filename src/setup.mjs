@@ -20,7 +20,7 @@ import { findObsidianVaults, nestedVaults } from './obsidian.mjs';
 import { syncSettings, chooseSync, suggestFolders, PROVIDERS, PROVIDER_LABELS } from './sync/settings.mjs';
 import { sessionsService } from './host.mjs';
 import { addAgent, renameAgent, removeAgent, revokeAgent, markConnected, findAgentByToken, publicAgent, localAgentSnippet, remoteAgentSnippet } from './mcp-agents.mjs';
-import { buildGraph3D, noteDetail3D } from './graph3d.mjs';
+import { buildGraph3D, noteDetail3D, editNote3D } from './graph3d.mjs';
 import { snapshotSettings, chooseSnapshot, suggestSnapshotFolder, clearSnapshot, startSnapshotWatcher, writeSnapshotOnce, loadSnapshotStatus, saveSnapshotStatus } from './snapshot.mjs';
 import { listHandoffs } from './writes.mjs';
 
@@ -439,6 +439,15 @@ export async function startSetup(opts = {}) {
       const ctx = createContext(cfg, { env: { ...env, BRAINLINK_SEMANTIC: '0' } });
       if (!b.vault || !ctx.enabled.includes(b.vault)) throw new Error('Unknown vault.');
       return noteDetail3D(ctx, b.vault, String(b.path || ''));
+    },
+    // A3: the 3D graph panel's Edit button. Same token/127.0.0.1-only gate as every other route
+    // here; every vault-guard refusal (private, excluded, symlink escape, changed-on-disk) lives
+    // in editNote3D itself, not this thin route.
+    'POST /api/graph3d/note/edit': async (b) => {
+      const cfg = await loadConfig(file);
+      const ctx = createContext(cfg, { env: { ...env, BRAINLINK_SEMANTIC: '0' } });
+      if (!b.vault || !ctx.enabled.includes(b.vault)) throw new Error('Unknown vault.');
+      return editNote3D(ctx, b.vault, String(b.path || ''), { content: b.content, mtime: b.mtime });
     },
     'POST /api/sample': async () => {
       const dest = path.join(home, 'Documents', 'BrainLink Sample Vault');
