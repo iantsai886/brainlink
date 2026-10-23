@@ -7,7 +7,7 @@
   "bin": { "brainlink": "bin/brainlink.mjs" },
   "dependencies": { "brainlink-store": "file:../brainlink-store" },
   "scripts": {
-    "test": "node --import ./test/_preload.mjs --test test/",
+    "test": "node --import ./test/_preload.mjs --test \"test/*.test.mjs\"",
     "setup": "node bin/brainlink.mjs setup",
     "build:mac": "bash packaging/macos/build-pkg.sh",
     "build:mac-zip": "bash packaging/macos/build-zip.sh",

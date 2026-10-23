@@ -199,8 +199,24 @@ test('session sharing settings: shareSummaries=true opts in to imported-session 
     const id = list.sessions[0].id;
     const read = await call(mcp, 'session_read', { id });
     assert.equal(read.private, true);
-    assert.ok(Array.isArray(read.key_turns), 'the default (non-full) read works and returns key-turn snippets, not an error');
+    assert.deepEqual(read.key_turns, [], 'sharing summaries does not disclose private transcript excerpts');
   });
+});
+
+test('private imported transcript needs full-text consent before excerpts appear', async () => {
+  const { env } = await mcpWithHome();
+  const store = await openSessionStore(env);
+  const saved = await store.putSession({ client: 'codex', source_id: 'private-excerpt', project: '/fictional',
+    title: 'Fictional project', summary: 'A safe project summary.', private: true,
+    started_at: '2026-10-10T00:00:00Z', note_refs: [],
+    messages: [{ role: 'user', at: '2026-10-10T00:00:00Z', text: 'PLANTED_PRIVATE_CLIENT_NOTE' }] });
+  const summaryOnly = await sessionRead(store, { id: saved.id, allow_imported_private: true });
+  assert.equal(summaryOnly.summary, 'A safe project summary.');
+  assert.deepEqual(summaryOnly.key_turns, []);
+  assert.ok(!JSON.stringify(summaryOnly).includes('PLANTED_PRIVATE_CLIENT_NOTE'));
+  const withConsent = await sessionRead(store, { id: saved.id, allow_imported_private: true,
+    allow_imported_full_private: true });
+  assert.match(withConsent.key_turns[0].text, /PLANTED_PRIVATE_CLIENT_NOTE/);
 });
 
 test('regression: a caller-supplied include_private=true has no effect, on session_list or session_read, full or not', async () => {

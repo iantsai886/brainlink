@@ -81,14 +81,17 @@ export async function sessionRead(store, a = {}) {
   const summaryOk = a.include_private || (a.allow_imported_private && relaxable);
   if (session.private && !summaryOk) return { id: session.id, private: true, message: PRIVATE_MESSAGE };
   const base = summaryOf(session);
+  const fullOk = a.include_private || (a.allow_imported_full_private && relaxable);
   if (a.full) {
-    const fullOk = a.include_private || (a.allow_imported_full_private && relaxable);
     if (session.private && !fullOk) return { ...base, message: PRIVATE_FULL_MESSAGE };
     const batch = await store.readSession(a.id, { offset: a.offset || 0, limit: FULL_PAGE_FETCH });
     const messages = fitByTokens(batch.messages, FULL_PAGE_TOKENS);
     const nextOffset = (a.offset || 0) + messages.length < session.message_count ? (a.offset || 0) + messages.length : null;
     return { ...base, messages: messages.map((m) => ({ ...m, text: redactText(m.text) })), next_offset: nextOffset };
   }
+  // Key turns are transcript excerpts, not summary metadata. Summary permission alone must
+  // never grant access to the body of a private imported session.
+  if (session.private && !fullOk) return { ...base, key_turns: [] };
   // summary + metadata + up to 3 key-turn snippets — comfortably under the ~800 token default budget
   return { ...base, key_turns: await keyTurns(store, a.id, session.message_count) };
 }
