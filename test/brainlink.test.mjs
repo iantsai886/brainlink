@@ -937,10 +937,11 @@ test('P0-2: a root .brainlinkignore exclusion applies at any depth, not only to 
 
   // snapshot
   const dest = await tmp('p02-snapshot-dest');
-  const ctx = ctxOf(cfg);
+  const snapEnv = { BRAINLINK_HOME: await tmp('p02-snapshot-home'), BRAINLINK_SEMANTIC: '0' };
+  const ctx = ctxOf(cfg, snapEnv);
   const { chooseSnapshot, writeSnapshotOnce } = await import('../src/snapshot.mjs');
   const withSnapshot = chooseSnapshot(cfg, { enabled: true, folder: dest });
-  await writeSnapshotOnce(ctx, withSnapshot, {});
+  await writeSnapshotOnce(ctx, withSnapshot, snapEnv);
   const { existsSync } = await import('node:fs');
   assert.ok(!existsSync(path.join(dest, 'BrainLink Shared', 'Acme Studio', 'sub', '00 Home')), 'nested excluded folder never reaches the snapshot');
   assert.ok(existsSync(path.join(dest, 'BrainLink Shared', 'Acme Studio', 'sub', 'Visible.md')));
