@@ -76,7 +76,7 @@ ol.todo li { padding-left: 4px; }
 .settings[open] > summary { margin-bottom: 12px; }
 .settings > div { display: grid; gap: 16px; }
 .working { opacity: .6; pointer-events: none; }
-.brain { display: grid; grid-template-columns: 1.4fr 1fr; gap: 18px; align-items: start; }
+.brain { display: grid; grid-template-columns: 1.7fr 1fr; gap: 18px; align-items: start; }
 @media (max-width: 720px) { .brain { grid-template-columns: 1fr; } }
 #graph { width: 100%; aspect-ratio: 4 / 3; max-width: 100%; border-radius: 10px; background: var(--bg); border: 1px solid var(--line); display: block; }
 .stats { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; }
@@ -191,6 +191,10 @@ ol.todo li { padding-left: 4px; }
   <section id="sessions-panel" hidden>
     <h2 data-i18n="sessions.title"></h2>
     <p class="hint" id="sessions-hint"></p>
+    <div class="notice" id="sessions-private-notice" hidden style="margin-bottom:10px">
+      <span data-i18n="sessions.privateNotice"></span>
+      <button class="link" id="sessions-private-notice-btn" data-i18n="sessions.privateNoticeBtn"></button>
+    </div>
     <div class="card" style="margin-bottom:10px">
       <b data-i18n="sessions.shareTitle"></b>
       <label class="muted" style="display:flex;flex-direction:row;gap:6px;align-items:center;margin-top:6px"><input type="checkbox" id="sess-share-summaries" style="width:auto"><span data-i18n="sessions.shareSummariesLabel"></span></label>
@@ -199,6 +203,12 @@ ol.todo li { padding-left: 4px; }
     <div class="row" style="margin-bottom:10px"><label class="muted" style="display:flex;flex-direction:row;gap:6px;align-items:center"><input type="checkbox" id="sess-private" style="width:auto"><span data-i18n="sessions.showPrivate"></span></label></div>
     <div id="sessions-list" class="cards"></div>
     <div id="session-detail" style="margin-top:12px"></div>
+  </section>
+
+  <section id="handoffs-panel" hidden>
+    <h2 data-i18n="handoffs.title"></h2>
+    <p class="hint" data-i18n="handoffs.hint"></p>
+    <div id="handoffs-list" class="cards"></div>
   </section>
 
   <details class="settings" id="settings"><summary data-i18n="settings.summary"></summary><div>
@@ -277,7 +287,7 @@ ol.todo li { padding-left: 4px; }
       <div><b id="note-title"></b><div class="mono muted" id="note-path" style="font-size:12px"></div></div>
       <button class="link" id="note-close" data-i18n="note.close"></button>
     </div>
-    <div id="note-body" class="mono" style="margin-top:12px"></div>
+    <div id="note-body" style="margin-top:12px"></div>
   </div>
 </div>
 <div id="folder-fallback-modal" class="modal-overlay" hidden>
@@ -425,6 +435,29 @@ function renderSessions(list) {
   }
   $('sessions-list').innerHTML = html;
 }
+
+// P0: two-AI handoff receipt. /api/handoffs already drops anything private or under an
+// excluded ("00 Home"-style) folder server-side (see src/writes.mjs listHandoffs), so this only
+// has to render what comes back -- never a reason to re-check privacy here.
+async function loadHandoffs() {
+  $('handoffs-list').innerHTML = `<p class="skeleton">${esc(t('handoffs.loading'))}</p>`;
+  try {
+    const r = await api('POST', '/api/handoffs', {});
+    $('handoffs-panel').hidden = !r.enabled;
+    if (r.enabled) renderHandoffs(r.receipts);
+  } catch (e) { $('handoffs-list').innerHTML = `<p class="error-box">${esc(t('handoffs.loadError', { msg: e.message }))}</p>`; }
+}
+function renderHandoffs(list) {
+  if (!list.length) { $('handoffs-list').innerHTML = `<p class="muted">${esc(t('handoffs.empty'))}</p>`; return; }
+  $('handoffs-list').innerHTML = list.map((h) => `<div class="card">
+      <div class="row" style="justify-content:space-between">
+        <b><span class="badge" style="background:${clientColor(h.from)}">${esc(clientLabel(h.from))}</span> → <span class="badge" style="background:${clientColor(h.to)}">${esc(clientLabel(h.to))}</span></b>
+        <span class="pill ${h.picked_up ? 'on' : ''}">${h.picked_up ? esc(t('handoffs.pickedUp')) : esc(t('handoffs.notPickedUp'))}</span>
+      </div>
+      <div style="font-size:14px">${esc(h.subject)}</div>
+      <div class="muted" style="font-size:13px">${esc(t('handoffs.sentAt', { when: h.sent_at ? new Date(h.sent_at).toLocaleString(LOCALE) : '' }))}${h.picked_up ? ' · ' + esc(t('handoffs.pickedUpBy', { who: clientLabel(h.picked_up_by), when: h.picked_up_at ? new Date(h.picked_up_at).toLocaleString(LOCALE) : '' })) : ''}</div>
+    </div>`).join('');
+}
 function renderSyncSuggestions(provider, suggested) {
   const list = (suggested && suggested[provider]) || [];
   $('sync-suggestions').innerHTML = list.length ? t('syncOnb.found', { list: list.map((p) => `<button type="button" class="link" data-sync-pick="${esc(p)}">${esc(p)}</button>`).join(' ') }) : '';
@@ -544,6 +577,60 @@ async function ask() {
 $('ask-go').onclick = ask;
 $('ask-q').onkeydown = (e) => { if (e.key === 'Enter') ask(); };
 
+// ---- P1b: the citation/source note modal renders formatted text, not raw Markdown, and turns
+// [[wikilinks]] into real links -- but only for a target the server already confirmed is visible
+// (api/note's `wikilinks`, from resolveNoteWikilinks in src/links.mjs). A dead link and a link to
+// a private/excluded note both come back `resolved: null` and render as identical plain text:
+// nothing here can tell a reader which one it was. ----
+function renderNoteInline(text, linkMap) {
+  // Unprintable control characters as placeholders: they never occur in real note text and are
+  // left untouched by esc(), so a code span or wikilink can always be swapped back in afterward
+  // without any risk of colliding with an ordinary number already in the note (e.g. "Section 2").
+  const codes = [];
+  let s = String(text).replace(/`([^`]+)`/g, (_, c) => { codes.push(c); return `\x00${codes.length - 1}\x00`; });
+  const wikis = [];
+  s = s.replace(/\[\[[^\]]+\]\]/g, (raw) => { wikis.push(raw); return `\x01${wikis.length - 1}\x01`; });
+  s = esc(s);
+  s = s.replace(/\[([^\]]+)\]\(([^)\s]+)\)/g, (_, label, url) => (/^(https?:|obsidian:)/i.test(url) ? `<a href="${esc(url)}" target="_blank" rel="noopener">${esc(label)}</a>` : esc(label)));
+  s = s.replace(/\*\*([^*]+)\*\*/g, '<strong>$1</strong>');
+  s = s.replace(/\*([^*]+)\*/g, '<em>$1</em>');
+  s = s.replace(/(^|[^\w])_([^_]+)_(?!\w)/g, '$1<em>$2</em>');
+  s = s.replace(/\x00(\d+)\x00/g, (_, i) => `<code>${esc(codes[i])}</code>`);
+  s = s.replace(/\x01(\d+)\x01/g, (_, i) => {
+    const w = linkMap.get(wikis[i]);
+    if (!w) return esc(wikis[i].replace(/^\[\[|\]\]$/g, '').split('|').pop().trim());
+    return w.resolved ? `<a href="#" data-open-note="${esc(w.resolved.vault)}::${esc(w.resolved.path)}">${esc(w.label)}</a>` : esc(w.label);
+  });
+  return s;
+}
+function renderNoteBody(md, wikilinks, vault) {
+  const linkMap = new Map((wikilinks || []).map((w) => [w.raw, { ...w, resolved: w.resolved ? { ...w.resolved, vault } : null }]));
+  const lines = String(md || '').replace(/\r\n/g, '\n').split('\n');
+  const out = [];
+  let list = null;
+  const flush = () => { if (list) { out.push(`<${list.type}>${list.items.map((it) => `<li>${renderNoteInline(it, linkMap)}</li>`).join('')}</${list.type}>`); list = null; } };
+  let i = 0;
+  while (i < lines.length) {
+    const line = lines[i];
+    if (/^```/.test(line)) { flush(); const buf = []; i++; while (i < lines.length && !/^```/.test(lines[i])) { buf.push(lines[i]); i++; } i++; out.push(`<pre><code>${esc(buf.join('\n'))}</code></pre>`); continue; }
+    const h = line.match(/^(#{1,6})\s+(.*)$/);
+    if (h) { flush(); const lvl = Math.min(6, h[1].length + 2); out.push(`<h${lvl}>${renderNoteInline(h[2], linkMap)}</h${lvl}>`); i++; continue; }
+    const bq = line.match(/^>\s?(.*)$/);
+    if (bq) { flush(); out.push(`<blockquote>${renderNoteInline(bq[1], linkMap)}</blockquote>`); i++; continue; }
+    const ul = line.match(/^[-*]\s+(.*)$/);
+    if (ul) { if (!list || list.type !== 'ul') { flush(); list = { type: 'ul', items: [] }; } list.items.push(ul[1]); i++; continue; }
+    const ol = line.match(/^\d+\.\s+(.*)$/);
+    if (ol) { if (!list || list.type !== 'ol') { flush(); list = { type: 'ol', items: [] }; } list.items.push(ol[1]); i++; continue; }
+    if (!line.trim()) { flush(); i++; continue; }
+    flush();
+    const buf = [line]; i++;
+    while (i < lines.length && lines[i].trim() && !/^(#{1,6}\s|>|[-*]\s|\d+\.\s|```)/.test(lines[i])) { buf.push(lines[i]); i++; }
+    out.push(`<p>${renderNoteInline(buf.join(' '), linkMap)}</p>`);
+  }
+  flush();
+  return out.join('\n') || `<p class="muted">${esc(t('note.empty'))}</p>`;
+}
+
 // ---- Source chips / session refs open the real note, read-only, in a modal ----
 async function openNote(vault, p) {
   $('note-modal').hidden = false;
@@ -552,7 +639,7 @@ async function openNote(vault, p) {
   $('note-body').innerHTML = `<p class="skeleton">${esc(t('note.loading'))}</p>`;
   try {
     const n = await api('POST', '/api/note', { vault, path: p });
-    $('note-body').textContent = n.body.trim() || t('note.empty');
+    $('note-body').innerHTML = renderNoteBody(n.body, n.wikilinks, vault);
   } catch (e) { $('note-body').innerHTML = `<p class="error-box">${esc(t('note.loadError', { msg: e.message }))}</p>`; }
 }
 function closeNote() { $('note-modal').hidden = true; }
@@ -622,7 +709,13 @@ async function load() {
   $('sess-share-summaries').checked = Boolean(S.sessions_sharing?.shareSummaries);
   $('sess-share-full').checked = Boolean(S.sessions_sharing?.shareFullText);
   $('sess-share-full').disabled = !$('sess-share-summaries').checked;
+  // P1a: sessions were imported (or logged) but stay invisible to every connected AI because
+  // sharing is off -- say so plainly, with one button that turns the existing switch on, instead
+  // of a silent gap between "sessions exist" and "no AI can ever see them".
+  $('sessions-private-notice').hidden = !(S.sessions_has_private && !S.sessions_sharing?.shareSummaries);
   if (hasVault && !onboardingSync) loadSessions().catch(() => {});
+  $('handoffs-panel').hidden = !hasVault || onboardingSync;
+  if (hasVault && !onboardingSync) loadHandoffs().catch(() => {});
   $('cfgpath').textContent = S.config_path;
   $('n1').className = 'step' + (S.vaults.length ? ' done' : '');
   $('vaults').innerHTML = S.vaults.length ? S.vaults.map((v, i) => `<div class="card"><div class="row" style="justify-content:space-between"><b>${esc(v.name)}</b><span class="pill ${v.exists ? 'on' : ''}">${v.exists ? esc(t('vault.notesCount', { n: v.notes })) : esc(t('vault.missing'))}</span></div><div class="mono muted">${esc(v.path)}</div><div class="row muted" style="font-size:13px">${v.private ? esc(t('vault.privateShort')) + ' · ' : ''}${esc(t('vault.writes'))}: ${esc(v.writes)} · ${esc(t('vault.intake'))}: ${esc(v.flat ? 'root' : v.intake_folder)}${v.decisions.length ? ' · ' + esc(t('vault.decisions')) + ' ' + esc(v.decisions.join('/')) : ''}<button class="link" data-remove="${esc(v.name)}">${esc(t('vault.removeBtn'))}</button></div>
@@ -720,6 +813,11 @@ document.addEventListener('click', (e) => {
   if (d.syncOnbPick) $('sync-onb-folder').value = d.syncOnbPick;
 });
 $('sess-private').onchange = () => loadSessions().catch(() => {});
+$('sessions-private-notice-btn').onclick = () => act(async () => {
+  const r = await api('POST', '/api/sessions/sharing', { shareSummaries: true, shareFullText: $('sess-share-full').checked });
+  S.sessions_sharing = r.sessions;
+  toast(t('sessions.shareToastSaved'));
+});
 $('sess-share-summaries').onchange = () => act(async () => {
   const shareSummaries = $('sess-share-summaries').checked;
   const r = await api('POST', '/api/sessions/sharing', { shareSummaries, shareFullText: $('sess-share-full').checked });
@@ -742,7 +840,10 @@ $('test').onclick = () => {
   $('test-out').innerHTML = `<p class="skeleton">${esc(t('test.searching'))}</p>`;
   act(async () => { const r = await api('POST', '/api/test', { query: $('q').value }); $('test-out').innerHTML = r.results.length ? `<div class="cards">${r.results.map((x) => `<div class="card"><b>${esc(x.title)}</b><span class="mono muted">${esc(r.vault)}/${esc(x.path)}${x.heading ? ' › ' + esc(x.heading) : ''}</span></div>`).join('')}</div>` : `<p class="muted">${esc(t('test.noMatches'))}</p>`; });
 };
-$('done').onclick = async () => { try { await api('POST', '/api/quit'); } catch {} document.body.innerHTML = `<main><section><h2>${esc(t('quit.closedTitle'))}</h2><p class="hint">${esc(t('quit.closedHint'))}</p></section></main>`; };
+// Closes this browser tab's view only. BrainLink's background service (the dashboard process
+// that also keeps the shared snapshot folder in sync) must keep running — it is not tied to
+// whether this tab is open, so Done never calls an API that would stop it.
+$('done').onclick = () => { document.body.innerHTML = `<main><section><h2>${esc(t('quit.closedTitle'))}</h2><p class="hint">${esc(t('quit.closedHint'))}</p></section></main>`; };
 $('q').onkeydown = (e) => { if (e.key === 'Enter') $('test').click(); };
 
 async function boot() {

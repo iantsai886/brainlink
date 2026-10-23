@@ -79,3 +79,19 @@ test('`brainlink ui`: the Terminal shows the URL with the token masked, not in f
     assert.match(line, /\?t=.{1,4}…$/, `expected a masked token, got: ${line}`);
   } finally { child.kill(); }
 });
+
+test('P1e: "Done, close setup" never stops the background server', async () => {
+  const home = await tmp('done-no-quit-home');
+  const s = await launch('ui', { ...process.env, BRAINLINK_HOME: home });
+  try {
+    // There is no server-side quit route to call anymore.
+    assert.equal((await s.api('POST', '/api/quit', {})).status, 404);
+    // The server (and whatever background work it does, e.g. the shared-snapshot watcher) is
+    // still up afterwards — proven by a normal call still succeeding.
+    assert.equal((await s.api('GET', '/api/state')).status, 200);
+    // The page's own Done handler must not call any quit-like endpoint either.
+    const html = await readFile(path.join(ROOT, 'ui', 'index.html'), 'utf8');
+    const doneHandler = html.match(/\$\('done'\)\.onclick = .*?;(?=\n)/s)[0];
+    assert.doesNotMatch(doneHandler, /api\(['"]POST['"],\s*['"]\/api\/quit['"]/);
+  } finally { s.stop(); }
+});

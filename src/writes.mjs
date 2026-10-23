@@ -5,7 +5,7 @@ import { writeFile, appendFile, readdir, readFile, stat, open, mkdir } from 'nod
 import path from 'node:path';
 import { TEMPLATES, renderTemplate } from './templates.mjs';
 import { suggestLinks, relatedSection, safeUpdateMap } from './links.mjs';
-import { vault, vaultRoot, safeJoin, findSecrets, zonedNow, parseFrontmatter } from './core.mjs';
+import { vault, vaultRoot, safeJoin, findSecrets, zonedNow, parseFrontmatter, isExcludedPath, isPrivateMeta, fmSaysPrivate } from './core.mjs';
 
 export const slug = (s) => String(s || '').toLowerCase().replace(/[^a-z0-9㐀-鿿]+/g, '-').replace(/^-|-$/g, '') || 'unknown';
 
@@ -223,18 +223,27 @@ export async function sendHandoff(ctx, a, now = new Date()) {
   return commitNew(ctx, h.vault, rel, `${fm}\n\n# ${subject}\n\n${madeBy(id)}\n\n## Body\n\n${String(a.body).trim()}\n`, a.confirm);
 }
 
+// P0: a handoff receipt (Setup UI) reads this same list, so a handoff mailbox folder that ends up
+// under an excluded ("00 Home"-style) folder, or a handoff note hand-edited with `private: true`,
+// must never surface here either -- same fail-closed check readNote() uses for ordinary notes.
 export async function listHandoffs(ctx, { to, limit = 10 } = {}) {
   const h = handoffBox(ctx);
-  const dir = safeJoin(vaultRoot(ctx, h.vault), h.folder);
+  const root = vaultRoot(ctx, h.vault);
+  const dir = safeJoin(root, h.folder);
   let names = [];
   try { names = (await readdir(dir)).filter((f) => HANDOFF_RE.test(f)).sort().reverse(); } catch {}
   const want = to ? slug(to) : null;
   const out = [];
   for (const f of names) {
+    const rel = `${h.folder}/${f}`;
+    if (await isExcludedPath(root, rel)) continue;
     const m = f.match(/-from-([a-z0-9-]+?)-to-([a-z0-9-]+?)-/);
     if (want && m && !(m[2] === want || m[2] === 'all' || m[2].startsWith(want))) continue;
-    const { meta, body } = parseFrontmatter(await readFile(safeJoin(dir, f), 'utf8'));
-    out.push({ path: `${h.vault}/${h.folder}/${f}`, from: m?.[1], to: m?.[2], status: meta.status || '', priority: meta.priority || '', subject: meta.subject || f, decision_needed: meta.decision_needed || '', excerpt: body.trim().slice(0, 300) });
+    const { meta, body, frontmatter: fmBlock } = parseFrontmatter(await readFile(safeJoin(dir, f), 'utf8'));
+    if (isPrivateMeta(meta) || fmSaysPrivate(fmBlock)) continue;
+    const dm = f.match(/^(\d{4}-\d{2}-\d{2})-(\d{2})(\d{2})-/);
+    const sent_at = meta.written_at || (dm ? `${dm[1]}T${dm[2]}:${dm[3]}:00` : '');
+    out.push({ path: `${h.vault}/${rel}`, from: m?.[1], to: m?.[2], status: meta.status || '', priority: meta.priority || '', subject: meta.subject || f, decision_needed: meta.decision_needed || '', excerpt: body.trim().slice(0, 300), ack_of: meta.ack_of || '', sent_at });
     if (out.length >= limit) break;
   }
   return out;

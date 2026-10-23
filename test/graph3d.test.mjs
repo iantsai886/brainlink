@@ -156,3 +156,45 @@ test('ui/notes3d.js + ui/notes3d.css: the canvas is resized from the real contai
   assert.match(src, /requestAnimationFrame\(resizeToContainer\)/, 'the initial size must be re-applied a frame later too, after layout has definitely settled');
   assert.match(css, /\.notes3d-canvas\s*>\s*div,\s*\.notes3d-canvas canvas\s*\{[^}]*max-width:\s*100%[^}]*max-height:\s*100%/, 'a hard CSS cap so a stale/0 clientWidth read can never visibly overflow the container');
 });
+
+// ---- P1c: larger default size, permanent truncated node labels, readable in both themes ----
+
+test('ui/notes3d.css: the map is larger by default than the old 4:3 box', async () => {
+  const { readFile } = await import('node:fs/promises');
+  const css = await readFile(new URL('../ui/notes3d.css', import.meta.url), 'utf8');
+  const block = css.match(/\.notes3d-wrap\s*\{[^}]*\}/)[0];
+  assert.doesNotMatch(block, /aspect-ratio:\s*4\s*\/\s*3/, 'must no longer be the old, smaller 4:3 box');
+  assert.match(block, /min-height:\s*\d+px/, 'needs a height floor so it is never cramped, independent of aspect-ratio');
+});
+
+test('truncateLabel: real behavior — short titles pass through, long ones truncate with an ellipsis, never exceeding the cap', async () => {
+  const { readFile } = await import('node:fs/promises');
+  const src = await readFile(new URL('../ui/notes3d.js', import.meta.url), 'utf8');
+  const capMatch = src.match(/LABEL_MAX_CHARS\s*=\s*(\d+)/);
+  assert.ok(capMatch, 'LABEL_MAX_CHARS constant must exist');
+  const cap = Number(capMatch[1]);
+  const fnSrc = src.match(/function truncateLabel\(title\) \{[\s\S]*?\n  \}/)[0];
+  const truncateLabel = new Function(`const LABEL_MAX_CHARS = ${cap};\n${fnSrc}\nreturn truncateLabel;`)();
+  assert.equal(truncateLabel('Short title'), 'Short title');
+  assert.equal(truncateLabel(''), '');
+  assert.equal(truncateLabel(null), '');
+  const long = 'A very long note title that definitely exceeds the label budget';
+  const truncated = truncateLabel(long);
+  assert.ok(truncated.length <= cap, `truncated label "${truncated}" must be at most ${cap} chars`);
+  assert.ok(truncated.endsWith('…'), 'truncated labels must end with an ellipsis so it is clear text was cut');
+  assert.equal(truncateLabel('x'.repeat(cap)), 'x'.repeat(cap), 'a title exactly at the cap must not be truncated');
+});
+
+test('ui/notes3d.js: nodes get a permanent, theme-aware label built from the real title (not just the hover tooltip)', async () => {
+  const { readFile } = await import('node:fs/promises');
+  const src = await readFile(new URL('../ui/notes3d.js', import.meta.url), 'utf8');
+  assert.match(src, /\.nodeThreeObjectExtend\(true\)/, 'labels must be added alongside the node sphere, not replace it');
+  assert.match(src, /\.nodeThreeObject\(\(n\) => \(labelled\.has\(n\.id\) \? makeLabelSprite\(truncateLabel\(n\.title\), inkColor, bgColor\) : null\)\)/);
+  // Readable in both themes: driven from the same --ink/--bg custom properties every other
+  // themed element on this page uses, not a hardcoded color.
+  assert.match(src, /inkColor\s*=\s*css\.getPropertyValue\('--ink'\)/);
+  assert.match(src, /bgColor\s*=\s*css\.getPropertyValue\('--bg'\)/);
+  assert.match(src, /strokeStyle\s*=\s*bgColor/, 'the label must be outlined in the background color so it stays legible over any node color');
+  // Large vaults stay readable: not every node gets a permanent label once there are many.
+  assert.match(src, /LABEL_CAP/);
+});

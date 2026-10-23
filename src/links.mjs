@@ -4,7 +4,7 @@
 // even for people who never open Obsidian. Only new text is written: old notes are not edited.
 import { readFile, writeFile, mkdir, stat } from 'node:fs/promises';
 import path from 'node:path';
-import { findMentions, suggestRelated, terms, collection } from './graph.mjs';
+import { findMentions, suggestRelated, terms, collection, makeResolver } from './graph.mjs';
 import { loadVault, noteTerms, eligibleFor, vault, vaultRoot, safeJoin, parseFrontmatter, zonedNow } from './core.mjs';
 
 // How to write a link to note i: by title when the title is unique, else by path.
@@ -29,6 +29,27 @@ export async function suggestLinks(ctx, vaultName, text, { limit = 5, excludeRel
       if (s.score < 0.05) continue;
       out.push({ target: linkTarget(index, s.j), title: index.notes[s.j].title, why: 'similar', shared: s.shared.slice(0, 3) });
     }
+  }
+  return out;
+}
+
+// P1b: resolves every [[wikilink]] in a note's body against this already-loaded, privacy-filtered
+// vault index, for a citation modal that must render real links to real notes and never leak
+// whether a dead-looking link actually points at a private note — both come back `resolved: null`,
+// indistinguishable from each other. Uses the exact same resolver linkGraph() uses, so a link that
+// would appear as a graph edge here resolves the same way, and the same private/generated check
+// every other read path in this codebase uses (core.mjs's index.notes[i].private / .generated).
+export function resolveNoteWikilinks(index, body) {
+  const resolve = makeResolver(index.notes);
+  const visible = (i) => !index.notes[i].generated && !index.notes[i].private;
+  const out = [];
+  const re = /\[\[([^\]|]+)(?:\|([^\]]+))?\]\]/g;
+  let m;
+  while ((m = re.exec(String(body || '')))) {
+    const target = m[1].trim();
+    const label = (m[2] || target).trim();
+    const i = resolve(target);
+    out.push({ raw: m[0], target, label, resolved: i !== undefined && visible(i) ? { path: index.notes[i].rel, title: index.notes[i].title } : null });
   }
   return out;
 }

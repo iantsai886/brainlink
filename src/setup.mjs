@@ -1,7 +1,7 @@
 // Setup UI backend: a local-only web app (127.0.0.1, random session token) that picks the
 // vault folder, applies a rule pack and connects AI clients.
 import { createServer } from 'node:http';
-import { readFile, readdir, stat, cp, mkdir, writeFile } from 'node:fs/promises';
+import { readFile, stat, cp, mkdir, writeFile } from 'node:fs/promises';
 import { randomBytes, timingSafeEqual } from 'node:crypto';
 import { execFile } from 'node:child_process';
 import { homedir } from 'node:os';
@@ -14,6 +14,7 @@ import { ROOT, launchSpec, readActivity, refreshMap, logActivity } from './runti
 import { detectEmbedder } from './embed.mjs';
 import { vaultHealth } from './insights.mjs';
 import { loadVault } from './core.mjs';
+import { resolveNoteWikilinks } from './links.mjs';
 import { VERSION, createMcp } from './server.mjs';
 import { findObsidianVaults, nestedVaults } from './obsidian.mjs';
 import { syncSettings, chooseSync, suggestFolders, PROVIDERS, PROVIDER_LABELS } from './sync/settings.mjs';
@@ -21,6 +22,7 @@ import { sessionsService } from './host.mjs';
 import { addAgent, renameAgent, removeAgent, revokeAgent, markConnected, findAgentByToken, publicAgent, localAgentSnippet, remoteAgentSnippet } from './mcp-agents.mjs';
 import { buildGraph3D, noteDetail3D } from './graph3d.mjs';
 import { snapshotSettings, chooseSnapshot, suggestSnapshotFolder, clearSnapshot, startSnapshotWatcher, writeSnapshotOnce, loadSnapshotStatus, saveSnapshotStatus } from './snapshot.mjs';
+import { listHandoffs } from './writes.mjs';
 
 const UI_STATIC_TYPES = { '.js': 'text/javascript; charset=utf-8', '.css': 'text/css; charset=utf-8', '.json': 'application/json; charset=utf-8' };
 const UI_DIR = path.join(ROOT, 'ui');
@@ -51,14 +53,15 @@ export function pickFolder(os = process.platform, prompt = 'Choose your Obsidian
   });
 }
 
-async function countNotes(dir, n = 0, depth = 0) {
-  if (depth > 12) return n;
-  for (const f of await readdir(dir, { withFileTypes: true }).catch(() => [])) {
-    if (f.name.startsWith('.') || f.name === 'node_modules') continue;
-    if (f.isDirectory()) n = await countNotes(path.join(dir, f.name), n, depth + 1);
-    else if (f.name.toLowerCase().endsWith('.md')) n++;
-  }
-  return n;
+// P1a: the vault card's note count must count only what the user/AI can actually see -- the same
+// definition vaultHealth/the Brain map stats use (excludes private notes, generated notes, and
+// anything under an excluded folder, which never even reaches the index). A raw recursive .md
+// file count here previously disagreed with that visible count (e.g. showing 8 when only 2 notes
+// were actually visible), which is confusing on its own and actively misleading once some of the
+// difference is private content.
+async function visibleNoteCount(ctx, vaultName) {
+  const index = await loadVault(ctx, vaultName);
+  return index.notes.filter((n) => !n.generated && !n.private).length;
 }
 
 // A search snippet is raw note text (headings, **bold**, `code`); strip the Markdown so the
@@ -78,7 +81,9 @@ export async function startSetup(opts = {}) {
   const sessions = sessionsService(env); // src/host.mjs: cross-session reads over src/sessions/* (importAll, session_list/read semantics)
   const html = await readFile(path.join(ROOT, 'ui', 'index.html'), 'utf8');
   let port = opts.port ?? 0;
-  // When started from the app (no terminal), exit after idleMinutes without requests or on Done.
+  // When started from the app (no terminal), exit after idleMinutes without requests. Closing
+  // the Done button in the browser only hides that tab's view (see ui/index.html) — it must
+  // never stop this background process, so idle timeout is the only thing that quits it here.
   let idleTimer = null;
   const quit = () => setTimeout(() => { snapshotWatcher?.stop(); (opts.onQuit ? opts.onQuit() : server.close()); }, 100);
   const touch = () => { if (!opts.idleMinutes) return; clearTimeout(idleTimer); idleTimer = setTimeout(quit, opts.idleMinutes * 60e3); idleTimer.unref?.(); };
@@ -108,11 +113,12 @@ export async function startSetup(opts = {}) {
 
   async function state() {
     const cfg = await loadConfig(file);
+    const ctx = createContext(cfg, { env });
     const vaults = [];
     for (const v of cfg.vaults) {
       const ok = await stat(v.path).then((s) => s.isDirectory(), () => false);
       const excluded = ok ? await readExcludedFolders(v.path) : { active: [], suggested: [] };
-      vaults.push({ ...v, exists: ok, notes: ok ? await countNotes(v.path) : 0, excluded_folders: excluded.active, excluded_suggestions: excluded.suggested });
+      vaults.push({ ...v, exists: ok, notes: ok ? await visibleNoteCount(ctx, v.name) : 0, excluded_folders: excluded.active, excluded_suggestions: excluded.suggested });
     }
     return {
       version: VERSION, config_path: file, os, locale: cfg.locale,
@@ -126,6 +132,11 @@ export async function startSetup(opts = {}) {
       obsidian_vaults: (await findObsidianVaults({ home, os, env })).filter((o) => !cfg.vaults.some((v) => path.resolve(v.path) === path.resolve(o.path))),
       sync: { ...syncSettings(cfg), providers: PROVIDERS, provider_labels: PROVIDER_LABELS, suggested_folders: suggestFolders(home) },
       sessions_sharing: cfg.sessions,
+      // P1a: imported sessions default to private, and a private session is invisible to every
+      // connected AI while sessions.shareSummaries is off -- regardless of the "Show private
+      // sessions" checkbox below, which only controls what this local Setup UI displays. Peeking
+      // at a small page is enough to know "at least one exists"; the UI doesn't need the full list.
+      sessions_has_private: ((await sessions.list({ include_private: true, limit: 20 }).catch(() => ({ sessions: [] }))).sessions || []).some((x) => x.private),
       snapshot: { ...snapshotSettings(cfg), suggested_folder: suggestSnapshotFolder(home), ...(await loadSnapshotStatus(snapshotStateFile)) },
     };
   }
@@ -231,7 +242,6 @@ export async function startSetup(opts = {}) {
 
   const routes = {
     'GET /api/state': () => state(),
-    'POST /api/quit': () => { quit(); return { ok: true }; },
     'POST /api/pick-folder': async () => { const p = await pick(); return p === undefined ? { path: null, unavailable: true } : { path: p }; },
     'POST /api/quick': (b) => quickStart(b),
     'POST /api/graph': async (b) => {
@@ -409,6 +419,25 @@ export async function startSetup(opts = {}) {
       await saveConfig(next, file);
       return { ok: true, sessions: next.sessions };
     },
+    // P0: two-AI handoff receipt -- who handed off, who picked it up (if anyone yet), and when.
+    // listHandoffs() already drops anything under an excluded ("00 Home"-style) folder or marked
+    // private, so this never has to re-check that itself; it only has to pair each handoff with
+    // the later handoff (if any) that acks it via `ack_of` to know whether it was picked up.
+    'POST /api/handoffs': async (b) => {
+      const cfg = await loadConfig(file);
+      const ctx = createContext(cfg, { env: { ...env, BRAINLINK_SEMANTIC: '0' } });
+      if (!cfg.handoff || !ctx.enabled.includes(cfg.handoff.vault)) return { enabled: false, receipts: [] };
+      const list = await listHandoffs(ctx, { limit: b.limit || 30 });
+      const ackByTarget = new Map(list.filter((x) => x.ack_of).map((a) => [a.ack_of, a]));
+      const receipts = list.filter((x) => !x.ack_of).map((x) => {
+        const ack = ackByTarget.get(x.path);
+        return {
+          from: x.from, to: x.to, subject: x.subject, sent_at: x.sent_at, status: x.status, priority: x.priority,
+          picked_up: Boolean(ack), picked_up_by: ack ? ack.from : null, picked_up_at: ack ? ack.sent_at : null,
+        };
+      });
+      return { enabled: true, receipts };
+    },
     // ---- Shared snapshot: a read-only copy of the notes for cloud agents (Ian's RB8) ----
     'POST /api/snapshot/pick-folder': async () => { const p = await pickSnapshotFolder(); return p === undefined ? { path: null, unavailable: true } : { path: p }; },
     'POST /api/snapshot': async (b) => {
@@ -453,12 +482,17 @@ export async function startSetup(opts = {}) {
         sources: top.map((x) => ({ vault: v, path: x.path, title: x.title, heading: x.heading || '', score: x.score })),
       };
     },
-    // Opens one of the answer's source chips: full frontmatter + body, read-only.
+    // Opens one of the answer's source chips (or a citation modal's own wikilink): full
+    // frontmatter + body, read-only, plus each [[wikilink]] in the body already resolved (or not)
+    // against this vault's privacy-filtered index — P1b: the modal renders formatted text and
+    // real links, and a dead/private target must never be distinguishable from the other.
     'POST /api/note': async (b) => {
       const cfg = normalize(await loadConfig(file));
       const ctx = createContext(cfg, { env: { ...env, BRAINLINK_AI_PLATFORM: '' } });
       if (!b.vault || !ctx.enabled.includes(b.vault)) throw new Error('Unknown vault.');
-      return { vault: b.vault, ...(await readNote(ctx, b.vault, String(b.path || ''))) };
+      const note = await readNote(ctx, b.vault, String(b.path || ''));
+      const index = await loadVault(ctx, b.vault);
+      return { vault: b.vault, ...note, wikilinks: resolveNoteWikilinks(index, note.body) };
     },
   };
 

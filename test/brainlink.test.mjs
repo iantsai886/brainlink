@@ -390,6 +390,33 @@ test('handoffs: send to a mailbox and filter by recipient', async () => {
   assert.equal((await listHandoffs(ctx, {})).length, 2);
 });
 
+test('P0: listHandoffs carries ack_of/sent_at for pickup pairing, and never surfaces a private or excluded handoff', async () => {
+  const { cfg, company } = await fixture();
+  const ctx = ctxOf(cfg);
+  const r1 = await sendHandoff(ctx, { to: 'Grok', subject: 'Check pricing page', body: 'Please review.', confirm: true }, NOW);
+  const r2 = await sendHandoff(ctx, { to: 'Claude', subject: 'Pricing page reviewed', body: 'Done, looks good.', ack_of: r1.path, confirm: true }, new Date(NOW.getTime() + 3600000));
+  const list = await listHandoffs(ctx, {});
+  const original = list.find((x) => x.path === r1.path);
+  const ack = list.find((x) => x.path === r2.path);
+  assert.equal(ack.ack_of, r1.path);
+  assert.match(original.sent_at, /^2026-10-18T09:30/);
+  assert.match(ack.sent_at, /^2026-10-18T10:30/);
+
+  // Hand-edited frontmatter (sendHandoff never writes private:true itself, but the same
+  // fail-closed rule readNote() applies to ordinary notes must apply here too).
+  const dir = path.join(company, 'Chief of Staff Office', 'Handoffs');
+  await writeFile(path.join(dir, '2026-10-19-0900-from-claude-to-grok-secret-plan.md'), '---\ntype: handoff\nprivate: true\nsubject: "Secret plan"\nto: "Grok"\n---\n# Secret plan\n');
+  const withPrivate = await listHandoffs(ctx, {});
+  assert.ok(!withPrivate.some((x) => x.subject === 'Secret plan'), 'a handoff hand-marked private must never be listed');
+  assert.equal(withPrivate.length, list.length, 'the private handoff must be dropped, not added, from the count');
+
+  // A user excluding the whole mailbox folder (e.g. via the vault's excluded-folders setting)
+  // must empty the list, exactly like it would for ordinary notes under that folder. Rules
+  // accumulate by folder name at any depth (see isExcludedPath), so "Handoffs/" alone covers it.
+  await writeFile(path.join(company, '.brainlinkignore'), 'Handoffs/\n');
+  assert.deepEqual(await listHandoffs(ctx, {}), []);
+});
+
 // ---- agents ----
 
 test('agents resolve by name or phrase, case and punctuation insensitive', async () => {
@@ -603,6 +630,81 @@ test('setup UI: host check, token check, add vault, connect with no plan limits'
   } finally { s.server.close(); }
 });
 
+test('P1a: the vault card\'s note count matches what is actually visible (private/excluded notes are not counted)', async () => {
+  const home = await tmp('p1a-notecount');
+  const env = { BRAINLINK_HOME: path.join(home, 'app'), BRAINLINK_SEMANTIC: '0' };
+  const vaultDir = path.join(home, 'Notes');
+  await cp(SAMPLE, vaultDir, { recursive: true });
+  const s = await startSetup({ env, home, os: 'darwin', port: 0, pick: async () => vaultDir, useCli: false });
+  const base = `http://127.0.0.1:${s.port}`;
+  const api = (method, p, body) => fetch(base + p, { method, headers: { 'X-BrainLink-Token': s.token, 'Content-Type': 'application/json' }, body: body && JSON.stringify(body) });
+  try {
+    const add = await (await api('POST', '/api/vault', { path: vaultDir, name: 'Acme', pack: 'founder-os', agentName: 'Chief of Staff' })).json();
+    assert.equal(add.ok, true);
+    const before = (await (await api('GET', '/api/state')).json()).vaults[0].notes;
+    const g0 = await (await api('POST', '/api/graph', {})).json();
+    assert.equal(before, g0.health.notes, 'the vault card count must match the Brain map\'s own visible-notes count');
+
+    // Add one private note and one excluded-folder note: a naive recursive .md count would see
+    // both, but neither should ever count as a visible note.
+    await writeFile(path.join(vaultDir, 'Private Thoughts.md'), '---\nprivate: true\n---\n# Private Thoughts\n');
+    await mkdir(path.join(vaultDir, '00 Home'), { recursive: true });
+    await writeFile(path.join(vaultDir, '00 Home', 'Diary.md'), '# Diary\n');
+    await writeFile(path.join(vaultDir, '.brainlinkignore'), '00 Home/\n');
+    const after = (await (await api('GET', '/api/state')).json()).vaults[0].notes;
+    assert.equal(after, before, 'adding one private and one excluded-folder note must not move the visible count');
+    const g1 = await (await api('POST', '/api/graph', {})).json();
+    assert.equal(after, g1.health.notes);
+  } finally { s.server.close(); }
+});
+
+test('P0: POST /api/handoffs shows a clear receipt (who sent, who picked up, when) and a "not picked up yet" state; never leaks a private or excluded handoff', async () => {
+  const home = await tmp('p0-handoffs');
+  const env = { BRAINLINK_HOME: path.join(home, 'app'), BRAINLINK_SEMANTIC: '0' };
+  const vaultDir = path.join(home, 'Notes');
+  await cp(SAMPLE, vaultDir, { recursive: true });
+  const s = await startSetup({ env, home, os: 'darwin', port: 0, pick: async () => vaultDir, useCli: false });
+  const base = `http://127.0.0.1:${s.port}`;
+  const api = (method, p, body) => fetch(base + p, { method, headers: { 'X-BrainLink-Token': s.token, 'Content-Type': 'application/json' }, body: body && JSON.stringify(body) });
+  try {
+    const add = await (await api('POST', '/api/vault', { path: vaultDir, name: 'Acme', pack: 'founder-os', agentName: 'Chief of Staff' })).json();
+    assert.equal(add.ok, true);
+    const dir = path.join(vaultDir, 'Chief of Staff Office', 'Handoffs');
+    // A: handed off by Claude, picked up (acked) by Grok.
+    await writeFile(path.join(dir, '2026-10-18-0930-from-claude-to-grok-check-pricing-page.md'),
+      '---\ntype: handoff\nstatus: REQUEST\nai_platform: "Claude"\nwritten_at: 2026-10-18T09:30:00+08:00\nto: "Grok"\npriority: P1\nsubject: "Check pricing page"\n---\n# Check pricing page\n');
+    await writeFile(path.join(dir, '2026-10-18-1030-from-grok-to-claude-pricing-page-done.md'),
+      `---\ntype: handoff\nstatus: DONE\nai_platform: "Grok"\nwritten_at: 2026-10-18T10:30:00+08:00\nto: "Claude"\npriority: P1\nsubject: "Pricing page done"\nack_of: "Acme/Chief of Staff Office/Handoffs/2026-10-18-0930-from-claude-to-grok-check-pricing-page.md"\n---\n# Pricing page done\n`);
+    // B: handed off by Claude to Codex, no reply yet.
+    await writeFile(path.join(dir, '2026-10-19-0900-from-claude-to-codex-deploy-the-fix.md'),
+      '---\ntype: handoff\nstatus: REQUEST\nai_platform: "Claude"\nwritten_at: 2026-10-19T09:00:00+08:00\nto: "Codex"\npriority: P1\nsubject: "Deploy the fix"\n---\n# Deploy the fix\n');
+    // Hand-marked private: must never appear in the receipt, title included.
+    await writeFile(path.join(dir, '2026-10-20-0900-from-claude-to-grok-secret-plan.md'),
+      '---\ntype: handoff\nprivate: true\nsubject: "Secret plan"\nto: "Grok"\n---\n# Secret plan\n');
+
+    const r = await (await api('POST', '/api/handoffs', {})).json();
+    assert.equal(r.enabled, true);
+    // 3, not 4: the sample vault ships one pre-existing handoff of its own, and an ack is a
+    // reply (paired into its original's receipt), never a top-level receipt on its own.
+    assert.equal(r.receipts.length, 3);
+    assert.ok(!JSON.stringify(r).includes('Secret plan'), 'a private handoff title must never reach the UI');
+
+    const picked = r.receipts.find((x) => x.subject === 'Check pricing page');
+    assert.equal(picked.from, 'claude');
+    assert.equal(picked.to, 'grok');
+    assert.equal(picked.picked_up, true);
+    assert.equal(picked.picked_up_by, 'grok');
+    assert.match(picked.picked_up_at, /^2026-10-18T10:30/);
+    assert.match(picked.sent_at, /^2026-10-18T09:30/);
+
+    const pending = r.receipts.find((x) => x.subject === 'Deploy the fix');
+    assert.equal(pending.from, 'claude');
+    assert.equal(pending.to, 'codex');
+    assert.equal(pending.picked_up, false, 'not picked up yet');
+    assert.equal(pending.picked_up_by, null);
+  } finally { s.server.close(); }
+});
+
 test('CLI: `brainlink serve` speaks MCP over stdio and logs content-free activity', async () => {
   const { cfg } = await fixture();
   const home = await tmp('cli');
@@ -711,7 +813,7 @@ test('CLI: `brainlink init` needs no licence and sets up writes and agents immed
 import { stem, extractTags, findMentions, makeResolver } from '../src/graph.mjs';
 import { remember, appendDaily } from '../src/writes.mjs';
 import { recentNotes, openLoops, vaultHealth, brief } from '../src/insights.mjs';
-import { buildHomeMap, suggestLinks } from '../src/links.mjs';
+import { buildHomeMap, suggestLinks, resolveNoteWikilinks } from '../src/links.mjs';
 import { createServer as httpServer } from 'node:http';
 
 test('stemming, tags, unlinked mentions, Obsidian-style link resolution', () => {
@@ -779,6 +881,65 @@ test('auto-linking: new notes link what they mention plus similar notes, and the
   await proposeNote(ctx, { vault: 'Acme Studio', folder: 'Projects', title: 'Second', body: 'x', source: 's', confirm: true }, NOW);
   assert.equal(await readFile(path.join(company, 'BrainLink/Home.md'), 'utf8'), '# My own home');
   assert.match(await buildHomeMap(ctx, 'Acme Studio', NOW), /not linked to anything yet/);
+});
+
+test('P1b resolver: resolveNoteWikilinks resolves a real link, but a private note and an excluded-folder note are both just "not resolved" — indistinguishable from each other or a typo', async () => {
+  const { cfg, company } = await fixture();
+  await writeFile(path.join(company, 'Secret Note.md'), '---\nprivate: true\n---\n# Secret Note\n\nshh');
+  await mkdir(path.join(company, '00 Home'), { recursive: true });
+  await writeFile(path.join(company, '00 Home', 'Diary.md'), '# Diary\n\npersonal');
+  await writeFile(path.join(company, '.brainlinkignore'), '00 Home/\n');
+  const ctx = ctxOf(cfg);
+  const index = await loadVault(ctx, 'Acme Studio');
+  const body = 'See [[Northwind Coffee]], [[Secret Note]], [[Diary]], [[Totally Made Up Note]] and [[Northwind Coffee|the client]].';
+  const links = resolveNoteWikilinks(index, body);
+  assert.equal(links.length, 5);
+
+  const real = links[0];
+  assert.equal(real.target, 'Northwind Coffee');
+  assert.ok(real.resolved && real.resolved.path && real.resolved.title === 'Northwind Coffee');
+
+  const privateLink = links[1];
+  assert.equal(privateLink.target, 'Secret Note');
+  assert.equal(privateLink.resolved, null);
+
+  const excludedLink = links[2];
+  assert.equal(excludedLink.target, 'Diary');
+  assert.equal(excludedLink.resolved, null);
+
+  const deadLink = links[3];
+  assert.equal(deadLink.target, 'Totally Made Up Note');
+  assert.equal(deadLink.resolved, null);
+  // Private, excluded and dead all come back exactly `null` — no extra field (e.g. a reason, or
+  // the real path) that could let a reader tell a private note from one that never existed.
+  assert.deepEqual(new Set([privateLink.resolved, excludedLink.resolved, deadLink.resolved]), new Set([null]));
+
+  // An alias (`|the client`) uses the alias as the display label but still resolves the real target.
+  const aliased = links[4];
+  assert.equal(aliased.target, 'Northwind Coffee');
+  assert.equal(aliased.label, 'the client');
+  assert.ok(aliased.resolved);
+});
+
+test('P1b resolver over HTTP: /api/note returns wikilinks resolved the same way, private/dead both null, and never exposes a private note\'s real path', async () => {
+  const { cfg, company } = await fixture();
+  await writeFile(path.join(company, 'Secret Note.md'), '---\nprivate: true\n---\n# Secret Note\n\nshh');
+  await writeFile(path.join(company, 'Cites Things.md'), 'Mentions [[Northwind Coffee]] and [[Secret Note]] and [[Nope]].');
+  const home = await tmp('p1b-note-api');
+  const env = { BRAINLINK_HOME: home };
+  await saveConfig(cfg, path.join(home, 'config.json'));
+  const s = await startSetup({ env, home, os: 'linux', port: 0, useCli: false });
+  try {
+    const r = await fetch(`http://127.0.0.1:${s.port}/api/note`, {
+      method: 'POST', headers: { 'X-BrainLink-Token': s.token, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ vault: 'Acme Studio', path: 'Cites Things.md' }),
+    }).then((x) => x.json());
+    assert.equal(r.wikilinks.length, 3);
+    assert.ok(r.wikilinks[0].resolved?.path === 'Northwind Coffee.md' || r.wikilinks[0].resolved?.title === 'Northwind Coffee');
+    assert.equal(r.wikilinks[1].resolved, null);
+    assert.equal(r.wikilinks[2].resolved, null);
+    assert.ok(!JSON.stringify(r).includes('Secret Note.md'), 'the private note\'s real path must never appear in the response');
+  } finally { s.server.close(); }
 });
 
 test('templates: meeting note with linked attendees, tasks and its own folder', async () => {
