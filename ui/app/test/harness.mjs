@@ -1,7 +1,7 @@
 // Shared test harness: real reference store + fictional seed + mock services. No private data.
 import path from 'node:path'; import { pathToFileURL } from 'node:url'; import { existsSync } from 'node:fs';
-const DIR = process.env.BRAINLINK_STORE_DIR || ['../../../src/store', '../../../../brainlink-store'].map((p) => path.resolve(import.meta.dirname || path.dirname(new URL(import.meta.url).pathname), p)).find((d) => existsSync(path.join(d, 'memory-store.mjs')));
-// Real reference store required, intentionally excluded from the deliverable.
+const DIR = process.env.BRAINLINK_STORE_DIR || ['../../../vendor/brainlink-store', '../../../src/store', '../../../../brainlink-store'].map((p) => path.resolve(import.meta.dirname || path.dirname(new URL(import.meta.url).pathname), p)).find((d) => existsSync(path.join(d, 'memory-store.mjs')));
+// The recovered local store is checked into vendor/ for reproducible test setup.
 if (!DIR) throw new Error('Set BRAINLINK_STORE_DIR to the directory containing memory-store.mjs and errors.mjs');
 export const { createMemoryStore } = await import(pathToFileURL(path.join(DIR, 'memory-store.mjs')).href);
 export const VAULTS = [{ name: 'Work', private: false }, { name: 'Journal', private: true }];

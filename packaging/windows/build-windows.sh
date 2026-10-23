@@ -19,6 +19,8 @@ command -v makensis >/dev/null || { echo "makensis not found (brew install maken
 rm -rf "$WORK" && mkdir -p "$STAGE/node" "$STAGE/app" "$STAGE/bin" "$DIST"
 unzip -q -j "$ZIP" "node-$NODE_VERSION-win-x64/node.exe" "node-$NODE_VERSION-win-x64/LICENSE" -d "$STAGE/node"
 cp -R "$ROOT/bin" "$ROOT/src" "$ROOT/ui" "$ROOT/samples" "$ROOT/package.json" "$ROOT/LICENSE.txt" "$ROOT/README.md" "$STAGE/app/"
+mkdir -p "$STAGE/app/node_modules/brainlink-store"
+cp "$ROOT/vendor/brainlink-store/memory-store.mjs" "$ROOT/vendor/brainlink-store/errors.mjs" "$ROOT/vendor/brainlink-store/package.json" "$STAGE/app/node_modules/brainlink-store/"
 cp "$HERE/brainlink.cmd" "$STAGE/bin/brainlink.cmd"
 cp "$HERE/BrainLink.vbs" "$HERE/BrainLink.ico" "$STAGE/"
 # Windows line endings for the scripts Windows runs directly.

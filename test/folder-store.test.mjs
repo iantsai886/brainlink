@@ -4,10 +4,31 @@ import assert from 'node:assert/strict';
 import { mkdtempSync, readFileSync, writeFileSync, mkdirSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
-import { runStoreContract } from 'brainlink-store/contract-tests.mjs';
 import { createFolderStore } from '../src/store/folder-store.mjs';
 
-runStoreContract((opts) => createFolderStore({ ...opts, root: mkdtempSync(path.join(tmpdir(), 'bl-folder-')) }));
+// The recovered local brainlink-store package did not include its advertised
+// contract-tests.mjs. Keep explicit adapter checks here; do not claim these
+// replace the missing published contract suite.
+test('folder-store: rejects a stale etag and preserves the committed note', async () => {
+  const root = mkdtempSync(path.join(tmpdir(), 'bl-folder-cas-'));
+  try {
+    const store = createFolderStore({ vaults: [{ name: 'Work', private: false }], root });
+    const made = await store.write({ vault: 'Work', path: 'A.md', body: 'first', frontmatter: {} }, { expected_etag: '' });
+    await assert.rejects(store.write({ vault: 'Work', id: made.id, path: 'A.md', body: 'second', frontmatter: {} }, { expected_etag: 'stale' }), /conflict|etag/i);
+    assert.equal((await store.read(made.id)).body, 'first');
+    assert.match(readFileSync(path.join(root, 'Work', 'A.md'), 'utf8'), /first/);
+  } finally { rmSync(root, { recursive: true, force: true }); }
+});
+
+test('folder-store: private vault is inaccessible without explicit scope', async () => {
+  const root = mkdtempSync(path.join(tmpdir(), 'bl-folder-private-'));
+  try {
+    const store = createFolderStore({ vaults: [{ name: 'Private', private: true }], root });
+    const made = await store.write({ vault: 'Private', path: 'Secret.md', body: 'fictional private marker', frontmatter: {} }, { expected_etag: '' });
+    await assert.rejects(store.read(made.id, { remote: true }), /privacy|private|denied|not found/i);
+    assert.equal((await store.read(made.id)).body, 'fictional private marker');
+  } finally { rmSync(root, { recursive: true, force: true }); }
+});
 
 test('folder-store: never rewrites an untouched note on disk', async () => {
   const root = mkdtempSync(path.join(tmpdir(), 'bl-folder-bytes-'));

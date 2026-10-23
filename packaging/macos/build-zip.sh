@@ -7,12 +7,12 @@
 #   app-source-dir defaults to the repo root (two levels up from this script).
 #
 # Env overrides (for testing against a different checkout/runtime cache):
-#   BRAINLINK_STORE_SRC  path to the brainlink-store checkout (default: ../brainlink-store)
+#   BRAINLINK_STORE_SRC  optional override (default: checked-in vendor/brainlink-store)
 #   BRAINLINK_NODE_RT    path to the downloaded, SHA-checked Node tarballs (default: /workspace/brainlink-runs/node-rt)
 set -euo pipefail
 HERE="$(cd "$(dirname "$0")" && pwd)"
 ROOT="$(cd "${1:-$HERE/../..}" && pwd)"
-STORE_SRC="$(cd "${BRAINLINK_STORE_SRC:-$ROOT/../brainlink-store}" && pwd)"
+STORE_SRC="$(cd "${BRAINLINK_STORE_SRC:-$ROOT/vendor/brainlink-store}" && pwd)"
 NODE_RT="${BRAINLINK_NODE_RT:-/workspace/brainlink-runs/node-rt}"
 NODE_VERSION="22.23.3"
 VERSION_FULL="$(node -p "require('$ROOT/package.json').version")"

@@ -41,7 +41,7 @@ brainlink setup | init | connect <client|all> | disconnect <client> | clients | 
 ## Developers
 
 ```bash
-npm install               # links the sibling brainlink-store checkout (file:../brainlink-store)
+npm install               # uses the checked-in store implementation (file:./vendor/brainlink-store)
 npm test                  # one test suite, no external dependencies (Node 22+)
 node bin/brainlink.mjs demo   # try the milestone UI on a throwaway sample vault, nothing real touched
 node bin/brainlink.mjs ui     # same UI on the vaults in config.json
@@ -51,7 +51,7 @@ npm run build:win-preview # dist/BrainLink-Preview-<version>-windows.zip — no 
 npm run build:linux      # dist/*.deb + linux tar.gz for x64 and arm64
 ```
 
-Dependency: `brainlink-store` (`../brainlink-store`, this repo's sibling) — the Obsidian-independent store contract. Not vendored; see that repo's README for how the UI (`ui/app/`) resolves the same checkout. `src/store/folder-store.mjs` is the real vault backing it: every note is a plain Markdown file in the vault folder (frontmatter is left byte-for-byte untouched until that note is actually edited through the API), with CAS/versions/sessions/snapshots delegated to `brainlink-store`'s reference implementation and search routed through `src/core.mjs` (the same ranking the MCP tools use).
+Dependency: `brainlink-store` (`vendor/brainlink-store`) — the recovered local v0.2 implementation, checked in so a fresh install does not need an unknown sibling checkout. Its advertised original contract-test file was not available; see `docs/STORE-RECOVERY.md`. `src/store/folder-store.mjs` is the real vault backing it: every note is a plain Markdown file in the vault folder (frontmatter is left byte-for-byte untouched until that note is actually edited through the API), with CAS/versions/sessions/snapshots delegated to `brainlink-store`'s reference implementation and search routed through `src/core.mjs` (the same ranking the MCP tools use).
 
 Packaging notes: [Windows](packaging/windows/README.md), [macOS unsigned install](packaging/macos/INSTALL-UNSIGNED.md), [Linux](packaging/linux/README.md). Clean-room code: no code from Obsidian Copilot or Khoj (AGPL).
 

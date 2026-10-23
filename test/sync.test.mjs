@@ -9,7 +9,7 @@ import { syncSettings, chooseSync, syncOnce, readSessionIndex, restoreSnapshot, 
 
 // Real BrainStore contract (brainlink-store, commit d8e792b): interface.d.ts, memory-store.mjs, errors.mjs.
 const STORE_DIR = process.env.BRAINLINK_STORE_DIR
-  || ['../src/store', '../../brainlink-store'].map((p) => path.resolve(import.meta.dirname, p)).find((d) => existsSync(path.join(d, 'memory-store.mjs')));
+  || ['../vendor/brainlink-store', '../src/store', '../../brainlink-store'].map((p) => path.resolve(import.meta.dirname, p)).find((d) => existsSync(path.join(d, 'memory-store.mjs')));
 if (!STORE_DIR) throw new Error('memory-store.mjs not found; set BRAINLINK_STORE_DIR');
 const { createMemoryStore, toSessionRecord } = await import(pathToFileURL(path.join(STORE_DIR, 'memory-store.mjs')).href);
 
