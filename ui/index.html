@@ -448,6 +448,7 @@ function renderSessions(list) {
       <div class="muted" style="font-size:14px">${esc(s.summary || t('sessions.noSummary'))}</div>
       <div class="row muted" style="font-size:13px">${esc(new Date(s.started_at).toLocaleString(LOCALE))} · ${s.turns} ${s.turns === 1 ? esc(t('sessions.messageOne')) : esc(t('sessions.messageMany'))}
         <button class="link" data-sess-read="${esc(s.id)}">${esc(t('sessions.open'))}</button>
+        ${s.summary ? `<button class="link" data-sess-file="${esc(s.id)}">${esc(t('sessions.fileSummary'))}</button>` : ''}
         <button class="link" data-sess-toggle="${esc(s.id)}" data-sess-private="${s.private ? '1' : ''}">${s.private ? esc(t('sessions.makeShared')) : esc(t('sessions.makePrivate'))}</button>
       </div></div>`;
   }
@@ -833,6 +834,29 @@ document.addEventListener('click', (e) => {
         <div class="muted" style="font-size:13px">${s.project ? esc(s.project) + ' · ' : ''}${s.message_count} ${s.message_count === 1 ? esc(t('sessions.messageOne')) : esc(t('sessions.messageMany'))} · ${esc(new Date(s.started_at).toLocaleString(LOCALE))}${s.note_refs?.length ? ' · ' + esc(t('sessions.refs', { list: s.note_refs.join(', ') })) : ''}</div></div>`;
     } catch (e) { $('session-detail').innerHTML = `<p class="error-box">${esc(t('sessions.detailError', { msg: e.message }))}</p>`; }
   })(d.sessRead);
+  if (d.sessFile) (async (id) => {
+    const choices = (S.vaults || []).filter((v) => v.exists && v.writes !== 'off').map((v) => `<option value="${esc(v.name)}">${esc(v.name)}</option>`).join('');
+    $('session-detail').innerHTML = `<div class="card"><b>${esc(t('sessions.fileSummary'))}</b><p class="muted">${esc(t('sessions.fileHint'))}</p>
+      <label>${esc(t('sessions.destination'))}<select id="session-file-vault">${choices}</select></label>
+      <div class="row"><button class="secondary" data-file-preview="${esc(id)}">${esc(t('sessions.preview'))}</button><button class="primary" data-file-confirm="${esc(id)}" hidden>${esc(t('sessions.savePrivate'))}</button></div>
+      <pre id="session-file-preview" style="white-space:pre-wrap;overflow-wrap:anywhere"></pre></div>`;
+    if (!choices) $('session-detail').textContent = t('sessions.noDestination');
+  })(d.sessFile);
+  if (d.filePreview) act(async () => {
+    const vault = $('session-file-vault').value;
+    const result = await api('POST', '/api/sessions/file', { id: d.filePreview, vault, confirm: false });
+    if (!result.ok) throw new Error((result.errors || []).join('; '));
+    $('session-file-preview').textContent = result.preview || '';
+    $('session-file-preview').dataset.vault = vault;
+    document.querySelector('[data-file-confirm]').hidden = false;
+  });
+  if (d.fileConfirm) act(async () => {
+    const vault = $('session-file-vault').value;
+    if ($('session-file-preview').dataset.vault !== vault) throw new Error(t('sessions.previewFirst'));
+    const result = await api('POST', '/api/sessions/file', { id: d.fileConfirm, vault, confirm: true });
+    if (!result.ok || !result.written) throw new Error((result.errors || []).join('; ') || result.next || 'Not saved.');
+    toast(t('sessions.savedPrivate', { path: result.path }));
+  });
   if (d.sessToggle) act(() => api('POST', '/api/sessions/private', { id: d.sessToggle, private: !d.sessPrivate }));
   if (d.syncPick) $('sync-folder').value = d.syncPick;
   if (d.syncOnbPick) $('sync-onb-folder').value = d.syncOnbPick;

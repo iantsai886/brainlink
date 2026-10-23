@@ -30,12 +30,14 @@ export function frontmatter(ctx, vaultName, id, f, now = new Date()) {
   if (v.schema === 'provenance') {
     const date = ts.slice(0, 10);
     return ['---', `type: ${f.type || 'log'}`, `status: ${f.status || 'proposed'}`, `tags: ${tags}`, ...extra,
+      ...(f.private ? ['private: true'] : []),
       `created_by_platform: ${slug(id.ai_platform)}`, `created_by_agent: ${slug(id.agent_or_role)}`, `created_session_or_task_id: ${q(id.session_or_task_id)}`, `created_date: ${date}`,
       `last_material_revision_by_platform: ${slug(id.ai_platform)}`, `last_material_revision_by_agent: ${slug(id.agent_or_role)}`,
       `last_material_revision_session_or_task_id: ${q(id.session_or_task_id)}`, `last_material_revision_date: ${date}`,
       `provenance_confidence: ${['verified', 'reported', 'inferred'].includes(f.confidence) ? f.confidence : 'unknown'}`, `source: ${q(f.source)}`, '---'].join('\n');
   }
   return ['---', `type: ${f.type || 'note'}`, `status: ${f.status || 'proposed'}`, `ai_platform: ${q(id.ai_platform)}`, `agent_or_role: ${q(id.agent_or_role)}`,
+    ...(f.private ? ['private: true'] : []),
     `session_or_task_id: ${q(id.session_or_task_id)}`, `written_at: ${ts}`, `source: ${q(f.source)}`, `confidence: ${q(f.confidence || 'proposed')}`, `tags: ${tags}`, ...extra, '---'].join('\n');
 }
 

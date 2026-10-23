@@ -24,6 +24,7 @@ import { buildGraph3D, noteDetail3D } from './graph3d.mjs';
 import { snapshotSettings, chooseSnapshot, suggestSnapshotFolder, clearSnapshot, startSnapshotWatcher, writeSnapshotOnce, loadSnapshotStatus, saveSnapshotStatus } from './snapshot.mjs';
 import { listHandoffs } from './writes.mjs';
 import { backupOnce, verifyBackup, restoreBackupToEmpty, loadBackupStatus, saveBackupStatus } from './backup.mjs';
+import { fileSessionSummary } from './sessions/filing.mjs';
 
 const UI_STATIC_TYPES = { '.js': 'text/javascript; charset=utf-8', '.css': 'text/css; charset=utf-8', '.json': 'application/json; charset=utf-8' };
 const UI_DIR = path.join(ROOT, 'ui');
@@ -461,6 +462,13 @@ export async function startSetup(opts = {}) {
     },
     'POST /api/sessions': (b) => sessions.list({ q: b.q, client: b.client, project: b.project, since: b.since, limit: b.limit, include_private: Boolean(b.include_private) }),
     'POST /api/sessions/read': (b) => sessions.read({ id: b.id, include_private: Boolean(b.include_private) }),
+    'POST /api/sessions/file': async (b) => {
+      if (b.confirm !== true && b.confirm !== false) throw new Error('Choose preview or confirm.');
+      const cfg = await loadConfig(file);
+      const ctx = createContext(cfg, { env: { ...env, BRAINLINK_AI_PLATFORM: 'BrainLink Local' } });
+      const session = await sessions.read({ id: b.id, include_private: true });
+      return fileSessionSummary(ctx, session, String(b.vault || ''), b.confirm);
+    },
     'POST /api/sessions/private': (b) => sessions.setPrivate(b.id, b.private),
     // What connected AI apps (not this local UI) may see of imported/logged sessions. The user's
     // own choice; session_list/session_read in src/server.mjs always read this, never a caller flag.
