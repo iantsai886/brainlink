@@ -89,29 +89,29 @@ PORTUGUÊS
 ======================================================================
 
 PRIMEIROS PASSOS (só uma vez)
-1. Descompacte este ficheiro (clique com o botão direito no .zip e escolha "Extrair Tudo..."
-   se não abrir automaticamente). Vai aparecer uma pasta BrainLink com este texto lá dentro.
+1. Extraia este arquivo (clique com o botão direito no .zip e escolha "Extrair Tudo..." se ele
+   não abrir automaticamente). Você vai ver uma pasta BrainLink com este texto dentro dela.
 2. Nessa pasta, clique duas vezes em "BrainLink.vbs".
-3. O Windows pode mostrar "O Windows protegeu o seu PC" (SmartScreen, porque esta aplicação
+3. O Windows pode mostrar "O Windows protegeu o seu PC" (SmartScreen, porque este aplicativo
    ainda não tem assinatura de código). Clique em "Mais informações" e depois em "Executar
-   mesmo assim". Só precisa de fazer isto uma vez.
-4. O BrainLink instala-se sozinho e o navegador abre automaticamente a seguir -- sem janela de
-   consola, sem escrever nada. Pode agora apagar a pasta BrainLink que descarregou, se quiser;
-   o BrainLink já está instalado na sua pasta de utilizador e arranca sozinho sempre que iniciar
-   sessão.
+   assim mesmo". Você só precisa fazer isso uma vez.
+4. O BrainLink se instala automaticamente e o seu navegador abre nele na hora -- sem janela de
+   console, sem digitar nada. Agora você já pode excluir a pasta BrainLink que baixou, se
+   quiser; o BrainLink já está instalado na sua pasta de usuário e inicia automaticamente
+   sempre que você faz login.
 
 NO DIA A DIA
-O BrainLink fica a funcionar discretamente em segundo plano e arranca sozinho ao iniciar
-sessão. Para abrir o painel novamente, clique duas vezes em "BrainLink.vbs" onde o guardou (ou
-descarregue e descompacte de novo -- vai encontrar o BrainLink já em execução em vez de abrir
-um segundo).
+O BrainLink continua rodando discretamente em segundo plano e inicia automaticamente no login.
+Para abrir o painel de novo, clique duas vezes em "BrainLink.vbs" onde você o guardou (ou baixe
+e extraia de novo -- ele vai encontrar o BrainLink que já está rodando, em vez de abrir um
+segundo).
 
 PARA REMOVER O BRAINLINK
-Clique duas vezes em "Uninstall BrainLink.cmd" na mesma pasta. As suas notas são mantidas; só
-o BrainLink em si (e a sua entrada na pasta de Inicialização) é removido. Não são necessários
-privilégios de administrador para instalar ou remover.
+Clique duas vezes em "Uninstall BrainLink.cmd" na mesma pasta. Suas notas são mantidas; só o
+BrainLink em si (e o item dele na pasta de Inicialização) é removido. Não é preciso ser
+administrador para instalar ou remover.
 
-Não é preciso instalar Node.js -- o BrainLink já vem com o seu próprio Node incluído.
+Não é preciso instalar o Node.js -- o BrainLink já vem com o próprio Node incluído.
 
 ======================================================================
 繁體中文
