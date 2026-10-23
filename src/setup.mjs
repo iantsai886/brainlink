@@ -454,9 +454,9 @@ export async function startSetup(opts = {}) {
     // dedicated subfolder when the manifest was lost, not the normal "Stop sharing" toggle-off.
     'POST /api/snapshot/clear': async (b) => {
       const cfg = await loadConfig(file);
-      await clearSnapshot(snapshotSettings(cfg).folder, env, cfg.vaults, { force: Boolean(b?.force) });
+      const result = await clearSnapshot(snapshotSettings(cfg).folder, env, cfg.vaults, { force: Boolean(b?.force) });
       if (b?.force) await refreshSnapshotWatcher(cfg);
-      return { ok: true };
+      return result;
     },
     'POST /api/test': async (b) => {
       const cfg = normalize(await loadConfig(file));

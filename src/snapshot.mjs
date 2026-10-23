@@ -146,6 +146,14 @@ async function vaultRealRoots(vaults = []) {
 }
 
 function isWithinRoot(root, real) { return real === root || real.startsWith(root + path.sep); }
+// N6/N5b: "a vault overlaps a path" has to catch both directions -- the vault sitting at or
+// inside that path (isWithinRoot), and the path itself sitting at or inside the vault (a vault
+// configured as an ancestor of outRoot/dest, however unlikely) -- a destructive rm -rf must
+// refuse either way, not just the direction the original N5 dest-in-vault check happened to need.
+function overlapsRoot(root, real) { return isWithinRoot(root, real) || isWithinRoot(real, root); }
+async function realOrResolved(p) {
+  try { return await realpath(p); } catch { return path.resolve(p); }
+}
 
 // F2's "missing manifest" fail-closed check needs to tell apart two scenarios that both look
 // like "no manifest, but outRoot isn't empty": a genuine first enable where a foreign/collision
@@ -287,9 +295,17 @@ export async function writeSnapshotOnce(ctx, cfg, env = process.env) {
   // run (the recursive watcher fires on its own writes too), growing without end. Reject before
   // writing anything, rather than detect it after the fact.
   const vaultRoots = await vaultRealRoots(ctx.cfg.vaults);
-  let realDest;
-  try { realDest = await realpath(dest); } catch { realDest = path.resolve(dest); }
-  if (vaultRoots.some((root) => isWithinRoot(root, realDest))) {
+  const realDest = await realOrResolved(dest);
+  // N5b: also check outRoot (dest/BrainLink Shared) itself, not just dest -- a vault configured
+  // at or inside the dedicated subfolder (rather than at dest's own root) must be rejected the
+  // same way, before a single byte is written, not just once outRoot already happens to exist.
+  // outRoot uses the full symmetric overlap (vault equals, is inside, or contains it): unlike
+  // dest, nothing legitimate is ever supposed to live inside outRoot (N2), so a vault on either
+  // side of that boundary is a problem. dest itself keeps the original, asymmetric check -- N4's
+  // supported layout (a vault at <dest>/<vaultName>) has dest *containing* the vault by design,
+  // and must keep working; only dest being at or inside a vault (the other direction) is N5.
+  const realOutRootForGate = await realOrResolved(outRoot);
+  if (vaultRoots.some((root) => isWithinRoot(root, realDest) || overlapsRoot(root, realOutRootForGate))) {
     return { ok: false, error: 'Shared folder is inside a vault. Choose a folder outside your vault(s).' };
   }
 
@@ -382,7 +398,18 @@ export async function clearSnapshot(dest, env = process.env, vaults = [], { forc
   // nothing. A caller that explicitly opts into a full reset gets the dedicated subfolder wiped
   // outright instead -- nothing else is ever meant to write inside it (N2), so this is safe for
   // an explicit, user-initiated reset even though it isn't safe to do automatically.
-  if (force && prev.status !== 'ok') { try { await rm(outRoot, { recursive: true, force: true }); } catch {} }
+  // N6: re-derive the F2 refusal here too, on the server, instead of trusting that a caller only
+  // ever sets force once writeSnapshotOnce's own N5b gate has already refused. A vault that sits
+  // at, inside, or around outRoot (e.g. configured at dest/BrainLink Shared or dest/BrainLink
+  // Shared/<name>, the exact layout N5b above is guarding against) must never be rm -rf'd, force
+  // or not -- that flag only means "this folder's tracking is gone", never "skip the vault check".
+  if (force && prev.status !== 'ok') {
+    const realOutRoot = await realOrResolved(outRoot);
+    if (vaultRoots.some((root) => overlapsRoot(root, realOutRoot))) {
+      return { ok: false, error: 'Refusing to clear: a connected vault sits at, inside, or around this shared folder.' };
+    }
+    try { await rm(outRoot, { recursive: true, force: true }); } catch {}
+  }
   try { await unlink(manifestPath(dest, env)); } catch {}
   try { await unlink(`${manifestPath(dest, env)}.bak`); } catch {}
   return { ok: true };

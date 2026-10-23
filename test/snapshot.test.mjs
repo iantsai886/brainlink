@@ -468,6 +468,65 @@ test('snapshot N5: a destination folder inside a vault is rejected, not written 
   assert.ok(!existsSync(path.join(dest, 'BrainLink Shared')), 'nothing was ever written inside the vault');
 });
 
+// N5b: N5 only rejected a dest *inside* a vault. A vault configured at or inside the dedicated
+// 'BrainLink Shared' subfolder itself (rather than at dest's own root) must be rejected the same
+// way, before anything is written -- otherwise the snapshot walks the vault into itself every run.
+test('snapshot N5b: a vault at or equal to dest/BrainLink Shared is rejected, not written to', async () => {
+  for (const vaultSuffix of ['BrainLink Shared', path.join('BrainLink Shared', 'Brain')]) {
+    const dest = await tmp('n5b-dest');
+    const vaultDir = path.join(dest, vaultSuffix);
+    await mkdir(vaultDir, { recursive: true });
+    await writeFile(path.join(vaultDir, 'A.md'), '# A\nhello');
+    const env = { BRAINLINK_HOME: await tmp('n5b-home'), BRAINLINK_SEMANTIC: '0' };
+    const cfg = normalize({ vaults: [{ name: 'Brain', path: vaultDir }] });
+    const ctx = createContext(cfg, { env });
+    const withSnapshot = chooseSnapshot(cfg, { enabled: true, folder: dest });
+
+    for (let i = 0; i < 2; i++) {
+      const r = await writeSnapshotOnce(ctx, withSnapshot, env);
+      assert.equal(r.ok, false, `rejected for vault at ${vaultSuffix}`);
+    }
+    assert.ok(existsSync(path.join(vaultDir, 'A.md')), 'vault note untouched');
+  }
+});
+
+// N6: "Clear and re-share" (force clear) must never rm -rf a folder a connected vault sits at,
+// inside, or around -- that path is a real destructive delete, unlike the normal manifest-tracked
+// clear loop above, and a corrupt/missing manifest (the only way to reach it) must not bypass it.
+test('snapshot N6: force-clear refuses to rm -rf a shared folder that a connected vault overlaps', async () => {
+  for (const vaultSuffix of ['BrainLink Shared', path.join('BrainLink Shared', 'Brain')]) {
+    const dest = await tmp('n6-dest');
+    const vaultDir = path.join(dest, vaultSuffix);
+    await mkdir(vaultDir, { recursive: true });
+    await writeFile(path.join(vaultDir, 'A.md'), '# A\nhello');
+    const env = { BRAINLINK_HOME: await tmp('n6-home'), BRAINLINK_SEMANTIC: '0' };
+    const cfg = normalize({ vaults: [{ name: 'Brain', path: vaultDir }] });
+
+    // Simulate the only way clearSnapshot's force path is reachable: a corrupt manifest for dest.
+    await mkdir(path.dirname(manifestPath(dest, env)), { recursive: true });
+    await writeFile(manifestPath(dest, env), '{not valid json');
+
+    const r = await clearSnapshot(dest, env, cfg.vaults, { force: true });
+    assert.equal(r.ok, false, `force clear refused for vault at ${vaultSuffix}`);
+    assert.ok(existsSync(path.join(vaultDir, 'A.md')), 'vault note survives the forced clear');
+  }
+});
+
+// Sanity check in the other direction: force-clearing a shared folder that has no vault overlap
+// at all still works exactly as before (the N6 guard must not make legitimate recovery impossible).
+test('snapshot N6: force-clear still wipes a non-overlapping shared folder normally', async () => {
+  const { cfg, env } = await setupVaults();
+  const dest = await tmp('n6-safe-dest');
+  await mkdir(path.join(dest, 'BrainLink Shared'), { recursive: true });
+  await writeFile(path.join(dest, 'BrainLink Shared', 'stray.md'), 'leftover');
+  await mkdir(path.dirname(manifestPath(dest, env)), { recursive: true });
+  await writeFile(manifestPath(dest, env), '{not valid json');
+
+  const r = await clearSnapshot(dest, env, cfg.vaults, { force: true });
+  assert.equal(r.ok, true);
+  assert.ok(!existsSync(path.join(dest, 'BrainLink Shared')), 'wiped outright: no vault overlaps this folder');
+});
+
 // R1/N1: the fix. readManifest no longer falls back to dest/manifest.json at all (that fallback is
 // what let a planted or pre-existing manifest.json drive deletion on first enable, after a clear,
 // after a folder switch, or on a corrupt appHome manifest), and neither write nor clear ever
