@@ -423,7 +423,7 @@ export async function startSetup(opts = {}) {
     },
     'POST /api/snapshot/clear': async () => {
       const cfg = await loadConfig(file);
-      await clearSnapshot(snapshotSettings(cfg).folder, env);
+      await clearSnapshot(snapshotSettings(cfg).folder, env, cfg.vaults);
       return { ok: true };
     },
     'POST /api/test': async (b) => {

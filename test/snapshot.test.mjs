@@ -253,6 +253,56 @@ test('snapshot: upgrading from 1.2.1 purges a stale private-note/00-Home copy le
   assert.ok(existsSync(path.join(dest, 'manifest.json')), 'the old in-folder manifest is never deleted by BrainLink -- it may not even be ours (N1)');
 });
 
+// N4: the vault can be the exact same file as the "shared output" location when the vault lives
+// at <dest>/<vaultName> -- the layout suggestSnapshotFolder itself suggests. A legacy (or
+// current) manifest naming that vault's own relative path must never be able to delete the real
+// vault file just because it is byte-identical to itself.
+test('snapshot N4: a vault at <dest>/<vaultName> survives a planted legacy manifest naming its own notes', async () => {
+  const dest = await tmp('dest-n4');
+  const vaultDir = path.join(dest, 'Brain');
+  await mkdir(path.join(vaultDir, 'Projects'), { recursive: true });
+  await writeFile(path.join(vaultDir, 'Pub.md'), '# Pub\nhello');
+  await writeFile(path.join(vaultDir, 'Projects', 'Plan.md'), '# Plan\nhello');
+  await writeFile(path.join(vaultDir, 'Other.md'), '# Other\nhello');
+  // Planted (or genuinely legacy) manifest naming real vault files relative to dest's own root.
+  await writeFile(path.join(dest, 'manifest.json'), JSON.stringify({ files: {
+    'Brain/Pub.md': { sha12: 'x' },
+    'Brain/Projects/Plan.md': { sha12: 'y' },
+  } }));
+  const env = { BRAINLINK_HOME: await tmp('n4-home'), BRAINLINK_SEMANTIC: '0' };
+  const cfg = normalize({ vaults: [{ name: 'Brain', path: vaultDir }] });
+  const ctx = createContext(cfg, { env });
+  const withSnapshot = chooseSnapshot(cfg, { enabled: true, folder: dest });
+
+  const r = await writeSnapshotOnce(ctx, withSnapshot, env);
+  assert.equal(r.ok, true);
+  assert.ok(existsSync(path.join(vaultDir, 'Pub.md')), 'real vault note survives (not deleted as a stale legacy copy of itself)');
+  assert.ok(existsSync(path.join(vaultDir, 'Projects', 'Plan.md')), 'real vault note survives');
+  assert.ok(existsSync(path.join(vaultDir, 'Other.md')), 'untouched vault note also survives');
+
+  await clearSnapshot(dest, env, cfg.vaults);
+  assert.ok(existsSync(path.join(vaultDir, 'Other.md')), 'vault file still intact after clear');
+});
+
+// N5: a dest inside a vault would get walked and copied right back into itself every run,
+// growing without end (and the recursive watcher fires on its own writes too). Reject up front.
+test('snapshot N5: a destination folder inside a vault is rejected, not written to', async () => {
+  const vaultDir = await tmp('n5-vault');
+  await writeFile(path.join(vaultDir, 'A.md'), '# A\nhello');
+  const dest = path.join(vaultDir, 'share');
+  await mkdir(dest, { recursive: true });
+  const env = { BRAINLINK_HOME: await tmp('n5-home'), BRAINLINK_SEMANTIC: '0' };
+  const cfg = normalize({ vaults: [{ name: 'Brain', path: vaultDir }] });
+  const ctx = createContext(cfg, { env });
+  const withSnapshot = chooseSnapshot(cfg, { enabled: true, folder: dest });
+
+  for (let i = 0; i < 3; i++) {
+    const r = await writeSnapshotOnce(ctx, withSnapshot, env);
+    assert.equal(r.ok, false, 'rejected every run, not just the first');
+  }
+  assert.ok(!existsSync(path.join(dest, 'BrainLink Shared')), 'nothing was ever written inside the vault');
+});
+
 // R1/N1: the fix. readManifest no longer falls back to dest/manifest.json at all (that fallback is
 // what let a planted or pre-existing manifest.json drive deletion on first enable, after a clear,
 // after a folder switch, or on a corrupt appHome manifest), and neither write nor clear ever

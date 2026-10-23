@@ -17,6 +17,11 @@ import { sessionList } from './sessions/mcp.mjs';
 export function defaultSnapshot() { return { enabled: false, folder: null, includeSessions: false }; }
 export function snapshotSettings(cfg = {}) { return { ...defaultSnapshot(), ...(cfg.snapshot || {}) }; }
 
+// N5's authoritative guard is the realpath-based check inside writeSnapshotOnce (vaultRealRoots
+// / isWithinRoot): chooseSnapshot deliberately does not reject a vault-nested folder itself,
+// since the folder may not exist yet (nothing to realpath) and this setter must stay a pure,
+// synchronous config transform -- the write path is where the folder is guaranteed to exist and
+// a wrong answer would be actually destructive, so that's where the real check belongs.
 export function validateSnapshot(s) {
   const e = [];
   if (s.enabled && (!s.folder || !path.isAbsolute(s.folder))) e.push('Choose a folder using the folder picker.');
@@ -92,7 +97,7 @@ function legacyMigrationMarker(dest, env) {
 // own current note loses nothing; anything that doesn't match (changed, renamed, or the source no
 // longer exists) is left in place rather than guessed about. The legacy file itself is never
 // deleted -- it may not even be ours.
-async function migrateLegacyManifestOnce(ctx, dest, outRoot, env) {
+async function migrateLegacyManifestOnce(ctx, dest, outRoot, env, vaultRoots) {
   const marker = legacyMigrationMarker(dest, env);
   if (existsSync(marker)) return;
   await atomicWrite(marker, String(Date.now()));
@@ -107,7 +112,7 @@ async function migrateLegacyManifestOnce(ctx, dest, outRoot, env) {
     try { sourceFull = safeJoin(path.resolve(v.path), m[2]); } catch { continue; }
     let sourceBytes;
     try { sourceBytes = await readFile(sourceFull); } catch { continue; } // can't verify: leave it alone
-    const safe = await safeDeletePath(outRoot, rel);
+    const safe = await safeDeletePath(outRoot, rel, vaultRoots, sourceFull);
     if (!safe) continue;
     let distBytes;
     try { distBytes = await readFile(safe); } catch { continue; }
@@ -115,11 +120,43 @@ async function migrateLegacyManifestOnce(ctx, dest, outRoot, env) {
   }
 }
 
+// N4: the vault path and the "shared output" path can be the exact same file on disk -- the
+// layout suggestSnapshotFolder itself suggests is a vault at <dest>/<vaultName>, so a legacy (or
+// current) manifest key naming that vault's own relative path resolves to a real vault file, not
+// a copy. A byte-equal check alone (the migration's original guard) always passes in that case,
+// since it's comparing the file to itself. Resolve every configured vault's real path once and
+// never let any delete loop (migration, prune, clear) unlink a path whose realpath lands inside
+// one of them, or that shares a dev+ino with the specific source file a migration step is
+// mirroring (catches the same file reached via a different, non-descendant symlink chain).
+async function vaultRealRoots(vaults = []) {
+  const roots = [];
+  for (const v of vaults) {
+    if (!v || !v.path) continue;
+    try { roots.push(await realpath(path.resolve(v.path))); } catch { /* vault path gone: nothing to protect */ }
+  }
+  return roots;
+}
+
+function isWithinRoot(root, real) { return real === root || real.startsWith(root + path.sep); }
+
+async function isProtectedVaultFile(vaultRoots, resolved, sourceFull) {
+  if (sourceFull) {
+    try {
+      const [a, b] = await Promise.all([stat(resolved), stat(sourceFull)]);
+      if (a.dev === b.dev && a.ino === b.ino) return true;
+    } catch { /* one of them doesn't exist: dev+ino can't match */ }
+  }
+  let real;
+  try { real = await realpath(resolved); } catch { return false; }
+  return vaultRoots.some((root) => isWithinRoot(root, real));
+}
+
 // The manifest read back from `dest` is untrusted (it lives in a folder a cloud sync client also
 // writes to, and a compromised/odd peer could plant one). Before deleting a key from it, confirm
 // the path it names actually resolves inside `dest` -- rejecting absolute paths, "..", and any
-// symlink (in the key's own directory chain, or the key itself) that would resolve outside it.
-async function safeDeletePath(dest, rel) {
+// symlink (in the key's own directory chain, or the key itself) that would resolve outside it --
+// and, per N4 above, never a path that is actually a real vault file.
+async function safeDeletePath(dest, rel, vaultRoots = [], sourceFull = null) {
   if (typeof rel !== 'string' || !rel || path.isAbsolute(rel)) return null;
   const destResolved = path.resolve(dest);
   const resolved = path.resolve(destResolved, rel);
@@ -130,6 +167,7 @@ async function safeDeletePath(dest, rel) {
   try { realDir = await realpath(path.dirname(resolved)); } catch { return null; } // containing dir must really exist
   if (realDir !== realDest && !realDir.startsWith(realDest + path.sep)) return null;
   try { if ((await lstat(resolved)).isSymbolicLink()) return null; } catch { /* nothing there yet: fine, unlink is a no-op */ }
+  if (await isProtectedVaultFile(vaultRoots, resolved, sourceFull)) return null;
   return resolved;
 }
 
@@ -208,6 +246,16 @@ export async function writeSnapshotOnce(ctx, cfg, env = process.env) {
   if (!(await stat(dest).then((s) => s.isDirectory(), () => false))) return { ok: false, error: `Shared folder not found: ${dest}` };
   const outRoot = sharedRoot(dest);
 
+  // N5: a dest inside a vault gets walked and copied right back into itself on the very next
+  // run (the recursive watcher fires on its own writes too), growing without end. Reject before
+  // writing anything, rather than detect it after the fact.
+  const vaultRoots = await vaultRealRoots(ctx.cfg.vaults);
+  let realDest;
+  try { realDest = await realpath(dest); } catch { realDest = path.resolve(dest); }
+  if (vaultRoots.some((root) => isWithinRoot(root, realDest))) {
+    return { ok: false, error: 'Shared folder is inside a vault. Choose a folder outside your vault(s).' };
+  }
+
   const notes = await snapshotNotes(ctx);
   const sessions = settings.includeSessions ? await snapshotSessions(env).catch(() => []) : null;
   const readmeText = README;
@@ -222,11 +270,11 @@ export async function writeSnapshotOnce(ctx, cfg, env = process.env) {
 
   // The pre-1.2.2 legacy manifest, if any, named paths at `dest`'s own root (the shared subfolder
   // didn't exist yet when it was written) -- migrate against `dest`, not the new subfolder.
-  await migrateLegacyManifestOnce(ctx, dest, dest, env);
+  await migrateLegacyManifestOnce(ctx, dest, dest, env, vaultRoots);
 
   const prev = await readManifest(dest, env);
   const prevFiles = prev.files || {};
-  for (const rel of Object.keys(prevFiles)) if (!wanted[rel]) { const safe = await safeDeletePath(outRoot, rel); if (safe) { try { await unlink(safe); } catch {} } }
+  for (const rel of Object.keys(prevFiles)) if (!wanted[rel]) { const safe = await safeDeletePath(outRoot, rel, vaultRoots); if (safe) { try { await unlink(safe); } catch {} } }
 
   const files = {};
   const now = new Date().toISOString();
@@ -245,11 +293,12 @@ export async function writeSnapshotOnce(ctx, cfg, env = process.env) {
 // "Stop sharing" + clear: removes every file this feature ever wrote (tracked in its own
 // manifest, kept under appHome — see manifestPath above) from inside the shared subfolder, and
 // nothing else -- a foreign file there, or anywhere else in `dest`, is untouched.
-export async function clearSnapshot(dest, env = process.env) {
+export async function clearSnapshot(dest, env = process.env, vaults = []) {
   if (!dest) return { ok: true };
   const outRoot = sharedRoot(dest);
+  const vaultRoots = await vaultRealRoots(vaults);
   const prev = await readManifest(dest, env);
-  for (const rel of Object.keys(prev.files || {})) { const safe = await safeDeletePath(outRoot, rel); if (safe) { try { await unlink(safe); } catch {} } }
+  for (const rel of Object.keys(prev.files || {})) { const safe = await safeDeletePath(outRoot, rel, vaultRoots); if (safe) { try { await unlink(safe); } catch {} } }
   try { await unlink(manifestPath(dest, env)); } catch {}
   return { ok: true };
 }
