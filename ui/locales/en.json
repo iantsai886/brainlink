@@ -13,7 +13,7 @@
   "start.create": "Create",
   "start.otherFolder": "Use a different folder…",
   "folderFallback.title": "Type the folder's path",
-  "folderFallback.hint": "We couldn't open the folder picker. In Finder, hold the Option key, right-click the folder, choose \"Copy as Pathname\", then paste it below.",
+  "folderFallback.hint": "We couldn't open the folder picker. In your file manager, right-click the folder and look for an option like \"Copy path\" (or similar), then paste it below.",
   "folderFallback.placeholder": "/Users/you/Documents/My Notes",
   "folderFallback.use": "Use this folder",
   "folderFallback.cancel": "Cancel",

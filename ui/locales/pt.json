@@ -13,7 +13,7 @@
   "start.create": "Criar",
   "start.otherFolder": "Usar outra pasta…",
   "folderFallback.title": "Escreva o caminho da pasta",
-  "folderFallback.hint": "Não foi possível abrir o seletor de pastas. No Finder, mantenha premida a tecla Option, clique com o botão direito na pasta, escolha \"Copiar como Nome do Caminho\" e depois cole abaixo.",
+  "folderFallback.hint": "Não foi possível abrir o seletor de pastas. No seu gestor de ficheiros, clique com o botão direito na pasta e procure uma opção como \"Copiar caminho\" (ou semelhante), depois cole abaixo.",
   "folderFallback.placeholder": "/Users/você/Documentos/As Minhas Notas",
   "folderFallback.use": "Usar esta pasta",
   "folderFallback.cancel": "Cancelar",

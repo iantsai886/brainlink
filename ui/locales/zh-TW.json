@@ -13,7 +13,7 @@
   "start.create": "建立",
   "start.otherFolder": "選擇其他資料夾…",
   "folderFallback.title": "輸入資料夾路徑",
-  "folderFallback.hint": "無法開啟資料夾選取視窗。請在 Finder 中按住 Option 鍵並點選該資料夾（右鍵），選擇「拷貝為路徑名稱」，再貼到下面。",
+  "folderFallback.hint": "無法開啟資料夾選取視窗。請在你的檔案管理工具中，在該資料夾上按右鍵，尋找類似「複製路徑」的選項，再貼到下面。",
   "folderFallback.placeholder": "/Users/你的名字/文件/我的筆記",
   "folderFallback.use": "使用這個資料夾",
   "folderFallback.cancel": "取消",

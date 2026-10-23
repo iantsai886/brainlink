@@ -98,6 +98,20 @@ test('P1g: share.subfolderHint names "BrainLink Shared" and is rendered in the f
 });
 function catalogsOf(raw) { return JSON.parse(raw); }
 
+// P1d: the folder-picker fallback's hint used to say "In Finder, hold the Option key... choose
+// Copy as Pathname" -- Mac-only steps shown to every OS (this fallback fires on Windows/Linux too,
+// whenever the native GUI dialog isn't available), and jargon even for a Mac user who doesn't know
+// what "Pathname" means. It must now describe a generic, actionable step (right-click, copy path)
+// that doesn't name Finder or an Option key, in every shipped locale.
+test('P1d: folderFallback.hint gives generic, actionable steps with no Mac Finder jargon', async () => {
+  for (const id of LOCALES) {
+    const s = catalogsOf(await readFile(path.join(LOCALES_DIR, `${id}.json`), 'utf8'))['folderFallback.hint'];
+    assert.doesNotMatch(s, /Finder/, `${id}.json folderFallback.hint should not name Finder`);
+    assert.doesNotMatch(s, /Option/, `${id}.json folderFallback.hint should not mention the Option key`);
+    assert.doesNotMatch(s, /Pathname/, `${id}.json folderFallback.hint should not say "Pathname"`);
+  }
+});
+
 // P1b: the citation/source note modal (ui/index.html's #note-modal, openNote()) must render the
 // note as formatted text, not raw Markdown, and must resolve [[wikilinks]] against what the
 // server already decided is visible (src/links.mjs's resolveNoteWikilinks, see test/brainlink.test.mjs
