@@ -970,7 +970,7 @@ test('remember, daily note, open loops, recent, health and brief', async () => {
   assert.equal(d.path, 'Acme Studio/Journal/Daily/2026-10-18.md');
   assert.match(await readFile(path.join(company, 'Journal/Daily/2026-10-18.md'), 'utf8'), /- 09:30 Called the printer _\(Claude\)_/);
   const loops = await openLoops(ctx, 'Acme Studio', { days: 3650 });
-  assert.ok(loops.next_actions.some((x) => /booking vendor/.test(x.action)));
+  assert.ok(loops.next_actions.some((x) => /booking vendor/.test(x.action)), JSON.stringify(loops));
   const rec = await recentNotes(ctx, 'Acme Studio', { days: 1 });
   assert.ok(rec.some((x) => x.title === 'Lonely'));
   const h = await vaultHealth(ctx, 'Acme Studio');
@@ -1044,7 +1044,7 @@ test('Windows: one-click setup connects apps with node.exe paths, and disconnect
 
 // ---- Linux code paths ----
 
-test('Linux: XDG config, Claude Desktop path, and Obsidian found in native, Flatpak and Snap installs', async () => {
+test('Linux: XDG config, Claude Desktop path, and Obsidian found in native, Flatpak and Snap installs', { skip: process.platform !== 'linux' }, async () => {
   const home = await tmp('linux');
   assert.equal(appHome({}, 'linux', home), path.join(home, '.config', 'brainlink'));
   assert.equal(appHome({ XDG_CONFIG_HOME: '/x' }, 'linux', home), '/x/brainlink');

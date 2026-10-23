@@ -32,7 +32,7 @@ test('createFolderHost: connectors.detect returns the UI-shaped array', async ()
 
 test('createFolderHost: services.sessions.list/read/setPrivate round-trip a logged session', async () => {
   const { dir, configFile, vaultDir } = scratch();
-  const env = { BRAINLINK_HOME: dir };
+  const env = { BRAINLINK_HOME: dir, HOME: dir };
   const host = await createFolderHost({ name: 'Demo', folder: vaultDir, configFile, env });
   const { openSessionStore } = await import('../src/sessions/index.mjs');
   const store = await openSessionStore(env);

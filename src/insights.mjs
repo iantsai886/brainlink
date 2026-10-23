@@ -21,7 +21,8 @@ export async function recentNotes(ctx, vaultName, { days = 7, since, until, limi
 // Field lines written by close-loop captures, e.g. "- **Smallest next actions:** …" (single or nested list).
 function captureFields(body, labels) {
   const out = [];
-  const lines = body.split('\n');
+  // Markdown vaults synced from Windows commonly use CRLF. Match fields on logical lines.
+  const lines = body.split(/\r?\n/);
   for (let k = 0; k < lines.length; k++) {
     const m = lines[k].match(/^- \*\*([^*]+):\*\*\s*(.*)$/);
     if (!m || !labels.some((re) => re.test(m[1]))) continue;

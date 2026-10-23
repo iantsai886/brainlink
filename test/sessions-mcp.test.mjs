@@ -18,7 +18,7 @@ const tmp = (p) => mkdtemp(path.join(tmpdir(), `brainlink-${p}-`));
 
 async function mcpWithHome(extraEnv = {}) {
   const home = await tmp('sess-mcp');
-  const env = { BRAINLINK_HOME: home, BRAINLINK_AI_PLATFORM: 'Claude', BRAINLINK_SEMANTIC: '0', ...extraEnv };
+  const env = { BRAINLINK_HOME: home, HOME: home, BRAINLINK_AI_PLATFORM: 'Claude', BRAINLINK_SEMANTIC: '0', ...extraEnv };
   const ctx = createContext(normalize({}), { env });
   return { mcp: createMcp(ctx), ctx, env };
 }
@@ -150,7 +150,7 @@ test('token budget: representative session_list/session_read calls average <=105
 
 test('imported sessions stay hidden by default under a fake HOME; session_read points at Settings', async () => {
   await withFakeHome(async () => {
-    const { mcp, env } = await mcpWithHome(); // cfg.sessions defaults: shareSummaries false, shareFullText false
+    const { mcp, env } = await mcpWithHome({ HOME: process.env.HOME }); // cfg.sessions defaults: shareSummaries false, shareFullText false
     const list = await call(mcp, 'session_list', {});
     assert.deepEqual(list.sessions, [], 'imported sessions are not visible until the user opts in, in BrainLink Settings');
     const store = await openSessionStore(env);
@@ -190,7 +190,7 @@ test('R2: a config saved before the schema-version bump has shareSummaries force
 
 test('session sharing settings: shareSummaries=true opts in to imported-session summaries', async () => {
   await withFakeHome(async () => {
-    const { env } = await mcpWithHome();
+    const { env } = await mcpWithHome({ HOME: process.env.HOME });
     const ctx = createContext(normalize({ version: CONFIG_SCHEMA_VERSION, sessions: { shareSummaries: true, shareFullText: false } }), { env });
     const mcp = createMcp(ctx);
     const list = await call(mcp, 'session_list', {});
@@ -221,7 +221,7 @@ test('private imported transcript needs full-text consent before excerpts appear
 
 test('regression: a caller-supplied include_private=true has no effect, on session_list or session_read, full or not', async () => {
   await withFakeHome(async () => {
-    const { env } = await mcpWithHome();
+    const { env } = await mcpWithHome({ HOME: process.env.HOME });
     const ctx = createContext(normalize({ version: CONFIG_SCHEMA_VERSION, sessions: { shareSummaries: true, shareFullText: false } }), { env });
     const mcp = createMcp(ctx);
     const withFlag = await call(mcp, 'session_list', { include_private: true });
@@ -236,12 +236,12 @@ test('regression: a caller-supplied include_private=true has no effect, on sessi
 
 test('session sharing settings: shareSummaries=false hides imports again; shareFullText=true (with shareSummaries) unlocks full=true', async () => {
   await withFakeHome(async () => {
-    const off = await mcpWithHome();
+    const off = await mcpWithHome({ HOME: process.env.HOME });
     const ctxOff = createContext(normalize({ version: CONFIG_SCHEMA_VERSION, sessions: { shareSummaries: false, shareFullText: false } }), { env: off.env });
     const mcpOff = createMcp(ctxOff);
     assert.deepEqual((await call(mcpOff, 'session_list', {})).sessions, [], 'turning shareSummaries off hides imports again, matching the pre-fix default');
 
-    const on = await mcpWithHome();
+    const on = await mcpWithHome({ HOME: process.env.HOME });
     const ctxOn = createContext(normalize({ version: CONFIG_SCHEMA_VERSION, sessions: { shareSummaries: true, shareFullText: true } }), { env: on.env });
     const mcpOn = createMcp(ctxOn);
     const id = (await call(mcpOn, 'session_list', {})).sessions[0].id;

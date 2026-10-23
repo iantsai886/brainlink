@@ -34,7 +34,7 @@ const EXPECTED_FAIL_IDS = new Set([
   'S2 session_read private refused even with include_private/full',
 ]);
 
-test('Technical Reviewer privacy probe: every row passes except the 1 known, documented item-1 exception', async () => {
+test('Technical Reviewer privacy probe: every row passes except the 1 known, documented item-1 exception', async (t) => {
   const B = path.join(tmpdir(), `brainlink-tr-probe-${process.pid}-${Date.now()}`);
   await rm(B, { recursive: true, force: true }); await mkdir(B, { recursive: true });
 
@@ -60,7 +60,11 @@ test('Technical Reviewer privacy probe: every row passes except the 1 known, doc
   await w('Secret2.md', '---\nprivate: true\n---\n# Secret2\n\n- [ ] PRIVTASK_MARK call the bank\n\n## Open questions\n- PRIVQ_MARK should I sell?\n\n- **Smallest next actions:** PRIVNEXT_MARK move money\n');
   await w('Home.md', '# Home\n\nzebracorn hub. See [[Secret]], [[SecretYes]], [[money]], [[nested]], [[Visible]].');
   await w('Visible.md', '# Visible\n\nzebracorn VISIBLE_OK');
-  await symlink(path.join(V, '00 Home/money.md'), path.join(V, 'link-to-money.md'));
+  try { await symlink(path.join(V, '00 Home/money.md'), path.join(V, 'link-to-money.md')); }
+  catch (error) {
+    if (error.code === 'EPERM' && process.platform === 'win32') { t.skip('Windows symlink privilege unavailable; run privacy probe on a symlink-capable host'); return; }
+    throw error;
+  }
   await symlink(path.join(V, '00 Home'), path.join(V, 'HomeAlias'));
   await symlink(path.join(V, 'Secret.md'), path.join(V, 'link-to-secret.md'));
 

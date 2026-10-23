@@ -40,7 +40,7 @@ async function setupToken() {
   await writeFile(file, t, { mode: 0o600 });
   return t;
 }
-const clientOpts = () => ({ home: homedir(), os: process.platform, env: process.env, launch: launchSpec() });
+const clientOpts = () => ({ home: process.env.HOME || homedir(), os: process.platform, env: process.env, launch: launchSpec() });
 
 const HELP = `BrainLink MCP ${VERSION} — one Markdown brain for every AI
 

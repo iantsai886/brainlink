@@ -91,7 +91,7 @@ test('P1e: "Done, close setup" never stops the background server', async () => {
     assert.equal((await s.api('GET', '/api/state')).status, 200);
     // The page's own Done handler must not call any quit-like endpoint either.
     const html = await readFile(path.join(ROOT, 'ui', 'index.html'), 'utf8');
-    const doneHandler = html.match(/\$\('done'\)\.onclick = .*?;(?=\n)/s)[0];
+    const doneHandler = html.match(/\$\('done'\)\.onclick = .*?;(?=\r?\n)/s)[0];
     assert.doesNotMatch(doneHandler, /api\(['"]POST['"],\s*['"]\/api\/quit['"]/);
   } finally { s.stop(); }
 });

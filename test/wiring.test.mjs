@@ -147,8 +147,8 @@ test('connectors: connect()/test()/disconnect() normalize to {ok,message} over t
 test('CLI: `brainlink connect --all` connects every present client and skips the rest', async () => {
   const home = await tmp('cli-home');
   await mkdir(path.join(home, '.cursor'), { recursive: true });
-  await mkdir(path.join(home, '.config', 'Claude'), { recursive: true });
-  const env = { ...process.env, HOME: home, BRAINLINK_HOME: path.join(home, 'app') };
+  await mkdir(path.join(home, 'AppData', 'Roaming', 'Claude'), { recursive: true });
+  const env = { ...process.env, HOME: home, APPDATA: path.join(home, 'AppData', 'Roaming'), BRAINLINK_HOME: path.join(home, 'app') };
   await new Promise((resolve, reject) => {
     const child = spawn(process.execPath, [path.join(ROOT, 'bin', 'brainlink.mjs'), 'connect', '--all'], { env });
     let out = '';
@@ -157,7 +157,7 @@ test('CLI: `brainlink connect --all` connects every present client and skips the
   });
   const cursor = JSON.parse(await readFile(path.join(home, '.cursor', 'mcp.json'), 'utf8'));
   assert.ok(cursor.mcpServers.brainlink);
-  const claude = JSON.parse(await readFile(path.join(home, '.config', 'Claude', 'claude_desktop_config.json'), 'utf8'));
+  const claude = JSON.parse(await readFile(path.join(home, 'AppData', 'Roaming', 'Claude', 'claude_desktop_config.json'), 'utf8'));
   assert.ok(claude.mcpServers.brainlink);
   await assert.rejects(readFile(path.join(home, '.gemini', 'settings.json')), 'gemini was never present, so --all must not create it');
 });
@@ -166,8 +166,8 @@ test('CLI: `brainlink connect --all` keeps going past one app\'s unreadable conf
   const home = await tmp('cli-home-bad-config');
   await mkdir(path.join(home, '.cursor'), { recursive: true });
   await writeFile(path.join(home, '.cursor', 'mcp.json'), '{ broken'); // cursor is present but its config is not valid JSON
-  await mkdir(path.join(home, '.config', 'Claude'), { recursive: true });
-  const env = { ...process.env, HOME: home, BRAINLINK_HOME: path.join(home, 'app') };
+  await mkdir(path.join(home, 'AppData', 'Roaming', 'Claude'), { recursive: true });
+  const env = { ...process.env, HOME: home, APPDATA: path.join(home, 'AppData', 'Roaming'), BRAINLINK_HOME: path.join(home, 'app') };
   const out = await new Promise((resolve, reject) => {
     const child = spawn(process.execPath, [path.join(ROOT, 'bin', 'brainlink.mjs'), 'connect', '--all'], { env });
     let buf = '';
@@ -175,7 +175,7 @@ test('CLI: `brainlink connect --all` keeps going past one app\'s unreadable conf
     child.on('exit', (code) => (code === 0 ? resolve(buf) : reject(new Error(`exit ${code}: ${buf}`))));
   });
   // cursor's bad config must not stop claude desktop from being connected.
-  const claude = JSON.parse(await readFile(path.join(home, '.config', 'Claude', 'claude_desktop_config.json'), 'utf8'));
+  const claude = JSON.parse(await readFile(path.join(home, 'AppData', 'Roaming', 'Claude', 'claude_desktop_config.json'), 'utf8'));
   assert.ok(claude.mcpServers.brainlink);
   assert.equal(await readFile(path.join(home, '.cursor', 'mcp.json'), 'utf8'), '{ broken', 'the broken file is never overwritten');
   // Every app's outcome is reported, not just the first failure.
@@ -222,7 +222,7 @@ test('CLI: `brainlink sync` runs end to end with no vault configured', async () 
 
 test('setup UI: /api/sync chooses a provider (and rejects a bad one); state() reports it', async () => {
   const home = await tmp('setup-sync-home');
-  const env = { BRAINLINK_HOME: path.join(home, 'app'), BRAINLINK_SEMANTIC: '0' };
+  const env = { BRAINLINK_HOME: path.join(home, 'app'), HOME: home, BRAINLINK_SEMANTIC: '0' };
   const s = await startSetup({ env, home, os: 'linux', port: 0, useCli: false });
   const base = `http://127.0.0.1:${s.port}`;
   const api = (method, p, body) => fetch(base + p, { method, headers: { 'X-BrainLink-Token': s.token, 'Content-Type': 'application/json' }, body: body && JSON.stringify(body) });
@@ -246,7 +246,7 @@ test('setup UI: /api/sync chooses a provider (and rejects a bad one); state() re
 
 test('setup UI: /api/sessions list/read/private wire the same session store as session_list/session_read', async () => {
   const home = await tmp('setup-sessions-home');
-  const env = { BRAINLINK_HOME: path.join(home, 'app'), BRAINLINK_SEMANTIC: '0' };
+  const env = { BRAINLINK_HOME: path.join(home, 'app'), HOME: home, BRAINLINK_SEMANTIC: '0' };
   const store = await openSessionStore(env);
   const s = await store.putSession({ client: 'codex', source_id: 'proj/1', project: '/work', title: 'Fix the kiln', summary: 'Diagnosed the kiln controller.', started_at: '2026-10-10T00:00:00Z', note_refs: [], private: true, messages: [{ role: 'user', at: '2026-10-10T00:00:00Z', text: 'hi' }] });
 

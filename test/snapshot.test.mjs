@@ -24,6 +24,15 @@ const tmp = (p) => mkdtemp(path.join(tmpdir(), `bl-snap-${p}-`));
 // N2: every write/delete BrainLink does lands inside this dedicated subfolder of the chosen
 // destination, never at the destination's own root -- see src/snapshot.mjs's SHARED_SUBDIR.
 const shared = (dest) => path.join(dest, 'BrainLink Shared');
+async function symlinkOrSkip(t, target, link) {
+  const { symlink } = await import('node:fs/promises');
+  try { await symlink(target, link, 'dir'); }
+  catch (error) {
+    if (error.code === 'EPERM' && process.platform === 'win32') { t.skip('Windows symlink privilege unavailable'); return false; }
+    throw error;
+  }
+  return true;
+}
 
 async function setupVaults() {
   const vaultDir = await tmp('vault');
@@ -135,7 +144,7 @@ test('snapshot N3: a symlinked destination is followed safely for both write and
   const { ctx, cfg, env } = await setupVaults();
   const realDest = await tmp('dest-n3-real');
   const linkDest = path.join(tmpdir(), `bl-snap-n3-link-${process.pid}-${Date.now()}`);
-  await symlink(realDest, linkDest, 'dir');
+  if (!(await symlinkOrSkip(t, realDest, linkDest))) return;
   t.after(async () => { const { unlink } = await import('node:fs/promises'); await unlink(linkDest).catch(() => {}); });
 
   const withSnapshot = chooseSnapshot(cfg, { enabled: true, folder: linkDest });
@@ -155,7 +164,7 @@ test('snapshot F3: a symlinked "BrainLink Shared" (outRoot itself) is refused, n
   const { ctx, cfg, env } = await setupVaults();
   const dest = await tmp('dest-f3-outroot-link');
   const outside = await tmp('outside-f3-outroot');
-  await symlink(outside, shared(dest), 'dir');
+  if (!(await symlinkOrSkip(t, outside, shared(dest)))) return;
   t.after(() => rmlink(shared(dest)).catch(() => {}));
 
   const withSnapshot = chooseSnapshot(cfg, { enabled: true, folder: dest });
@@ -170,7 +179,7 @@ test('snapshot F3: a symlinked vault folder inside "BrainLink Shared" is refused
   const dest = await tmp('dest-f3-vault-link');
   const outside = await tmp('outside-f3-vault');
   await mkdir(shared(dest), { recursive: true });
-  await symlink(outside, path.join(shared(dest), 'Brain'), 'dir');
+  if (!(await symlinkOrSkip(t, outside, path.join(shared(dest), 'Brain')))) return;
   t.after(() => rmlink(path.join(shared(dest), 'Brain')).catch(() => {}));
 
   const withSnapshot = chooseSnapshot(cfg, { enabled: true, folder: dest });

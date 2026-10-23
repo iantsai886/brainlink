@@ -3,8 +3,9 @@
 import path from 'node:path';
 import { appHome } from '../config.mjs';
 import { createSessionStore } from './store.mjs';
-import { importClaudeCode } from './claude-code.mjs';
-import { importCodex } from './codex.mjs';
+import { importClaudeCode, defaultRoot as claudeRoot } from './claude-code.mjs';
+import { importCodex, defaultRoot as codexRoot, defaultHistoryFile } from './codex.mjs';
+import { homedir } from 'node:os';
 
 export { createSessionStore, SESSIONS_VAULT } from './store.mjs';
 export { importClaudeCode } from './claude-code.mjs';
@@ -19,9 +20,13 @@ export const openSessionStore = (env = process.env) => createSessionStore({ dir:
 export async function importAll({ store, env = process.env } = {}) {
   const dir = sessionsDir(env);
   const s = store || await openSessionStore(env);
+  // Use the same caller-supplied home in tests and subprocesses. os.homedir() on Windows
+  // ignores HOME, which previously caused a fictional test to import the user's real history.
+  const sourceHome = env.HOME || env.USERPROFILE || homedir();
   const [claudeCode, codex] = await Promise.all([
-    importClaudeCode({ store: s, cursorsFile: path.join(dir, 'cursors-claude-code.json') }),
-    importCodex({ store: s, cursorsFile: path.join(dir, 'cursors-codex.json') }),
+    importClaudeCode({ store: s, root: claudeRoot(sourceHome), cursorsFile: path.join(dir, 'cursors-claude-code.json') }),
+    importCodex({ store: s, root: codexRoot(sourceHome), historyFile: defaultHistoryFile(sourceHome),
+      cursorsFile: path.join(dir, 'cursors-codex.json') }),
   ]);
   return { 'claude-code': claudeCode, codex };
 }
