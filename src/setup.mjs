@@ -421,9 +421,12 @@ export async function startSetup(opts = {}) {
       const status = await loadSnapshotStatus(snapshotStateFile);
       return { ok: true, snapshot: { ...snapshotSettings(next), suggested_folder: suggestSnapshotFolder(home), ...status } };
     },
-    'POST /api/snapshot/clear': async () => {
+    // F2 recovery: force=true is the "Clear and re-share" action -- a full reset of the
+    // dedicated subfolder when the manifest was lost, not the normal "Stop sharing" toggle-off.
+    'POST /api/snapshot/clear': async (b) => {
       const cfg = await loadConfig(file);
-      await clearSnapshot(snapshotSettings(cfg).folder, env);
+      await clearSnapshot(snapshotSettings(cfg).folder, env, cfg.vaults, { force: Boolean(b?.force) });
+      if (b?.force) await refreshSnapshotWatcher(cfg);
       return { ok: true };
     },
     'POST /api/test': async (b) => {

@@ -3,10 +3,13 @@
 // notes/vaults); atomic writes; manifest-tracked deletion so foreign files are never touched.
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtemp, mkdir, writeFile, readFile, readdir } from 'node:fs/promises';
+import { mkdtemp, mkdir, writeFile, readFile, readdir, unlink } from 'node:fs/promises';
 import { existsSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
+import { createHash } from 'node:crypto';
+
+const sha12 = (text) => createHash('sha256').update(text).digest('hex').slice(0, 12);
 
 import { normalize } from '../src/config.mjs';
 import { createContext } from '../src/core.mjs';
@@ -144,6 +147,38 @@ test('snapshot N3: a symlinked destination is followed safely for both write and
   assert.ok(!existsSync(path.join(realDest, 'BrainLink Shared', 'Brain', 'Public.md')), 'clear through the symlink removes the real file');
 });
 
+// F3: unlike N3 (dest itself symlinked, handled safely by just following it), a symlink *inside*
+// dest -- at outRoot itself, or one level below it -- must be refused, since atomicWrite's
+// mkdir+writeFile would otherwise follow it and silently write real note content outside dest.
+test('snapshot F3: a symlinked "BrainLink Shared" (outRoot itself) is refused, not written through', async (t) => {
+  const { symlink, unlink: rmlink } = await import('node:fs/promises');
+  const { ctx, cfg, env } = await setupVaults();
+  const dest = await tmp('dest-f3-outroot-link');
+  const outside = await tmp('outside-f3-outroot');
+  await symlink(outside, shared(dest), 'dir');
+  t.after(() => rmlink(shared(dest)).catch(() => {}));
+
+  const withSnapshot = chooseSnapshot(cfg, { enabled: true, folder: dest });
+  const r = await writeSnapshotOnce(ctx, withSnapshot, env);
+  assert.equal(r.ok, false, 'refused outright: outRoot itself is a symlink');
+  assert.deepEqual(await readdir(outside), [], 'nothing was written through the symlink to the outside folder');
+});
+
+test('snapshot F3: a symlinked vault folder inside "BrainLink Shared" is refused, not written through', async (t) => {
+  const { symlink, unlink: rmlink } = await import('node:fs/promises');
+  const { ctx, cfg, env } = await setupVaults();
+  const dest = await tmp('dest-f3-vault-link');
+  const outside = await tmp('outside-f3-vault');
+  await mkdir(shared(dest), { recursive: true });
+  await symlink(outside, path.join(shared(dest), 'Brain'), 'dir');
+  t.after(() => rmlink(path.join(shared(dest), 'Brain')).catch(() => {}));
+
+  const withSnapshot = chooseSnapshot(cfg, { enabled: true, folder: dest });
+  const r = await writeSnapshotOnce(ctx, withSnapshot, env);
+  assert.equal(r.ok, false, 'refused outright: the vault subfolder inside outRoot is a symlink escaping it');
+  assert.deepEqual(await readdir(outside), [], 'nothing was written through the symlink to the outside folder');
+});
+
 test('snapshot: an exclusion at the vault root also hides nested descendants (e.g. "sub/Secret/x.md")', async () => {
   const { vaultDir, ctx, cfg, env } = await setupVaults();
   await mkdir(path.join(vaultDir, 'sub', 'Secret'), { recursive: true });
@@ -251,6 +286,186 @@ test('snapshot: upgrading from 1.2.1 purges a stale private-note/00-Home copy le
   assert.ok(!existsSync(path.join(dest, 'Brain', '00 Home', 'Diary.md')), 'stale leaked 00 Home copy is purged on the first post-upgrade write');
   assert.ok(existsSync(path.join(shared(dest), 'Brain', 'Public.md')), 'still-current note is untouched');
   assert.ok(existsSync(path.join(dest, 'manifest.json')), 'the old in-folder manifest is never deleted by BrainLink -- it may not even be ours (N1)');
+});
+
+// F1: v1.2.2/v1.2.3 wrote the appHome manifest with keys relative to dest's own root (the
+// 'BrainLink Shared' subfolder didn't exist yet). Upgrading must not reinterpret those keys
+// relative to the new subfolder (which could delete an unrelated user file that happens to sit
+// at that path inside the subfolder), and must prune the orphaned dest-root copies so a note
+// made private after the upgrade leaves no stale copy anywhere in dest.
+test('snapshot F1: upgrading a v1.2.3 dest-root appHome manifest prunes old copies and never touches the new subfolder', async () => {
+  const { vaultDir, ctx, cfg, env } = await setupVaults();
+  const dest = await tmp('dest-f1');
+  // v1.2.3 copies, written at dest's own root.
+  await mkdir(path.join(dest, 'Brain'), { recursive: true });
+  await writeFile(path.join(dest, 'Brain', 'Public.md'), '# Public\nhello'); // still current
+  await writeFile(path.join(dest, 'README.md'), 'old root readme');
+  await writeFile(path.join(dest, 'index.md'), 'old root index');
+  // A user file that happens to collide with the same relative path inside the NEW subfolder --
+  // must never be deleted just because a v1.2.3 key of the same name exists.
+  await mkdir(path.join(shared(dest), 'Brain'), { recursive: true });
+  await writeFile(path.join(shared(dest), 'Brain', 'Public.md'), 'NOT OURS: lives in the new subfolder');
+
+  const v123Manifest = { generated_at: 'x', files: {
+    'Brain/Public.md': { sha12: sha12('# Public\nhello') },
+    'README.md': { sha12: sha12('old root readme') },
+    'index.md': { sha12: sha12('old root index') },
+  } }; // no "layout" field: this is what a real v1.2.3 appHome manifest looked like
+  const withSnapshot = chooseSnapshot(cfg, { enabled: true, folder: dest });
+  await mkdir(path.dirname(manifestPath(dest, env)), { recursive: true });
+  await writeFile(manifestPath(dest, env), JSON.stringify(v123Manifest));
+
+  const r = await writeSnapshotOnce(ctx, withSnapshot, env);
+  assert.equal(r.ok, true);
+  assert.ok(!existsSync(path.join(dest, 'Brain', 'Public.md')), 'stale dest-root copy pruned (still byte-equal to the recorded sha12)');
+  assert.ok(!existsSync(path.join(dest, 'README.md')), 'stale dest-root README pruned');
+  assert.ok(!existsSync(path.join(dest, 'index.md')), 'stale dest-root index pruned');
+  assert.equal(await readFile(path.join(shared(dest), 'Brain', 'Public.md'), 'utf8'), 'NOT OURS: lives in the new subfolder', 'old key never reinterpreted relative to the new subfolder -- the unrelated file there is untouched');
+
+  const manifest = JSON.parse(await readFile(manifestPath(dest, env), 'utf8'));
+  assert.equal(manifest.layout, 2, 'a fresh layout-2 manifest is started');
+
+  // Now make Public.md private: no copy of it should survive anywhere in dest.
+  await writeFile(path.join(vaultDir, 'Public.md'), '---\nprivate: true\n---\n# Public\nhello');
+  await writeSnapshotOnce(ctx, withSnapshot, env);
+  assert.ok(!existsSync(path.join(dest, 'Brain', 'Public.md')));
+  assert.equal(await readFile(path.join(shared(dest), 'Brain', 'Public.md'), 'utf8'), 'NOT OURS: lives in the new subfolder', 'still untouched -- never claimed as ours');
+});
+
+test('snapshot F1: clearSnapshot also resolves an un-migrated (pre-layout-2) manifest against dest, not the subfolder', async () => {
+  const { ctx, cfg, env } = await setupVaults();
+  const dest = await tmp('dest-f1-clear');
+  await writeFile(path.join(dest, 'README.md'), 'old root readme');
+  const v123Manifest = { generated_at: 'x', files: { 'README.md': { sha12: sha12('old root readme') } } };
+  await mkdir(path.dirname(manifestPath(dest, env)), { recursive: true });
+  await writeFile(manifestPath(dest, env), JSON.stringify(v123Manifest));
+
+  await clearSnapshot(dest, env, cfg.vaults);
+  assert.ok(!existsSync(path.join(dest, 'README.md')), 'clear removes the dest-root copy named by the un-migrated manifest');
+  assert.ok(!existsSync(manifestPath(dest, env)));
+});
+
+// F2: a corrupt appHome manifest, with the shared subfolder already non-empty, means ownership
+// tracking was lost -- adopting files by content would also adopt a user's own byte-identical
+// copy, later deleted the moment the real note changes. Fail closed instead: write nothing,
+// delete nothing, keep a .bak, and surface a 'Clear and re-share' action.
+test('snapshot F2: a corrupt manifest with existing shared content fails closed, keeps a .bak, and leaves a recovery action', async () => {
+  const { ctx, cfg, env } = await setupVaults();
+  const dest = await tmp('dest-f2-corrupt');
+  const withSnapshot = chooseSnapshot(cfg, { enabled: true, folder: dest });
+  await writeSnapshotOnce(ctx, withSnapshot, env); // establish real shared content + a good manifest
+  const before = (await readdir(shared(dest), { recursive: true })).sort();
+
+  await writeFile(manifestPath(dest, env), '{not valid json');
+  const r = await writeSnapshotOnce(ctx, withSnapshot, env);
+  assert.equal(r.ok, false);
+  assert.equal(r.action, 'clear_and_reshare');
+  assert.equal(await readFile(`${manifestPath(dest, env)}.bak`, 'utf8'), '{not valid json', 'the corrupt manifest is backed up, not lost');
+
+  const after = (await readdir(shared(dest), { recursive: true })).sort();
+  assert.deepEqual(after, before, 'nothing was written or deleted while failing closed');
+});
+
+// The manifest can go missing (not just corrupt) while BrainLink's own previously-written content
+// is still sitting in outRoot -- e.g. appHome got wiped independently of the synced folder. That
+// must fail closed too, but a genuine first enable where a foreign file merely collides with a
+// wanted path (N2) must still succeed normally: README.md's exact, BrainLink-generated content is
+// the signal that tells the two apart (see looksPreviouslyShared in src/snapshot.mjs).
+test('snapshot F2: a missing manifest where BrainLink previously shared this folder fails closed', async () => {
+  const { ctx, cfg, env } = await setupVaults();
+  const dest = await tmp('dest-f2-missing');
+  const withSnapshot = chooseSnapshot(cfg, { enabled: true, folder: dest });
+  await writeSnapshotOnce(ctx, withSnapshot, env); // establishes real BrainLink-written content, incl. README.md
+  await unlink(manifestPath(dest, env)); // simulate appHome manifest loss (not corruption: deletion)
+
+  const r = await writeSnapshotOnce(ctx, withSnapshot, env);
+  assert.equal(r.ok, false);
+  assert.equal(r.action, 'clear_and_reshare');
+  assert.equal(await readFile(path.join(shared(dest), 'Brain', 'Public.md'), 'utf8'), '# Public\nhello', 'untouched');
+  assert.ok(!existsSync(manifestPath(dest, env)), 'still no manifest was written');
+});
+
+// N2's own collision case must keep succeeding normally even on a genuinely first write: a
+// foreign file merely occupying a wanted path (no BrainLink README.md anywhere) is not evidence
+// of prior sharing, so there is nothing to fail closed about.
+test('snapshot F2: a first-ever write with a pre-existing foreign file in the subfolder is not mistaken for manifest loss', async () => {
+  const { ctx, cfg, env } = await setupVaults();
+  const dest = await tmp('dest-f2-not-prior');
+  await mkdir(path.join(shared(dest), 'Brain'), { recursive: true });
+  await writeFile(path.join(shared(dest), 'Brain', 'Public.md'), 'NOT OURS: a pre-existing, unrelated file');
+  const withSnapshot = chooseSnapshot(cfg, { enabled: true, folder: dest });
+
+  const r = await writeSnapshotOnce(ctx, withSnapshot, env);
+  assert.equal(r.ok, true, 'proceeds normally -- no README.md means no evidence this was ever shared before');
+  assert.equal(await readFile(path.join(shared(dest), 'Brain', 'Public.md'), 'utf8'), 'NOT OURS: a pre-existing, unrelated file', 'still never overwritten (N2)');
+});
+
+test('snapshot F2: "Clear and re-share" (force clear) resets a stuck folder and a normal write then succeeds', async () => {
+  const { ctx, cfg, env } = await setupVaults();
+  const dest = await tmp('dest-f2-recover');
+  const withSnapshot = chooseSnapshot(cfg, { enabled: true, folder: dest });
+  await writeSnapshotOnce(ctx, withSnapshot, env);
+  await writeFile(manifestPath(dest, env), '{not valid json');
+  const stuck = await writeSnapshotOnce(ctx, withSnapshot, env);
+  assert.equal(stuck.ok, false);
+
+  await clearSnapshot(dest, env, cfg.vaults, { force: true });
+  assert.ok(!existsSync(shared(dest)), 'the dedicated subfolder is wiped outright by the explicit force-reset');
+  assert.ok(!existsSync(`${manifestPath(dest, env)}.bak`), 'the backup is cleaned up too');
+
+  const recovered = await writeSnapshotOnce(ctx, withSnapshot, env);
+  assert.equal(recovered.ok, true, 're-sharing now succeeds');
+  assert.ok(existsSync(path.join(shared(dest), 'Brain', 'Public.md')));
+});
+
+// N4: the vault can be the exact same file as the "shared output" location when the vault lives
+// at <dest>/<vaultName> -- the layout suggestSnapshotFolder itself suggests. A legacy (or
+// current) manifest naming that vault's own relative path must never be able to delete the real
+// vault file just because it is byte-identical to itself.
+test('snapshot N4: a vault at <dest>/<vaultName> survives a planted legacy manifest naming its own notes', async () => {
+  const dest = await tmp('dest-n4');
+  const vaultDir = path.join(dest, 'Brain');
+  await mkdir(path.join(vaultDir, 'Projects'), { recursive: true });
+  await writeFile(path.join(vaultDir, 'Pub.md'), '# Pub\nhello');
+  await writeFile(path.join(vaultDir, 'Projects', 'Plan.md'), '# Plan\nhello');
+  await writeFile(path.join(vaultDir, 'Other.md'), '# Other\nhello');
+  // Planted (or genuinely legacy) manifest naming real vault files relative to dest's own root.
+  await writeFile(path.join(dest, 'manifest.json'), JSON.stringify({ files: {
+    'Brain/Pub.md': { sha12: 'x' },
+    'Brain/Projects/Plan.md': { sha12: 'y' },
+  } }));
+  const env = { BRAINLINK_HOME: await tmp('n4-home'), BRAINLINK_SEMANTIC: '0' };
+  const cfg = normalize({ vaults: [{ name: 'Brain', path: vaultDir }] });
+  const ctx = createContext(cfg, { env });
+  const withSnapshot = chooseSnapshot(cfg, { enabled: true, folder: dest });
+
+  const r = await writeSnapshotOnce(ctx, withSnapshot, env);
+  assert.equal(r.ok, true);
+  assert.ok(existsSync(path.join(vaultDir, 'Pub.md')), 'real vault note survives (not deleted as a stale legacy copy of itself)');
+  assert.ok(existsSync(path.join(vaultDir, 'Projects', 'Plan.md')), 'real vault note survives');
+  assert.ok(existsSync(path.join(vaultDir, 'Other.md')), 'untouched vault note also survives');
+
+  await clearSnapshot(dest, env, cfg.vaults);
+  assert.ok(existsSync(path.join(vaultDir, 'Other.md')), 'vault file still intact after clear');
+});
+
+// N5: a dest inside a vault would get walked and copied right back into itself every run,
+// growing without end (and the recursive watcher fires on its own writes too). Reject up front.
+test('snapshot N5: a destination folder inside a vault is rejected, not written to', async () => {
+  const vaultDir = await tmp('n5-vault');
+  await writeFile(path.join(vaultDir, 'A.md'), '# A\nhello');
+  const dest = path.join(vaultDir, 'share');
+  await mkdir(dest, { recursive: true });
+  const env = { BRAINLINK_HOME: await tmp('n5-home'), BRAINLINK_SEMANTIC: '0' };
+  const cfg = normalize({ vaults: [{ name: 'Brain', path: vaultDir }] });
+  const ctx = createContext(cfg, { env });
+  const withSnapshot = chooseSnapshot(cfg, { enabled: true, folder: dest });
+
+  for (let i = 0; i < 3; i++) {
+    const r = await writeSnapshotOnce(ctx, withSnapshot, env);
+    assert.equal(r.ok, false, 'rejected every run, not just the first');
+  }
+  assert.ok(!existsSync(path.join(dest, 'BrainLink Shared')), 'nothing was ever written inside the vault');
 });
 
 // R1/N1: the fix. readManifest no longer falls back to dest/manifest.json at all (that fallback is
@@ -395,14 +610,17 @@ test('snapshot: suggestSnapshotFolder finds a Google Drive for desktop folder', 
   assert.equal(suggestSnapshotFolder(home), drive);
 });
 
-test('snapshot: status file tracks last synced time, count and error', async () => {
+test('snapshot: status file tracks last synced time, count, error and recovery action', async () => {
   const file = path.join(await tmp('status'), 'snapshot-state.json');
-  assert.deepEqual(await loadSnapshotStatus(file), { lastSyncedAt: null, noteCount: 0, error: null });
+  assert.deepEqual(await loadSnapshotStatus(file), { lastSyncedAt: null, noteCount: 0, error: null, action: null });
   const ok = await saveSnapshotStatus(file, { ok: true, noteCount: 3, syncedAt: '2026-10-21T00:00:00Z' });
-  assert.deepEqual(ok, { lastSyncedAt: '2026-10-21T00:00:00Z', noteCount: 3, error: null });
+  assert.deepEqual(ok, { lastSyncedAt: '2026-10-21T00:00:00Z', noteCount: 3, error: null, action: null });
   const failed = await saveSnapshotStatus(file, { ok: false, error: 'Shared folder not found' });
   assert.equal(failed.error, 'Shared folder not found');
   assert.equal(failed.lastSyncedAt, '2026-10-21T00:00:00Z', 'keeps the last good sync time on a later error');
+  // F2: a 'Clear and re-share' recovery action rides along with the error too.
+  const f2 = await saveSnapshotStatus(file, { ok: false, error: 'corrupt', action: 'clear_and_reshare' });
+  assert.equal(f2.action, 'clear_and_reshare');
 });
 
 test('snapshot: watcher runs once immediately and stop() prevents further runs', async () => {

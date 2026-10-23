@@ -65,7 +65,9 @@ export function zonedNow(tz, d = new Date()) {
 // once opened in Obsidian, so it must be gated the same as one with no stray leading bytes/lines.
 export function parseFrontmatter(text) {
   const stripped = String(text).replace(/^\uFEFF/, '');
-  const m = stripped.match(/^(?:[ \t]*\r?\n)*---\r?\n([\s\S]*?)\r?\n---\r?\n?/);
+  // F4: trailing spaces/tabs after either fence (e.g. "--- \n") must not stop detection -- a note
+  // otherwise identical in Obsidian was leaking as non-private because of a stray trailing byte.
+  const m = stripped.match(/^(?:[ \t]*\r?\n)*---[^\S\r\n]*\r?\n([\s\S]*?)\r?\n---[^\S\r\n]*\r?\n?/);
   if (!m) return { meta: {}, body: stripped, frontmatter: '' };
   const meta = {};
   let listKey = null;

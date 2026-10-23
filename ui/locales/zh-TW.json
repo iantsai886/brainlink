@@ -277,5 +277,7 @@
   "share.toastStopped": "已停止分享。",
   "share.toastCleared": "已移除分享的檔案。",
   "share.toastNeedFolder": "請先選擇一個資料夾。",
-  "share.pickPromptFallback": "要分享的資料夾（例如 ~/Shared Notes）："
+  "share.pickPromptFallback": "要分享的資料夾（例如 ~/Shared Notes）：",
+  "share.clearAndReshare": "清除並重新分享",
+  "share.confirmClearReshare": "這會移除該資料夾中先前分享的所有檔案，並重新開始分享。要繼續嗎？"
 }
