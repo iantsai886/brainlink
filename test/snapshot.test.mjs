@@ -147,6 +147,38 @@ test('snapshot N3: a symlinked destination is followed safely for both write and
   assert.ok(!existsSync(path.join(realDest, 'BrainLink Shared', 'Brain', 'Public.md')), 'clear through the symlink removes the real file');
 });
 
+// F3: unlike N3 (dest itself symlinked, handled safely by just following it), a symlink *inside*
+// dest -- at outRoot itself, or one level below it -- must be refused, since atomicWrite's
+// mkdir+writeFile would otherwise follow it and silently write real note content outside dest.
+test('snapshot F3: a symlinked "BrainLink Shared" (outRoot itself) is refused, not written through', async (t) => {
+  const { symlink, unlink: rmlink } = await import('node:fs/promises');
+  const { ctx, cfg, env } = await setupVaults();
+  const dest = await tmp('dest-f3-outroot-link');
+  const outside = await tmp('outside-f3-outroot');
+  await symlink(outside, shared(dest), 'dir');
+  t.after(() => rmlink(shared(dest)).catch(() => {}));
+
+  const withSnapshot = chooseSnapshot(cfg, { enabled: true, folder: dest });
+  const r = await writeSnapshotOnce(ctx, withSnapshot, env);
+  assert.equal(r.ok, false, 'refused outright: outRoot itself is a symlink');
+  assert.deepEqual(await readdir(outside), [], 'nothing was written through the symlink to the outside folder');
+});
+
+test('snapshot F3: a symlinked vault folder inside "BrainLink Shared" is refused, not written through', async (t) => {
+  const { symlink, unlink: rmlink } = await import('node:fs/promises');
+  const { ctx, cfg, env } = await setupVaults();
+  const dest = await tmp('dest-f3-vault-link');
+  const outside = await tmp('outside-f3-vault');
+  await mkdir(shared(dest), { recursive: true });
+  await symlink(outside, path.join(shared(dest), 'Brain'), 'dir');
+  t.after(() => rmlink(path.join(shared(dest), 'Brain')).catch(() => {}));
+
+  const withSnapshot = chooseSnapshot(cfg, { enabled: true, folder: dest });
+  const r = await writeSnapshotOnce(ctx, withSnapshot, env);
+  assert.equal(r.ok, false, 'refused outright: the vault subfolder inside outRoot is a symlink escaping it');
+  assert.deepEqual(await readdir(outside), [], 'nothing was written through the symlink to the outside folder');
+});
+
 test('snapshot: an exclusion at the vault root also hides nested descendants (e.g. "sub/Secret/x.md")', async () => {
   const { vaultDir, ctx, cfg, env } = await setupVaults();
   await mkdir(path.join(vaultDir, 'sub', 'Secret'), { recursive: true });

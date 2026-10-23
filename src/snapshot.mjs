@@ -243,13 +243,31 @@ const SESSIONS_FILE = 'sessions.json';
 const SHARED_SUBDIR = 'BrainLink Shared';
 function sharedRoot(dest) { return path.join(dest, SHARED_SUBDIR); }
 
+// F3: `dest` sits in a folder a sync client also writes to, so the same symlink-swap concern N3
+// already covers for `dest` itself (atomicWrite's mkdir+writeFile both follow directory symlinks)
+// applies one level deeper too: a symlinked 'BrainLink Shared' or 'BrainLink Shared/<Vault>' would
+// silently write outside outRoot. Refuse outright if outRoot itself is a symlink, and otherwise
+// require -- after creating any missing directories -- that the real, resolved parent directory
+// still lands inside outRoot's own real path.
+async function assertContainedForWrite(outRoot, full) {
+  const outRootLink = await lstat(outRoot).catch(() => null);
+  if (outRootLink?.isSymbolicLink()) throw new Error(`Refusing to write: ${outRoot} is a symlink`);
+  await mkdir(path.dirname(full), { recursive: true });
+  const [realOutRoot, realDir] = await Promise.all([realpath(outRoot), realpath(path.dirname(full))]);
+  if (realDir !== realOutRoot && !realDir.startsWith(realOutRoot + path.sep)) {
+    throw new Error(`Refusing to write: ${full} would escape ${outRoot}`);
+  }
+}
+
 // N2, second layer: even inside the dedicated subfolder, never overwrite a file that already
 // exists there but isn't one this feature wrote before (tracked by the previous manifest). A
 // brand-new key with nothing in its way writes normally; a key that collides with something
 // already present and unowned is left alone and simply never claimed, so a later run doesn't
 // delete it either (it's not considered "ours" to remove).
-async function writeOwned(file, rel, data, prevFiles) {
+async function writeOwned(outRoot, rel, data, prevFiles) {
+  const file = path.join(outRoot, rel);
   if (!prevFiles[rel] && await stat(file).then(() => true, () => false)) return false;
+  await assertContainedForWrite(outRoot, file);
   await atomicWrite(file, data);
   return true;
 }
@@ -329,12 +347,18 @@ export async function writeSnapshotOnce(ctx, cfg, env = process.env) {
 
   const files = {};
   const now = new Date().toISOString();
-  for (const [rel, w] of Object.entries(wanted)) {
-    const full = path.join(outRoot, rel);
-    if (prevFiles[rel]?.sha12 === w.sha12 && existsSync(full)) { files[rel] = prevFiles[rel]; continue; }
-    if (await writeOwned(full, rel, w.data, prevFiles)) files[rel] = { sha12: w.sha12, updated_at: now };
-    // else: something we didn't create already occupies this path in the shared subfolder --
-    // leave it untouched and don't claim it in the manifest.
+  try {
+    for (const [rel, w] of Object.entries(wanted)) {
+      const full = path.join(outRoot, rel);
+      if (prevFiles[rel]?.sha12 === w.sha12 && existsSync(full)) { files[rel] = prevFiles[rel]; continue; }
+      if (await writeOwned(outRoot, rel, w.data, prevFiles)) files[rel] = { sha12: w.sha12, updated_at: now };
+      // else: something we didn't create already occupies this path in the shared subfolder --
+      // leave it untouched and don't claim it in the manifest.
+    }
+  } catch (e) {
+    // F3: a symlinked outRoot (or a symlinked directory below it) is a write-side escape --
+    // consistent with N5's and F2's guards above, report it rather than throwing out of here.
+    return { ok: false, error: e.message || String(e) };
   }
 
   await atomicWrite(manifestPath(dest, env), JSON.stringify({ generated_at: now, layout: CURRENT_LAYOUT, files }, null, 1));
