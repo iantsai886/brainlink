@@ -23,7 +23,7 @@ import { addAgent, renameAgent, removeAgent, revokeAgent, markConnected, findAge
 import { buildGraph3D, noteDetail3D } from './graph3d.mjs';
 import { snapshotSettings, chooseSnapshot, suggestSnapshotFolder, clearSnapshot, startSnapshotWatcher, writeSnapshotOnce, loadSnapshotStatus, saveSnapshotStatus } from './snapshot.mjs';
 import { listHandoffs } from './writes.mjs';
-import { backupOnce, verifyBackup, restoreBackupToEmpty } from './backup.mjs';
+import { backupOnce, verifyBackup, restoreBackupToEmpty, loadBackupStatus, saveBackupStatus } from './backup.mjs';
 
 const UI_STATIC_TYPES = { '.js': 'text/javascript; charset=utf-8', '.css': 'text/css; charset=utf-8', '.json': 'application/json; charset=utf-8' };
 const UI_DIR = path.join(ROOT, 'ui');
@@ -99,10 +99,11 @@ export async function startSetup(opts = {}) {
   // Shared snapshot (Ian's RB8): runs for as long as this Setup process is open. Restarted
   // whenever the setting changes so a just-picked folder, or turning it off, takes effect at once.
   const snapshotStateFile = path.join(appHome(env), 'snapshot-state.json');
+  const backupStateFile = path.join(appHome(env), 'backup-state.json');
   let snapshotWatcher = null;
   let backupTimer = null;
   let backupRunning = false;
-  let backupStatus = null;
+  let backupStatus = await loadBackupStatus(backupStateFile);
   async function runBackup(cfg) {
     if (backupRunning) throw new Error('A backup is already running.');
     if (!cfg.backup?.folder) throw new Error('Choose a backup destination first.');
@@ -111,23 +112,35 @@ export async function startSetup(opts = {}) {
       const result = await backupOnce(cfg.vaults, cfg.backup.folder);
       const check = await verifyBackup(result.folder);
       if (!check.ok) throw new Error(`Backup verification failed: ${check.errors.join('; ')}`);
-      backupStatus = { ok: true, ...result, verified_at: new Date().toISOString() };
+      backupStatus = { ok: true, ...result, at: new Date().toISOString() };
+      await saveBackupStatus(backupStateFile, backupStatus);
       return backupStatus;
     } catch (error) {
       backupStatus = { ok: false, error: error.message || String(error), at: new Date().toISOString() };
+      await saveBackupStatus(backupStateFile, backupStatus).catch(() => {});
       throw error;
     } finally { backupRunning = false; }
   }
   function refreshBackupTimer(cfg) {
-    if (backupTimer) clearInterval(backupTimer);
+    if (backupTimer) { clearTimeout(backupTimer); clearInterval(backupTimer); }
     backupTimer = null;
     backupEnabled = Boolean(cfg.backup?.enabled);
     touch(); // scheduled backups must survive the app's ordinary inactivity timeout
     if (!cfg.backup?.enabled) return;
-    backupTimer = setInterval(() => loadConfig(file).then((latest) => {
+    const interval = opts.backupIntervalMs ?? cfg.backup.intervalHours * 3600e3;
+    const lastAttempt = Date.parse(backupStatus?.at || '');
+    const firstDelay = Number.isFinite(lastAttempt) ? Math.max(0, interval - (Date.now() - lastAttempt)) : 0;
+    const tick = () => loadConfig(file).then((latest) => {
       if (latest.backup.enabled) return runBackup(latest);
-    }).catch((error) => { backupStatus = { ok: false, error: error.message || String(error), at: new Date().toISOString() }; }),
-    opts.backupIntervalMs ?? cfg.backup.intervalHours * 3600e3);
+    }).catch(async (error) => {
+      backupStatus = { ok: false, error: error.message || String(error), at: new Date().toISOString() };
+      await saveBackupStatus(backupStateFile, backupStatus).catch(() => {});
+    });
+    backupTimer = setTimeout(() => {
+      tick();
+      backupTimer = setInterval(tick, interval);
+      backupTimer.unref?.();
+    }, firstDelay);
     backupTimer.unref?.();
   }
   async function refreshSnapshotWatcher(cfg) {
@@ -592,7 +605,7 @@ export async function startSetup(opts = {}) {
     }
     try { json(res, 200, await route(body)); } catch (e) { json(res, 400, { error: String(e.message || e) }); }
   });
-  server.once('close', () => { snapshotWatcher?.stop(); if (backupTimer) clearInterval(backupTimer); });
+  server.once('close', () => { snapshotWatcher?.stop(); if (backupTimer) { clearTimeout(backupTimer); clearInterval(backupTimer); } });
   await new Promise((resolve, reject) => { server.once('error', reject); server.listen(port, '127.0.0.1', resolve); });
   port = server.address().port;
   touch();

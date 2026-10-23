@@ -1,12 +1,34 @@
 // Local vault backup, deliberately separate from the filtered cloud-sharing snapshot.
 // Never follows symlinks, overwrites an earlier backup, or writes inside a source vault.
 import { createHash, randomBytes } from 'node:crypto';
-import { lstat, realpath, readdir, readFile, writeFile, mkdir } from 'node:fs/promises';
+import { lstat, realpath, readdir, readFile, writeFile, mkdir, rename, unlink } from 'node:fs/promises';
 import path from 'node:path';
 
 const hash = (data) => createHash('sha256').update(data).digest('hex');
 const within = (parent, child) => child === parent || child.startsWith(parent + path.sep);
 const safeName = (name) => String(name).replace(/[^a-zA-Z0-9_-]+/g, '-').replace(/^-+|-+$/g, '').slice(0, 50) || 'vault';
+
+export async function loadBackupStatus(file) {
+  try {
+    const value = JSON.parse(await readFile(file, 'utf8'));
+    return value && typeof value.ok === 'boolean' && typeof value.at === 'string' ? value : null;
+  } catch (error) {
+    if (error.code === 'ENOENT') return null;
+    return { ok: false, at: new Date().toISOString(), error: 'Saved backup status could not be read.' };
+  }
+}
+
+export async function saveBackupStatus(file, status) {
+  await mkdir(path.dirname(file), { recursive: true });
+  const tmp = `${file}.${randomBytes(4).toString('hex')}.tmp`;
+  try {
+    await writeFile(tmp, JSON.stringify(status, null, 2) + '\n', { flag: 'wx', mode: 0o600 });
+    await rename(tmp, file);
+  } catch (error) {
+    await unlink(tmp).catch(() => {});
+    throw error;
+  }
+}
 
 async function filesUnder(root, dir = root, out = []) {
   for (const entry of await readdir(dir, { withFileTypes: true })) {

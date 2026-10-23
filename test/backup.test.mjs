@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { mkdtemp, mkdir, writeFile, readFile, readdir, symlink } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
-import { backupOnce, verifyBackup, restoreBackupToEmpty } from '../src/backup.mjs';
+import { backupOnce, verifyBackup, restoreBackupToEmpty, loadBackupStatus, saveBackupStatus } from '../src/backup.mjs';
 import { normalize, saveConfig } from '../src/config.mjs';
 import { startSetup } from '../src/setup.mjs';
 
@@ -91,5 +91,30 @@ test('authenticated Setup enables scheduled backup only after a verified first c
     assert.match(await readFile(path.join(restore, '1-Personal', 'Private.md'), 'utf8'), /private fixture/);
     const off = await api('/api/backup', { enabled: false, folder: dest, intervalHours: 24 });
     assert.equal((await off.json()).backup.enabled, false);
+  } finally { app.server.close(); }
+});
+
+test('restart retains backup result and catches up when the last run is overdue', async () => {
+  const root = await tmp('restart-source');
+  const dest = await tmp('restart-destination');
+  const home = await tmp('restart-home');
+  const env = { BRAINLINK_HOME: home, HOME: home, BRAINLINK_SEMANTIC: '0' };
+  await writeFile(path.join(root, 'note.md'), 'fictional');
+  await saveConfig(normalize({ vaults: [{ name: 'Company', path: root }], backup: { enabled: true, folder: dest, intervalHours: 24 } }), path.join(home, 'config.json'));
+  const statusFile = path.join(home, 'backup-state.json');
+  await saveBackupStatus(statusFile, { ok: true, at: '2020-01-01T00:00:00.000Z', folder: 'old' });
+  const app = await startSetup({ env, home, os: 'win32', port: 0, useCli: false, backupIntervalMs: 5000 });
+  try {
+    let persisted;
+    for (let i = 0; i < 80; i++) {
+      persisted = await loadBackupStatus(statusFile);
+      if (persisted?.ok && persisted.folder !== 'old') break;
+      await new Promise((resolve) => setTimeout(resolve, 25));
+    }
+    assert.equal((await readdir(dest)).length, 1, 'overdue schedule runs on restart');
+    assert.equal(persisted.ok, true);
+    assert.equal((await verifyBackup(persisted.folder)).ok, true);
+    const state = await fetch(`http://127.0.0.1:${app.port}/api/state`, { headers: { 'X-BrainLink-Token': app.token } }).then((r) => r.json());
+    assert.equal(state.backup.status.folder, persisted.folder);
   } finally { app.server.close(); }
 });
