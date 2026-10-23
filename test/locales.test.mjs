@@ -31,6 +31,19 @@ test('every supported locale ships a JSON file with the exact same keys as Engli
   }
 });
 
+// A1 (Chairman rule): no trial, nothing expires. No locale may render trial or expiry wording,
+// in any language -- a translator adding "14-day trial" or "expires on" back in would otherwise
+// slip through unnoticed, since nothing else in the app would exercise that string.
+test('A1: no locale string mentions a trial or an expiry, in any language', async () => {
+  const BANNED = [/\btrial\b/i, /\bexpir/i, /試用/, /到期/, /試驗/, /teste gratuito/i, /período de avalia/i, /expira/i];
+  for (const id of LOCALES) {
+    const catalog = await loadLocale(id);
+    for (const [key, value] of Object.entries(catalog)) {
+      for (const re of BANNED) assert.ok(!re.test(value), `${id}.json["${key}"] = ${JSON.stringify(value)} matches banned pattern ${re}`);
+    }
+  }
+});
+
 test('setup UI: /locales/<id>.json serves each catalog, /api/locale persists the choice', async () => {
   const { startSetup } = await import('../src/setup.mjs');
   const { mkdtemp } = await import('node:fs/promises');

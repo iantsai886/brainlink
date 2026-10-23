@@ -807,6 +807,34 @@ test('one-click setup: new brain, every found AI app connected; multi-vault fold
   } finally { s.server.close(); }
 });
 
+// A1 (Chairman rule): no trial, nothing expires. Years into the future, setup, writes and agents
+// must all still work exactly as on day one, and nothing in config.json may ever record a trial
+// start or an expiry -- there is no field anywhere whose presence could later be used to gate it.
+test('A1: with the clock set years ahead, nothing expires and trial_started is never written', async (t) => {
+  t.mock.timers.enable({ apis: ['Date'] });
+  t.mock.timers.setTime(new Date('2099-06-01T00:00:00Z').getTime());
+  try {
+    const home = await tmp('a1-future');
+    const vault = path.join(home, 'Vault');
+    await mkdir(vault, { recursive: true });
+    const env = { BRAINLINK_HOME: path.join(home, 'app'), BRAINLINK_SEMANTIC: '0' };
+    const s = await startSetup({ env, home, os: 'darwin', port: 0, useCli: false });
+    const api = (p, body) => fetch(`http://127.0.0.1:${s.port}${p}`, { method: body ? 'POST' : 'GET', headers: { 'X-BrainLink-Token': s.token, 'Content-Type': 'application/json' }, body: body && JSON.stringify(body) }).then((r) => r.json());
+    try {
+      const r = await api('/api/vault', { path: vault, name: 'Brain', scaffold: true });
+      assert.equal(r.ok, true, 'setup still works 73 years in the future');
+      const raw = await readFile(path.join(home, 'app', 'config.json'), 'utf8');
+      assert.equal(raw.match(/trial|expir|licen[cs]e/i), null, 'config.json never records a trial, expiry or licence field');
+      const cfg = JSON.parse(raw);
+      const ctx = createContext(normalize(cfg), { env: { BRAINLINK_AI_PLATFORM: 'Claude' } });
+      assert.equal(ctx.readOnly, false, 'writes still work, not disabled by any expiry check');
+      assert.ok(ctx.agents.length > 0, 'the auto-created agent is still active');
+      const closed = await closeLoop(ctx, { agent: ctx.agents[0].name, title: 'Still works', source: 'chat', confidence: 'high', decisions: ['Nothing expired'], confirm: true });
+      assert.equal(closed.written, true, 'a real write still succeeds years from now');
+    } finally { s.server.close(); }
+  } finally { t.mock.timers.reset(); }
+});
+
 test('CLI: `brainlink init` needs no licence and sets up writes and agents immediately', async () => {
   const home = await tmp('cli-init');
   const vault = path.join(home, 'Vault');
