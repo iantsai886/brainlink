@@ -265,6 +265,7 @@
   "share.folderPlaceholder": "選擇一個資料夾…",
   "share.pickFolder": "選擇資料夾…",
   "share.suggestedFound": "已找到：{path}",
+  "share.subfolderHint": "BrainLink 會在你選的資料夾裡建立一個叫「BrainLink Shared」的資料夾，只把筆記寫在裡面──絕對不會動到那個資料夾裡的其他檔案。",
   "share.includeSessions": "也包含非私人的對話記錄",
   "share.save": "儲存",
   "share.statusError": "分享未能完成：{error}",

@@ -50,6 +50,7 @@
         <div class="row" style="align-self:end"><button id="share-pick">${esc(t('share.pickFolder'))}</button></div>
       </div>
       ${!draft.folder && snap.suggested_folder ? `<p class="hint" style="margin:8px 0 0">${t('share.suggestedFound', { path: `<button type="button" class="link" data-share-use-suggested="${esc(snap.suggested_folder)}">${esc(snap.suggested_folder)}</button>` })}</p>` : ''}
+      <p class="hint" style="margin:8px 0 0">${esc(t('share.subfolderHint'))}</p>
       <label class="muted" style="display:flex;flex-direction:row;gap:6px;align-items:center;margin-top:10px"><input type="checkbox" id="share-sessions" ${draft.includeSessions ? 'checked' : ''} style="width:auto"> ${esc(t('share.includeSessions'))}</label>
     ` : '';
     root.innerHTML = `

@@ -265,6 +265,7 @@
   "share.folderPlaceholder": "Escolha uma pasta…",
   "share.pickFolder": "Escolher pasta…",
   "share.suggestedFound": "Encontrado: {path}",
+  "share.subfolderHint": "O BrainLink cria uma pasta chamada \"BrainLink Shared\" dentro da pasta que você escolher e só grava suas notas ali — ele nunca toca em mais nada dentro dessa pasta.",
   "share.includeSessions": "Incluir também as conversas não privadas",
   "share.save": "Salvar",
   "share.statusError": "Não foi possível concluir o compartilhamento: {error}",

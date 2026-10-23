@@ -80,3 +80,20 @@ test('every en key actually used by the Agents / Share cards (and sync provider 
     }
   }
 });
+
+// P1g: the Share card must say, in one plain sentence, that BrainLink writes into a dedicated
+// "BrainLink Shared" folder inside whatever folder the user picked, and never touches anything
+// else there -- so a user sharing e.g. a whole Dropbox folder knows BrainLink isn't reading or
+// overwriting their other files in it.
+test('P1g: share.subfolderHint names "BrainLink Shared" and is rendered in the folder area', async () => {
+  const shareJs = await readFile(path.join(ROOT, 'ui', 'share.js'), 'utf8');
+  assert.match(shareJs, /t\(\s*['"]share\.subfolderHint['"]\s*\)/);
+  const en = JSON.parse(await readFile(path.join(LOCALES_DIR, 'en.json'), 'utf8'));
+  assert.match(en['share.subfolderHint'], /BrainLink Shared/);
+  assert.match(en['share.subfolderHint'], /never touches/i);
+  for (const id of LOCALES) {
+    const s = catalogsOf(await readFile(path.join(LOCALES_DIR, `${id}.json`), 'utf8'))['share.subfolderHint'];
+    assert.match(s, /BrainLink Shared/, `${id}.json share.subfolderHint should keep the literal folder name`);
+  }
+});
+function catalogsOf(raw) { return JSON.parse(raw); }

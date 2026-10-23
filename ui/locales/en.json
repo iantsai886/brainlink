@@ -265,6 +265,7 @@
   "share.folderPlaceholder": "Choose a folder…",
   "share.pickFolder": "Choose folder…",
   "share.suggestedFound": "Found: {path}",
+  "share.subfolderHint": "BrainLink creates a folder named \"BrainLink Shared\" inside the folder you choose and only writes your notes there — it never touches anything else in that folder.",
   "share.includeSessions": "Also include non-private chat sessions",
   "share.save": "Save",
   "share.statusError": "Could not finish sharing: {error}",
