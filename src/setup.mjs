@@ -78,7 +78,9 @@ export async function startSetup(opts = {}) {
   const sessions = sessionsService(env); // src/host.mjs: cross-session reads over src/sessions/* (importAll, session_list/read semantics)
   const html = await readFile(path.join(ROOT, 'ui', 'index.html'), 'utf8');
   let port = opts.port ?? 0;
-  // When started from the app (no terminal), exit after idleMinutes without requests or on Done.
+  // When started from the app (no terminal), exit after idleMinutes without requests. Closing
+  // the Done button in the browser only hides that tab's view (see ui/index.html) — it must
+  // never stop this background process, so idle timeout is the only thing that quits it here.
   let idleTimer = null;
   const quit = () => setTimeout(() => { snapshotWatcher?.stop(); (opts.onQuit ? opts.onQuit() : server.close()); }, 100);
   const touch = () => { if (!opts.idleMinutes) return; clearTimeout(idleTimer); idleTimer = setTimeout(quit, opts.idleMinutes * 60e3); idleTimer.unref?.(); };
@@ -231,7 +233,6 @@ export async function startSetup(opts = {}) {
 
   const routes = {
     'GET /api/state': () => state(),
-    'POST /api/quit': () => { quit(); return { ok: true }; },
     'POST /api/pick-folder': async () => { const p = await pick(); return p === undefined ? { path: null, unavailable: true } : { path: p }; },
     'POST /api/quick': (b) => quickStart(b),
     'POST /api/graph': async (b) => {

@@ -742,7 +742,10 @@ $('test').onclick = () => {
   $('test-out').innerHTML = `<p class="skeleton">${esc(t('test.searching'))}</p>`;
   act(async () => { const r = await api('POST', '/api/test', { query: $('q').value }); $('test-out').innerHTML = r.results.length ? `<div class="cards">${r.results.map((x) => `<div class="card"><b>${esc(x.title)}</b><span class="mono muted">${esc(r.vault)}/${esc(x.path)}${x.heading ? ' › ' + esc(x.heading) : ''}</span></div>`).join('')}</div>` : `<p class="muted">${esc(t('test.noMatches'))}</p>`; });
 };
-$('done').onclick = async () => { try { await api('POST', '/api/quit'); } catch {} document.body.innerHTML = `<main><section><h2>${esc(t('quit.closedTitle'))}</h2><p class="hint">${esc(t('quit.closedHint'))}</p></section></main>`; };
+// Closes this browser tab's view only. BrainLink's background service (the dashboard process
+// that also keeps the shared snapshot folder in sync) must keep running — it is not tied to
+// whether this tab is open, so Done never calls an API that would stop it.
+$('done').onclick = () => { document.body.innerHTML = `<main><section><h2>${esc(t('quit.closedTitle'))}</h2><p class="hint">${esc(t('quit.closedHint'))}</p></section></main>`; };
 $('q').onkeydown = (e) => { if (e.key === 'Enter') $('test').click(); };
 
 async function boot() {
