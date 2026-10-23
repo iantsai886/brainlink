@@ -74,14 +74,22 @@ async function atomicWrite(file, data) {
 
 const LEGACY_MANIFEST = 'manifest.json';
 
-// The current manifest lives only under appHome (manifestPath above). A missing or corrupt file
-// here means "nothing tracked yet" -- it must never fall back to anything inside `dest`, which a
-// synced peer (or just a user's own unrelated manifest.json, e.g. from a web/extension project)
-// can write to. That fallback was the R1 regression: it made a planted or pre-existing
-// dest/manifest.json drive the delete loop below on first enable, after a clear, after a folder
-// switch, or whenever the appHome file fails to parse.
+// v1.2.4 introduced the dedicated 'BrainLink Shared' subfolder (N2); every key in a layout-2
+// manifest is relative to that subfolder (outRoot). v1.2.2/v1.2.3 wrote the same appHome manifest
+// path, but its keys were relative to dest's own root (the subfolder didn't exist yet) -- F1.
+const CURRENT_LAYOUT = 2;
+
+// The current manifest lives only under appHome (manifestPath above). 'missing' (no fallback to
+// anything inside `dest`, which a synced peer or just a user's own unrelated manifest.json could
+// write to -- that fallback was the R1 regression) and 'corrupt' (unparseable JSON) are
+// distinguished so callers can tell "nothing tracked yet" apart from "a real manifest existed
+// and failed to parse" (F2 fails closed on the latter instead of treating it the same as empty).
 async function readManifest(dest, env) {
-  try { return JSON.parse(await readFile(manifestPath(dest, env), 'utf8')); } catch { return { files: {} }; }
+  let raw;
+  try { raw = await readFile(manifestPath(dest, env), 'utf8'); }
+  catch { return { status: 'missing', files: {}, layout: CURRENT_LAYOUT }; }
+  try { const parsed = JSON.parse(raw); return { status: 'ok', files: parsed.files || {}, layout: parsed.layout }; }
+  catch { return { status: 'corrupt', files: {}, layout: undefined, raw }; }
 }
 
 function legacyMigrationMarker(dest, env) {
@@ -273,7 +281,24 @@ export async function writeSnapshotOnce(ctx, cfg, env = process.env) {
   await migrateLegacyManifestOnce(ctx, dest, dest, env, vaultRoots);
 
   const prev = await readManifest(dest, env);
-  const prevFiles = prev.files || {};
+  let prevFiles = prev.status === 'ok' ? prev.files : {};
+
+  // F1: a v1.2.2/v1.2.3 appHome manifest (trusted, since it never lived inside `dest`) named
+  // paths at dest's own root, before the 'BrainLink Shared' subfolder existed. Prune those
+  // dest-root copies once, deleting only ones whose on-disk bytes still match the sha12 this
+  // manifest already recorded (an edited or already-removed copy is left alone), then start a
+  // fresh layout-2 manifest -- the old keys are never interpreted relative to outRoot.
+  if (prev.status === 'ok' && prev.layout !== CURRENT_LAYOUT) {
+    for (const [rel, meta] of Object.entries(prevFiles)) {
+      const safe = await safeDeletePath(dest, rel, vaultRoots);
+      if (!safe) continue;
+      let text;
+      try { text = await readFile(safe, 'utf8'); } catch { continue; }
+      if (meta && sha12(text) === meta.sha12) { try { await unlink(safe); } catch {} }
+    }
+    prevFiles = {};
+  }
+
   for (const rel of Object.keys(prevFiles)) if (!wanted[rel]) { const safe = await safeDeletePath(outRoot, rel, vaultRoots); if (safe) { try { await unlink(safe); } catch {} } }
 
   const files = {};
@@ -286,7 +311,7 @@ export async function writeSnapshotOnce(ctx, cfg, env = process.env) {
     // leave it untouched and don't claim it in the manifest.
   }
 
-  await atomicWrite(manifestPath(dest, env), JSON.stringify({ generated_at: now, files }, null, 1));
+  await atomicWrite(manifestPath(dest, env), JSON.stringify({ generated_at: now, layout: CURRENT_LAYOUT, files }, null, 1));
   return { ok: true, noteCount: notes.length, syncedAt: now };
 }
 
@@ -298,7 +323,10 @@ export async function clearSnapshot(dest, env = process.env, vaults = []) {
   const outRoot = sharedRoot(dest);
   const vaultRoots = await vaultRealRoots(vaults);
   const prev = await readManifest(dest, env);
-  for (const rel of Object.keys(prev.files || {})) { const safe = await safeDeletePath(outRoot, rel, vaultRoots); if (safe) { try { await unlink(safe); } catch {} } }
+  // F1: a manifest without the layout-2 marker names paths at dest's own root, not outRoot --
+  // never apply those old keys to outRoot either (same bug as the prune loop above).
+  const root = prev.status === 'ok' && prev.layout === CURRENT_LAYOUT ? outRoot : dest;
+  if (prev.status === 'ok') for (const rel of Object.keys(prev.files)) { const safe = await safeDeletePath(root, rel, vaultRoots); if (safe) { try { await unlink(safe); } catch {} } }
   try { await unlink(manifestPath(dest, env)); } catch {}
   return { ok: true };
 }

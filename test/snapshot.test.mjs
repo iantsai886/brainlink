@@ -7,6 +7,9 @@ import { mkdtemp, mkdir, writeFile, readFile, readdir } from 'node:fs/promises';
 import { existsSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
+import { createHash } from 'node:crypto';
+
+const sha12 = (text) => createHash('sha256').update(text).digest('hex').slice(0, 12);
 
 import { normalize } from '../src/config.mjs';
 import { createContext } from '../src/core.mjs';
@@ -251,6 +254,63 @@ test('snapshot: upgrading from 1.2.1 purges a stale private-note/00-Home copy le
   assert.ok(!existsSync(path.join(dest, 'Brain', '00 Home', 'Diary.md')), 'stale leaked 00 Home copy is purged on the first post-upgrade write');
   assert.ok(existsSync(path.join(shared(dest), 'Brain', 'Public.md')), 'still-current note is untouched');
   assert.ok(existsSync(path.join(dest, 'manifest.json')), 'the old in-folder manifest is never deleted by BrainLink -- it may not even be ours (N1)');
+});
+
+// F1: v1.2.2/v1.2.3 wrote the appHome manifest with keys relative to dest's own root (the
+// 'BrainLink Shared' subfolder didn't exist yet). Upgrading must not reinterpret those keys
+// relative to the new subfolder (which could delete an unrelated user file that happens to sit
+// at that path inside the subfolder), and must prune the orphaned dest-root copies so a note
+// made private after the upgrade leaves no stale copy anywhere in dest.
+test('snapshot F1: upgrading a v1.2.3 dest-root appHome manifest prunes old copies and never touches the new subfolder', async () => {
+  const { vaultDir, ctx, cfg, env } = await setupVaults();
+  const dest = await tmp('dest-f1');
+  // v1.2.3 copies, written at dest's own root.
+  await mkdir(path.join(dest, 'Brain'), { recursive: true });
+  await writeFile(path.join(dest, 'Brain', 'Public.md'), '# Public\nhello'); // still current
+  await writeFile(path.join(dest, 'README.md'), 'old root readme');
+  await writeFile(path.join(dest, 'index.md'), 'old root index');
+  // A user file that happens to collide with the same relative path inside the NEW subfolder --
+  // must never be deleted just because a v1.2.3 key of the same name exists.
+  await mkdir(path.join(shared(dest), 'Brain'), { recursive: true });
+  await writeFile(path.join(shared(dest), 'Brain', 'Public.md'), 'NOT OURS: lives in the new subfolder');
+
+  const v123Manifest = { generated_at: 'x', files: {
+    'Brain/Public.md': { sha12: sha12('# Public\nhello') },
+    'README.md': { sha12: sha12('old root readme') },
+    'index.md': { sha12: sha12('old root index') },
+  } }; // no "layout" field: this is what a real v1.2.3 appHome manifest looked like
+  const withSnapshot = chooseSnapshot(cfg, { enabled: true, folder: dest });
+  await mkdir(path.dirname(manifestPath(dest, env)), { recursive: true });
+  await writeFile(manifestPath(dest, env), JSON.stringify(v123Manifest));
+
+  const r = await writeSnapshotOnce(ctx, withSnapshot, env);
+  assert.equal(r.ok, true);
+  assert.ok(!existsSync(path.join(dest, 'Brain', 'Public.md')), 'stale dest-root copy pruned (still byte-equal to the recorded sha12)');
+  assert.ok(!existsSync(path.join(dest, 'README.md')), 'stale dest-root README pruned');
+  assert.ok(!existsSync(path.join(dest, 'index.md')), 'stale dest-root index pruned');
+  assert.equal(await readFile(path.join(shared(dest), 'Brain', 'Public.md'), 'utf8'), 'NOT OURS: lives in the new subfolder', 'old key never reinterpreted relative to the new subfolder -- the unrelated file there is untouched');
+
+  const manifest = JSON.parse(await readFile(manifestPath(dest, env), 'utf8'));
+  assert.equal(manifest.layout, 2, 'a fresh layout-2 manifest is started');
+
+  // Now make Public.md private: no copy of it should survive anywhere in dest.
+  await writeFile(path.join(vaultDir, 'Public.md'), '---\nprivate: true\n---\n# Public\nhello');
+  await writeSnapshotOnce(ctx, withSnapshot, env);
+  assert.ok(!existsSync(path.join(dest, 'Brain', 'Public.md')));
+  assert.equal(await readFile(path.join(shared(dest), 'Brain', 'Public.md'), 'utf8'), 'NOT OURS: lives in the new subfolder', 'still untouched -- never claimed as ours');
+});
+
+test('snapshot F1: clearSnapshot also resolves an un-migrated (pre-layout-2) manifest against dest, not the subfolder', async () => {
+  const { ctx, cfg, env } = await setupVaults();
+  const dest = await tmp('dest-f1-clear');
+  await writeFile(path.join(dest, 'README.md'), 'old root readme');
+  const v123Manifest = { generated_at: 'x', files: { 'README.md': { sha12: sha12('old root readme') } } };
+  await mkdir(path.dirname(manifestPath(dest, env)), { recursive: true });
+  await writeFile(manifestPath(dest, env), JSON.stringify(v123Manifest));
+
+  await clearSnapshot(dest, env, cfg.vaults);
+  assert.ok(!existsSync(path.join(dest, 'README.md')), 'clear removes the dest-root copy named by the un-migrated manifest');
+  assert.ok(!existsSync(manifestPath(dest, env)));
 });
 
 // N4: the vault can be the exact same file as the "shared output" location when the vault lives
