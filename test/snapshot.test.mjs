@@ -179,6 +179,32 @@ test('snapshot F3: a symlinked vault folder inside "BrainLink Shared" is refused
   assert.deepEqual(await readdir(outside), [], 'nothing was written through the symlink to the outside folder');
 });
 
+// F3 (mkdir-through-symlink): a symlink deeper in outRoot's tree than the final segment -- not
+// outRoot itself, and not the immediate vault folder, but a folder *below* that -- used to get
+// mkdir'd through before the single end-of-chain realpath check ever ran, since Node's recursive
+// mkdir follows an existing symlink component and keeps creating directories beyond it. Walking
+// the path one segment at a time (see assertContainedForWrite) must refuse at that segment
+// instead, before anything -- not even an empty directory -- is created through it.
+test('snapshot F3: a symlink below the vault folder, not just at it, is refused before mkdir follows it', async (t) => {
+  const { symlink, unlink: rmlink } = await import('node:fs/promises');
+  const vaultDir = await tmp('f3-deep-vault');
+  await mkdir(path.join(vaultDir, 'Projects', 'Deep'), { recursive: true });
+  await writeFile(path.join(vaultDir, 'Projects', 'Deep', 'Note.md'), '# Note\nhello');
+  const env = { BRAINLINK_HOME: await tmp('f3-deep-home'), BRAINLINK_SEMANTIC: '0' };
+  const cfg = normalize({ vaults: [{ name: 'Brain', path: vaultDir }] });
+  const ctx = createContext(cfg, { env });
+  const dest = await tmp('dest-f3-deep');
+  const outside = await tmp('outside-f3-deep');
+  await mkdir(path.join(shared(dest), 'Brain'), { recursive: true });
+  await symlink(outside, path.join(shared(dest), 'Brain', 'Projects'), 'dir');
+  t.after(() => rmlink(path.join(shared(dest), 'Brain', 'Projects')).catch(() => {}));
+
+  const withSnapshot = chooseSnapshot(cfg, { enabled: true, folder: dest });
+  const r = await writeSnapshotOnce(ctx, withSnapshot, env);
+  assert.equal(r.ok, false, 'refused: a symlink sits below the vault folder, on the way to the note');
+  assert.deepEqual(await readdir(outside), [], 'nothing, not even an empty "Deep" directory, was created through the symlink');
+});
+
 test('snapshot: an exclusion at the vault root also hides nested descendants (e.g. "sub/Secret/x.md")', async () => {
   const { vaultDir, ctx, cfg, env } = await setupVaults();
   await mkdir(path.join(vaultDir, 'sub', 'Secret'), { recursive: true });

@@ -255,15 +255,29 @@ function sharedRoot(dest) { return path.join(dest, SHARED_SUBDIR); }
 // already covers for `dest` itself (atomicWrite's mkdir+writeFile both follow directory symlinks)
 // applies one level deeper too: a symlinked 'BrainLink Shared' or 'BrainLink Shared/<Vault>' would
 // silently write outside outRoot. Refuse outright if outRoot itself is a symlink, and otherwise
-// require -- after creating any missing directories -- that the real, resolved parent directory
-// still lands inside outRoot's own real path.
+// require that the real, resolved parent directory still lands inside outRoot's own real path.
+// Walked one path segment at a time (rather than a single recursive mkdir followed by one
+// realpath check at the end) so a symlink planted mid-tree by a concurrent sync client is caught
+// -- and never mkdir'd through -- before any directory below it is created, instead of only being
+// noticed once the whole chain already exists.
 async function assertContainedForWrite(outRoot, full) {
   const outRootLink = await lstat(outRoot).catch(() => null);
   if (outRootLink?.isSymbolicLink()) throw new Error(`Refusing to write: ${outRoot} is a symlink`);
-  await mkdir(path.dirname(full), { recursive: true });
-  const [realOutRoot, realDir] = await Promise.all([realpath(outRoot), realpath(path.dirname(full))]);
-  if (realDir !== realOutRoot && !realDir.startsWith(realOutRoot + path.sep)) {
-    throw new Error(`Refusing to write: ${full} would escape ${outRoot}`);
+  if (!outRootLink) await mkdir(outRoot, { recursive: true });
+  const realOutRoot = await realpath(outRoot);
+  const rel = path.relative(outRoot, path.dirname(full));
+  let cur = outRoot;
+  if (rel && rel !== '.') {
+    for (const seg of rel.split(path.sep)) {
+      cur = path.join(cur, seg);
+      const segLink = await lstat(cur).catch(() => null);
+      if (segLink?.isSymbolicLink()) throw new Error(`Refusing to write: ${cur} is a symlink`);
+      if (!segLink) await mkdir(cur);
+      const realCur = await realpath(cur);
+      if (realCur !== realOutRoot && !realCur.startsWith(realOutRoot + path.sep)) {
+        throw new Error(`Refusing to write: ${full} would escape ${outRoot}`);
+      }
+    }
   }
 }
 
