@@ -3,7 +3,7 @@
 // notes/vaults); atomic writes; manifest-tracked deletion so foreign files are never touched.
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtemp, mkdir, writeFile, readFile, readdir } from 'node:fs/promises';
+import { mkdtemp, mkdir, writeFile, readFile, readdir, unlink } from 'node:fs/promises';
 import { existsSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
@@ -313,6 +313,79 @@ test('snapshot F1: clearSnapshot also resolves an un-migrated (pre-layout-2) man
   assert.ok(!existsSync(manifestPath(dest, env)));
 });
 
+// F2: a corrupt appHome manifest, with the shared subfolder already non-empty, means ownership
+// tracking was lost -- adopting files by content would also adopt a user's own byte-identical
+// copy, later deleted the moment the real note changes. Fail closed instead: write nothing,
+// delete nothing, keep a .bak, and surface a 'Clear and re-share' action.
+test('snapshot F2: a corrupt manifest with existing shared content fails closed, keeps a .bak, and leaves a recovery action', async () => {
+  const { ctx, cfg, env } = await setupVaults();
+  const dest = await tmp('dest-f2-corrupt');
+  const withSnapshot = chooseSnapshot(cfg, { enabled: true, folder: dest });
+  await writeSnapshotOnce(ctx, withSnapshot, env); // establish real shared content + a good manifest
+  const before = (await readdir(shared(dest), { recursive: true })).sort();
+
+  await writeFile(manifestPath(dest, env), '{not valid json');
+  const r = await writeSnapshotOnce(ctx, withSnapshot, env);
+  assert.equal(r.ok, false);
+  assert.equal(r.action, 'clear_and_reshare');
+  assert.equal(await readFile(`${manifestPath(dest, env)}.bak`, 'utf8'), '{not valid json', 'the corrupt manifest is backed up, not lost');
+
+  const after = (await readdir(shared(dest), { recursive: true })).sort();
+  assert.deepEqual(after, before, 'nothing was written or deleted while failing closed');
+});
+
+// The manifest can go missing (not just corrupt) while BrainLink's own previously-written content
+// is still sitting in outRoot -- e.g. appHome got wiped independently of the synced folder. That
+// must fail closed too, but a genuine first enable where a foreign file merely collides with a
+// wanted path (N2) must still succeed normally: README.md's exact, BrainLink-generated content is
+// the signal that tells the two apart (see looksPreviouslyShared in src/snapshot.mjs).
+test('snapshot F2: a missing manifest where BrainLink previously shared this folder fails closed', async () => {
+  const { ctx, cfg, env } = await setupVaults();
+  const dest = await tmp('dest-f2-missing');
+  const withSnapshot = chooseSnapshot(cfg, { enabled: true, folder: dest });
+  await writeSnapshotOnce(ctx, withSnapshot, env); // establishes real BrainLink-written content, incl. README.md
+  await unlink(manifestPath(dest, env)); // simulate appHome manifest loss (not corruption: deletion)
+
+  const r = await writeSnapshotOnce(ctx, withSnapshot, env);
+  assert.equal(r.ok, false);
+  assert.equal(r.action, 'clear_and_reshare');
+  assert.equal(await readFile(path.join(shared(dest), 'Brain', 'Public.md'), 'utf8'), '# Public\nhello', 'untouched');
+  assert.ok(!existsSync(manifestPath(dest, env)), 'still no manifest was written');
+});
+
+// N2's own collision case must keep succeeding normally even on a genuinely first write: a
+// foreign file merely occupying a wanted path (no BrainLink README.md anywhere) is not evidence
+// of prior sharing, so there is nothing to fail closed about.
+test('snapshot F2: a first-ever write with a pre-existing foreign file in the subfolder is not mistaken for manifest loss', async () => {
+  const { ctx, cfg, env } = await setupVaults();
+  const dest = await tmp('dest-f2-not-prior');
+  await mkdir(path.join(shared(dest), 'Brain'), { recursive: true });
+  await writeFile(path.join(shared(dest), 'Brain', 'Public.md'), 'NOT OURS: a pre-existing, unrelated file');
+  const withSnapshot = chooseSnapshot(cfg, { enabled: true, folder: dest });
+
+  const r = await writeSnapshotOnce(ctx, withSnapshot, env);
+  assert.equal(r.ok, true, 'proceeds normally -- no README.md means no evidence this was ever shared before');
+  assert.equal(await readFile(path.join(shared(dest), 'Brain', 'Public.md'), 'utf8'), 'NOT OURS: a pre-existing, unrelated file', 'still never overwritten (N2)');
+});
+
+test('snapshot F2: "Clear and re-share" (force clear) resets a stuck folder and a normal write then succeeds', async () => {
+  const { ctx, cfg, env } = await setupVaults();
+  const dest = await tmp('dest-f2-recover');
+  const withSnapshot = chooseSnapshot(cfg, { enabled: true, folder: dest });
+  await writeSnapshotOnce(ctx, withSnapshot, env);
+  await writeFile(manifestPath(dest, env), '{not valid json');
+  const stuck = await writeSnapshotOnce(ctx, withSnapshot, env);
+  assert.equal(stuck.ok, false);
+
+  await clearSnapshot(dest, env, cfg.vaults, { force: true });
+  assert.ok(!existsSync(shared(dest)), 'the dedicated subfolder is wiped outright by the explicit force-reset');
+  assert.ok(!existsSync(`${manifestPath(dest, env)}.bak`), 'the backup is cleaned up too');
+
+  const recovered = await writeSnapshotOnce(ctx, withSnapshot, env);
+  assert.equal(recovered.ok, true, 're-sharing now succeeds');
+  assert.ok(existsSync(path.join(shared(dest), 'Brain', 'Public.md')));
+});
+
 // N4: the vault can be the exact same file as the "shared output" location when the vault lives
 // at <dest>/<vaultName> -- the layout suggestSnapshotFolder itself suggests. A legacy (or
 // current) manifest naming that vault's own relative path must never be able to delete the real
@@ -505,14 +578,17 @@ test('snapshot: suggestSnapshotFolder finds a Google Drive for desktop folder', 
   assert.equal(suggestSnapshotFolder(home), drive);
 });
 
-test('snapshot: status file tracks last synced time, count and error', async () => {
+test('snapshot: status file tracks last synced time, count, error and recovery action', async () => {
   const file = path.join(await tmp('status'), 'snapshot-state.json');
-  assert.deepEqual(await loadSnapshotStatus(file), { lastSyncedAt: null, noteCount: 0, error: null });
+  assert.deepEqual(await loadSnapshotStatus(file), { lastSyncedAt: null, noteCount: 0, error: null, action: null });
   const ok = await saveSnapshotStatus(file, { ok: true, noteCount: 3, syncedAt: '2026-10-21T00:00:00Z' });
-  assert.deepEqual(ok, { lastSyncedAt: '2026-10-21T00:00:00Z', noteCount: 3, error: null });
+  assert.deepEqual(ok, { lastSyncedAt: '2026-10-21T00:00:00Z', noteCount: 3, error: null, action: null });
   const failed = await saveSnapshotStatus(file, { ok: false, error: 'Shared folder not found' });
   assert.equal(failed.error, 'Shared folder not found');
   assert.equal(failed.lastSyncedAt, '2026-10-21T00:00:00Z', 'keeps the last good sync time on a later error');
+  // F2: a 'Clear and re-share' recovery action rides along with the error too.
+  const f2 = await saveSnapshotStatus(file, { ok: false, error: 'corrupt', action: 'clear_and_reshare' });
+  assert.equal(f2.action, 'clear_and_reshare');
 });
 
 test('snapshot: watcher runs once immediately and stop() prevents further runs', async () => {

@@ -28,7 +28,12 @@
   const header = () => `<h2>${esc(t('share.title'))}</h2>`;
 
   function statusHtml(snap) {
-    if (snap.error) return `<p class="error-box">${esc(t('share.statusError', { error: snap.error }))}</p>`;
+    if (snap.error) {
+      // F2: a lost/corrupt manifest fails closed rather than guessing, so the only way forward
+      // is an explicit reset -- offer that action right next to the error, not just the message.
+      const action = snap.action === 'clear_and_reshare' ? ` <button data-share-clear-reshare>${esc(t('share.clearAndReshare'))}</button>` : '';
+      return `<p class="error-box">${esc(t('share.statusError', { error: snap.error }))}${action}</p>`;
+    }
     if (!snap.lastSyncedAt) return `<p class="muted">${esc(t('share.statusNeverSynced'))}</p>`;
     const when = new Date(snap.lastSyncedAt).toLocaleString();
     return `<p class="muted">${esc(snap.noteCount === 1 ? t('share.statusLastSyncedOne', { when }) : t('share.statusLastSynced', { when, count: snap.noteCount }))}</p>`;
@@ -84,6 +89,13 @@
       try {
         if (d.shareRetry !== undefined) { state.loading = true; draw(); await load(); return; }
         if (d.shareUseSuggested !== undefined) { state.draft.folder = d.shareUseSuggested; draw(); return; }
+        if (d.shareClearReshare !== undefined) {
+          if (!window.confirm?.(t('share.confirmClearReshare'))) return;
+          await api('/api/snapshot/clear', { force: true });
+          toast(t('share.toastCleared'));
+          await load();
+          return;
+        }
         if (e.target.id === 'share-pick') {
           const r = await api('/api/snapshot/pick-folder');
           const p = r.path || (r.unavailable ? await window.promptForFolder?.() : '');

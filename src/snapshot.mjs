@@ -3,7 +3,7 @@
 // so a cloud AI agent can read the brain with no inbound network access. BrainLink itself never
 // opens a network connection or listens on anything but 127.0.0.1 -- whatever gets this folder to
 // the cloud is the user's own desktop sync client, not us.
-import { readFile, writeFile, rename, mkdir, unlink, stat, lstat, realpath } from 'node:fs/promises';
+import { readFile, writeFile, rename, mkdir, unlink, stat, lstat, realpath, readdir, rm } from 'node:fs/promises';
 import { existsSync } from 'node:fs';
 import { watch } from 'node:fs';
 import { createHash } from 'node:crypto';
@@ -147,6 +147,17 @@ async function vaultRealRoots(vaults = []) {
 
 function isWithinRoot(root, real) { return real === root || real.startsWith(root + path.sep); }
 
+// F2's "missing manifest" fail-closed check needs to tell apart two scenarios that both look
+// like "no manifest, but outRoot isn't empty": a genuine first enable where a foreign/collision
+// file already happens to occupy a wanted path (N2 -- this must keep succeeding normally), versus
+// BrainLink having actually shared this folder before and the manifest later being lost (the real
+// F2 danger). README.md's content is BrainLink's own literal, regenerated-every-run text, so its
+// exact presence is a strong, hard-to-coincide signal of "shared by BrainLink before" that a
+// merely-colliding or foreign file won't match.
+async function looksPreviouslyShared(outRoot) {
+  try { return (await readFile(path.join(outRoot, 'README.md'), 'utf8')) === README; } catch { return false; }
+}
+
 async function isProtectedVaultFile(vaultRoots, resolved, sourceFull) {
   if (sourceFull) {
     try {
@@ -264,6 +275,22 @@ export async function writeSnapshotOnce(ctx, cfg, env = process.env) {
     return { ok: false, error: 'Shared folder is inside a vault. Choose a folder outside your vault(s).' };
   }
 
+  // F2: a corrupt manifest, or a missing one when the shared subfolder already has content, means
+  // ownership tracking for this folder was lost. Adopting files by content (byte-equal to a
+  // current note) was considered and rejected -- it would also adopt the user's own unrelated
+  // copy, which then gets deleted the moment that note is later removed or made private. Fail
+  // closed instead, before any mutation (including the legacy-manifest migration below): write
+  // nothing, delete nothing, keep a .bak of a corrupt manifest for inspection, and surface a
+  // 'Clear and re-share' action so the user can explicitly reset this folder's tracking.
+  const prev = await readManifest(dest, env);
+  if (prev.status === 'corrupt') {
+    try { await writeFile(`${manifestPath(dest, env)}.bak`, prev.raw); } catch {}
+    return { ok: false, error: 'The sharing record for this folder is corrupt and can no longer be trusted.', action: 'clear_and_reshare' };
+  }
+  if (prev.status === 'missing' && await looksPreviouslyShared(outRoot)) {
+    return { ok: false, error: 'The sharing record for this folder is missing, but the folder was shared before.', action: 'clear_and_reshare' };
+  }
+
   const notes = await snapshotNotes(ctx);
   const sessions = settings.includeSessions ? await snapshotSessions(env).catch(() => []) : null;
   const readmeText = README;
@@ -280,7 +307,6 @@ export async function writeSnapshotOnce(ctx, cfg, env = process.env) {
   // didn't exist yet when it was written) -- migrate against `dest`, not the new subfolder.
   await migrateLegacyManifestOnce(ctx, dest, dest, env, vaultRoots);
 
-  const prev = await readManifest(dest, env);
   let prevFiles = prev.status === 'ok' ? prev.files : {};
 
   // F1: a v1.2.2/v1.2.3 appHome manifest (trusted, since it never lived inside `dest`) named
@@ -318,7 +344,7 @@ export async function writeSnapshotOnce(ctx, cfg, env = process.env) {
 // "Stop sharing" + clear: removes every file this feature ever wrote (tracked in its own
 // manifest, kept under appHome — see manifestPath above) from inside the shared subfolder, and
 // nothing else -- a foreign file there, or anywhere else in `dest`, is untouched.
-export async function clearSnapshot(dest, env = process.env, vaults = []) {
+export async function clearSnapshot(dest, env = process.env, vaults = [], { force = false } = {}) {
   if (!dest) return { ok: true };
   const outRoot = sharedRoot(dest);
   const vaultRoots = await vaultRealRoots(vaults);
@@ -327,7 +353,14 @@ export async function clearSnapshot(dest, env = process.env, vaults = []) {
   // never apply those old keys to outRoot either (same bug as the prune loop above).
   const root = prev.status === 'ok' && prev.layout === CURRENT_LAYOUT ? outRoot : dest;
   if (prev.status === 'ok') for (const rel of Object.keys(prev.files)) { const safe = await safeDeletePath(root, rel, vaultRoots); if (safe) { try { await unlink(safe); } catch {} } }
+  // F2 recovery ("Clear and re-share"): when ownership tracking was lost (missing/corrupt
+  // manifest), there is no tracked list left to reconcile against, so the normal loop above does
+  // nothing. A caller that explicitly opts into a full reset gets the dedicated subfolder wiped
+  // outright instead -- nothing else is ever meant to write inside it (N2), so this is safe for
+  // an explicit, user-initiated reset even though it isn't safe to do automatically.
+  if (force && prev.status !== 'ok') { try { await rm(outRoot, { recursive: true, force: true }); } catch {} }
   try { await unlink(manifestPath(dest, env)); } catch {}
+  try { await unlink(`${manifestPath(dest, env)}.bak`); } catch {}
   return { ok: true };
 }
 
@@ -371,12 +404,14 @@ export function startSnapshotWatcher(ctx, cfg, env = process.env, opts = {}) {
 // Status (last synced / count / error), persisted separately from config.json so Settings can
 // show it without re-scanning. file: caller-chosen path (see src/setup.mjs, appHome-based).
 export async function loadSnapshotStatus(file) {
-  try { return JSON.parse(await readFile(file, 'utf8')); } catch { return { lastSyncedAt: null, noteCount: 0, error: null }; }
+  try { return JSON.parse(await readFile(file, 'utf8')); } catch { return { lastSyncedAt: null, noteCount: 0, error: null, action: null }; }
 }
 export async function saveSnapshotStatus(file, result) {
-  const status = result.skipped ? { lastSyncedAt: null, noteCount: 0, error: null }
-    : result.ok ? { lastSyncedAt: result.syncedAt, noteCount: result.noteCount, error: null }
-    : { ...(await loadSnapshotStatus(file)), error: result.error };
+  // F2: result.action (e.g. 'clear_and_reshare') rides along with the error so a UI reading this
+  // status file can offer the right recovery action, not just a dead-end error string.
+  const status = result.skipped ? { lastSyncedAt: null, noteCount: 0, error: null, action: null }
+    : result.ok ? { lastSyncedAt: result.syncedAt, noteCount: result.noteCount, error: null, action: null }
+    : { ...(await loadSnapshotStatus(file)), error: result.error, action: result.action || null };
   await atomicWrite(file, JSON.stringify(status));
   return status;
 }

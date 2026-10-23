@@ -277,5 +277,7 @@
   "share.toastStopped": "Sharing turned off.",
   "share.toastCleared": "Shared files removed.",
   "share.toastNeedFolder": "Choose a folder first.",
-  "share.pickPromptFallback": "Folder to share (for example ~/Shared Notes):"
+  "share.pickPromptFallback": "Folder to share (for example ~/Shared Notes):",
+  "share.clearAndReshare": "Clear and re-share",
+  "share.confirmClearReshare": "This will remove everything previously shared in that folder and start sharing fresh. Continue?"
 }

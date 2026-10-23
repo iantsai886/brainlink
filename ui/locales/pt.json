@@ -277,5 +277,7 @@
   "share.toastStopped": "Compartilhamento desativado.",
   "share.toastCleared": "Arquivos compartilhados removidos.",
   "share.toastNeedFolder": "Escolha uma pasta primeiro.",
-  "share.pickPromptFallback": "Pasta para compartilhar (por exemplo, ~/Shared Notes):"
+  "share.pickPromptFallback": "Pasta para compartilhar (por exemplo, ~/Shared Notes):",
+  "share.clearAndReshare": "Limpar e compartilhar novamente",
+  "share.confirmClearReshare": "Isso removerá tudo o que foi compartilhado anteriormente nessa pasta e começará a compartilhar novamente. Continuar?"
 }
