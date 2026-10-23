@@ -84,6 +84,8 @@
   "sessions.title": "Sessões",
   "sessions.hint": "Uma única linha do tempo para todas as IAs que ligar — Claude, Cursor, Codex e outras. Qualquer sessão pode abrir e ler qualquer outra (a mesma chamada {call} que todas as IAs ligadas usam). As sessões privadas (padrão nas importações) mostram 🔒 e ficam ocultas a menos que peça para as ver; nunca são sincronizadas.",
   "sessions.showPrivate": "Mostrar sessões privadas",
+  "sessions.privateNotice": "Suas sessões importadas são privadas, então os apps de IA conectados ainda não conseguem ver nenhuma delas.",
+  "sessions.privateNoticeBtn": "Permitir que apps de IA conectados vejam os resumos",
   "sessions.shareTitle": "Apps de IA conectados",
   "sessions.shareSummariesLabel": "Permitir que apps de IA conectados vejam resumos das minhas sessões de IA importadas",
   "sessions.shareFullTextLabel": "Também permitir que apps de IA conectados leiam o texto completo das mensagens (não só os resumos)",

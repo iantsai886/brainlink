@@ -603,6 +603,34 @@ test('setup UI: host check, token check, add vault, connect with no plan limits'
   } finally { s.server.close(); }
 });
 
+test('P1a: the vault card\'s note count matches what is actually visible (private/excluded notes are not counted)', async () => {
+  const home = await tmp('p1a-notecount');
+  const env = { BRAINLINK_HOME: path.join(home, 'app'), BRAINLINK_SEMANTIC: '0' };
+  const vaultDir = path.join(home, 'Notes');
+  await cp(SAMPLE, vaultDir, { recursive: true });
+  const s = await startSetup({ env, home, os: 'darwin', port: 0, pick: async () => vaultDir, useCli: false });
+  const base = `http://127.0.0.1:${s.port}`;
+  const api = (method, p, body) => fetch(base + p, { method, headers: { 'X-BrainLink-Token': s.token, 'Content-Type': 'application/json' }, body: body && JSON.stringify(body) });
+  try {
+    const add = await (await api('POST', '/api/vault', { path: vaultDir, name: 'Acme', pack: 'founder-os', agentName: 'Chief of Staff' })).json();
+    assert.equal(add.ok, true);
+    const before = (await (await api('GET', '/api/state')).json()).vaults[0].notes;
+    const g0 = await (await api('POST', '/api/graph', {})).json();
+    assert.equal(before, g0.health.notes, 'the vault card count must match the Brain map\'s own visible-notes count');
+
+    // Add one private note and one excluded-folder note: a naive recursive .md count would see
+    // both, but neither should ever count as a visible note.
+    await writeFile(path.join(vaultDir, 'Private Thoughts.md'), '---\nprivate: true\n---\n# Private Thoughts\n');
+    await mkdir(path.join(vaultDir, '00 Home'), { recursive: true });
+    await writeFile(path.join(vaultDir, '00 Home', 'Diary.md'), '# Diary\n');
+    await writeFile(path.join(vaultDir, '.brainlinkignore'), '00 Home/\n');
+    const after = (await (await api('GET', '/api/state')).json()).vaults[0].notes;
+    assert.equal(after, before, 'adding one private and one excluded-folder note must not move the visible count');
+    const g1 = await (await api('POST', '/api/graph', {})).json();
+    assert.equal(after, g1.health.notes);
+  } finally { s.server.close(); }
+});
+
 test('CLI: `brainlink serve` speaks MCP over stdio and logs content-free activity', async () => {
   const { cfg } = await fixture();
   const home = await tmp('cli');

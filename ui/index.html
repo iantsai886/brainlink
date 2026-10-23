@@ -191,6 +191,10 @@ ol.todo li { padding-left: 4px; }
   <section id="sessions-panel" hidden>
     <h2 data-i18n="sessions.title"></h2>
     <p class="hint" id="sessions-hint"></p>
+    <div class="notice" id="sessions-private-notice" hidden style="margin-bottom:10px">
+      <span data-i18n="sessions.privateNotice"></span>
+      <button class="link" id="sessions-private-notice-btn" data-i18n="sessions.privateNoticeBtn"></button>
+    </div>
     <div class="card" style="margin-bottom:10px">
       <b data-i18n="sessions.shareTitle"></b>
       <label class="muted" style="display:flex;flex-direction:row;gap:6px;align-items:center;margin-top:6px"><input type="checkbox" id="sess-share-summaries" style="width:auto"><span data-i18n="sessions.shareSummariesLabel"></span></label>
@@ -676,6 +680,10 @@ async function load() {
   $('sess-share-summaries').checked = Boolean(S.sessions_sharing?.shareSummaries);
   $('sess-share-full').checked = Boolean(S.sessions_sharing?.shareFullText);
   $('sess-share-full').disabled = !$('sess-share-summaries').checked;
+  // P1a: sessions were imported (or logged) but stay invisible to every connected AI because
+  // sharing is off -- say so plainly, with one button that turns the existing switch on, instead
+  // of a silent gap between "sessions exist" and "no AI can ever see them".
+  $('sessions-private-notice').hidden = !(S.sessions_has_private && !S.sessions_sharing?.shareSummaries);
   if (hasVault && !onboardingSync) loadSessions().catch(() => {});
   $('cfgpath').textContent = S.config_path;
   $('n1').className = 'step' + (S.vaults.length ? ' done' : '');
@@ -774,6 +782,11 @@ document.addEventListener('click', (e) => {
   if (d.syncOnbPick) $('sync-onb-folder').value = d.syncOnbPick;
 });
 $('sess-private').onchange = () => loadSessions().catch(() => {});
+$('sessions-private-notice-btn').onclick = () => act(async () => {
+  const r = await api('POST', '/api/sessions/sharing', { shareSummaries: true, shareFullText: $('sess-share-full').checked });
+  S.sessions_sharing = r.sessions;
+  toast(t('sessions.shareToastSaved'));
+});
 $('sess-share-summaries').onchange = () => act(async () => {
   const shareSummaries = $('sess-share-summaries').checked;
   const r = await api('POST', '/api/sessions/sharing', { shareSummaries, shareFullText: $('sess-share-full').checked });

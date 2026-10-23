@@ -84,6 +84,8 @@
   "sessions.title": "Sessions",
   "sessions.hint": "One timeline across every AI you connect — Claude, Cursor, Codex and more. Any session can open and read any other (the same {call} call every connected AI uses). Private sessions (the default for imports) show 🔒 and are hidden unless you ask to see them; they never sync.",
   "sessions.showPrivate": "Show private sessions",
+  "sessions.privateNotice": "Your imported sessions are private, so connected AI apps can't see any of them yet.",
+  "sessions.privateNoticeBtn": "Let connected AI apps see summaries",
   "sessions.shareTitle": "Connected AI apps",
   "sessions.shareSummariesLabel": "Let connected AI apps see summaries of my imported AI sessions",
   "sessions.shareFullTextLabel": "Also let connected AI apps read full message text (not just summaries)",

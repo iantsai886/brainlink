@@ -84,6 +84,8 @@
   "sessions.title": "對話記錄",
   "sessions.hint": "把你連接的每個 AI——Claude、Cursor、Codex 等等——整合成一條時間軸。任何一段對話都能打開、讀取其他任何一段（用的是同一個 {call} 呼叫，每個連接的 AI 都用它）。匯入的對話預設為私密（顯示 🔒），除非你要求查看，否則會隱藏；它們永遠不會同步。",
   "sessions.showPrivate": "顯示私密對話記錄",
+  "sessions.privateNotice": "你匯入的對話記錄都是私密的，目前已連接的 AI 應用程式還看不到任何一筆。",
+  "sessions.privateNoticeBtn": "讓已連接的 AI 應用程式看到摘要",
   "sessions.shareTitle": "已連接的 AI 應用程式",
   "sessions.shareSummariesLabel": "允許已連接的 AI 應用程式查看我匯入的 AI 對話摘要",
   "sessions.shareFullTextLabel": "也允許已連接的 AI 應用程式讀取完整對話內容（不只是摘要）",

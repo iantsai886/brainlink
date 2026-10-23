@@ -1,7 +1,7 @@
 // Setup UI backend: a local-only web app (127.0.0.1, random session token) that picks the
 // vault folder, applies a rule pack and connects AI clients.
 import { createServer } from 'node:http';
-import { readFile, readdir, stat, cp, mkdir, writeFile } from 'node:fs/promises';
+import { readFile, stat, cp, mkdir, writeFile } from 'node:fs/promises';
 import { randomBytes, timingSafeEqual } from 'node:crypto';
 import { execFile } from 'node:child_process';
 import { homedir } from 'node:os';
@@ -52,14 +52,15 @@ export function pickFolder(os = process.platform, prompt = 'Choose your Obsidian
   });
 }
 
-async function countNotes(dir, n = 0, depth = 0) {
-  if (depth > 12) return n;
-  for (const f of await readdir(dir, { withFileTypes: true }).catch(() => [])) {
-    if (f.name.startsWith('.') || f.name === 'node_modules') continue;
-    if (f.isDirectory()) n = await countNotes(path.join(dir, f.name), n, depth + 1);
-    else if (f.name.toLowerCase().endsWith('.md')) n++;
-  }
-  return n;
+// P1a: the vault card's note count must count only what the user/AI can actually see -- the same
+// definition vaultHealth/the Brain map stats use (excludes private notes, generated notes, and
+// anything under an excluded folder, which never even reaches the index). A raw recursive .md
+// file count here previously disagreed with that visible count (e.g. showing 8 when only 2 notes
+// were actually visible), which is confusing on its own and actively misleading once some of the
+// difference is private content.
+async function visibleNoteCount(ctx, vaultName) {
+  const index = await loadVault(ctx, vaultName);
+  return index.notes.filter((n) => !n.generated && !n.private).length;
 }
 
 // A search snippet is raw note text (headings, **bold**, `code`); strip the Markdown so the
@@ -111,11 +112,12 @@ export async function startSetup(opts = {}) {
 
   async function state() {
     const cfg = await loadConfig(file);
+    const ctx = createContext(cfg, { env });
     const vaults = [];
     for (const v of cfg.vaults) {
       const ok = await stat(v.path).then((s) => s.isDirectory(), () => false);
       const excluded = ok ? await readExcludedFolders(v.path) : { active: [], suggested: [] };
-      vaults.push({ ...v, exists: ok, notes: ok ? await countNotes(v.path) : 0, excluded_folders: excluded.active, excluded_suggestions: excluded.suggested });
+      vaults.push({ ...v, exists: ok, notes: ok ? await visibleNoteCount(ctx, v.name) : 0, excluded_folders: excluded.active, excluded_suggestions: excluded.suggested });
     }
     return {
       version: VERSION, config_path: file, os, locale: cfg.locale,
@@ -129,6 +131,11 @@ export async function startSetup(opts = {}) {
       obsidian_vaults: (await findObsidianVaults({ home, os, env })).filter((o) => !cfg.vaults.some((v) => path.resolve(v.path) === path.resolve(o.path))),
       sync: { ...syncSettings(cfg), providers: PROVIDERS, provider_labels: PROVIDER_LABELS, suggested_folders: suggestFolders(home) },
       sessions_sharing: cfg.sessions,
+      // P1a: imported sessions default to private, and a private session is invisible to every
+      // connected AI while sessions.shareSummaries is off -- regardless of the "Show private
+      // sessions" checkbox below, which only controls what this local Setup UI displays. Peeking
+      // at a small page is enough to know "at least one exists"; the UI doesn't need the full list.
+      sessions_has_private: ((await sessions.list({ include_private: true, limit: 20 }).catch(() => ({ sessions: [] }))).sessions || []).some((x) => x.private),
       snapshot: { ...snapshotSettings(cfg), suggested_folder: suggestSnapshotFolder(home), ...(await loadSnapshotStatus(snapshotStateFile)) },
     };
   }
