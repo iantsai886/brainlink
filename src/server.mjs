@@ -12,6 +12,7 @@ import { TEMPLATES } from './templates.mjs';
 import { connectAgent, closeLoop } from './agents.mjs';
 import { openSessionStore, importAll } from './sessions/index.mjs';
 import { sessionList, sessionRead, sessionLog } from './sessions/mcp.mjs';
+import { closeSession } from './sessions/close.mjs';
 
 export const VERSION = '1.2.6';
 export const SERVER_NAME = 'brainlink';
@@ -40,7 +41,7 @@ export function createMcp(ctx, { onCall = () => {} } = {}) {
       ? 'This connection is READ-ONLY.'
       : 'WRITE: never overwrite. Every write needs your identity (ai_platform, agent_or_role, session_or_task_id) and returns a preview unless confirm=true; show the preview to the user before confirming unless their own phrase (e.g. a close-loop phrase) already authorised it. Never store credentials, tokens or account numbers. Keep each vault\'s material in that vault.',
     'SMART: vault_search accepts rephrasings and translations (queries) — add an English translation for non-English questions; respect status not_in_brain, folder, tag and since/until filters. "What changed / what\'s open?" → brain_brief, vault_recent, open_loops. "Remember …" → remember. Quick thoughts → append_daily. Meetings, decisions, people, projects, ideas → propose_note with a template. Mention existing notes by their exact title; BrainLink links them and adds a Related section automatically.',
-    'SESSIONS: session_list / session_read cover imported Claude Code and Codex history plus anything logged with session_log (for clients with no readable local history). Whether private sessions (the default for imports) are visible to you at all is the user\'s own choice in BrainLink Settings, not something you can request or set.',
+    'SESSIONS: session_list / session_read cover imported Claude Code and Codex history plus anything logged with session_log (for clients with no readable local history). When the user ends work, session_close can preview or save a private, proposed outcome in one explicit vault; never guess the vault or claim an unverified summary is fact. Whether private imported sessions are visible to you is the user\'s own choice in BrainLink Settings.',
     agents.length ? `AGENTS: ${agents.map((a) => `${a.name} (${a.vault}) — "${a.activation[0]}" → agent_connect; "${a.close[0]}" → agent_close_loop`).join('; ')}.` : '',
     hasHandoff ? `INTER-AI: send_handoff / list_handoffs use the ${cfg.handoff.vault}/${cfg.handoff.folder} mailbox.` : '',
   ].filter(Boolean).join('\n');
@@ -138,6 +139,13 @@ export function createMcp(ctx, { onCall = () => {} } = {}) {
         title: { type: 'string' }, text: { type: 'string' }, role: { type: 'string', enum: ['note', 'user', 'assistant'], default: 'note' },
         session_id: { type: 'string' }, project: { type: 'string' }, private: { type: 'boolean', default: true } }, required: ['text'] },
       run: async (a) => sessionLog(await sessionStore(), a, ctx.platform) },
+    { name: 'session_close', title: 'Close work into a private session and proposed note', annotations: WR,
+      description: 'For a supported AI to submit the outcome when work ends. Requires one explicit destination vault and stable task ID. Preview by default; confirm=true stores a private session summary and private proposed episodic note. No raw transcript is copied, and the imported-session sharing switch cannot expose this closure.',
+      inputSchema: { type: 'object', properties: {
+        vault: vaultProp, title: { type: 'string' }, project: { type: 'string' }, goal: { type: 'string' }, outcome: { type: 'string' },
+        decisions: strs, actions: strs, corrections: strs, open_questions: strs, next_actions: strs, ...idProps,
+      }, required: ['vault', 'title', 'goal', 'outcome', 'session_or_task_id'] },
+      run: async (a) => closeSession(ctx, await sessionStore(), a) },
     ...(agents.length ? [
       { name: 'agent_connect', title: 'Activate an agent ("Connect to …")', annotations: RO,
         description: `Use when the user says an activation phrase (${agents.map((a) => `"${a.activation[0]}"`).join(', ')}). Loads the agent's role, live notes, recent captures and stale-source warnings from its own vault.`,
@@ -228,12 +236,14 @@ export function createMcp(ctx, { onCall = () => {} } = {}) {
   const builtinPrompts = [
     { name: 'brief', title: 'Brief me', description: 'What changed and what is still open in my notes' },
     { name: 'remember', title: 'Remember this', description: 'Save a fact for every AI', arguments: [{ name: 'fact', description: 'What to remember', required: true }] },
+    { name: 'close-session', title: 'Close this work', description: 'Prepare a private, source-attributed session outcome for one vault' },
   ];
   const prompts = async () => [...agentPrompts(), ...builtinPrompts, ...(await listCommands(ctx).catch(() => [])).map((c) => ({ name: c.name, title: c.title, description: `${c.description} (from ${c.vault})`, ...(c.takesInput ? { arguments: [{ name: 'input', description: 'Text for this command', required: false }] } : {}) }))];
   const getPrompt = async (name, args = {}) => {
     const msg = (text, description) => ({ description, messages: [{ role: 'user', content: { type: 'text', text } }] });
     if (name === 'brief') return msg(`Call brain_brief for ${ctx.enabled[0]} and tell me in a few lines what changed, what is open, and one suggested next step.`, 'Brief me');
     if (name === 'remember') return msg(`Remember this: ${args.fact || ''}. Call remember with confirm=true and confirm in one line.`, 'Remember this');
+    if (name === 'close-session') return msg('Close this work. Use brainlink_guide to identify the correct vault; if the destination is ambiguous, ask me instead of guessing. Summarise goal, actual outcome, decisions, corrections, open questions and next actions without credentials or raw private turns. Call session_close with a stable session_or_task_id and confirm=false to preview. Save with confirm=true only after my close instruction or approval; then report the saved path and any failure.', 'Close this work');
     if (name.startsWith('cmd-')) {
       const c = (await listCommands(ctx)).find((x) => x.name === name);
       if (!c) throw new Error(`Unknown command ${name}`);

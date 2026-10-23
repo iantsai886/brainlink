@@ -81,8 +81,17 @@ test('authenticated Setup enables scheduled backup only after a verified first c
     const state = await fetch(`http://127.0.0.1:${app.port}/api/state`, { headers: { 'X-BrainLink-Token': app.token } }).then((r) => r.json());
     assert.equal(state.backup.enabled, true);
     assert.equal(state.backup.status.file_count, 1);
-    for (let i = 0; i < 40 && (await readdir(dest)).length < 2; i++) await new Promise((resolve) => setTimeout(resolve, 25));
-    assert.ok((await readdir(dest)).length >= 2, 'scheduled backup creates another verified copy');
+    let secondVerified = false;
+    for (let i = 0; i < 120 && !secondVerified; i++) {
+      for (const folder of await readdir(dest)) {
+        const full = path.join(dest, folder);
+        if (full === result.backup.status.folder) continue;
+        secondVerified = await verifyBackup(full).then((r) => r.ok, () => false);
+        if (secondVerified) break;
+      }
+      if (!secondVerified) await new Promise((resolve) => setTimeout(resolve, 25));
+    }
+    assert.ok(secondVerified, 'scheduled backup creates another verified copy');
     await new Promise((resolve) => setTimeout(resolve, 650));
     assert.equal((await fetch(`http://127.0.0.1:${app.port}/health`)).status, 200, 'scheduled backup keeps the app running while idle');
     assert.equal((await api('/api/backup/restore', { backupFolder: result.backup.status.folder, destination: restore })).status, 400);
@@ -90,7 +99,8 @@ test('authenticated Setup enables scheduled backup only after a verified first c
     assert.equal(restored.status, 200);
     assert.match(await readFile(path.join(restore, '1-Personal', 'Private.md'), 'utf8'), /private fixture/);
     const off = await api('/api/backup', { enabled: false, folder: dest, intervalHours: 24 });
-    assert.equal((await off.json()).backup.enabled, false);
+    const offBody = await off.json();
+    assert.equal(offBody.backup?.enabled, false, JSON.stringify(offBody));
   } finally { app.server.close(); }
 });
 
@@ -112,7 +122,7 @@ test('restart retains backup result and catches up when the last run is overdue'
       await new Promise((resolve) => setTimeout(resolve, 25));
     }
     assert.equal((await readdir(dest)).length, 1, 'overdue schedule runs on restart');
-    assert.equal(persisted.ok, true);
+    assert.equal(persisted.ok, true, JSON.stringify(persisted));
     assert.equal((await verifyBackup(persisted.folder)).ok, true);
     const state = await fetch(`http://127.0.0.1:${app.port}/api/state`, { headers: { 'X-BrainLink-Token': app.token } }).then((r) => r.json());
     assert.equal(state.backup.status.folder, persisted.folder);

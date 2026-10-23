@@ -104,6 +104,7 @@ export async function startSetup(opts = {}) {
   let snapshotWatcher = null;
   let backupTimer = null;
   let backupRunning = false;
+  let backupTickRunning = false;
   let backupStatus = await loadBackupStatus(backupStateFile);
   async function runBackup(cfg) {
     if (backupRunning) throw new Error('A backup is already running.');
@@ -131,12 +132,21 @@ export async function startSetup(opts = {}) {
     const interval = opts.backupIntervalMs ?? cfg.backup.intervalHours * 3600e3;
     const lastAttempt = Date.parse(backupStatus?.at || '');
     const firstDelay = Number.isFinite(lastAttempt) ? Math.max(0, interval - (Date.now() - lastAttempt)) : 0;
-    const tick = () => loadConfig(file).then((latest) => {
-      if (latest.backup.enabled) return runBackup(latest);
-    }).catch(async (error) => {
-      backupStatus = { ok: false, error: error.message || String(error), at: new Date().toISOString() };
-      await saveBackupStatus(backupStateFile, backupStatus).catch(() => {});
-    });
+    const tick = async () => {
+      if (backupTickRunning || backupRunning) return; // slow copies must not turn a good receipt into a spurious failure
+      backupTickRunning = true;
+      try {
+        let latest;
+        try { latest = await loadConfig(file); }
+        catch (error) {
+          backupStatus = { ok: false, error: error.message || String(error), at: new Date().toISOString() };
+          await saveBackupStatus(backupStateFile, backupStatus).catch(() => {});
+          return;
+        }
+        if (latest.backup.enabled) await runBackup(latest); // runBackup saves its own success/failure receipt
+      } catch { // a failed scheduled copy is already recorded by runBackup
+      } finally { backupTickRunning = false; }
+    };
     backupTimer = setTimeout(() => {
       tick();
       backupTimer = setInterval(tick, interval);
