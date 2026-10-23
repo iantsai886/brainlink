@@ -21,16 +21,17 @@ function autostartScript(nodeExe, cliPath) {
   return `' BrainLink: starts the Setup server quietly at login (no window) -- the Startup-folder\r\n' stand-in for a LaunchAgent. Installed and removed only by BrainLink's own setup/uninstall.\r\n' Window style 0 = hidden, False = don't wait: node keeps running after this script exits.\r\nCreateObject("WScript.Shell").Run """${nodeExe}"" ""${cliPath}"" win-start --no-open", 0, False\r\n`;
 }
 
-// Copies this release's app/ and node/ (siblings of `here`) into the stable per-user install
-// location and (re)writes the autostart entry. `skipCopy` lets a caller that already confirmed the
-// background server is up skip re-copying ~100MB of Node runtime on every single double-click.
+// Copies this whole release folder (app/, node/, BrainLink.vbs, the uninstaller, READ ME FIRST.txt
+// -- everything, like macOS's `cp -R "$HERE/."`) into the stable per-user install location, so
+// they're all still reachable after the user deletes the folder they originally unzipped, then
+// (re)writes the autostart entry. `skipCopy` lets a caller that already confirmed the background
+// server is up skip re-copying ~100MB of Node runtime on every single double-click.
 export async function installIfNeeded({ here, env = process.env, home = homedir(), skipCopy = false } = {}) {
   const dest = installDir(env, home);
   const alreadyThere = path.resolve(here) === path.resolve(dest);
   if (!alreadyThere && !skipCopy) {
     await mkdir(dest, { recursive: true });
-    await cp(path.join(here, 'app'), path.join(dest, 'app'), { recursive: true, force: true });
-    await cp(path.join(here, 'node'), path.join(dest, 'node'), { recursive: true, force: true });
+    await cp(here, dest, { recursive: true, force: true });
   }
   const nodeExe = path.join(dest, 'node', 'node.exe');
   const cliPath = path.join(dest, 'app', 'bin', 'brainlink.mjs');

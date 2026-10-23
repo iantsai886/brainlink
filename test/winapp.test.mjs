@@ -20,6 +20,9 @@ async function fakeRelease(dir) {
   await writeFile(path.join(dir, 'app', 'bin', 'brainlink.mjs'), '// fake cli\n');
   await mkdir(path.join(dir, 'node'), { recursive: true });
   await writeFile(path.join(dir, 'node', 'node.exe'), 'fake node binary\n');
+  await writeFile(path.join(dir, 'BrainLink.vbs'), '\' fake launcher\n');
+  await writeFile(path.join(dir, 'Uninstall BrainLink.cmd'), '@echo off\n');
+  await writeFile(path.join(dir, 'READ ME FIRST.txt'), 'read me\n');
   return dir;
 }
 
@@ -41,6 +44,8 @@ test('installIfNeeded: copies app/+node/ into installDir() and writes a Startup-
   assert.ok(await stat(path.join(dest, 'app', 'bin', 'brainlink.mjs')).then(() => true, () => false));
   assert.ok(await stat(path.join(dest, 'node', 'node.exe')).then(() => true, () => false));
   assert.ok(await stat(here).then(() => true, () => false), 'the original downloaded folder must be copied, not moved');
+  assert.ok(await stat(path.join(dest, 'Uninstall BrainLink.cmd')).then(() => true, () => false), 'the uninstaller must also land in the installed copy, so it survives deleting the download');
+  assert.ok(await stat(path.join(dest, 'READ ME FIRST.txt')).then(() => true, () => false));
 
   const script = await readFile(startup, 'utf8');
   assert.ok(script.includes(nodeExe) && script.includes(cliPath), 'autostart script must point at the installed node.exe and brainlink.mjs, not the download folder');
