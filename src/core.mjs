@@ -67,7 +67,11 @@ export function parseFrontmatter(text) {
   const stripped = String(text).replace(/^\uFEFF/, '');
   // F4: trailing spaces/tabs after either fence (e.g. "--- \n") must not stop detection -- a note
   // otherwise identical in Obsidian was leaking as non-private because of a stray trailing byte.
-  const m = stripped.match(/^(?:[ \t]*\r?\n)*---[^\S\r\n]*\r?\n([\s\S]*?)\r?\n---[^\S\r\n]*\r?\n?/);
+  // F4b: the closer must end at end-of-line (or end-of-string) after the dashes/whitespace, not
+  // just allow zero more characters there -- the old `\r?\n?` tail made that newline optional, so
+  // a `----` (or `---x`, `--- note`) line inside the frontmatter was wrongly accepted as the
+  // closing fence, truncating the body before fields like `private: true` were ever parsed.
+  const m = stripped.match(/^(?:[ \t]*\r?\n)*---[^\S\r\n]*\r?\n([\s\S]*?)\r?\n---[^\S\r\n]*(?:\r?\n|$)/);
   if (!m) return { meta: {}, body: stripped, frontmatter: '' };
   const meta = {};
   let listKey = null;

@@ -168,6 +168,24 @@ test('F4: trailing spaces/tabs (and CRLF) on either frontmatter fence still dete
   }
 });
 
+// F4b: a line inside the frontmatter block that merely starts with "---" (a horizontal-rule-like
+// "----", a stray "---x", or "--- note") must never be mistaken for the real closing fence -- the
+// old regex's optional trailing `\r?\n?` let it stop right after those three dashes, truncating
+// the block before fields further down (e.g. `private: true`) were ever parsed. The real closer
+// starts a line with exactly "---", followed only by horizontal whitespace, then end of line.
+test('F4b: "----", "---x" and "--- note" inside frontmatter do not close it early', () => {
+  const dashes = '---\ntitle: x\n----\nprivate: true\n---\n# Secret\n\nbody text';
+  const dashLetter = '---\ntitle: x\n---x\nprivate: true\n---\n# Secret\n\nbody text';
+  const dashWord = '---\ntitle: x\n--- note\nprivate: true\n---\n# Secret\n\nbody text';
+  for (const text of [dashes, dashLetter, dashWord]) {
+    const { meta, body, frontmatter } = parseFrontmatter(text);
+    assert.equal(meta.private, 'true', `private: true is still parsed past the fake closer in: ${JSON.stringify(text)}`);
+    assert.ok(isPrivateMeta(meta));
+    assert.match(body, /^# Secret/, 'the fake closer line stays inside frontmatter, not the body');
+    assert.ok(frontmatter.includes('private: true'));
+  }
+});
+
 // R3: isPrivateMeta's line-by-line key parser is deliberately strict (a looser leading-\s* regex
 // would also match a `private:` line nested under an unrelated key, flipping a genuinely private
 // note to public -- see the two "must stay private" cases below). fmSaysPrivate is a second,
