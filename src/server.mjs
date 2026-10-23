@@ -172,10 +172,14 @@ export function createMcp(ctx, { onCall = () => {} } = {}) {
       run: (a) => proposeNote(ctx, a) },
     ...(hasHandoff ? [
       { name: 'send_handoff', title: 'Message another AI', annotations: WR,
-        description: 'Write a handoff note (YYYY-MM-DD-HHmm-from-X-to-Y-slug.md) to the shared inter-AI mailbox.',
+        description: 'Write a structured, scoped handoff to the existing inter-AI mailbox. Source links must resolve to visible notes in that mailbox vault; no private notes are copied.',
         inputSchema: { type: 'object', properties: {
           to: { type: 'string' }, subject: { type: 'string' }, body: { type: 'string' }, priority: { type: 'string', enum: ['P0', 'P1', 'P2', 'P3'] },
-          decision_needed: { type: 'boolean' }, deadline: { type: 'string' }, ack_of: { type: 'string' }, status: { type: 'string' }, source: { type: 'string' }, ...idProps }, required: ['to', 'subject', 'body'] },
+          goal: { type: 'string' }, current_state: { type: 'string' }, decisions: strs, modified_files: strs, tests: strs,
+          open_questions: strs, next_steps: strs, source_refs: strs,
+          scope: { type: 'string', enum: ['personal', 'company', 'client'] },
+          confidence: { type: 'string', enum: ['verified', 'reported', 'inferred', 'unknown'] },
+          decision_needed: { type: 'boolean' }, deadline: { type: 'string' }, ack_of: { type: 'string' }, status: { type: 'string' }, source: { type: 'string' }, ...idProps }, required: ['to', 'subject'] },
         run: (a) => sendHandoff(ctx, a) },
       { name: 'list_handoffs', title: 'Read the inter-AI mailbox', annotations: RO,
         description: 'Newest handoff messages, optionally only those addressed to a platform/agent (includes "all").',

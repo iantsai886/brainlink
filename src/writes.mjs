@@ -5,7 +5,7 @@ import { writeFile, appendFile, readdir, readFile, stat, open, mkdir } from 'nod
 import path from 'node:path';
 import { TEMPLATES, renderTemplate } from './templates.mjs';
 import { suggestLinks, relatedSection, safeUpdateMap } from './links.mjs';
-import { vault, vaultRoot, safeJoin, findSecrets, zonedNow, parseFrontmatter, isExcludedPath, isPrivateMeta, fmSaysPrivate } from './core.mjs';
+import { vault, vaultRoot, safeJoin, findSecrets, zonedNow, parseFrontmatter, isExcludedPath, isPrivateMeta, fmSaysPrivate, readNote } from './core.mjs';
 
 export const slug = (s) => String(s || '').toLowerCase().replace(/[^a-z0-9㐀-鿿]+/g, '-').replace(/^-|-$/g, '') || 'unknown';
 
@@ -196,6 +196,18 @@ export async function appendDaily(ctx, a, now = new Date()) {
 
 const PRIORITIES = ['P0', 'P1', 'P2', 'P3'];
 const HANDOFF_RE = /^\d{4}-\d{2}-\d{2}-\d{4}-from-.+\.md$/;
+const HANDOFF_FIELDS = [
+  ['goal', 'Goal'], ['current_state', 'Current state'], ['decisions', 'Decisions'],
+  ['modified_files', 'Modified files'], ['tests', 'Tests and results'],
+  ['open_questions', 'Open questions'], ['next_steps', 'Next steps'],
+];
+
+function handoffSection(label, value) {
+  const items = Array.isArray(value) ? value : [value];
+  const clean = items.map((item) => String(item || '').trim()).filter(Boolean);
+  if (!clean.length) return '';
+  return `\n## ${label}\n\n${Array.isArray(value) ? clean.map((item) => `- ${item}`).join('\n') : clean[0]}\n`;
+}
 
 function handoffBox(ctx) {
   const h = ctx.cfg.handoff;
@@ -211,16 +223,28 @@ export async function sendHandoff(ctx, a, now = new Date()) {
   const subject = String(a.subject || '').trim();
   const te = titleError(subject); if (te) errors.push(te.replace('title', 'subject'));
   if (!a.to) errors.push('to is required (platform or agent name, or "all")');
-  if (!a.body) errors.push('body is required');
+  if (!a.body && !a.goal) errors.push('body or goal is required');
   if (a.priority && !PRIORITIES.includes(a.priority)) errors.push(`priority must be one of ${PRIORITIES.join(', ')}`);
+  if (a.scope && !['personal', 'company', 'client'].includes(a.scope)) errors.push('scope must be personal, company, or client');
+  if (a.confidence && !['verified', 'reported', 'inferred', 'unknown'].includes(a.confidence)) errors.push('confidence must be verified, reported, inferred, or unknown');
+  const refs = a.source_refs || [];
+  if (!Array.isArray(refs) || refs.length > 8 || refs.some((ref) => typeof ref !== 'string' || !ref.endsWith('.md') || /[\r\n\[\]]/.test(ref))) errors.push('source_refs must be up to 8 Markdown paths in the handoff vault');
   if (!(await isDir(safeJoin(vaultRoot(ctx, h.vault), h.folder)))) errors.push(`handoff folder "${h.folder}" does not exist in ${h.vault}`);
+  if (!errors.length) for (const ref of refs) {
+    try { await readNote(ctx, h.vault, ref); }
+    catch { errors.push('source_refs contains a missing, excluded, or private note'); break; }
+  }
   if (errors.length) return { ok: false, errors };
   const ts = zonedNow(ctx.tz, now);
   const rel = `${h.folder}/${ts.slice(0, 10)}-${ts.slice(11, 13)}${ts.slice(14, 16)}-from-${slug(id.ai_platform)}-to-${slug(a.to)}-${slug(subject).slice(0, 60)}.md`;
-  const fm = ['---', 'type: handoff', `status: ${a.status || 'REQUEST'}`, `ai_platform: ${q(id.ai_platform)}`, `agent_or_role: ${q(id.agent_or_role)}`,
+  const fm = ['---', 'type: handoff', 'handoff_schema: 1', `status: ${a.status || 'REQUEST'}`, `ai_platform: ${q(id.ai_platform)}`, `agent_or_role: ${q(id.agent_or_role)}`,
     `session_or_task_id: ${q(id.session_or_task_id)}`, `written_at: ${ts}`, `to: ${q(a.to)}`, `priority: ${a.priority || 'P2'}`, `subject: ${q(subject)}`,
-    `decision_needed: ${a.decision_needed ? 'yes' : 'no'}`, `deadline: ${a.deadline || ''}`, `ack_of: ${a.ack_of || ''}`, `source: ${q(a.source || 'handoff')}`, '---'].join('\n');
-  return commitNew(ctx, h.vault, rel, `${fm}\n\n# ${subject}\n\n${madeBy(id)}\n\n## Body\n\n${String(a.body).trim()}\n`, a.confirm);
+    `decision_needed: ${a.decision_needed ? 'yes' : 'no'}`, `deadline: ${a.deadline || ''}`, `ack_of: ${a.ack_of || ''}`, `source: ${q(a.source || 'handoff')}`,
+    `scope: ${q(a.scope || 'unspecified')}`, `confidence: ${q(a.confidence || 'unknown')}`, '---'].join('\n');
+  const sections = HANDOFF_FIELDS.map(([field, label]) => handoffSection(label, a[field])).join('');
+  const sources = refs.length ? handoffSection('Sources', refs.map((ref) => `[[${ref.replace(/\.md$/i, '')}]]`)) : '';
+  const body = a.body ? handoffSection('Body', a.body) : '';
+  return commitNew(ctx, h.vault, rel, `${fm}\n\n# ${subject}\n\n${madeBy(id)}\n${sections}${sources}${body}`, a.confirm);
 }
 
 // P0: a handoff receipt (Setup UI) reads this same list, so a handoff mailbox folder that ends up

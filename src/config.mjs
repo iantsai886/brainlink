@@ -55,8 +55,8 @@ export function normalize(raw = {}) {
   cfg.connections = raw.connections || {};
   // Local-only choice that decides what connected AI apps may see of imported sessions. An AI
   // client can never set or override this (see src/sessions/mcp.mjs / src/server.mjs): only the
-  // user, in BrainLink Settings, changes it. shareSummaries covers session_list + the default
-  // session_read (summary + short key-turn snippets); shareFullText additionally covers full=true
+  // user, in BrainLink Settings, changes it. shareSummaries covers session_list + summary
+  // metadata; shareFullText additionally permits key-turn excerpts and full=true
   // (the raw message text). Imports still default private per-session, and this now defaults OFF
   // too: an AI client sees none of a user's imported session history until the user opts in.
   // R2: a config from before CONFIG_SCHEMA_VERSION is force-reset to off here instead of trusting

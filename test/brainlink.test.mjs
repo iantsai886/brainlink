@@ -390,6 +390,27 @@ test('handoffs: send to a mailbox and filter by recipient', async () => {
   assert.equal((await listHandoffs(ctx, {})).length, 2);
 });
 
+test('structured handoff keeps scope and evidence, and refuses private source links before writing', async () => {
+  const { cfg, company } = await fixture();
+  const ctx = ctxOf(cfg);
+  const args = { to: 'Codex', subject: 'Continue fictional site', goal: 'Finish the public landing page',
+    current_state: 'Design approved', decisions: ['Keep one-column layout'], modified_files: ['site/index.html'],
+    tests: ['Local preview passed'], open_questions: ['Check keyboard navigation'],
+    next_steps: ['Add focus states'], scope: 'company', confidence: 'reported',
+    source_refs: ['Home.md'], confirm: true };
+  const made = await sendHandoff(ctx, args, NOW);
+  assert.equal(made.written, true);
+  const saved = await readFile(path.join(company, made.path.split('/').slice(1).join('/')), 'utf8');
+  assert.match(saved, /handoff_schema: 1/);
+  assert.match(saved, /scope: "company"/);
+  assert.match(saved, /## Tests and results\n\n- Local preview passed/);
+  assert.match(saved, /\[\[Home\]\]/);
+  const privateRef = await sendHandoff(ctx, { ...args, subject: 'Must not write', source_refs: ['Secret Note.md'] }, NOW);
+  assert.equal(privateRef.ok, false);
+  assert.match(privateRef.errors.join(' '), /private note/);
+  assert.equal((await listHandoffs(ctx, { to: 'Codex' })).length, 1);
+});
+
 test('P0: listHandoffs carries ack_of/sent_at for pickup pairing, and never surfaces a private or excluded handoff', async () => {
   const { cfg, company } = await fixture();
   const ctx = ctxOf(cfg);
