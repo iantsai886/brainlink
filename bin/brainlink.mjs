@@ -42,6 +42,20 @@ async function setupToken() {
 }
 const clientOpts = () => ({ home: homedir(), os: process.platform, env: process.env, launch: launchSpec() });
 
+// Shared by `setup` and `win-start`: same address every time (fixed port + saved token), so a
+// bookmark or old tab works again once BrainLink is reopened. If Setup is already running, just
+// bring it to the front instead of starting a second server on the same port.
+async function runSetup({ fromApp, noOpen, port }) {
+  const token = await setupToken();
+  const url = `http://127.0.0.1:${port}/?t=${token}`;
+  const running = await fetch(`http://127.0.0.1:${port}/health`).then((r) => r.json(), () => null);
+  if (running?.app === 'brainlink') { if (!noOpen) openInBrowser(url); out(`BrainLink Setup: ${maskUrl(url)}`); return { running: true, url }; }
+  const opts = { token, openUrl: noOpen ? null : (u) => openInBrowser(u), idleMinutes: fromApp ? 30 : 0, onQuit: () => process.exit(0) };
+  const s = await startSetup({ ...opts, port }).catch((e) => (e.code === 'EADDRINUSE' ? startSetup({ ...opts, port: 0 }) : Promise.reject(e)));
+  out(fromApp ? `BrainLink Setup: ${maskUrl(s.url)}` : `BrainLink Setup is open at ${maskUrl(s.url)}\nKeep this window open while you set up; press Control-C when done.`);
+  return { running: false, url: s.url };
+}
+
 const HELP = `BrainLink MCP ${VERSION} — one Markdown brain for every AI
 
   brainlink setup [--no-open]          open the Setup app (pick vault, connect AIs)
@@ -85,17 +99,34 @@ async function main() {
       return;
     }
     case 'setup': {
-      // Same address every time (fixed port + saved token), so a bookmark or old tab works again
-      // once BrainLink is reopened. If Setup is already running, just bring it to the front.
-      const fromApp = flag('app');
       const port = Number(opt('port', SETUP_PORT)) || SETUP_PORT;
-      const token = await setupToken();
-      const url = `http://127.0.0.1:${port}/?t=${token}`;
-      const running = await fetch(`http://127.0.0.1:${port}/health`).then((r) => r.json(), () => null);
-      if (running?.app === 'brainlink') { if (!flag('no-open')) openInBrowser(url); out(`BrainLink Setup: ${maskUrl(url)}`); return; }
-      const opts = { token, openUrl: flag('no-open') ? null : (u) => openInBrowser(u), idleMinutes: fromApp ? 30 : 0, onQuit: () => process.exit(0) };
-      const s = await startSetup({ ...opts, port }).catch((e) => (e.code === 'EADDRINUSE' ? startSetup({ ...opts, port: 0 }) : Promise.reject(e)));
-      out(fromApp ? `BrainLink Setup: ${maskUrl(s.url)}` : `BrainLink Setup is open at ${maskUrl(s.url)}\nKeep this window open while you set up; press Control-C when done.`);
+      await runSetup({ fromApp: flag('app'), noOpen: flag('no-open'), port });
+      return;
+    }
+    // Windows zip release only: the BrainLink.vbs double-click launcher and its Startup-folder
+    // autostart entry (packaging/windows) both run this instead of `setup`. It installs into
+    // %LOCALAPPDATA%\BrainLink and writes the autostart entry on every launch (cheap once the
+    // server is already up, since the file copy is skipped) before doing exactly what `setup`
+    // does -- no --app idle-timeout, since this is now the permanent background service, same
+    // role as macOS's LaunchAgent.
+    case 'win-start': {
+      if (process.platform === 'win32') {
+        const { installIfNeeded } = await import('../src/winapp.mjs');
+        const alreadyUp = await fetch(`http://127.0.0.1:${SETUP_PORT}/health`).then((r) => r.json(), () => null);
+        await installIfNeeded({ here: path.dirname(ROOT), skipCopy: alreadyUp?.app === 'brainlink' })
+          .catch((e) => out(`BrainLink: install step failed (${e.message}); continuing anyway.`));
+      }
+      await runSetup({ fromApp: false, noOpen: flag('no-open'), port: SETUP_PORT });
+      return;
+    }
+    case 'win-uninstall': {
+      for (const [id, c] of Object.entries(await detect(clientOpts()))) {
+        if (!c.connected) continue;
+        try { await disconnectClient(id, clientOpts()); out(`removed BrainLink from ${c.title}`); } catch (e) { out(`could not update ${c.title}: ${e.message}`); }
+      }
+      const { uninstallWindows } = await import('../src/winapp.mjs');
+      await uninstallWindows({});
+      out('BrainLink has been removed. Your notes were not touched.');
       return;
     }
     case 'init': {
