@@ -179,53 +179,77 @@ function renderIndex(notes) {
 
 const SESSIONS_FILE = 'sessions.json';
 
+// N2: every write/delete this feature ever does happens inside this dedicated subfolder of the
+// chosen destination, never in `dest` itself. That alone keeps BrainLink's hand off anything a
+// user already has sitting at the top level of a synced folder (a root README.md, an unrelated
+// project, etc.) -- there is no longer a name BrainLink writes that could collide with one.
+const SHARED_SUBDIR = 'BrainLink Shared';
+function sharedRoot(dest) { return path.join(dest, SHARED_SUBDIR); }
+
+// N2, second layer: even inside the dedicated subfolder, never overwrite a file that already
+// exists there but isn't one this feature wrote before (tracked by the previous manifest). A
+// brand-new key with nothing in its way writes normally; a key that collides with something
+// already present and unowned is left alone and simply never claimed, so a later run doesn't
+// delete it either (it's not considered "ours" to remove).
+async function writeOwned(file, rel, data, prevFiles) {
+  if (!prevFiles[rel] && await stat(file).then(() => true, () => false)) return false;
+  await atomicWrite(file, data);
+  return true;
+}
+
 // One pass: write the filtered snapshot, delete anything we wrote before that no longer belongs
-// (removed note, newly excluded, newly private, sessions turned off), and never touch a file in
-// the destination folder we did not write ourselves (tracked in manifest.json).
+// (removed note, newly excluded, newly private, sessions turned off), and never touch a file we
+// did not create ourselves, inside or outside the shared subfolder (tracked in manifest.json).
 export async function writeSnapshotOnce(ctx, cfg, env = process.env) {
   const settings = snapshotSettings(cfg);
   if (!settings.enabled) return { ok: true, skipped: true, noteCount: 0 };
   if (!settings.folder) return { ok: false, error: 'No shared folder chosen yet.' };
   const dest = settings.folder;
   if (!(await stat(dest).then((s) => s.isDirectory(), () => false))) return { ok: false, error: `Shared folder not found: ${dest}` };
+  const outRoot = sharedRoot(dest);
 
   const notes = await snapshotNotes(ctx);
   const sessions = settings.includeSessions ? await snapshotSessions(env).catch(() => []) : null;
   const readmeText = README;
   const indexText = renderIndex(notes);
 
-  const files = {};
-  for (const n of notes) files[relFor(n)] = { sha12: sha12(n.raw), updated_at: new Date(n.mtime).toISOString() };
-  files['README.md'] = { sha12: sha12(readmeText), updated_at: new Date().toISOString() };
-  files['index.md'] = { sha12: sha12(indexText), updated_at: new Date().toISOString() };
+  const wanted = {};
+  for (const n of notes) wanted[relFor(n)] = { sha12: sha12(n.raw), data: n.raw };
+  wanted['README.md'] = { sha12: sha12(readmeText), data: readmeText };
+  wanted['index.md'] = { sha12: sha12(indexText), data: indexText };
   const sessionsText = sessions ? JSON.stringify({ generated_at: new Date().toISOString(), sessions }, null, 1) : null;
-  if (sessionsText !== null) files[SESSIONS_FILE] = { sha12: sha12(sessionsText), updated_at: new Date().toISOString() };
+  if (sessionsText !== null) wanted[SESSIONS_FILE] = { sha12: sha12(sessionsText), data: sessionsText };
 
+  // The pre-1.2.2 legacy manifest, if any, named paths at `dest`'s own root (the shared subfolder
+  // didn't exist yet when it was written) -- migrate against `dest`, not the new subfolder.
   await migrateLegacyManifestOnce(ctx, dest, dest, env);
 
   const prev = await readManifest(dest, env);
-  for (const rel of Object.keys(prev.files || {})) if (!files[rel]) { const safe = await safeDeletePath(dest, rel); if (safe) { try { await unlink(safe); } catch {} } }
+  const prevFiles = prev.files || {};
+  for (const rel of Object.keys(prevFiles)) if (!wanted[rel]) { const safe = await safeDeletePath(outRoot, rel); if (safe) { try { await unlink(safe); } catch {} } }
 
-  for (const n of notes) {
-    const rel = relFor(n);
-    if (prev.files?.[rel]?.sha12 === files[rel].sha12) continue;
-    await atomicWrite(path.join(dest, rel), n.raw);
+  const files = {};
+  const now = new Date().toISOString();
+  for (const [rel, w] of Object.entries(wanted)) {
+    const full = path.join(outRoot, rel);
+    if (prevFiles[rel]?.sha12 === w.sha12 && existsSync(full)) { files[rel] = prevFiles[rel]; continue; }
+    if (await writeOwned(full, rel, w.data, prevFiles)) files[rel] = { sha12: w.sha12, updated_at: now };
+    // else: something we didn't create already occupies this path in the shared subfolder --
+    // leave it untouched and don't claim it in the manifest.
   }
-  if (prev.files?.['README.md']?.sha12 !== files['README.md'].sha12) await atomicWrite(path.join(dest, 'README.md'), readmeText);
-  if (prev.files?.['index.md']?.sha12 !== files['index.md'].sha12) await atomicWrite(path.join(dest, 'index.md'), indexText);
-  if (sessionsText !== null) await atomicWrite(path.join(dest, SESSIONS_FILE), sessionsText);
 
-  await atomicWrite(manifestPath(dest, env), JSON.stringify({ generated_at: new Date().toISOString(), files }, null, 1));
-  return { ok: true, noteCount: notes.length, syncedAt: new Date().toISOString() };
+  await atomicWrite(manifestPath(dest, env), JSON.stringify({ generated_at: now, files }, null, 1));
+  return { ok: true, noteCount: notes.length, syncedAt: now };
 }
 
-// "Stop sharing" + clear: removes every file this feature ever wrote to `dest` (tracked in its
-// own manifest, kept under appHome — see manifestPath above), and nothing else -- a foreign file
-// placed in the same folder is untouched.
+// "Stop sharing" + clear: removes every file this feature ever wrote (tracked in its own
+// manifest, kept under appHome — see manifestPath above) from inside the shared subfolder, and
+// nothing else -- a foreign file there, or anywhere else in `dest`, is untouched.
 export async function clearSnapshot(dest, env = process.env) {
   if (!dest) return { ok: true };
+  const outRoot = sharedRoot(dest);
   const prev = await readManifest(dest, env);
-  for (const rel of Object.keys(prev.files || {})) { const safe = await safeDeletePath(dest, rel); if (safe) { try { await unlink(safe); } catch {} } }
+  for (const rel of Object.keys(prev.files || {})) { const safe = await safeDeletePath(outRoot, rel); if (safe) { try { await unlink(safe); } catch {} } }
   try { await unlink(manifestPath(dest, env)); } catch {}
   return { ok: true };
 }

@@ -926,8 +926,8 @@ test('P0-2: a root .brainlinkignore exclusion applies at any depth, not only to 
   const withSnapshot = chooseSnapshot(cfg, { enabled: true, folder: dest });
   await writeSnapshotOnce(ctx, withSnapshot, {});
   const { existsSync } = await import('node:fs');
-  assert.ok(!existsSync(path.join(dest, 'Acme Studio', 'sub', '00 Home')), 'nested excluded folder never reaches the snapshot');
-  assert.ok(existsSync(path.join(dest, 'Acme Studio', 'sub', 'Visible.md')));
+  assert.ok(!existsSync(path.join(dest, 'BrainLink Shared', 'Acme Studio', 'sub', '00 Home')), 'nested excluded folder never reaches the snapshot');
+  assert.ok(existsSync(path.join(dest, 'BrainLink Shared', 'Acme Studio', 'sub', 'Visible.md')));
 });
 
 test('default .brainlinkignore: shipped on a fresh real vault, never overwrites one already there, folders stay out of search and answers', async () => {

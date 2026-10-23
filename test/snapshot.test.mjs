@@ -18,6 +18,9 @@ import {
 } from '../src/snapshot.mjs';
 
 const tmp = (p) => mkdtemp(path.join(tmpdir(), `bl-snap-${p}-`));
+// N2: every write/delete BrainLink does lands inside this dedicated subfolder of the chosen
+// destination, never at the destination's own root -- see src/snapshot.mjs's SHARED_SUBDIR.
+const shared = (dest) => path.join(dest, 'BrainLink Shared');
 
 async function setupVaults() {
   const vaultDir = await tmp('vault');
@@ -64,18 +67,81 @@ test('snapshot: excluded and private notes never appear; foreign files are left 
   assert.equal(r.ok, true);
   assert.equal(r.noteCount, 1, 'only Public.md qualifies');
 
-  assert.equal(await readFile(path.join(dest, 'Brain', 'Public.md'), 'utf8'), '# Public\nhello');
-  assert.ok(!existsSync(path.join(dest, 'Brain', 'Secret')), 'excluded folder never copied');
-  assert.ok(!existsSync(path.join(dest, 'Brain', 'Private.md')), 'private note never copied');
-  assert.ok(!existsSync(path.join(dest, 'Diary')), 'private vault never copied');
-  assert.match(await readFile(path.join(dest, 'README.md'), 'utf8'), /read-only/);
-  assert.match(await readFile(path.join(dest, 'index.md'), 'utf8'), /Public/);
+  assert.equal(await readFile(path.join(shared(dest), 'Brain', 'Public.md'), 'utf8'), '# Public\nhello');
+  assert.ok(!existsSync(path.join(shared(dest), 'Brain', 'Secret')), 'excluded folder never copied');
+  assert.ok(!existsSync(path.join(shared(dest), 'Brain', 'Private.md')), 'private note never copied');
+  assert.ok(!existsSync(path.join(shared(dest), 'Diary')), 'private vault never copied');
+  assert.match(await readFile(path.join(shared(dest), 'README.md'), 'utf8'), /read-only/);
+  assert.match(await readFile(path.join(shared(dest), 'index.md'), 'utf8'), /Public/);
 
   const manifest = JSON.parse(await readFile(manifestPath(dest, env), 'utf8'));
   assert.deepEqual(Object.keys(manifest.files).sort(), ['Brain/Public.md', 'README.md', 'index.md']);
   assert.ok(!existsSync(path.join(dest, 'manifest.json')), 'the manifest no longer lives inside the shared folder (P0-3 D: a remote peer with write access to dest can no longer plant/edit it)');
 
   assert.equal(await readFile(path.join(dest, 'my-own-file.txt'), 'utf8'), 'keep me', 'foreign file untouched');
+});
+
+// N2: BrainLink only ever creates/writes one thing directly inside the chosen destination -- the
+// dedicated 'BrainLink Shared' subfolder itself. Nothing is ever written to, or deleted from, the
+// destination's own root, so a user's existing top-level files (a root README, an unrelated
+// project) can never collide with anything BrainLink names.
+test('snapshot N2: everything is confined to a dedicated "BrainLink Shared" subfolder', async () => {
+  const { ctx, cfg, env } = await setupVaults();
+  const dest = await tmp('dest-n2-confine');
+  await writeFile(path.join(dest, 'README.md'), 'this is the user\'s own root README, not ours');
+  const withSnapshot = chooseSnapshot(cfg, { enabled: true, folder: dest });
+  await writeSnapshotOnce(ctx, withSnapshot, env);
+
+  assert.deepEqual(await readdir(dest), ['BrainLink Shared', 'README.md'], 'nothing new appears at the destination root');
+  assert.equal(await readFile(path.join(dest, 'README.md'), 'utf8'), 'this is the user\'s own root README, not ours', 'the user\'s own root-level file is untouched, not overwritten by ours');
+  assert.match(await readFile(path.join(shared(dest), 'README.md'), 'utf8'), /read-only/, 'BrainLink\'s own README lives one level down, inside the subfolder');
+  assert.ok(existsSync(path.join(shared(dest), 'Brain', 'Public.md')));
+
+  await clearSnapshot(dest, env);
+  assert.equal(await readFile(path.join(dest, 'README.md'), 'utf8'), 'this is the user\'s own root README, not ours', 'clear never touches the destination root either');
+});
+
+// N2, second layer: even inside the dedicated subfolder, a file BrainLink didn't create itself is
+// never overwritten or later deleted, e.g. a sync conflict copy or a coincidental name collision
+// from a previous, differently-configured vault.
+test('snapshot N2: a foreign file already occupying a wanted path inside the subfolder is left untouched', async () => {
+  const { ctx, cfg, env } = await setupVaults();
+  const dest = await tmp('dest-n2-collide');
+  await mkdir(path.join(shared(dest), 'Brain'), { recursive: true });
+  await writeFile(path.join(shared(dest), 'Brain', 'Public.md'), 'NOT OURS: a pre-existing file at the exact path we want');
+  const withSnapshot = chooseSnapshot(cfg, { enabled: true, folder: dest });
+
+  const r = await writeSnapshotOnce(ctx, withSnapshot, env);
+  assert.equal(r.ok, true);
+  assert.equal(await readFile(path.join(shared(dest), 'Brain', 'Public.md'), 'utf8'), 'NOT OURS: a pre-existing file at the exact path we want', 'never overwritten since we did not create it');
+
+  const manifest = JSON.parse(await readFile(manifestPath(dest, env), 'utf8'));
+  assert.ok(!manifest.files['Brain/Public.md'], 'not claimed as ours in the manifest, so a later run cannot delete it either');
+
+  const r2 = await writeSnapshotOnce(ctx, withSnapshot, env);
+  assert.equal(r2.ok, true);
+  assert.equal(await readFile(path.join(shared(dest), 'Brain', 'Public.md'), 'utf8'), 'NOT OURS: a pre-existing file at the exact path we want', 'still untouched on a later run, since it was never claimed');
+});
+
+// N3: a destination that is itself a symlink (e.g. a user picks a shortcut to their Drive folder)
+// is safely handled -- writes land in the real target (normal fs symlink-following), and a later
+// clear only ever deletes paths that resolve, via realpath, inside that real target (safeDeletePath
+// already enforces this for every deletion, symlinked destination or not).
+test('snapshot N3: a symlinked destination is followed safely for both write and clear', async (t) => {
+  const { symlink } = await import('node:fs/promises');
+  const { ctx, cfg, env } = await setupVaults();
+  const realDest = await tmp('dest-n3-real');
+  const linkDest = path.join(tmpdir(), `bl-snap-n3-link-${process.pid}-${Date.now()}`);
+  await symlink(realDest, linkDest, 'dir');
+  t.after(async () => { const { unlink } = await import('node:fs/promises'); await unlink(linkDest).catch(() => {}); });
+
+  const withSnapshot = chooseSnapshot(cfg, { enabled: true, folder: linkDest });
+  const r = await writeSnapshotOnce(ctx, withSnapshot, env);
+  assert.equal(r.ok, true);
+  assert.equal(await readFile(path.join(realDest, 'BrainLink Shared', 'Brain', 'Public.md'), 'utf8'), '# Public\nhello', 'write lands in the real target, not a broken path');
+
+  await clearSnapshot(linkDest, env);
+  assert.ok(!existsSync(path.join(realDest, 'BrainLink Shared', 'Brain', 'Public.md')), 'clear through the symlink removes the real file');
 });
 
 test('snapshot: an exclusion at the vault root also hides nested descendants (e.g. "sub/Secret/x.md")', async () => {
@@ -87,8 +153,8 @@ test('snapshot: an exclusion at the vault root also hides nested descendants (e.
   const withSnapshot = chooseSnapshot(cfg, { enabled: true, folder: dest });
   const r = await writeSnapshotOnce(ctx, withSnapshot, env);
   assert.equal(r.noteCount, 2, 'Public.md and sub/Public2.md only');
-  assert.ok(!existsSync(path.join(dest, 'Brain', 'sub', 'Secret')), 'nested excluded folder never copied into the snapshot');
-  assert.ok(existsSync(path.join(dest, 'Brain', 'sub', 'Public2.md')));
+  assert.ok(!existsSync(path.join(shared(dest), 'Brain', 'sub', 'Secret')), 'nested excluded folder never copied into the snapshot');
+  assert.ok(existsSync(path.join(shared(dest), 'Brain', 'sub', 'Public2.md')));
 });
 
 // P0-3: a manifest planted *inside* the snapshot folder itself used to be untrusted input (anyone
@@ -116,7 +182,7 @@ test('snapshot: a manifest planted inside the shared folder itself is never read
   const r2 = await writeSnapshotOnce(ctx, withSnapshot, env);
   assert.equal(r2.ok, true);
   assert.equal(await readFile(victim, 'utf8'), 'do not delete me', 'write path never touched a file outside the snapshot folder');
-  assert.ok(existsSync(path.join(dest, 'Brain', 'Public.md')), 'a fake dest/manifest.json has no effect at all: still not read from there');
+  assert.ok(existsSync(path.join(shared(dest), 'Brain', 'Public.md')), 'a fake dest/manifest.json has no effect at all: still not read from there');
   assert.ok(existsSync(dest), 'the snapshot folder itself survives');
 
   await writeFile(path.join(dest, 'manifest.json'), JSON.stringify(maliciousManifest));
@@ -183,7 +249,7 @@ test('snapshot: upgrading from 1.2.1 purges a stale private-note/00-Home copy le
 
   assert.ok(!existsSync(path.join(dest, 'Brain', 'Private.md')), 'stale leaked private note is purged on the first post-upgrade write');
   assert.ok(!existsSync(path.join(dest, 'Brain', '00 Home', 'Diary.md')), 'stale leaked 00 Home copy is purged on the first post-upgrade write');
-  assert.ok(existsSync(path.join(dest, 'Brain', 'Public.md')), 'still-current note is untouched');
+  assert.ok(existsSync(path.join(shared(dest), 'Brain', 'Public.md')), 'still-current note is untouched');
   assert.ok(existsSync(path.join(dest, 'manifest.json')), 'the old in-folder manifest is never deleted by BrainLink -- it may not even be ours (N1)');
 });
 
@@ -258,12 +324,12 @@ test('snapshot: removing or excluding a note propagates, without touching foreig
   const withSnapshot = chooseSnapshot(cfg, { enabled: true, folder: dest });
 
   await writeSnapshotOnce(ctx, withSnapshot, env);
-  assert.ok(existsSync(path.join(dest, 'Brain', 'Public.md')));
+  assert.ok(existsSync(path.join(shared(dest), 'Brain', 'Public.md')));
 
   await writeFile(path.join(vaultDir, '.brainlinkignore'), 'Secret/\nPublic.md\n');
   const r2 = await writeSnapshotOnce(ctx, withSnapshot, env);
   assert.equal(r2.noteCount, 0);
-  assert.ok(!existsSync(path.join(dest, 'Brain', 'Public.md')), 'newly excluded note is deleted from the snapshot');
+  assert.ok(!existsSync(path.join(shared(dest), 'Brain', 'Public.md')), 'newly excluded note is deleted from the snapshot');
   const manifest = JSON.parse(await readFile(manifestPath(dest, env), 'utf8'));
   assert.deepEqual(Object.keys(manifest.files).sort(), ['README.md', 'index.md']);
   assert.equal(await readFile(path.join(dest, 'my-own-file.txt'), 'utf8'), 'keep me');
@@ -274,11 +340,11 @@ test('snapshot: marking a previously-shared note private removes it too', async 
   const dest = await tmp('dest-private');
   const withSnapshot = chooseSnapshot(cfg, { enabled: true, folder: dest });
   await writeSnapshotOnce(ctx, withSnapshot, env);
-  assert.ok(existsSync(path.join(dest, 'Brain', 'Public.md')));
+  assert.ok(existsSync(path.join(shared(dest), 'Brain', 'Public.md')));
   await writeFile(path.join(vaultDir, 'Public.md'), '---\nprivate: true\n---\n# Public\nhello');
   const r2 = await writeSnapshotOnce(ctx, withSnapshot, env);
   assert.equal(r2.noteCount, 0);
-  assert.ok(!existsSync(path.join(dest, 'Brain', 'Public.md')));
+  assert.ok(!existsSync(path.join(shared(dest), 'Brain', 'Public.md')));
 });
 
 test('snapshot: clearing removes only files BrainLink wrote', async () => {
@@ -291,9 +357,9 @@ test('snapshot: clearing removes only files BrainLink wrote', async () => {
 
   await clearSnapshot(snapshotSettings(withSnapshot).folder, env);
   assert.ok(!existsSync(manifestPath(dest, env)));
-  assert.ok(!existsSync(path.join(dest, 'README.md')));
-  assert.ok(!existsSync(path.join(dest, 'index.md')));
-  assert.ok(!existsSync(path.join(dest, 'Brain', 'Public.md')));
+  assert.ok(!existsSync(path.join(shared(dest), 'README.md')));
+  assert.ok(!existsSync(path.join(shared(dest), 'index.md')));
+  assert.ok(!existsSync(path.join(shared(dest), 'Brain', 'Public.md')));
   assert.equal(await readFile(path.join(dest, 'my-own-file.txt'), 'utf8'), 'keep me');
 });
 
@@ -305,11 +371,11 @@ test('snapshot: includeSessions opts in non-private session summaries only', asy
 
   const dest1 = await tmp('dest-no-sessions');
   await writeSnapshotOnce(ctx, chooseSnapshot(cfg, { enabled: true, folder: dest1 }), env);
-  assert.ok(!existsSync(path.join(dest1, 'sessions.json')), 'left out by default');
+  assert.ok(!existsSync(path.join(shared(dest1), 'sessions.json')), 'left out by default');
 
   const dest2 = await tmp('dest-with-sessions');
   await writeSnapshotOnce(ctx, chooseSnapshot(cfg, { enabled: true, folder: dest2, includeSessions: true }), env);
-  const sessions = JSON.parse(await readFile(path.join(dest2, 'sessions.json'), 'utf8')).sessions;
+  const sessions = JSON.parse(await readFile(path.join(shared(dest2), 'sessions.json'), 'utf8')).sessions;
   assert.deepEqual(sessions.map((s) => s.summary), ['public summary']);
 });
 
@@ -317,7 +383,7 @@ test('snapshot: atomic write leaves no temp files behind', async () => {
   const { ctx, cfg, env } = await setupVaults();
   const dest = await tmp('dest-atomic');
   await writeSnapshotOnce(ctx, chooseSnapshot(cfg, { enabled: true, folder: dest }), env);
-  const names = await readdir(path.join(dest, 'Brain'));
+  const names = await readdir(path.join(shared(dest), 'Brain'));
   assert.ok(!names.some((n) => n.includes('.tmp-')));
 });
 
@@ -382,7 +448,7 @@ test('setup UI: /api/snapshot turns sharing on, writes once, and state() reports
     assert.ok(r.snapshot.lastSyncedAt);
     assert.ok(existsSync(manifestPath(dest, env)), 'writes immediately on enabling, not just on the next interval');
     assert.ok(!existsSync(path.join(dest, 'manifest.json')), 'the manifest is kept under appHome, not inside the shared folder');
-    assert.ok(existsSync(path.join(dest, 'Brain', 'A.md')));
+    assert.ok(existsSync(path.join(shared(dest), 'Brain', 'A.md')));
 
     const st1 = await (await api('GET', '/api/state')).json();
     assert.equal(st1.snapshot.enabled, true);
@@ -411,23 +477,23 @@ test('setup UI: /api/vault/private and /api/vault/remove restart the snapshot wa
   try {
     await (await api('POST', '/api/vault', { path: vaultDir, name: 'Brain', scaffold: false })).json();
     await (await api('POST', '/api/snapshot', { enabled: true, folder: dest })).json();
-    assert.ok(existsSync(path.join(dest, 'Brain', 'A.md')), 'shared while the vault is public');
+    assert.ok(existsSync(path.join(shared(dest), 'Brain', 'A.md')), 'shared while the vault is public');
 
     await (await api('POST', '/api/vault/private', { name: 'Brain', private: true })).json();
     const st1 = await (await api('GET', '/api/state')).json();
     assert.equal(st1.snapshot.noteCount, 0, 'marking the vault private re-synced immediately, not just on next restart');
-    assert.ok(!existsSync(path.join(dest, 'Brain', 'A.md')), "the now-private vault's note is gone from the shared folder right away");
+    assert.ok(!existsSync(path.join(shared(dest), 'Brain', 'A.md')), "the now-private vault's note is gone from the shared folder right away");
 
     await (await api('POST', '/api/vault/private', { name: 'Brain', private: false })).json();
     await (await api('POST', '/api/snapshot', { enabled: true, folder: dest })).json(); // back to public: re-share
-    assert.ok(existsSync(path.join(dest, 'Brain', 'A.md')));
+    assert.ok(existsSync(path.join(shared(dest), 'Brain', 'A.md')));
 
     await (await api('POST', '/api/vault/remove', { name: 'Brain' })).json();
     const st2 = await (await api('GET', '/api/state')).json();
     // Item 5: removing the last vault must not leave its notes sitting in the shared folder
     // (e.g. synced to the cloud via Google Drive) forever just because nothing is left enabled
     // to ever clean them up on a later write.
-    assert.ok(!existsSync(path.join(dest, 'Brain', 'A.md')), "removing the last vault clears its notes from the shared snapshot folder right away");
+    assert.ok(!existsSync(path.join(shared(dest), 'Brain', 'A.md')), "removing the last vault clears its notes from the shared snapshot folder right away");
     assert.equal(st2.snapshot.noteCount, 0, 'removing the last vault refreshed the watcher immediately, which now reports nothing to share');
   } finally { s.server.close(); }
 });
