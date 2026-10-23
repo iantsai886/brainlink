@@ -442,8 +442,17 @@ export async function startSetup(opts = {}) {
     'POST /api/snapshot/pick-folder': async () => { const p = await pickSnapshotFolder(); return p === undefined ? { path: null, unavailable: true } : { path: p }; },
     'POST /api/snapshot': async (b) => {
       const cfg = await loadConfig(file);
+      const prevFolder = snapshotSettings(cfg).folder;
       const next = chooseSnapshot(cfg, { enabled: b.enabled, folder: b.folder, includeSessions: b.includeSessions });
       await saveConfig(next, file);
+      const nextFolder = snapshotSettings(next).folder;
+      // S6: switching to a different folder left the *old* one's share in place forever -- nothing
+      // ever cleared it, so a note made private after the switch kept syncing from the folder
+      // BrainLink was no longer even pointed at. An owned-only clear (no force) removes exactly
+      // the files this feature wrote there and nothing else, the same way "Stop sharing" does.
+      if (prevFolder && nextFolder && path.resolve(prevFolder) !== path.resolve(nextFolder)) {
+        await clearSnapshot(prevFolder, env, cfg.vaults).catch(() => {});
+      }
       // Writes once immediately on enabling (or on any change), not just on the next interval or
       // vault edit, and picks up errors (e.g. the folder disappeared) right away.
       await refreshSnapshotWatcher(next);

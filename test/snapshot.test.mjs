@@ -739,6 +739,36 @@ test('setup UI: /api/snapshot turns sharing on, writes once, and state() reports
   } finally { s.server.close(); }
 });
 
+// S6: switching the shared folder left the *previous* folder's share sitting there forever --
+// nothing ever cleared it, so a note made private after the switch kept syncing from a folder
+// BrainLink wasn't even configured to look at anymore. Switching folders must do an owned-only
+// clear of the old one (only files BrainLink itself wrote there), the same as "Stop sharing".
+test('setup UI: switching the shared folder clears the previous one, owned files only (S6)', async () => {
+  const home = await tmp('setup-home-s6');
+  const vaultDir = await tmp('setup-vault-s6');
+  await writeFile(path.join(vaultDir, 'A.md'), '# A\nhello');
+  const oldDest = await tmp('setup-dest-s6-old');
+  await writeFile(path.join(oldDest, 'not-ours.txt'), 'a user file sitting at the destination root');
+  const newDest = await tmp('setup-dest-s6-new');
+  const env = { BRAINLINK_HOME: path.join(home, 'app'), BRAINLINK_SEMANTIC: '0' };
+  const s = await startSetup({ env, home, os: 'linux', port: 0, useCli: false, pickSnapshotFolder: async () => oldDest });
+  const api = (method, p, body) => fetch(`http://127.0.0.1:${s.port}${p}`, { method, headers: { 'X-BrainLink-Token': s.token, 'Content-Type': 'application/json' }, body: body && JSON.stringify(body) });
+  try {
+    await (await api('POST', '/api/vault', { path: vaultDir, name: 'Brain', scaffold: false })).json();
+    await (await api('POST', '/api/snapshot', { enabled: true, folder: oldDest })).json();
+    assert.ok(existsSync(path.join(shared(oldDest), 'Brain', 'A.md')), 'shared into the first folder');
+
+    const r = await (await api('POST', '/api/snapshot', { enabled: true, folder: newDest })).json();
+    assert.equal(r.ok, true);
+
+    assert.ok(!existsSync(path.join(shared(oldDest), 'Brain', 'A.md')), 'old folder: BrainLink-owned subfolder is cleared on switch');
+    assert.ok(!existsSync(path.join(shared(oldDest), 'README.md')));
+    assert.ok(existsSync(path.join(oldDest, 'not-ours.txt')), 'old folder: a foreign file at the destination root survives, untouched');
+    assert.ok(!existsSync(manifestPath(oldDest, env)), 'old folder: its manifest is gone too');
+    assert.ok(existsSync(path.join(shared(newDest), 'Brain', 'A.md')), 'new folder: shared normally');
+  } finally { s.server.close(); }
+});
+
 // S5: refreshSnapshotWatcher ran only at startup and from /api/snapshot — marking a vault private
 // or removing it did not restart the watcher, so it kept syncing a vault that should have stopped
 // right away (until the app was next restarted). Both routes now call refreshSnapshotWatcher,
