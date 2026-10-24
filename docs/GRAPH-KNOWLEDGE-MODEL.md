@@ -1,6 +1,6 @@
 # Typed knowledge graph: BrainLink design review
 
-Status: architecture recommendation derived from a supplied Facebook Reel transcript and keyframes. The transcript is a conceptual source, not independent evidence that the creator's system or performance claims are validated. No graph schema or typed-edge implementation is added by this review.
+Status: first implementation slice added to BrainLink and covered by local tests. The supplied transcript is a conceptual source, not independent evidence that the creator's system or performance claims are validated. This slice does not implement automatic extraction, an ontology editor, or proven token savings.
 
 ## Executive conclusion
 
@@ -20,13 +20,13 @@ The supplied keyframes at 00:12 and 02:00 show governance/data-sensitivity examp
 
 | Capability | Verified in this repository | Gap relative to the reel |
 |---|---|---|
-| Note graph | `src/graph.mjs` extracts Obsidian wikilinks and Markdown links, resolves them to notes, and reports broken links. | Edges are untyped links. The graph does not say *owns*, *runs*, *consumes*, or *produces*. |
-| 3D graph | `src/graph3d.mjs` builds a privacy-filtered note graph, and the UI supports click-through to note details. | Nodes are notes, not typed business entities or workflow records. |
+| Note graph | `src/graph.mjs` extracts Obsidian wikilinks and Markdown links; `src/typed-graph.mjs` also derives directional typed edges from verified frontmatter relations. | Manual metadata only. BrainLink does not automatically identify entities or extract relations from sessions/documents. |
+| 3D graph | `src/graph3d.mjs` builds a privacy-filtered note graph; nodes can show validated entity type/ID, typed edges have predicate labels, and note details show incoming/outgoing relations. | Still a note graph with optional entity metadata, not a full graph editor or workflow simulator. |
 | Related suggestions | `src/core.mjs` and `src/graph.mjs` suggest links using shared terms and graph neighbors. | A suggested association is not a verified semantic relationship. |
-| Structured workflows | Session filing and handoffs store workflow/session records and source context. | There is no general workflow model with typed inputs, outputs, owners, triggers, and steps in the knowledge graph. |
+| Structured workflows | A Markdown note can use `type: workflow`, a stable `id`, an explicit scope, and verified relations to teams, datasets, and artifacts. Typed edges join the existing graph-aware ranking. | Workflow steps, triggers, input/output schemas, and process execution are still prose; no automatic workflow extraction exists. |
 | Authorization | Vault and note privacy are filtered before indexing, search, reads, and graph construction. | A future typed graph must apply the same access policy to both endpoints before an edge, expansion, excerpt, or log is exposed. |
 
-This is based on code inspection of the current branch, not on the reel's marketing claims.
+This is based on code inspection and local tests on the current branch, not on the reel's marketing claims.
 
 ## Recommended record and edge model
 
@@ -107,6 +107,8 @@ Minimum acceptance gates:
 
 Add typed entities, workflows, and relationships to BrainLink's architecture as an optional semantic layer above the existing Markdown link graph. Preserve simple note links. Start with fictional company data and a narrow set of workflows; do not build an open-ended ontology editor or autonomous graph rewriting yet.
 
-The smallest implementation after this design is reviewed: parse validated `type`, stable `id`, `scope`, and `relations` metadata for a few entity types; derive authorized typed edges; show predicate labels in graph detail; and add fictional privacy and retrieval canaries. Keep this as proposed until those tests exist.
+Implemented first slice: parse a bounded allowlist of entity types and predicates from explicit Markdown frontmatter; materialize only verified edges with evidence, confidence, current records, unique IDs, and matching scope inside the same authorized vault; include the edges in graph-aware ranking; and render typed labels in the existing graph and note details. Fictional tests cover valid relations and fail-closed cases. The metadata is currently edited directly in Markdown; there is no editor or automatic proposal workflow yet.
+
+Next: add a UI review/edit affordance or assistant-generated proposals only after a frozen retrieval set can verify value and privacy. Then measure token and task-quality changes; until that work is complete, token savings remain unproven.
 
 Source: user-provided Reel transcript with keyframes at 00:00, 00:12, 00:30, 00:45, 01:00, 01:30, 02:00, and 02:30. Speaker credentials and promotional claims were not independently checked or used as evidence.

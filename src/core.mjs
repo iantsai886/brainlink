@@ -7,6 +7,7 @@ import { readdir, readFile, writeFile, stat, open } from 'node:fs/promises';
 import { createHash } from 'node:crypto';
 import path from 'node:path';
 import { termFrequencies, terms, linkGraph, collection, suggestRelated, extractTags } from './graph.mjs';
+import { deriveTypedRelations } from './typed-graph.mjs';
 import { appHome } from './config.mjs';
 import { detectEmbedder, VectorStore, fillVectors, embedTexts, nearest } from './embed.mjs';
 import { findAgentByToken, publicAgent } from './mcp-agents.mjs';
@@ -313,7 +314,14 @@ export async function loadVault(ctx, name) {
 
 export function buildIndex(notes) {
   notes = notes.filter((n) => n && !n.private); // defensive: even direct callers cannot rank private content
-  const { edges, broken } = linkGraph(notes);
+  const { edges: noteEdges, broken } = linkGraph(notes);
+  const typedRelations = deriveTypedRelations(notes);
+  const edges = [...noteEdges];
+  const edgeKeys = new Set(edges.map(([source, target]) => `${source}>${target}`));
+  for (const edge of typedRelations) {
+    const key = `${edge.source}>${edge.target}`;
+    if (!edgeKeys.has(key)) { edges.push([edge.source, edge.target]); edgeKeys.add(key); }
+  }
   const backlinks = notes.map(() => new Set()), outlinks = notes.map(() => new Set());
   for (const [a, b] of edges) { backlinks[b].add(a); outlinks[a].add(b); }
   const chunks = notes.flatMap((n, noteIdx) => n.chunks.map((c) => ({ ...c, noteIdx, len: [...c.tokens.values()].reduce((s, x) => s + x, 0) })));
@@ -327,7 +335,7 @@ export function buildIndex(notes) {
   notes.forEach((n, i) => { for (const a of n.aliases || []) if (!byAlias.has(a.toLowerCase())) byAlias.set(a.toLowerCase(), i); });
   const byTag = new Map();
   notes.forEach((n, i) => { for (const t of n.tags) { if (!byTag.has(t)) byTag.set(t, []); byTag.get(t).push(i); } });
-  return { notes, chunks, df, avgLen, backlinks, outlinks, byRel, byTitle, byAlias, byTag, edges, broken, termSets: null };
+  return { notes, chunks, df, avgLen, backlinks, outlinks, byRel, byTitle, byAlias, byTag, edges, broken, typedRelations, termSets: null };
 }
 
 // Note-level term sets and document frequencies, built lazily (used by related and linking).

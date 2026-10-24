@@ -141,7 +141,8 @@ test('ui/notes3d.js: clicking a node opens its note via the same path as a wikil
 test('ui/notes3d.js: hover label is escaped, and the selected node is visibly highlighted', async () => {
   const { readFile } = await import('node:fs/promises');
   const src = await readFile(new URL('../ui/notes3d.js', import.meta.url), 'utf8');
-  assert.match(src, /\.nodeLabel\(\(n\) => esc\(n\.title\)\)/, 'nodeLabel is rendered as the tooltip innerHTML and must be escaped like any other note-derived HTML');
+  assert.match(src, /\.nodeLabel\(\(n\) => `\$\{esc\(n\.title\)\}.*esc\(n\.type\)/, 'node labels show typed entity kind while escaping note-derived title and type text');
+  assert.match(src, /\.linkLabel\(\(l\) => l\.predicate \? esc\(l\.predicate\) : ''\)/, 'typed relationship labels are escaped before graph rendering');
   assert.match(src, /selectedId/, 'the currently-open node must be tracked so it can be highlighted');
   assert.match(src, /\.nodeColor\(\(n\) => \(n\.id === selectedId/, 'the selected node must render in a distinct color');
   assert.match(src, /\.nodeVal\(\(n\) => \(n\.id === selectedId/, 'the selected node must render larger, reinforcing which note is open');

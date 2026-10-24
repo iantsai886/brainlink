@@ -51,7 +51,7 @@ The customer sees one natural vault experience; the four types are an internal r
 - Session Capture: supported end-of-session capture with explicit fallback export.
 - Memory Pipeline: extraction, classification, destination proposal, provenance, links, approval, and versioning.
 - Context Packets: compact citations-first packets with freshness, confidence, exclusions, and full-source fallback.
-- Graph and Navigation: clickable source-backed links with list/search/edit alternatives; 3D is optional. Typed entities and workflow relationships are a proposed semantic layer above the current Markdown link graph; see `docs/GRAPH-KNOWLEDGE-MODEL.md`.
+- Graph and Navigation: clickable source-backed links with list/search/edit alternatives; 3D is optional. A first typed-relationship layer now derives manually authored, verified entity/workflow edges from Markdown; assistant extraction and a relationship editor remain future work. See `docs/GRAPH-KNOWLEDGE-MODEL.md`.
 - Skills: a portable Agent Skills-format cross-AI handoff workflow is now versioned in Git, with Iango registry metadata and matching Claude Code / Codex discovery copies. Codex CLI discovery is verified; Claude Code CLI is unavailable for local verification. See `skills/README.md`.
 - Backup and Restore: scheduled user-selected destination, integrity check, retention, restore preview, clean-folder drill, and rollback.
 - Improve / RSI: experiment proposals, frozen baseline, fresh cases, costs, failures, reviewer, promotion, and rollback.

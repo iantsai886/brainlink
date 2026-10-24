@@ -4,6 +4,7 @@
 // this module adds the one rule loadVault doesn't already enforce: private vaults and
 // frontmatter-flagged private notes are dropped before a single node is built.
 import { loadVault, summarize } from './core.mjs';
+import { typedEntityMetadataMap } from './typed-graph.mjs';
 
 // n.private is already computed once, at index-build time, by core.mjs's isPrivateMeta — reusing
 // it here (rather than re-deriving private-ness from n.meta.private with a second, independent
@@ -22,6 +23,14 @@ async function visibleVaults(ctx, only) {
 export async function buildGraph3D(ctx, vaultName, { limit = 2000 } = {}) {
   const vaults = await visibleVaults(ctx, vaultName);
   const nodes = [], keep = []; // keep[k] = { vaultName, index, i } for edge lookups
+  const entityMetadata = new Map(vaults.flatMap(({ index }) => [...typedEntityMetadataMap(index.notes)]));
+  const typedByIndex = new Map(vaults.map(({ index }) => [index, new Map()]));
+  for (const { index } of vaults) for (const edge of index.typedRelations) {
+    if (!typedByIndex.get(index).has(edge.source)) typedByIndex.get(index).set(edge.source, new Map());
+    const byTarget = typedByIndex.get(index).get(edge.source);
+    if (!byTarget.has(edge.target)) byTarget.set(edge.target, []);
+    byTarget.get(edge.target).push(edge.predicate);
+  }
   let total = 0;
   for (const { name, index } of vaults) {
     for (let i = 0; i < index.notes.length; i++) {
@@ -39,15 +48,17 @@ export async function buildGraph3D(ctx, vaultName, { limit = 2000 } = {}) {
   shown.forEach((k, pIdx) => pos.set(`${k.name}::${k.i}`, pIdx));
   for (const k of shown) {
     const n = k.index.notes[k.i];
-    nodes.push({ id: pos.get(`${k.name}::${k.i}`), title: n.title, path: n.rel, vault: k.name, group: n.rel.includes('/') ? n.rel.split('/')[0] : '', tags: [...n.tags], degree: degreeOf(k) });
+    nodes.push({ id: pos.get(`${k.name}::${k.i}`), title: n.title, path: n.rel, vault: k.name, group: n.rel.includes('/') ? n.rel.split('/')[0] : '', tags: [...n.tags], degree: degreeOf(k), ...(entityMetadata.get(n) || {}) });
   }
   const links = [];
   for (const k of shown) {
     const from = pos.get(`${k.name}::${k.i}`);
+    const typedByTarget = typedByIndex.get(k.index).get(k.i) || new Map();
     for (const j of k.index.outlinks[k.i]) {
       const to = pos.get(`${k.name}::${j}`);
       if (to === undefined || isPrivateNote(k.index.notes[j])) continue;
-      links.push({ source: from, target: to });
+      const predicates = typedByTarget.get(j) || [];
+      links.push({ source: from, target: to, kind: predicates.length ? 'typed' : 'note_link', ...(predicates.length ? { predicate: [...new Set(predicates)].join(' · ') } : {}) });
     }
   }
   return { vault: vaultName || null, nodes, links, shown: nodes.length, total };
@@ -65,9 +76,15 @@ export async function noteDetail3D(ctx, vaultName, rel) {
   const n = index.notes[i];
   if (isPrivateNote(n)) throw new Error('This note is private and cannot be shown in the graph.');
   const visible = (j) => !index.notes[j].generated && !isPrivateNote(index.notes[j]);
+  const relationships = index.typedRelations.flatMap((edge) => {
+    if (edge.source === i && visible(edge.target)) return [{ direction: 'outgoing', predicate: edge.predicate, evidence: edge.evidence, confidence: edge.confidence, note: summarize(index, edge.target) }];
+    if (edge.target === i && visible(edge.source)) return [{ direction: 'incoming', predicate: edge.predicate, evidence: edge.evidence, confidence: edge.confidence, note: summarize(index, edge.source) }];
+    return [];
+  });
   return {
     vault: vaultName, path: n.rel, title: n.title, body: n.body, tags: [...n.tags],
     backlinks: [...index.backlinks[i]].filter(visible).map((j) => summarize(index, j)),
     outlinks: [...index.outlinks[i]].filter(visible).map((j) => summarize(index, j)),
+    relationships,
   };
 }
