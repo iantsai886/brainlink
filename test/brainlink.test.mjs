@@ -442,15 +442,42 @@ test('structured handoff keeps scope and evidence, and refuses private source li
   assert.equal((await listHandoffs(ctx, { to: 'Codex' })).length, 1);
 });
 
+test('handoff replies are append-only and use a constrained lifecycle status', async () => {
+  const { cfg, company } = await fixture();
+  const ctx = ctxOf(cfg);
+  const request = await sendHandoff(ctx, { to: 'Codex', subject: 'Fictional task', goal: 'Complete the demo', confirm: true }, NOW);
+  assert.equal(request.written, true);
+  const requestFile = await readFile(path.join(company, request.path.split('/').slice(1).join('/')), 'utf8');
+  assert.match(requestFile, /status: REQUEST/);
+
+  const invalid = await sendHandoff(ctx, { to: 'Claude', subject: 'Invalid update', body: 'No arbitrary status', ack_of: request.path, status: 'MAGIC', confirm: true }, new Date(NOW.getTime() + 3600000));
+  assert.equal(invalid.ok, false);
+  assert.match(invalid.errors.join(' '), /status must be one of/);
+  const blocked = await sendHandoff(ctx, { to: 'Claude', subject: 'Blocked on approval', body: 'Waiting for approval.', ack_of: request.path, status: 'BLOCKED', confirm: true }, new Date(NOW.getTime() + 3600000));
+  const completed = await sendHandoff(ctx, { to: 'Claude', subject: 'Demo complete', body: 'The fictional demo is done.', ack_of: request.path, status: 'COMPLETED', confirm: true }, new Date(NOW.getTime() + 7200000));
+  assert.equal(blocked.written, true);
+  assert.equal(completed.written, true);
+  assert.notEqual(blocked.path, completed.path);
+  const items = await listHandoffs(ctx, {});
+  assert.equal(items.find((item) => item.path === blocked.path).status, 'BLOCKED');
+  assert.equal(items.find((item) => item.path === completed.path).status, 'COMPLETED');
+  const unchanged = await readFile(path.join(company, request.path.split('/').slice(1).join('/')), 'utf8');
+  assert.equal(unchanged, requestFile, 'replies never rewrite the original request');
+});
+
 test('P0: listHandoffs carries ack_of/sent_at for pickup pairing, and never surfaces a private or excluded handoff', async () => {
   const { cfg, company } = await fixture();
   const ctx = ctxOf(cfg);
   const r1 = await sendHandoff(ctx, { to: 'Grok', subject: 'Check pricing page', body: 'Please review.', confirm: true }, NOW);
   const r2 = await sendHandoff(ctx, { to: 'Claude', subject: 'Pricing page reviewed', body: 'Done, looks good.', ack_of: r1.path, confirm: true }, new Date(NOW.getTime() + 3600000));
+  const r3 = await sendHandoff(ctx, { to: 'Grok', subject: 'Pricing page complete', body: 'Changes are finished.', ack_of: r1.path, status: 'COMPLETED', confirm: true }, new Date(NOW.getTime() + 7200000));
   const list = await listHandoffs(ctx, {});
   const original = list.find((x) => x.path === r1.path);
   const ack = list.find((x) => x.path === r2.path);
+  const completion = list.find((x) => x.path === r3.path);
   assert.equal(ack.ack_of, r1.path);
+  assert.equal(ack.status, 'ACKNOWLEDGED', 'reply without a status defaults to acknowledgement');
+  assert.equal(completion.status, 'COMPLETED');
   assert.match(original.sent_at, /^2026-10-18T09:30/);
   assert.match(ack.sent_at, /^2026-10-18T10:30/);
 
@@ -725,8 +752,10 @@ test('P0: POST /api/handoffs shows a clear receipt (who sent, who picked up, whe
     // A: handed off by Claude, picked up (acked) by Grok.
     await writeFile(path.join(dir, '2026-10-18-0930-from-claude-to-grok-check-pricing-page.md'),
       '---\ntype: handoff\nstatus: REQUEST\nai_platform: "Claude"\nwritten_at: 2026-10-18T09:30:00+08:00\nto: "Grok"\npriority: P1\nsubject: "Check pricing page"\n---\n# Check pricing page\n');
-    await writeFile(path.join(dir, '2026-10-18-1030-from-grok-to-claude-pricing-page-done.md'),
-      `---\ntype: handoff\nstatus: DONE\nai_platform: "Grok"\nwritten_at: 2026-10-18T10:30:00+08:00\nto: "Claude"\npriority: P1\nsubject: "Pricing page done"\nack_of: "Acme/Chief of Staff Office/Handoffs/2026-10-18-0930-from-claude-to-grok-check-pricing-page.md"\n---\n# Pricing page done\n`);
+    await writeFile(path.join(dir, '2026-10-18-1030-from-grok-to-claude-pricing-page-started.md'),
+      `---\ntype: handoff\nstatus: IN_PROGRESS\nai_platform: "Grok"\nwritten_at: 2026-10-18T10:30:00+08:00\nto: "Claude"\npriority: P1\nsubject: "Pricing page started"\nack_of: "Acme/Chief of Staff Office/Handoffs/2026-10-18-0930-from-claude-to-grok-check-pricing-page.md"\n---\n# Pricing page started\n`);
+    await writeFile(path.join(dir, '2026-10-18-1130-from-grok-to-claude-pricing-page-done.md'),
+      `---\ntype: handoff\nstatus: COMPLETED\nai_platform: "Grok"\nwritten_at: 2026-10-18T11:30:00+08:00\nto: "Claude"\npriority: P1\nsubject: "Pricing page done"\nack_of: "Acme/Chief of Staff Office/Handoffs/2026-10-18-0930-from-claude-to-grok-check-pricing-page.md"\n---\n# Pricing page done\n`);
     // B: handed off by Claude to Codex, no reply yet.
     await writeFile(path.join(dir, '2026-10-19-0900-from-claude-to-codex-deploy-the-fix.md'),
       '---\ntype: handoff\nstatus: REQUEST\nai_platform: "Claude"\nwritten_at: 2026-10-19T09:00:00+08:00\nto: "Codex"\npriority: P1\nsubject: "Deploy the fix"\n---\n# Deploy the fix\n');
@@ -746,7 +775,9 @@ test('P0: POST /api/handoffs shows a clear receipt (who sent, who picked up, whe
     assert.equal(picked.to, 'grok');
     assert.equal(picked.picked_up, true);
     assert.equal(picked.picked_up_by, 'grok');
-    assert.match(picked.picked_up_at, /^2026-10-18T10:30/);
+    assert.match(picked.picked_up_at, /^2026-10-18T11:30/);
+    assert.equal(picked.update_status, 'COMPLETED');
+    assert.equal(picked.update_subject, 'Pricing page done');
     assert.match(picked.sent_at, /^2026-10-18T09:30/);
 
     const pending = r.receipts.find((x) => x.subject === 'Deploy the fix');

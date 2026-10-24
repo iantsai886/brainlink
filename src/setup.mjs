@@ -564,12 +564,17 @@ export async function startSetup(opts = {}) {
       const ctx = createContext(cfg, { env: { ...env, BRAINLINK_SEMANTIC: '0' } });
       if (!cfg.handoff || !ctx.enabled.includes(cfg.handoff.vault)) return { enabled: false, receipts: [] };
       const list = await listHandoffs(ctx, { limit: b.limit || 30 });
-      const ackByTarget = new Map(list.filter((x) => x.ack_of).map((a) => [a.ack_of, a]));
+      // listHandoffs is newest-first, so the first update for a target is its current state.
+      // Updates are append-only mailbox notes; the original request is never rewritten.
+      const latestUpdateByTarget = new Map();
+      for (const update of list) if (update.ack_of && !latestUpdateByTarget.has(update.ack_of)) latestUpdateByTarget.set(update.ack_of, update);
       const receipts = list.filter((x) => !x.ack_of).map((x) => {
-        const ack = ackByTarget.get(x.path);
+        const update = latestUpdateByTarget.get(x.path);
+        const legacyStatus = { ACK: 'ACKNOWLEDGED', DONE: 'COMPLETED', COMPLETE: 'COMPLETED' }[String(update?.status || '').toUpperCase()];
         return {
           from: x.from, to: x.to, subject: x.subject, sent_at: x.sent_at, status: x.status, priority: x.priority,
-          picked_up: Boolean(ack), picked_up_by: ack ? ack.from : null, picked_up_at: ack ? ack.sent_at : null,
+          picked_up: Boolean(update), picked_up_by: update ? update.from : null, picked_up_at: update ? update.sent_at : null,
+          update_status: update ? (legacyStatus || update.status || 'ACKNOWLEDGED') : null, update_subject: update ? update.subject : null,
         };
       });
       return { enabled: true, receipts };

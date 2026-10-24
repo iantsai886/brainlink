@@ -210,7 +210,7 @@ export function createMcp(ctx, { onCall = () => {} } = {}) {
           open_questions: strs, next_steps: strs, source_refs: strs,
           scope: { type: 'string', enum: ['personal', 'company', 'client'] },
           confidence: { type: 'string', enum: ['verified', 'reported', 'inferred', 'unknown'] },
-          decision_needed: { type: 'boolean' }, deadline: { type: 'string' }, ack_of: { type: 'string', description: 'Optional mailbox path of a handoff to acknowledge; profile-scoped agents may acknowledge only a handoff owned by the same Twin profile.' }, status: { type: 'string' }, source: { type: 'string' }, ...idProps }, required: ['to', 'subject'] },
+          decision_needed: { type: 'boolean' }, deadline: { type: 'string' }, ack_of: { type: 'string', description: 'Mailbox path of the handoff this append-only status update replies to. Profile-scoped agents may update only a handoff owned by the same Twin profile.' }, status: { type: 'string', enum: ['REQUEST', 'ACKNOWLEDGED', 'IN_PROGRESS', 'BLOCKED', 'COMPLETED', 'CANCELLED'], description: 'Omit for REQUEST on a new handoff or ACKNOWLEDGED on a reply. Replies require ack_of.' }, source: { type: 'string' }, ...idProps }, required: ['to', 'subject'] },
         run: (a) => sendHandoff(ctx, a) },
       { name: 'list_handoffs', title: 'Read the inter-AI mailbox', annotations: RO,
         description: 'Newest handoff messages, optionally only those addressed to a platform/agent (includes "all").',

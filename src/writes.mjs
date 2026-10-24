@@ -197,6 +197,7 @@ export async function appendDaily(ctx, a, now = new Date()) {
 // ---- inter-AI handoff mailbox ----
 
 const PRIORITIES = ['P0', 'P1', 'P2', 'P3'];
+const HANDOFF_STATUSES = ['REQUEST', 'ACKNOWLEDGED', 'IN_PROGRESS', 'BLOCKED', 'COMPLETED', 'CANCELLED'];
 const HANDOFF_RE = /^\d{4}-\d{2}-\d{2}-\d{4}-from-.+\.md$/;
 const HANDOFF_FIELDS = [
   ['goal', 'Goal'], ['current_state', 'Current state'], ['decisions', 'Decisions'],
@@ -253,6 +254,10 @@ export async function sendHandoff(ctx, a, now = new Date()) {
   if (!a.to) errors.push('to is required (platform or agent name, or "all")');
   if (!a.body && !a.goal) errors.push('body or goal is required');
   if (a.priority && !PRIORITIES.includes(a.priority)) errors.push(`priority must be one of ${PRIORITIES.join(', ')}`);
+  const status = String(a.status || (a.ack_of ? 'ACKNOWLEDGED' : 'REQUEST')).toUpperCase();
+  if (!HANDOFF_STATUSES.includes(status)) errors.push(`status must be one of ${HANDOFF_STATUSES.join(', ')}`);
+  if (!a.ack_of && status !== 'REQUEST') errors.push('status updates require ack_of; a new handoff must use REQUEST');
+  if (a.ack_of && status === 'REQUEST') errors.push('a handoff update cannot return to REQUEST');
   if (a.scope && !['personal', 'company', 'client'].includes(a.scope)) errors.push('scope must be personal, company, or client');
   if (a.confidence && !['verified', 'reported', 'inferred', 'unknown'].includes(a.confidence)) errors.push('confidence must be verified, reported, inferred, or unknown');
   if (a.ack_of) {
@@ -287,7 +292,7 @@ export async function sendHandoff(ctx, a, now = new Date()) {
   if (errors.length) return { ok: false, errors };
   const ts = zonedNow(ctx.tz, now);
   const rel = `${h.folder}/${ts.slice(0, 10)}-${ts.slice(11, 13)}${ts.slice(14, 16)}-from-${slug(id.ai_platform)}-to-${slug(a.to)}-${slug(subject).slice(0, 60)}.md`;
-  const fm = ['---', 'type: handoff', 'handoff_schema: 1', `status: ${a.status || 'REQUEST'}`, `ai_platform: ${q(id.ai_platform)}`, `agent_or_role: ${q(id.agent_or_role)}`,
+  const fm = ['---', 'type: handoff', 'handoff_schema: 1', `status: ${status}`, `ai_platform: ${q(id.ai_platform)}`, `agent_or_role: ${q(id.agent_or_role)}`,
     `session_or_task_id: ${q(id.session_or_task_id)}`, `written_at: ${ts}`, `to: ${q(a.to)}`, `priority: ${a.priority || 'P2'}`, `subject: ${q(subject)}`,
     `decision_needed: ${a.decision_needed ? 'yes' : 'no'}`, `deadline: ${a.deadline || ''}`, `ack_of: ${a.ack_of || ''}`, `source: ${q(a.source || 'handoff')}`,
     `scope: ${q(a.scope || 'unspecified')}`, `confidence: ${q(a.confidence || 'unknown')}`,

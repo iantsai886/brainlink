@@ -498,9 +498,10 @@ function renderHandoffs(list) {
   $('handoffs-list').innerHTML = list.map((h) => `<div class="card">
       <div class="row" style="justify-content:space-between">
         <b><span class="badge" style="background:${clientColor(h.from)}">${esc(clientLabel(h.from))}</span> → <span class="badge" style="background:${clientColor(h.to)}">${esc(clientLabel(h.to))}</span></b>
-        <span class="pill ${h.picked_up ? 'on' : ''}">${h.picked_up ? esc(t('handoffs.pickedUp')) : esc(t('handoffs.notPickedUp'))}</span>
+        <span class="pill ${h.picked_up ? 'on' : ''}">${h.picked_up ? esc(t(`handoffs.status.${h.update_status}`) || t('handoffs.pickedUp')) : esc(t('handoffs.notPickedUp'))}</span>
       </div>
       <div style="font-size:14px">${esc(h.subject)}</div>
+      ${h.update_subject ? `<div class="muted" style="font-size:13px">${esc(h.update_subject)}</div>` : ''}
       <div class="muted" style="font-size:13px">${esc(t('handoffs.sentAt', { when: h.sent_at ? new Date(h.sent_at).toLocaleString(LOCALE) : '' }))}${h.picked_up ? ' · ' + esc(t('handoffs.pickedUpBy', { who: clientLabel(h.picked_up_by), when: h.picked_up_at ? new Date(h.picked_up_at).toLocaleString(LOCALE) : '' })) : ''}</div>
     </div>`).join('');
 }
