@@ -6,6 +6,7 @@ import { tmpdir } from 'node:os';
 import { spawn } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import { recordSessionEndCue, listSessionEndCues, parseSessionEndEvent } from '../src/sessions/end-cue.mjs';
+import { startSetup } from '../src/setup.mjs';
 
 const temp = () => mkdtemp(path.join(tmpdir(), 'brainlink-end-cue-'));
 const hookEvent = (extra = {}) => JSON.stringify({ hook_event_name: 'SessionEnd', session_id: 'fictional-session-17', reason: 'other', cwd: 'C:\\Private\\Northwind', transcript_path: 'C:\\Private\\Northwind\\secret.jsonl', ...extra });
@@ -36,6 +37,8 @@ test('SessionEnd cue accepts only supported clients and bounded well-formed even
   assert.throws(() => parseSessionEndEvent(JSON.stringify({ hook_event_name: 'Stop', session_id: 'x' }), 'codex'), /SessionEnd/);
   assert.throws(() => parseSessionEndEvent(JSON.stringify({ hook_event_name: 'SessionEnd', session_id: '  ' }), 'codex'), /session_id/);
   assert.throws(() => parseSessionEndEvent(' '.repeat(32 * 1024 + 1), 'codex'), /too large/);
+  assert.equal(parseSessionEndEvent(hookEvent({ reason: 'do-not-persist-free-text' }), 'codex').reason, 'other');
+  assert.throws(() => parseSessionEndEvent(hookEvent({ session_id: '../private' }), 'codex'), /session_id/);
 });
 
 test('CLI hook command records and lists a cue using the isolated BrainLink home', async () => {
@@ -54,4 +57,28 @@ test('CLI hook command records and lists a cue using the isolated BrainLink home
   const listed = await run(['session-end-cues']);
   assert.match(listed, /codex  session fictional-session-17/);
   assert.doesNotMatch(listed, /Northwind|secret\.jsonl/);
+});
+
+test('local cue UI API requires authentication, minimizes metadata, and preserves dismissed records', async () => {
+  const taskHome = await temp();
+  const env = { ...process.env, BRAINLINK_HOME: taskHome, HOME: taskHome, USERPROFILE: taskHome };
+  const dir = path.join(taskHome, 'sessions', 'end-cues');
+  await recordSessionEndCue({ input: hookEvent(), client: 'codex', dir });
+  const app = await startSetup({ env, home: taskHome, os: 'win32', port: 0, useCli: false });
+  const call = (route, body = {}, token = app.token) => fetch(`http://127.0.0.1:${app.port}/api/sessions/end-cues${route}`, {
+    method: 'POST', headers: { 'Content-Type': 'application/json', 'X-BrainLink-Token': token }, body: JSON.stringify(body),
+  });
+  try {
+    assert.equal((await call('', {}, 'wrong')).status, 401);
+    const { cues } = await (await call('')).json();
+    assert.equal(cues.length, 1);
+    assert.deepEqual(Object.keys(cues[0]).sort(), ['client', 'ended_at', 'id']);
+    assert.doesNotMatch(JSON.stringify(cues), /fictional-session|Northwind|transcript_path/);
+    assert.equal((await (await call('/dismiss', { id: cues[0].id })).json()).ok, true);
+    assert.deepEqual((await (await call('')).json()).cues, []);
+    assert.match(await readFile(path.join(dir, `${cues[0].id}.json`), 'utf8'), /fictional-session-17/);
+    await recordSessionEndCue({ input: hookEvent(), client: 'codex', dir });
+    assert.deepEqual(await listSessionEndCues(dir), [], 'duplicate delivery must not revive a dismissed reminder');
+    assert.equal((await call('/dismiss', { id: '../config' })).ok, false);
+  } finally { app.server.close(); }
 });

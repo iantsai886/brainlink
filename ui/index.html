@@ -201,6 +201,8 @@ ol.todo li { padding-left: 4px; }
       <label class="muted" style="display:flex;flex-direction:row;gap:6px;align-items:center;margin-top:6px"><input type="checkbox" id="sess-share-full" style="width:auto"><span data-i18n="sessions.shareFullTextLabel"></span></label>
     </div>
     <div class="row" style="margin-bottom:10px"><label class="muted" style="display:flex;flex-direction:row;gap:6px;align-items:center"><input type="checkbox" id="sess-private" style="width:auto"><span data-i18n="sessions.showPrivate"></span></label></div>
+    <div id="session-hook-settings" class="cards"></div>
+    <div id="session-end-cues" class="cards" aria-live="polite"></div>
     <div id="sessions-list" class="cards"></div>
     <div id="session-detail" style="margin-top:12px"></div>
   </section>
@@ -426,9 +428,24 @@ function renderReady(r) {
 }
 
 async function loadSessions() {
+  loadSessionEndCues();
+  loadSessionHookSettings();
   $('sessions-list').innerHTML = `<p class="skeleton">${esc(t('sessions.loading'))}</p>`;
   try { renderSessions((await api('POST', '/api/sessions', { include_private: $('sess-private').checked, limit: 20 })).sessions); }
   catch (e) { $('sessions-list').innerHTML = `<p class="error-box">${esc(t('sessions.loadError', { msg: e.message }))}</p>`; }
+}
+async function loadSessionEndCues() {
+  try {
+    const { cues } = await api('POST', '/api/sessions/end-cues', {});
+    const html = cues.length ? `<div class="card"><b>${esc(t('sessions.pendingCloseout'))}</b><p class="muted">${esc(t('sessions.pendingCloseoutHint'))}</p>${cues.map((cue) => `<div class="row"><span>${esc(clientLabel(cue.client))} · ${esc(new Date(cue.ended_at).toLocaleString(LOCALE))}</span><button class="link" data-cue-dismiss="${esc(cue.id)}">${esc(t('sessions.dismissCue'))}</button></div>`).join('')}</div>` : '';
+    if ($('session-end-cues').innerHTML !== html) $('session-end-cues').innerHTML = html;
+  } catch (e) { $('session-end-cues').innerHTML = `<p class="error-box">${esc(e.message)}</p>`; }
+}
+async function loadSessionHookSettings() {
+  try {
+    const { clients } = await api('POST', '/api/sessions/hooks', {});
+    $('session-hook-settings').innerHTML = `<div class="card"><b>${esc(t('sessions.hooksTitle'))}</b><p class="muted">${esc(t('sessions.hooksHint'))}</p>${clients.map((c) => `<div class="row"><span>${esc(clientLabel(c.client))}</span>${c.error ? `<span class="error-box">${esc(c.error)}</span>` : `<span class="pill ${c.configured ? 'on' : ''}">${esc(t(c.configured ? 'sessions.hookConfigured' : 'sessions.hookOff'))}</span><button class="secondary" data-hook-client="${esc(c.client)}" data-hook-enable="${c.configured ? '0' : '1'}">${esc(t(c.configured ? 'sessions.hookDisable' : 'sessions.hookEnable'))}</button>`}</div>${c.configured ? `<p class="muted">${esc(t(c.trust_required ? 'sessions.hookTrust' : 'sessions.hookRestart'))}</p>` : ''}`).join('')}</div>`;
+  } catch (e) { $('session-hook-settings').innerHTML = `<p class="error-box">${esc(e.message)}</p>`; }
 }
 function dayLabel(iso) {
   const d = new Date(iso), days = Math.floor((new Date(new Date().toDateString()) - new Date(d.toDateString())) / 86400000);
@@ -827,6 +844,14 @@ document.addEventListener('click', (e) => {
     await api('POST', '/api/agent', { name: a.name, role: get('role').value, activation: get('activation').value, close: get('close').value, ...(get('capture_approved') ? { capture_approved: get('capture_approved').checked } : {}) });
     toast(t('rolePack.savedToast', { name: a.name }));
   });
+  if (d.hookClient) act(async () => {
+    await api('POST', '/api/sessions/hooks/set', { client: d.hookClient, enabled: d.hookEnable === '1' });
+    await loadSessionHookSettings();
+  });
+  if (d.cueDismiss) act(async () => {
+    await api('POST', '/api/sessions/end-cues/dismiss', { id: d.cueDismiss });
+    await loadSessionEndCues();
+  });
   if (d.sessRead) (async (id) => {
     // Independent of whatever session is currently shown: proves any session can read any other.
     $('session-detail').innerHTML = `<p class="skeleton">${esc(t('sessions.detailLoading'))}</p>`;
@@ -950,6 +975,7 @@ boot();
 // Light refresh: only the activity table, so edits in progress are never wiped.
 setInterval(async () => {
   if (document.visibilityState !== 'visible') return;
+  if (!$('sessions-panel').hidden) loadSessionEndCues();
   try { const s = await api('GET', '/api/state'); S.activity = s.activity; $('activity').innerHTML = s.activity.length ? s.activity.map((e) => `<tr><td>${esc(new Date(e.at).toLocaleString(LOCALE))}</td><td>${esc(e.platform)}</td><td class="mono">${esc(e.tool)}</td><td>${e.ok ? (e.written ? esc(t('test.written')) : esc(t('test.ok'))) : esc(t('test.refused'))}</td></tr>`).join('') : `<tr><td colspan="4" class="muted">${esc(t('ready.noCalls'))}</td></tr>`; $('n4').className = 'step' + (s.activity.length ? ' done' : ''); } catch {}
 }, 5000);
 </script>

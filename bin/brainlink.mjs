@@ -17,6 +17,7 @@ import { runSync } from '../src/sync-cli.mjs';
 import { PROVIDER_LABELS } from '../src/sync/settings.mjs';
 import { importAll } from '../src/sessions/index.mjs';
 import { recordSessionEndCue, listSessionEndCues } from '../src/sessions/end-cue.mjs';
+import { setSessionHook } from '../src/sessions/hooks.mjs';
 import { evaluateRetrieval } from '../src/retrieval-eval.mjs';
 
 // `brainlink brief | head` closes the pipe early: exit quietly instead of crashing.
@@ -153,6 +154,10 @@ async function main() {
         if (!c.connected) continue;
         try { await disconnectClient(id, clientOpts()); out(`removed BrainLink from ${c.title}`); } catch (e) { out(`could not update ${c.title}: ${e.message}`); }
       }
+      for (const client of ['claude-code', 'codex']) {
+        try { await setSessionHook(client, false, clientOpts()); }
+        catch (e) { out(`could not remove ${client} closeout reminder: ${e.message}`); }
+      }
       return;
     }
     case 'clients': {
@@ -209,7 +214,7 @@ async function main() {
         if (bytes > 32 * 1024) fail('hook event is too large');
         chunks.push(chunk);
       }
-      const dir = path.join(appHome(), 'sessions', 'end-cues');
+      const dir = path.join(opt('data-home', appHome()), 'sessions', 'end-cues');
       const result = await recordSessionEndCue({ input: Buffer.concat(chunks), client, dir });
       out(result.duplicate ? 'BrainLink: session end cue already recorded.' : 'BrainLink: local session end cue recorded; transcript was not read.');
       return;

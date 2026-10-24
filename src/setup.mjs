@@ -27,6 +27,8 @@ import { backupOnce, verifyBackup, restoreBackupToEmpty, loadBackupStatus, saveB
 import { fileSessionSummary } from './sessions/filing.mjs';
 import { isStartupEnabled, setStartupEnabled } from './startup.mjs';
 import { recommendSessionVault } from './sessions/routing.mjs';
+import { listSessionEndCues, dismissSessionEndCue, sessionEndCueId } from './sessions/end-cue.mjs';
+import { sessionHookStatus, setSessionHook } from './sessions/hooks.mjs';
 
 const UI_STATIC_TYPES = { '.js': 'text/javascript; charset=utf-8', '.css': 'text/css; charset=utf-8', '.json': 'application/json; charset=utf-8' };
 const UI_DIR = path.join(ROOT, 'ui');
@@ -473,6 +475,12 @@ export async function startSetup(opts = {}) {
       if (!(await stat(dest).catch(() => null))) await cp(path.join(ROOT, 'samples', 'acme-studio'), dest, { recursive: true, errorOnExist: true, force: false });
       return { ok: true, path: dest };
     },
+    'POST /api/sessions/hooks': async () => ({ clients: await Promise.all(['claude-code', 'codex'].map(async (client) => {
+      try { return await sessionHookStatus(client, { home, env }); } catch (e) { return { client, error: e.message }; }
+    })) }),
+    'POST /api/sessions/hooks/set': (b) => setSessionHook(b.client, b.enabled, { home, env, os }),
+    'POST /api/sessions/end-cues': async () => ({ cues: (await listSessionEndCues(path.join(appHome(env), 'sessions', 'end-cues'))).slice(0, 100).map((cue) => ({ id: sessionEndCueId(cue), client: cue.client, ended_at: cue.ended_at })) }),
+    'POST /api/sessions/end-cues/dismiss': (b) => dismissSessionEndCue(path.join(appHome(env), 'sessions', 'end-cues'), b.id),
     'POST /api/sessions': (b) => sessions.list({ q: b.q, client: b.client, project: b.project, since: b.since, limit: b.limit, include_private: Boolean(b.include_private) }),
     'POST /api/sessions/read': (b) => sessions.read({ id: b.id, include_private: Boolean(b.include_private) }),
     'POST /api/sessions/recommend': async (b) => {
