@@ -268,7 +268,8 @@ export async function sendHandoff(ctx, a, now = new Date()) {
   const fm = ['---', 'type: handoff', 'handoff_schema: 1', `status: ${a.status || 'REQUEST'}`, `ai_platform: ${q(id.ai_platform)}`, `agent_or_role: ${q(id.agent_or_role)}`,
     `session_or_task_id: ${q(id.session_or_task_id)}`, `written_at: ${ts}`, `to: ${q(a.to)}`, `priority: ${a.priority || 'P2'}`, `subject: ${q(subject)}`,
     `decision_needed: ${a.decision_needed ? 'yes' : 'no'}`, `deadline: ${a.deadline || ''}`, `ack_of: ${a.ack_of || ''}`, `source: ${q(a.source || 'handoff')}`,
-    `scope: ${q(a.scope || 'unspecified')}`, `confidence: ${q(a.confidence || 'unknown')}`, '---'].join('\n');
+    `scope: ${q(a.scope || 'unspecified')}`, `confidence: ${q(a.confidence || 'unknown')}`,
+    ...(ctx.twinScope?.mode === 'scoped' ? [`twin_profile_id: ${q(ctx.twinScope.profile_id)}`] : []), '---'].join('\n');
   const sections = HANDOFF_FIELDS.map(([field, label]) => handoffSection(label, a[field])).join('');
   const sources = refs.length ? handoffSection('Sources', refs.map((ref) => `[[${ref.replace(/\.md$/i, '')}]]`)) : '';
   const body = a.body ? handoffSection('Body', a.body) : '';
@@ -293,6 +294,7 @@ export async function listHandoffs(ctx, { to, limit = 10 } = {}) {
     const full = safeJoin(dir, f);
     const header = await readHandoffHeader(full).catch(() => null);
     if (!header || isPrivateMeta(header.meta) || fmSaysPrivate(header.block)) continue;
+    if (ctx.twinScope?.mode === 'scoped' && header.meta.twin_profile_id !== ctx.twinScope.profile_id) continue;
     // Read the recipient from frontmatter: splitting a slugged name such as "Claude Code"
     // at hyphens makes filename-only matching ambiguous with the subject slug.
     const recipient = slug(header.meta.to || f.match(/-to-([a-z0-9-]+?)-/)?.[1] || '');

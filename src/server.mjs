@@ -32,6 +32,9 @@ export function createMcp(ctx, { onCall = () => {} } = {}) {
   const hasHandoff = Boolean(cfg.handoff && ctx.enabled.includes(cfg.handoff.vault));
   const scopedSessionRead = ctx.twinScope?.mode === 'scoped' && twinToolListed(ctx, 'session_list');
   const scopedSessionClose = ctx.twinScope?.mode === 'scoped' && twinToolListed(ctx, 'session_close') && twinToolListed(ctx, 'session_filing_folders');
+  const scopedHandoffRead = ctx.twinScope?.mode === 'scoped' && twinToolListed(ctx, 'list_handoffs');
+  const scopedHandoffWrite = ctx.twinScope?.mode === 'scoped' && twinToolListed(ctx, 'send_handoff');
+  const guideHasHandoff = hasHandoff && (ctx.twinScope?.mode !== 'scoped' || scopedHandoffRead || scopedHandoffWrite);
   let sessionStorePromise = null;
   const sessionStore = () => sessionStorePromise ||= openSessionStore(ctx.env);
   // Lazy, memoized: the first session_list call (not createMcp itself, which some callers use
@@ -50,11 +53,11 @@ export function createMcp(ctx, { onCall = () => {} } = {}) {
       ? 'SMART: use only the listed tools and enabled vault choices. Respect not_in_brain and never infer content that retrieval did not return.'
       : 'SMART: vault_search accepts rephrasings and translations (queries) — add an English translation for non-English questions; respect status not_in_brain, folder, tag and since/until filters. "What changed / what\'s open?" → brain_brief, vault_recent, open_loops. "Remember …" → remember. Quick thoughts → append_daily. Meetings, decisions, people, projects, ideas → propose_note with a template. Mention existing notes by their exact title; BrainLink links them and adds a Related section automatically.',
     ctx.twinScope?.mode === 'scoped'
-      ? `TWIN PROFILE SCOPE: session reads ${scopedSessionRead ? 'are limited to records explicitly owned by this profile' : 'are unavailable'}; session closeout ${scopedSessionClose ? 'is available only as a private, approval-gated summary in a granted vault' : 'is unavailable'}; handoffs are unavailable.`
+      ? `TWIN PROFILE SCOPE: session reads ${scopedSessionRead ? 'are limited to records explicitly owned by this profile' : 'are unavailable'}; session closeout ${scopedSessionClose ? 'is available only as a private, approval-gated summary in a granted vault' : 'is unavailable'}; handoff read/send each require a separate explicit grant.`
       : 'SESSIONS: session_list / session_read cover imported Claude Code and Codex history plus anything logged with session_log (for clients with no readable local history). When the user ends work, choose an explicit vault; call session_filing_folders to see its allowed folders, select a clearly relevant existing folder, and pass it to session_close for preview. If there is no clear fit, omit folder to use the configured intake folder. Never guess a vault or claim an unverified summary is fact. Whether private imported sessions are visible to you is the user\'s own choice in BrainLink Settings.',
-    ...(ctx.twinScope?.mode === 'scoped' ? [`TWIN PROFILE SCOPE: you are ${ctx.twinScope.profile_name}; enabled vaults and tools are filtered to your grants. General note writes and handoffs are blocked. Session closeout, if listed, is a private summary plus approval-gated note proposal.`] : []),
+    ...(ctx.twinScope?.mode === 'scoped' ? [`TWIN PROFILE SCOPE: you are ${ctx.twinScope.profile_name}; enabled vaults and tools are filtered to your grants. General note writes are blocked. Handoff read/send each require a separate explicit grant. Session closeout, if listed, is a private summary plus approval-gated note proposal.`] : []),
     agents.length ? `AGENTS: ${agents.map((a) => `${a.name} (${a.vault}) — "${a.activation[0]}" → agent_connect; "${a.close[0]}" → agent_close_loop`).join('; ')}.` : '',
-    hasHandoff ? `INTER-AI: send_handoff / list_handoffs use the ${cfg.handoff.vault}/${cfg.handoff.folder} mailbox.` : '',
+    guideHasHandoff ? `INTER-AI: ${ctx.twinScope?.mode === 'scoped' ? `${scopedHandoffWrite ? 'send_handoff' : ''}${scopedHandoffWrite && scopedHandoffRead ? ' / ' : ''}${scopedHandoffRead ? 'list_handoffs' : ''}` : 'send_handoff / list_handoffs'} use the ${cfg.handoff.vault}/${cfg.handoff.folder} mailbox.` : '',
   ].filter(Boolean).join('\n');
 
   const guide = () => ({
@@ -66,7 +69,7 @@ export function createMcp(ctx, { onCall = () => {} } = {}) {
     agents: agents.map((a) => ({ name: a.name, vault: a.vault, role: a.role, activation_phrases: a.activation, close_phrases: a.close, close_writes_to: a.close_target })),
     identity: { required_on_writes: ['ai_platform', 'agent_or_role', 'session_or_task_id'], ai_platform_values: cfg.platforms, made_by_line: 'Made by {ai_platform} ({agent_or_role}).' },
     write_rules: ctx.twinScope?.mode === 'scoped' ? [
-      'General note writes and handoffs are unavailable to this profile-scoped connection.',
+      'General note writes are unavailable to this profile-scoped connection; handoff read/send require separate explicit grants.',
       ...(scopedSessionClose ? ['session_close is limited to a private summary and an explicit preview/confirmation flow in a granted vault.'] : []),
       'Only the profile permitted_vaults and available_operations listed above are available to this token.',
     ] : [
@@ -77,8 +80,8 @@ export function createMcp(ctx, { onCall = () => {} } = {}) {
       'Secret-looking content (keys, tokens, card/account numbers) is refused.',
     ],
     templates: Object.fromEntries(Object.entries(TEMPLATES).map(([k, t]) => [k, { folder: t.folder, fields: t.fields }])),
-    ...(hasHandoff ? { handoff_mailbox: `${cfg.handoff.vault}/${cfg.handoff.folder}` } : {}),
-    ...(ctx.twinScope?.mode === 'scoped' ? { twin_profile_scope: { profile_id: ctx.twinScope.profile_id, permitted_vaults: ctx.enabled, available_operations: [...new Set(ctx.twinScope.grants.flatMap((grant) => grant.operations))], writes_available: false, session_history_available: scopedSessionRead, session_close_available: scopedSessionClose, handoffs_available: false } } : {}),
+    ...(guideHasHandoff ? { handoff_mailbox: `${cfg.handoff.vault}/${cfg.handoff.folder}` } : {}),
+    ...(ctx.twinScope?.mode === 'scoped' ? { twin_profile_scope: { profile_id: ctx.twinScope.profile_id, permitted_vaults: ctx.enabled, available_operations: [...new Set(ctx.twinScope.grants.flatMap((grant) => grant.operations))], writes_available: false, session_history_available: scopedSessionRead, session_close_available: scopedSessionClose, handoffs_available: scopedHandoffRead || scopedHandoffWrite } } : {}),
   });
 
   const vaultProp = { type: 'string', enum: ctx.enabled, description: 'Which vault. Vaults are never mixed.' };

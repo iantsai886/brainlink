@@ -20,7 +20,7 @@ export function twinProfileStatus(cfg) {
     schema: 1,
     enforcement: 'scoped_agent_read_only',
     profiles,
-    next_gate: 'Named AI-agent tokens use profile-scoped vault access. Session reads require an explicit read_session grant and an exact profile_id match; private closeouts require propose_note plus filing-folder access and are approval-gated. Other clients keep their existing connection scope. General writes and handoffs remain unavailable until their data paths are profile-scoped.',
+    next_gate: 'Named AI-agent tokens use profile-scoped vault access. Session reads require an explicit read_session grant and exact profile_id match; private closeouts require propose_note plus filing-folder access and are approval-gated. Handoff read/send require separate grants and carry a profile owner. General note writes, session logging, and handoff acknowledgements remain unavailable until those paths are profile-scoped.',
   };
 }
 
@@ -43,9 +43,17 @@ const READ_TOOL_ACTION = Object.freeze({
   vault_search: 'search', vault_recent: 'search', open_loops: 'search', brain_brief: 'search',
   vault_health: 'search', vault_related: 'search', vault_read_note: 'read_note',
   session_list: 'read_session', session_read: 'read_session', session_close: 'propose_note',
+  list_handoffs: 'handoff_read', send_handoff: 'write_handoff',
   session_filing_folders: 'search', agent_connect: 'read_note', search: 'search', fetch: 'read_note',
 });
 const VAULT_ARGUMENT_TOOLS = new Set(['vault_search', 'vault_recent', 'open_loops', 'brain_brief', 'vault_health', 'vault_read_note', 'vault_related', 'session_filing_folders', 'session_close']);
+const HANDOFF_TOOLS = new Set(['list_handoffs', 'send_handoff']);
+
+function handoffGrant(ctx, action) {
+  const name = ctx.cfg?.handoff?.vault;
+  if (!name || !ctx.enabled.includes(name)) return false;
+  return (ctx.twinScope?.grants || []).some((grant) => grant.name === name && grant.operations.includes(action));
+}
 
 export function twinToolAuthorization(ctx, name, args = {}) {
   const scope = ctx.twinScope || { mode: 'legacy', grants: [] };
@@ -53,6 +61,9 @@ export function twinToolAuthorization(ctx, name, args = {}) {
   if (scope.mode !== 'scoped') return { allowed: false, reason: 'This AI agent token is not assigned to an active Twin profile.' };
   const action = READ_TOOL_ACTION[name];
   if (!action) return { allowed: false, reason: `This operation is not available to profile-scoped agents yet: ${name}.` };
+  if (HANDOFF_TOOLS.has(name)) return handoffGrant(ctx, action)
+    ? { allowed: true }
+    : { allowed: false, reason: `Twin profile scope does not allow ${action} in its handoff vault.` };
   const targetVault = args.vault || (name === 'fetch' ? String(args.id || '').split('::')[0] : null);
   if (targetVault) {
     const grant = scope.grants.find((item) => item.name === targetVault);
@@ -71,6 +82,7 @@ export function twinToolListed(ctx, name) {
   if (scope.mode !== 'scoped') return false;
   const action = READ_TOOL_ACTION[name];
   if (!action) return false;
+  if (HANDOFF_TOOLS.has(name)) return handoffGrant(ctx, action);
   if (VAULT_ARGUMENT_TOOLS.has(name)) return scope.grants.some((grant) => ctx.enabled.includes(grant.name) && grant.operations.includes(action));
   return ctx.enabled.length > 0 && ctx.enabled.every((vault) => scope.grants.some((grant) => grant.name === vault && grant.operations.includes(action)));
 }
@@ -79,5 +91,6 @@ export function twinToolVaultChoices(ctx, name) {
   const scope = ctx.twinScope || { mode: 'legacy', grants: [] };
   if (scope.mode === 'legacy') return ctx.enabled;
   const action = READ_TOOL_ACTION[name];
+  if (HANDOFF_TOOLS.has(name)) return handoffGrant(ctx, action) ? [ctx.cfg.handoff.vault] : [];
   return action ? scope.grants.filter((grant) => ctx.enabled.includes(grant.name) && grant.operations.includes(action)).map((grant) => grant.name) : [];
 }

@@ -365,5 +365,5 @@
   "twinProfiles.memory.procedural": "程序記憶",
   "twinProfiles.memory.episodic": "情節記憶",
   "twinProfiles.capture": "工作階段擷取",
-  "twinProfiles.limits": "這些限制只套用於指派給 Twin 的指定 Agent token。工作階段必須有明確授權且擁有相同的 profile；收尾寫入需要確認。一般寫入與交接目前仍封鎖，其他 AI 連線仍使用原有權限。"
+  "twinProfiles.limits": "這些限制只套用於指派給 Twin 的指定 Agent token。工作階段須有明確授權且屬於相同 profile；收尾需要確認。讀取與傳送交接各自需要明確授權；一般筆記寫入仍封鎖。其他 AI 連線仍使用原有權限。"
 }

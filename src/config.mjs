@@ -12,7 +12,7 @@ export const CLOSE_MODES = ['append-section', 'new-note', 'append-task', 'propos
 export const SCHEMAS = ['standard', 'provenance'];
 export const WRITE_MODES = ['on', 'proposal-only', 'off'];
 export const TWIN_MODES = ['personal', 'organisation'];
-export const TWIN_ACTIONS = ['search', 'read_note', 'read_session', 'handoff_read', 'propose_note', 'write_note'];
+export const TWIN_ACTIONS = ['search', 'read_note', 'read_session', 'handoff_read', 'write_handoff', 'propose_note', 'write_note'];
 
 // Where BrainLink keeps config.json, activity.log and backups for this OS user.
 export function appHome(env = process.env, platform = process.platform, home = homedir()) {
@@ -145,7 +145,7 @@ export function validate(cfg) {
         const accessRank = { read: 0, propose: 1, write: 2 };
         if (!['read', 'propose', 'write'].includes(grant?.access) || accessRank[grant?.access] > accessRank[profileGrant?.access]) errors.push(`twin profile "${p.id || ''}": agent vault access exceeds the profile grant`);
         if (!Array.isArray(grant?.operations) || grant.operations.some((op) => !TWIN_ACTIONS.includes(op) || !p.allowed_actions?.includes(op))) errors.push(`twin profile "${p.id || ''}": agent operations must be supported and allowed by the profile`);
-        const requiredAccess = { propose_note: 1, write_note: 2 };
+        const requiredAccess = { propose_note: 1, write_handoff: 1, write_note: 2 };
         if (Array.isArray(grant?.operations) && grant.operations.some((op) => requiredAccess[op] > accessRank[grant?.access])) errors.push(`twin profile "${p.id || ''}": agent operation exceeds its vault access`);
       }
     }

@@ -163,6 +163,46 @@ test('profile-scoped session reads stay inside the profile and closeouts remain 
   assert.equal((await store.listSessions({ profile_id: 'personal_twin_2' })).some((session) => session.id === savedSession.session.id), false);
 });
 
+test('profile-scoped handoffs require explicit grants and filter mailbox bodies by owner', async () => {
+  const root = await mkdtemp(path.join(tmpdir(), 'brainlink-twin-handoffs-'));
+  const orgPath = path.join(root, 'org');
+  await mkdir(path.join(orgPath, 'Handoffs'), { recursive: true });
+  const cfg = fixture(orgPath);
+  cfg.handoff = { vault: 'Fictional Org', folder: 'Handoffs' };
+  const profile = cfg.twin_profiles[0];
+  profile.allowed_actions.push('handoff_read', 'write_handoff');
+  profile.agent_access[0].vaults[0].access = 'propose';
+  profile.agent_access[0].vaults[0].operations.push('handoff_read', 'write_handoff');
+  const env = { BRAINLINK_HOME: path.join(root, 'app'), BRAINLINK_AGENT_TOKEN: 'fictional-agent-token' };
+  assert.deepEqual(validate(cfg), []);
+  const ungranted = structuredClone(cfg);
+  ungranted.twin_profiles[0].allowed_actions = ungranted.twin_profiles[0].allowed_actions.filter((action) => !['handoff_read', 'write_handoff'].includes(action));
+  ungranted.twin_profiles[0].agent_access[0].vaults[0].operations = ungranted.twin_profiles[0].agent_access[0].vaults[0].operations.filter((action) => !['handoff_read', 'write_handoff'].includes(action));
+  const deniedMcp = createMcp(createContext(ungranted, { env }));
+  const deniedNames = (await deniedMcp.handle({ jsonrpc: '2.0', id: 29, method: 'tools/list' })).result.tools.map((tool) => tool.name);
+  assert.ok(!deniedNames.includes('list_handoffs') && !deniedNames.includes('send_handoff'));
+  const deniedList = await deniedMcp.handle({ jsonrpc: '2.0', id: 30, method: 'tools/call', params: { name: 'list_handoffs', arguments: {} } });
+  assert.equal(deniedList.result.isError, true);
+  const mcp = createMcp(createContext(cfg, { env }));
+  const names = (await mcp.handle({ jsonrpc: '2.0', id: 30, method: 'tools/list' })).result.tools.map((tool) => tool.name);
+  assert.ok(names.includes('list_handoffs'));
+  assert.ok(names.includes('send_handoff'));
+  const sent = await mcp.handle({ jsonrpc: '2.0', id: 31, method: 'tools/call', params: { name: 'send_handoff', arguments: {
+    to: 'all', subject: 'Fictional org handoff', body: 'ORG_HANDOFF_CANARY_71', session_or_task_id: 'org-handoff-1', confirm: true,
+  } } });
+  assert.equal(sent.result.structuredContent.written, true);
+  const foreignPath = path.join(orgPath, 'Handoffs', '2026-10-24-2358-from-personal-to-all-personal-secret.md');
+  await writeFile(foreignPath, '---\ntype: handoff\nhandoff_schema: 1\nstatus: REQUEST\nwritten_at: 2026-10-24T23:58:00+08:00\nto: all\nsubject: Private personal handoff\ntwin_profile_id: personal_twin_2\n---\n\n# Private personal handoff\n\nPERSONAL_HANDOFF_CANARY_82\n');
+  const unassignedPath = path.join(orgPath, 'Handoffs', '2026-10-24-2359-from-legacy-to-all-unassigned.md');
+  await writeFile(unassignedPath, '---\ntype: handoff\nhandoff_schema: 1\nstatus: REQUEST\nwritten_at: 2026-10-24T23:59:00+08:00\nto: all\nsubject: Unassigned handoff\n---\n\n# Unassigned handoff\n\nUNASSIGNED_HANDOFF_CANARY_93\n');
+  const list = await mcp.handle({ jsonrpc: '2.0', id: 32, method: 'tools/call', params: { name: 'list_handoffs', arguments: { to: 'all' } } });
+  assert.equal(list.result.structuredContent.items.length, 1);
+  assert.match(JSON.stringify(list), /ORG_HANDOFF_CANARY_71/);
+  assert.doesNotMatch(JSON.stringify(list), /PERSONAL_HANDOFF_CANARY_82|UNASSIGNED_HANDOFF_CANARY_93/);
+  const stored = await readFile(path.join(orgPath, 'Handoffs', path.basename(sent.result.structuredContent.path)), 'utf8');
+  assert.match(stored, /twin_profile_id: "org_twin_1"/);
+});
+
 test('authenticated local status exposes Twin scopes without returning agent credentials', async () => {
   const root = await mkdtemp(path.join(tmpdir(), 'brainlink-twin-status-'));
   const home = path.join(root, 'home');
