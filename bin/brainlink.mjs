@@ -16,6 +16,7 @@ import { startSetup, openInBrowser } from '../src/setup.mjs';
 import { runSync } from '../src/sync-cli.mjs';
 import { PROVIDER_LABELS } from '../src/sync/settings.mjs';
 import { importAll } from '../src/sessions/index.mjs';
+import { recordSessionEndCue, listSessionEndCues } from '../src/sessions/end-cue.mjs';
 import { evaluateRetrieval } from '../src/retrieval-eval.mjs';
 
 // `brainlink brief | head` closes the pipe early: exit quietly instead of crashing.
@@ -55,6 +56,8 @@ const HELP = `BrainLink MCP ${VERSION} — one Markdown brain for every AI
   brainlink eval --fixture FILE       compare retrieval with a labelled fixture (read-only)
   brainlink map                        rebuild each vault's Home map
   brainlink sync                       one sync pass (local by default; set up in Setup)
+  brainlink session-end-cue --client claude-code|codex  record a local, metadata-only end cue from stdin
+  brainlink session-end-cues            list local end cues (no transcripts are read)
   brainlink ui [--no-open] [--port N]  open the milestone UI (notes, search, graph) on your vaults
   brainlink demo [--no-open]           try the UI on a throwaway sample vault; touches nothing real
   brainlink serve                      MCP over stdio (what AI apps run)
@@ -195,6 +198,26 @@ async function main() {
       const notesNote = r.provider !== 'local' ? ' (notes: pending the store integration — see brainlink-store/docs/progress.md)' : '';
       out(`sync (${label}): ${r.status}${notesNote}; sessions in index: ${r.sessions}`
         + (r.pushed?.length ? `; pushed ${r.pushed.length}` : '') + (r.pulled?.length ? `; pulled ${r.pulled.length}` : '') + (r.conflicts?.length ? `; conflicts ${r.conflicts.length}` : ''));
+      return;
+    }
+    case 'session-end-cue': {
+      const client = opt('client', '');
+      const chunks = [];
+      let bytes = 0;
+      for await (const chunk of process.stdin) {
+        bytes += chunk.length;
+        if (bytes > 32 * 1024) fail('hook event is too large');
+        chunks.push(chunk);
+      }
+      const dir = path.join(appHome(), 'sessions', 'end-cues');
+      const result = await recordSessionEndCue({ input: Buffer.concat(chunks), client, dir });
+      out(result.duplicate ? 'BrainLink: session end cue already recorded.' : 'BrainLink: local session end cue recorded; transcript was not read.');
+      return;
+    }
+    case 'session-end-cues': {
+      const cues = await listSessionEndCues(path.join(appHome(), 'sessions', 'end-cues'));
+      if (!cues.length) { out('No pending session end cues.'); return; }
+      for (const cue of cues) out(`${cue.ended_at}  ${cue.client}  session ${cue.session_id}  (${cue.reason})`);
       return;
     }
     case 'ui': {

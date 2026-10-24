@@ -4,7 +4,7 @@ Status snapshot: 2026-10-24 (Asia/Taipei)
 GitHub repository: `iantsai886/brainlink`
 Branch: `fix/private-session-excerpts`
 Code baseline: current `fix/private-session-excerpts` branch snapshot
-Validation environment: Windows, Node.js 24.18.0; `npm test`: 233 tests, 227 passed, 0 failed, 6 skipped.
+Validation environment: Windows, Node.js 24.18.0; `npm test`: 237 tests, 231 passed, 0 failed, 6 skipped.
 Client discovery: Codex CLI `0.164.0-alpha.11.1` found the repository skill in `codex debug prompt-input`; Claude Code CLI is not installed here.
 
 This is an evidence ledger, not a release-readiness claim. “Implemented and locally tested” does not imply packaged, cross-client validated, or ready for customers.
@@ -13,7 +13,7 @@ This is an evidence ledger, not a release-readiness claim. “Implemented and lo
 
 | Area | Current implementation | Evidence and remaining gap |
 |---|---|---|
-| Working memory | Imported Claude Code and Codex sessions, private session logging, bounded `session_read`, handoff mailbox and explicit close operation. | `docs/SESSION-INDEX.md`, `docs/STRUCTURED-HANDOFF.md`, `docs/SESSION-FILING.md`. A fictional two-client MCP fixture covers preview, pickup, privacy filtering and acknowledgement. No universal end-of-session detector or live Claude Code ↔ Codex runtime receipt yet. |
+| Working memory | Imported Claude Code and Codex sessions, private session logging, bounded `session_read`, handoff mailbox, explicit close operation, and an opt-in metadata-only `SessionEnd` hook command. | `src/sessions/end-cue.mjs`, `docs/SESSION-FILING.md`, `docs/STRUCTURED-HANDOFF.md`. Local tests cover cue validation, idempotence, metadata-only storage and fictional handoff privacy. Guided client hook installation, UI cue display, automatic summary extraction, and live Claude Code ↔ Codex runtime receipt remain open. |
 | Semantic memory | Markdown/Obsidian notes, multi-vault lexical search, optional local semantic search, links/graph, provenance-aware proposed notes, permission filtering before indexing and retrieval. | `src/core.mjs`, `docs/RETRIEVAL-EVAL.md`; privacy canary tests pass. Verified fact promotion and independent held-out quality evaluation remain incomplete. |
 | Procedural memory | Configurable agent roles, rule packs, prompts, shared commands, and a versioned Agent Skills-format cross-AI handoff workflow. | `.agents/skills/brainlink-cross-ai-handoff/SKILL.md` and `.claude/skills/brainlink-cross-ai-handoff/SKILL.md` are byte-identical copies of `skills/brainlink-cross-ai-handoff/SKILL.md`. `test/skills.test.mjs` checks manifest fields, registry metadata, safety instructions, and parity. Codex CLI repository discovery is verified; Claude Code CLI is unavailable, and live two-client handoff remains unverified. |
 | Episodic memory | Private imported sessions; `session_close` creates a private session and proposed note; the local UI can preview and file summaries. Exact project-to-vault destinations can be remembered after user confirmation. | `docs/SESSION-FILING.md`; fictional vault tests cover privacy and routing. Session capture still depends on a supported importer or an AI/client call; summaries are reported, not verified knowledge. |
@@ -33,7 +33,7 @@ This is an evidence ledger, not a release-readiness claim. “Implemented and lo
 
 ## Next engineering sequence
 
-1. Add opt-in Claude Code and Codex SessionEnd hooks that create a minimal local closeout cue; keep transcript reading off by default and durable filing approval-gated.
+1. Add guided hook installation/removal and show pending session-end cues in the local UI; keep transcript reading off by default and durable filing approval-gated.
 2. Add correction and reversal for proposed episodes, with source-linked changes and an audit trail.
 3. Run a live Claude Code ↔ Codex handoff and retain receipts for pickup, acknowledgement, and private-note non-disclosure.
 4. Expand frozen retrieval and filing evaluations to at least 20 representative cases per decision set; measure task success, privacy, latency and token estimates together.

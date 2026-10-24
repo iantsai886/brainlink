@@ -16,8 +16,19 @@ Validation: `test/session-filing.test.mjs` and `test/session-close.test.mjs` use
 
 ## End-of-session integration boundary
 
-Both Claude Code and Codex document local `SessionEnd` command hooks. Their hook payloads include a session identifier, working directory, reason, and transcript path. This makes a local end cue technically possible; it does not by itself produce a reviewed outcome summary or authorize saving one. BrainLink must not read transcript contents just because a lifecycle hook supplies a path. The first integration should be opt-in, record only a minimal local cue by default, and ask the AI/user to prepare and confirm a summary through `session_close`. Transcript ingestion would need a separate explicit setting, source-scope checks, secret filtering, and private-by-default storage.
+Both Claude Code and Codex document local `SessionEnd` command hooks. Their hook payloads include a session identifier, working directory, reason, and transcript path. This makes a local end cue technically possible; it does not by itself produce a reviewed outcome summary or authorize saving one. BrainLink must not read transcript contents just because a lifecycle hook supplies a path. The opt-in command below records only a minimal local cue. Transcript ingestion would need a separate explicit setting, source-scope checks, secret filtering, and private-by-default storage.
+
+Add this handler to the client's existing `SessionEnd` hook configuration (merge it with existing hooks; do not replace them):
+
+```json
+{
+  "type": "command",
+  "command": "brainlink session-end-cue --client claude-code"
+}
+```
+
+Use `--client codex` in Codex's `SessionEnd` hook. The command reads the hook JSON from stdin, discards `cwd` and `transcript_path`, and writes an idempotent cue under BrainLink's local application data. Run `brainlink session-end-cues` to inspect recorded cues. This first slice records awareness that a session ended; it does not generate or file a summary, and does not yet install hooks into either client automatically.
 
 Official references checked 2026-10-24: [Claude Code hooks reference](https://code.claude.com/docs/en/hooks#sessionend) and [Codex hooks documentation](https://learn.chatgpt.com/docs/hooks).
 
-Remaining for the complete product: installable opt-in end hooks, automatic destination recommendation with explainable evidence, source-linked and reversible classification, user correction, live cross-client handoff verification, token/time measurement, and privacy evaluation across personal/company/client fixtures. A lifecycle cue or AI-reported summary alone is not a verified experience or long-term rule.
+Remaining for the complete product: guided hook installation/removal, surfacing cues in the local UI, AI-assisted summary with review, automatic destination recommendation with explainable evidence, source-linked and reversible classification, user correction, live cross-client handoff verification, token/time measurement, and privacy evaluation across personal/company/client fixtures. A lifecycle cue or AI-reported summary alone is not a verified experience or long-term rule.
