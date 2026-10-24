@@ -15,11 +15,11 @@ export async function listSessionFilingFolders(ctx, vaultName) {
     if (depth >= 6 || folders.length >= 500) return;
     let entries;
     try { entries = await readdir(dir, { withFileTypes: true }); } catch { return; }
-    for (const entry of entries) {
+    for (const entry of entries.sort((a, b) => a.name.localeCompare(b.name))) {
       if (!entry.isDirectory() || entry.name.startsWith('.') || SKIP.has(entry.name)) continue;
       const child = rel ? `${rel}/${entry.name}` : entry.name;
       const segments = child.split('/');
-      if ((v.protected || []).some((p) => segments.some((s) => s.replace(/\.md$/i, '').toLowerCase().startsWith(String(p).toLowerCase())))) continue;
+      if ((v.protected || []).filter(Boolean).some((p) => segments.some((s) => s.replace(/\.md$/i, '').toLowerCase().startsWith(String(p).toLowerCase())))) continue;
       if (await isExcludedPath(root, child)) continue;
       const full = safeJoin(root, child);
       folders.push({ path: child, label: child });
