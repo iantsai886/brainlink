@@ -42,7 +42,9 @@ brainlink setup | init | connect <client|all> | disconnect <client> | clients | 
 
 ```bash
 npm install               # uses the checked-in store implementation (file:./vendor/brainlink-store)
-npm test                  # one test suite, no external dependencies (Node 22+)
+npm test                  # core suite (Node 22+)
+npm run test:ui           # local UI-model suite
+npm run test:all          # core + UI suites
 node bin/brainlink.mjs demo   # try the milestone UI on a throwaway sample vault, nothing real touched
 node bin/brainlink.mjs ui     # same UI on the vaults in config.json
 npm run build:mac        # dist/BrainLink-<version>.pkg (unsigned build: packaging/macos/INSTALL-UNSIGNED.md)
