@@ -33,9 +33,9 @@ This is an evidence ledger, not a release-readiness claim. “Implemented and lo
 
 ## Next engineering sequence
 
-1. Run the same fictional task end-to-end with Claude Code and Codex CLI, retaining a handoff receipt and private-note leak results.
-2. Add a portable Git-based Agent Skill format and validate the same skill against both clients.
-3. Extend session capture and destination routing with correction/reversal and source-linked relationships; keep user approval before durable writes.
+1. Add opt-in Claude Code and Codex SessionEnd hooks that create a minimal local closeout cue; keep transcript reading off by default and durable filing approval-gated.
+2. Add correction and reversal for proposed episodes, with source-linked changes and an audit trail.
+3. Run a live Claude Code ↔ Codex handoff and retain receipts for pickup, acknowledgement, and private-note non-disclosure.
 4. Expand frozen retrieval and filing evaluations to at least 20 representative cases per decision set; measure task success, privacy, latency and token estimates together.
 5. Build and install the Windows package on Windows, verify sign-in launch and uninstall cleanup, then run a restore drill on a separate empty location.
 6. Complete accessibility, large-vault performance and user task checks before calling the product ready to sell.

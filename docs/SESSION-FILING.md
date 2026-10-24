@@ -1,6 +1,6 @@
 # Session-to-memory filing: first governed path
 
-Status: local UI filing and connected-AI close operation implemented and locally tested; **not** universal automatic end-of-session detection.
+Status: local UI filing and connected-AI close operation implemented and locally tested; lifecycle hooks are documented for Claude Code and Codex, but BrainLink does not yet install or consume them.
 
 The local BrainLink Sessions screen now offers **File summary** when a stored session has a summary. The user chooses a destination vault, previews an episodic note, and explicitly saves it. The note inherits `private: true` regardless of the session's sharing toggle, carries the session ID and client as provenance, and remains `status: proposed` / `confidence: reported`. It never copies raw turns or promotes a summary to verified semantic knowledge. The note writer rejects credential-like content, respects writable-vault policy, uses an existing intake folder, and never overwrites an existing note. No source-backed links are invented.
 
@@ -14,4 +14,10 @@ The session and vault note are two separate writes, not a transaction. If the se
 
 Validation: `test/session-filing.test.mjs` and `test/session-close.test.mjs` use fictional company and personal vaults and verify preview-only behavior, private frontmatter and read blocking, chosen-vault-only writing, no overwrite, rejection of empty summary and secrets, exact-project destination recommendations, API authentication, exclusion of raw private turns, a scoped MCP close, and non-exposure through the imported-session sharing switch. Run with `node --import ./test/_preload.mjs --test test/session-filing.test.mjs test/session-close.test.mjs`.
 
-Remaining for the complete product: trustworthy automatic end detection and summary extraction in supported clients, automatic destination recommendation with explainable evidence, source-linked and reversible classification, user correction, cross-client handoff verification, token/time measurement, and privacy evaluation across personal/company/client fixtures. A summary alone is not a validated experience or long-term rule.
+## End-of-session integration boundary
+
+Both Claude Code and Codex document local `SessionEnd` command hooks. Their hook payloads include a session identifier, working directory, reason, and transcript path. This makes a local end cue technically possible; it does not by itself produce a reviewed outcome summary or authorize saving one. BrainLink must not read transcript contents just because a lifecycle hook supplies a path. The first integration should be opt-in, record only a minimal local cue by default, and ask the AI/user to prepare and confirm a summary through `session_close`. Transcript ingestion would need a separate explicit setting, source-scope checks, secret filtering, and private-by-default storage.
+
+Official references checked 2026-10-24: [Claude Code hooks reference](https://code.claude.com/docs/en/hooks#sessionend) and [Codex hooks documentation](https://learn.chatgpt.com/docs/hooks).
+
+Remaining for the complete product: installable opt-in end hooks, automatic destination recommendation with explainable evidence, source-linked and reversible classification, user correction, live cross-client handoff verification, token/time measurement, and privacy evaluation across personal/company/client fixtures. A lifecycle cue or AI-reported summary alone is not a verified experience or long-term rule.
