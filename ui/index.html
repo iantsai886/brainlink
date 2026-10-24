@@ -867,14 +867,14 @@ document.addEventListener('click', (e) => {
     let recommendation = { vault: null, reason: '', project: null, remember_available: false };
     try { recommendation = await api('POST', '/api/sessions/recommend', { id }); } catch {}
     const initialVault = recommendation.vault || (S.vaults || []).find((v) => v.exists && v.writes !== 'off')?.name || '';
-    let folderInfo = { folders: [], suggested_folder: null, default_folder: '' };
+    let folderInfo = { folders: [], suggested_folder: null, folder_suggestion_source: null, default_folder: '' };
     if (initialVault) try { folderInfo = await api('POST', '/api/sessions/filing-folders', { id, vault: initialVault }); } catch {}
     const folderOptions = (info) => (info.folders || []).map((f) => `<option value="${esc(f.path)}">${esc(f.path || t('sessions.vaultRoot'))}</option>`).join('');
     $('session-detail').innerHTML = `<div class="card"><b>${esc(t('sessions.fileSummary'))}</b><p class="muted">${esc(t('sessions.fileHint'))}</p>
       <label>${esc(t('sessions.destination'))}<select id="session-file-vault">${choices}</select></label>
       ${recommendation.vault ? `<p class="hint">${esc(t('sessions.destinationSuggestion', { vault: recommendation.vault }))}</p>` : `<p class="hint">${esc(t('sessions.noDestinationSuggestion'))}</p>`}
       <label>${esc(t('sessions.folder'))}<select id="session-file-folder">${folderOptions(folderInfo)}</select></label>
-      ${folderInfo.suggested_folder !== null ? `<p class="hint">${esc(t('sessions.folderSuggestion', { folder: folderInfo.suggested_folder || t('sessions.vaultRoot') }))}</p>` : ''}
+      ${folderInfo.suggested_folder !== null ? `<p class="hint">${esc(t(`sessions.folderSuggestion.${folderInfo.folder_suggestion_source}`, { folder: folderInfo.suggested_folder || t('sessions.vaultRoot') }))}</p>` : ''}
       ${recommendation.remember_available ? `<label class="muted" style="display:flex;flex-direction:row;gap:6px;align-items:center"><input type="checkbox" id="session-remember-destination" style="width:auto"><span>${esc(t('sessions.rememberDestinationAndFolder'))}</span></label>` : ''}
       <div class="row"><button class="secondary" data-file-preview="${esc(id)}">${esc(t('sessions.preview'))}</button><button class="primary" data-file-confirm="${esc(id)}" hidden>${esc(t('sessions.savePrivate'))}</button></div>
       <pre id="session-file-preview" style="white-space:pre-wrap;overflow-wrap:anywhere"></pre></div>`;

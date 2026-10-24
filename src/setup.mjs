@@ -496,8 +496,9 @@ export async function startSetup(opts = {}) {
       const session = await sessions.read({ id: b.id, include_private: true });
       const destination = ctx.byName.get(vaultName);
       if (!destination || destination.writes === 'off') throw new Error('Choose a writable destination vault.');
+      const suggestion = await suggestedSessionFolder(ctx, session, vaultName);
       return { folders: await listSessionFilingFolders(ctx, vaultName),
-        suggested_folder: await suggestedSessionFolder(ctx, session, vaultName),
+        suggested_folder: suggestion?.folder ?? null, folder_suggestion_source: suggestion?.source ?? null,
         default_folder: destination.flat ? '' : destination.intake_folder };
     },
     'POST /api/sessions/file': async (b) => {

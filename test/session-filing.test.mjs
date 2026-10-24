@@ -85,16 +85,45 @@ test('destination recommendation uses only an exact saved project choice and wri
 
 test('folder suggestions reuse only an exact project choice that still exists in the chosen vault', async () => {
   const root = await mkdtemp(path.join(tmpdir(), 'bl-filing-folder-route-'));
+  const personal = path.join(root, 'personal');
   await mkdir(path.join(root, 'Projects', 'Northwind'), { recursive: true });
   await mkdir(path.join(root, 'Inbox'), { recursive: true });
-  const cfg = normalize({ vaults: [{ name: 'Company', path: root }], session_filing: {
+  await mkdir(path.join(personal, 'Inbox'), { recursive: true });
+  const cfg = normalize({ vaults: [{ name: 'Company', path: root }, { name: 'Personal', path: personal }], session_filing: {
     projectFolders: { Northwind: { vault: 'Company', folder: 'Projects/Northwind' }, Similar: { vault: 'Company', folder: 'Missing' } },
   } });
   const ctx = createContext(cfg);
-  assert.equal(await suggestedSessionFolder(ctx, { project: 'Northwind' }, 'Company'), 'Projects/Northwind');
+  assert.deepEqual(await suggestedSessionFolder(ctx, { project: 'Northwind' }, 'Company'), {
+    folder: 'Projects/Northwind', source: 'saved', reason: 'Matches your saved choice for this exact project.',
+  });
   assert.equal(await suggestedSessionFolder(ctx, { project: 'Northwind-Other' }, 'Company'), null);
   assert.equal(await suggestedSessionFolder(ctx, { project: 'Northwind' }, 'Personal'), null);
   assert.equal(await suggestedSessionFolder(ctx, { project: 'Similar' }, 'Company'), null);
+});
+
+test('folder suggestion can use a same-vault note explicitly mentioned in the session summary', async () => {
+  const root = await mkdtemp(path.join(tmpdir(), 'bl-filing-content-route-'));
+  await mkdir(path.join(root, 'Projects', 'Bluebird'), { recursive: true });
+  await mkdir(path.join(root, 'Finance'), { recursive: true });
+  await writeFile(path.join(root, 'Projects', 'Bluebird', 'Delivery Plan.md'), 'The Bluebird migration plan tracks staged rollout, test owners, customer communications, rollback criteria, unresolved technical questions and weekly delivery milestones for the fictional project.');
+  await writeFile(path.join(root, 'Finance', 'Private Budget.md'), '---\nprivate: true\n---\nThe Bluebird private budget has a canary-only marker and must never guide recommendations.');
+  const ctx = createContext(normalize({ vaults: [{ name: 'Company', path: root }] }));
+  const suggestion = await suggestedSessionFolder(ctx, { project: 'Bluebird', title: 'Migration update', summary: 'Delivery Plan says the Bluebird rollout remains in review.' }, 'Company');
+  assert.deepEqual(suggestion, {
+    folder: 'Projects/Bluebird', source: 'related_note', reason: 'Matches an existing note mentioned in this session summary.',
+  });
+  assert.doesNotMatch(JSON.stringify(suggestion), /Private Budget|canary-only/);
+});
+
+test('folder suggestion abstains when exact note mentions point to different folders', async () => {
+  const root = await mkdtemp(path.join(tmpdir(), 'bl-filing-content-ambiguous-'));
+  await mkdir(path.join(root, 'Projects', 'Bluebird'), { recursive: true });
+  await mkdir(path.join(root, 'Legal'), { recursive: true });
+  await writeFile(path.join(root, 'Projects', 'Bluebird', 'Delivery Plan.md'), 'The Bluebird migration plan tracks staged rollout, test owners, customer communications, rollback criteria, unresolved technical questions and weekly delivery milestones for the fictional project.');
+  await writeFile(path.join(root, 'Legal', 'Service Contract.md'), 'The fictional Bluebird service contract records the proposed term, review owner, cancellation window, renewal process and open legal questions for the project team.');
+  const ctx = createContext(normalize({ vaults: [{ name: 'Company', path: root }] }));
+  const suggestion = await suggestedSessionFolder(ctx, { project: 'Bluebird', summary: 'Delivery Plan and Service Contract are both under discussion.' }, 'Company');
+  assert.equal(suggestion, null);
 });
 
 test('folder picker excludes hidden, protected and .brainlinkignore folders', async () => {
@@ -151,7 +180,9 @@ test('local filing API requires its token and writes a private note only after c
     assert.equal(written.destination_rule_saved, true);
     assert.match(await readFile(path.join(vault, ...written.path.slice('Company/'.length).split('/')), 'utf8'), /private: true/);
     assert.deepEqual(await recommend(next.id), { vault: 'Company', reason: 'Suggested from your saved choice for this exact project.', project: 'fictional-project', remember_available: true });
-    assert.equal((await folders(next.id, 'Company')).suggested_folder, 'Projects/fictional-project');
+    const folderSuggestion = await folders(next.id, 'Company');
+    assert.equal(folderSuggestion.suggested_folder, 'Projects/fictional-project');
+    assert.equal(folderSuggestion.folder_suggestion_source, 'saved');
     assert.equal((await readdir(path.join(personal, 'Inbox'))).length, 0);
   } finally { app.server.close(); }
 });

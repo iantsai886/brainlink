@@ -54,7 +54,7 @@ BrainLink is the memory, permissions, provenance and handoff layer; AI agents ar
 | Semantic | Durable notes, decisions and linked knowledge | Retrieve concise, cited context |
 | Procedural | Versioned skills, role instructions and repeatable workflows | Reuse validated ways of working |
 
-At session close, BrainLink should prepare a reviewed summary, explain its destination, preserve source links, and let the user correct or withdraw a proposal. RSI may evaluate placement, links, retrieval quality and token/time cost; it must not silently promote uncertain facts, broaden permissions, or change live behavior without validation and rollback.
+At session close, BrainLink should prepare a reviewed summary, explain its destination, preserve source links, and let the user correct or withdraw a proposal. Destination choice should reuse an exact user-approved project route first; otherwise it may suggest a folder from related notes in the explicitly selected vault and abstain when evidence is ambiguous. Saving remains preview-gated. RSI may evaluate placement, links, retrieval quality and token/time cost; it must not silently promote uncertain facts, broaden permissions, or change live behavior without validation and rollback.
 
 ## 4. Core (from vault-agent v0.2, made generic)
 
