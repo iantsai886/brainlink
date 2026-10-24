@@ -46,6 +46,24 @@ test('verified backup restores to an empty folder without touching the original'
   await assert.rejects(restoreBackupToEmpty(made.folder, recovered), /must be empty/);
 });
 
+test('verified backup includes and restores the BrainLink RSI ledger artifact', async () => {
+  const root = await tmp('artifact-source'), dest = await tmp('artifact-backup'), recovered = await tmp('artifact-restore');
+  await writeFile(path.join(root, 'Note.md'), 'fictional note');
+  const result = await backupOnce([{ name: 'Workspace', path: root }], dest, new Date('2026-10-25T00:00:00Z'), [
+    { name: 'rsi/ledger.jsonl', data: Buffer.from('fictional ledger receipt\n') },
+  ]);
+  assert.equal(result.file_count, 2);
+  assert.equal((await verifyBackup(result.folder)).ok, true);
+  const restored = await restoreBackupToEmpty(result.folder, recovered);
+  assert.equal(restored.file_count, 2);
+  assert.equal(await readFile(path.join(recovered, 'BrainLink', 'rsi', 'ledger.jsonl'), 'utf8'), 'fictional ledger receipt\n');
+});
+
+test('backup rejects traversal in extra artifact paths', async () => {
+  const root = await tmp('artifact-traversal-source'), dest = await tmp('artifact-traversal-dest');
+  await assert.rejects(backupOnce([{ name: 'Workspace', path: root }], dest, new Date(), [{ name: '../outside.txt', data: 'blocked' }]), /artifact path/);
+});
+
 test('backup rejects symlinked files when the host permits symlinks', async (t) => {
   const root = await tmp('symlink');
   const dest = await tmp('symlink-destination');

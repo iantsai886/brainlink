@@ -219,6 +219,26 @@ ol.todo li { padding-left: 4px; }
     <div id="handoffs-list" class="cards"></div>
   </section>
 
+  <section id="rsi-panel" hidden>
+    <h2 data-i18n="rsi.title">Improve BrainLink</h2>
+    <p class="hint" data-i18n="rsi.hint">Capture ideas, evidence and experiments. Saving a proposal never changes live behavior.</p>
+    <details class="card" style="margin-bottom:10px"><summary data-i18n="rsi.newIdea">Add an improvement idea</summary>
+      <form id="rsi-idea-form" style="margin-top:10px">
+        <label><span data-i18n="rsi.ideaTitle">Idea</span><input name="title" maxlength="120" required></label>
+        <label><span data-i18n="rsi.problem">User problem</span><textarea name="user_problem" maxlength="1200" required></textarea></label>
+        <label><span data-i18n="rsi.hypothesis">Testable hypothesis (optional)</span><textarea name="hypothesis" maxlength="1200"></textarea></label>
+        <div class="grid2"><label><span data-i18n="rsi.memory">Memory types</span><select name="memory_types" multiple size="4"><option value="working">Working</option><option value="semantic">Semantic</option><option value="procedural">Procedural</option><option value="episodic">Episodic</option></select></label>
+          <label><span data-i18n="rsi.source">Public source URL (optional, HTTPS)</span><input name="source_url" type="url" maxlength="1200" placeholder="https://..."></label></div>
+        <div class="grid2"><label><span data-i18n="rsi.sourceTitle">Source title</span><input name="source_title" maxlength="240"></label><label><span data-i18n="rsi.published">Published date (if known)</span><input name="source_published" type="date"></label></div>
+        <label><span data-i18n="rsi.sourceClaim">What does the source support? (optional)</span><input name="source_claim" maxlength="500"></label>
+        <div class="grid2"><label><span data-i18n="rsi.confidence">Confidence</span><select name="source_confidence"><option value="">Not assessed</option><option>high</option><option>medium</option><option>low</option></select></label><label><span data-i18n="rsi.limitations">Source limitations</span><input name="source_limitations" maxlength="500"></label></div>
+        <p class="muted" data-i18n="rsi.localPrivacy">Stored locally in BrainLink app data. Do not enter customer details, private notes, or secrets.</p>
+        <button class="primary" type="submit" data-i18n="rsi.save">Save idea</button>
+      </form>
+    </details>
+    <div id="rsi-ideas" class="cards" aria-live="polite"></div>
+  </section>
+
   <details class="settings" id="settings"><summary data-i18n="settings.summary"></summary><div>
   <section id="s-vault">
     <h2><span class="step" id="n1">1</span> <span data-i18n="vault.step1Title"></span></h2>
@@ -505,6 +525,42 @@ async function loadHandoffs() {
     if (r.enabled) renderHandoffs(r.receipts);
   } catch (e) { $('handoffs-list').innerHTML = `<p class="error-box">${esc(t('handoffs.loadError', { msg: e.message }))}</p>`; }
 }
+
+async function loadRsi() {
+  const response = await api('GET', '/api/rsi'), ideas = response.ideas || [];
+  const transitions = { discovered: ['triaged', 'rejected', 'deferred'], triaged: ['researching', 'proposed', 'rejected', 'deferred'], researching: ['proposed', 'rejected', 'deferred'], proposed: ['testing', 'rejected', 'deferred'], testing: ['review', 'rejected', 'deferred'], review: ['accepted', 'rejected', 'testing', 'deferred'], accepted: ['rolled_back'], rejected: [], deferred: ['triaged', 'rejected'], rolled_back: ['testing', 'rejected'] };
+  if (!ideas.length) { $('rsi-ideas').innerHTML = '<p class="muted">' + esc(t('rsi.empty')) + '</p>'; return; }
+  $('rsi-ideas').innerHTML = ideas.map((idea) => {
+    const f = idea.fields, sources = (f.sources || []).map(s => '<b>' + esc(s.title || s.url) + '</b> <a href="' + esc(s.url) + '" target="_blank" rel="noopener noreferrer">' + esc(t('rsi.openSource')) + '</a>' + (s.published_at ? ' · ' + esc(t('rsi.publishedShort')) + ' ' + esc(s.published_at) : '') + (s.accessed_at ? ' · ' + esc(t('rsi.accessed')) + ' ' + esc(s.accessed_at) : '') + (s.confidence ? ' · ' + esc(s.confidence) + ' ' + esc(t('rsi.confidenceShort')) : '') + (s.claim ? '<br>' + esc(s.claim) : '') + (s.limitations ? '<br>' + esc(t('rsi.limitations')) + ': ' + esc(s.limitations) : '')).join('<br>');
+    const history = idea.history.map(h => '<li>' + esc(h.status) + ' · ' + esc(new Date(h.at).toLocaleString(LOCALE)) + (h.note ? ' — ' + esc(h.note) : '') + '</li>').join('');
+    const options = (transitions[idea.status] || []).map(s => '<option value="' + esc(s) + '">' + esc(t('rsi.status.' + s)) + '</option>').join('');
+    const evidence = '<div class="grid2"><label>' + esc(t('rsi.baselineVersion')) + '<input data-rsi-field="baseline_version" value="' + esc(f.baseline_version || '') + '"></label><label>' + esc(t('rsi.candidateVersion')) + '<input data-rsi-field="candidate_version" value="' + esc(f.candidate_version || '') + '"></label><label>' + esc(t('rsi.testSetVersion')) + '<input data-rsi-field="test_set_version" value="' + esc(f.test_set_version || '') + '"></label><label>' + esc(t('rsi.reviewer')) + '<input data-rsi-field="reviewer" value="' + esc(f.reviewer || '') + '"></label></div><label>' + esc(t('rsi.results')) + '<textarea data-rsi-field="results">' + esc(f.results || '') + '</textarea></label><label>' + esc(t('rsi.metrics')) + '<textarea data-rsi-field="metrics">' + esc((f.metrics || []).join('\n')) + '</textarea></label><label>' + esc(t('rsi.guardrails')) + '<textarea data-rsi-field="guardrails">' + esc((f.guardrails || []).join('\n')) + '</textarea></label><label>' + esc(t('rsi.rationale')) + '<textarea data-rsi-field="decision_and_reason">' + esc(f.decision_and_reason || '') + '</textarea></label><label>' + esc(t('rsi.rollback')) + '<textarea data-rsi-field="rollback">' + esc(f.rollback || '') + '</textarea></label>';
+    return '<article class="card" data-rsi-id="' + esc(idea.id) + '" data-rsi-revision="' + idea.revision + '"><div class="row" style="justify-content:space-between"><b>' + esc(f.title) + '</b><span class="pill">' + esc(t('rsi.status.' + idea.status)) + '</span></div><p>' + esc(f.user_problem) + '</p>' + (f.hypothesis ? '<p><b>' + esc(t('rsi.hypothesisShort')) + ':</b> ' + esc(f.hypothesis) + '</p>' : '') + (sources ? '<p class="muted">' + sources + '</p>' : '') + '<div class="row muted" style="font-size:13px">' + esc((f.memory_types || []).map(x => t('twinProfiles.memory.' + x)).join(', ') || '—') + ' · ' + esc(t('rsi.updated')) + ' ' + esc(new Date(idea.updated_at).toLocaleString(LOCALE)) + '</div><details style="margin-top:8px"><summary>' + esc(t('rsi.evidenceHistory')) + '</summary>' + evidence + '<ol>' + history + '</ol>' + (options ? '<div class="row"><select data-rsi-next>' + options + '</select><input data-rsi-note maxlength="500" placeholder="' + esc(t('rsi.statusNote')) + '"><button data-rsi-update>' + esc(t('rsi.update')) + '</button></div>' : '') + '</details></article>';
+  }).join('');
+}
+
+$('rsi-idea-form').addEventListener('submit', (e) => act(async () => {
+  e.preventDefault();
+  const form = e.currentTarget, data = new FormData(form), sourceUrl = String(data.get('source_url') || '').trim();
+  const sources = sourceUrl ? [{ url: sourceUrl, title: String(data.get('source_title') || ''), published_at: String(data.get('source_published') || ''), accessed_at: new Date().toISOString(), claim: String(data.get('source_claim') || ''), confidence: String(data.get('source_confidence') || ''), limitations: String(data.get('source_limitations') || '') }] : [];
+  await api('POST', '/api/rsi/ideas', { title: String(data.get('title')), user_problem: String(data.get('user_problem')), hypothesis: String(data.get('hypothesis') || ''), memory_types: [...form.querySelector('[name="memory_types"]').selectedOptions].map(x => x.value), sources });
+  form.reset(); await loadRsi(); toast(t('rsi.saved'));
+}));
+document.addEventListener('click', (e) => {
+  const button = e.target.closest('[data-rsi-update]'); if (!button) return;
+  act(async () => {
+    const card = button.closest('[data-rsi-id]');
+    const fields = {};
+    for (const input of card.querySelectorAll('[data-rsi-field]')) {
+      const key = input.dataset.rsiField;
+      if (key === 'metrics' || key === 'guardrails') fields[key] = input.value.split(/\r?\n/).map(s => s.trim()).filter(Boolean);
+      else if (input.value.trim()) fields[key] = input.value.trim();
+    }
+    await api('POST', '/api/rsi/ideas/update', { id: card.dataset.rsiId, expected_revision: Number(card.dataset.rsiRevision), status: card.querySelector('[data-rsi-next]').value, note: card.querySelector('[data-rsi-note]').value, fields });
+    await loadRsi(); toast(t('rsi.updatedToast'));
+  });
+});
+
 function renderHandoffs(list) {
   if (!list.length) { $('handoffs-list').innerHTML = `<p class="muted">${esc(t('handoffs.empty'))}</p>`; return; }
   $('handoffs-list').innerHTML = list.map((h) => `<div class="card">
@@ -776,6 +832,8 @@ async function load() {
   if (hasVault && !onboardingSync) loadSessions().catch(() => {});
   $('handoffs-panel').hidden = !hasVault || onboardingSync;
   if (hasVault && !onboardingSync) loadHandoffs().catch(() => {});
+  $('rsi-panel').hidden = !hasVault || onboardingSync;
+  if (hasVault && !onboardingSync) loadRsi().catch(e => { $('rsi-ideas').innerHTML = '<p class="error-box">' + esc(e.message) + '</p>'; });
   $('cfgpath').textContent = S.config_path;
   $('n1').className = 'step' + (S.vaults.length ? ' done' : '');
   $('vaults').innerHTML = S.vaults.length ? S.vaults.map((v, i) => `<div class="card"><div class="row" style="justify-content:space-between"><b>${esc(v.name)}</b><span class="pill ${v.exists ? 'on' : ''}">${v.exists ? esc(t('vault.notesCount', { n: v.notes })) : esc(t('vault.missing'))}</span></div><div class="mono muted">${esc(v.path)}</div><div class="row muted" style="font-size:13px">${v.private ? esc(t('vault.privateShort')) + ' · ' : ''}${esc(t('vault.writes'))}: ${esc(v.writes)} · ${esc(t('vault.intake'))}: ${esc(v.flat ? 'root' : v.intake_folder)}${v.decisions.length ? ' · ' + esc(t('vault.decisions')) + ' ' + esc(v.decisions.join('/')) : ''}<button class="link" data-remove="${esc(v.name)}">${esc(t('vault.removeBtn'))}</button></div>

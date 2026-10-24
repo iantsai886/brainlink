@@ -1,7 +1,7 @@
 // Setup UI backend: a local-only web app (127.0.0.1, random session token) that picks the
 // vault folder, applies a rule pack and connects AI clients.
 import { createServer } from 'node:http';
-import { readFile, stat, cp, mkdir, writeFile } from 'node:fs/promises';
+import { readFile, stat, lstat, cp, mkdir, writeFile } from 'node:fs/promises';
 import { randomBytes, timingSafeEqual } from 'node:crypto';
 import { execFile } from 'node:child_process';
 import { homedir } from 'node:os';
@@ -32,6 +32,7 @@ import { listSessionEndCues, dismissSessionEndCue, sessionEndCueId } from './ses
 import { listSessionFilingFolders, suggestedSessionFolder } from './sessions/folders.mjs';
 import { sessionHookStatus, setSessionHook } from './sessions/hooks.mjs';
 import { twinProfileStatus } from './twin-profiles.mjs';
+import { createRsiLedger } from './rsi-ledger.mjs';
 
 const UI_STATIC_TYPES = { '.js': 'text/javascript; charset=utf-8', '.css': 'text/css; charset=utf-8', '.json': 'application/json; charset=utf-8' };
 const UI_DIR = path.join(ROOT, 'ui');
@@ -89,6 +90,7 @@ export async function startSetup(opts = {}) {
   const pickBackupFolder = opts.pickBackupFolder || (() => pickFolder(os, 'Choose a private backup destination'));
   const clientOpts = () => ({ home, os, env, launch: launchSpec(env), useCli: opts.useCli });
   const sessions = sessionsService(env); // src/host.mjs: cross-session reads over src/sessions/* (importAll, session_list/read semantics)
+  const rsiLedger = createRsiLedger({ home: appHome(env) });
   const html = await readFile(path.join(ROOT, 'ui', 'index.html'), 'utf8');
   let port = opts.port ?? 0;
   // When started from the app (no terminal), exit after idleMinutes without requests. Closing
@@ -113,12 +115,20 @@ export async function startSetup(opts = {}) {
   let backupRunning = false;
   let backupTickRunning = false;
   let backupStatus = await loadBackupStatus(backupStateFile);
+  async function rsiBackupArtifacts() {
+    // Validate the append-only journal before including it in an otherwise verified vault backup.
+    await rsiLedger.list();
+    const st = await lstat(rsiLedger.file).catch((e) => e.code === 'ENOENT' ? null : Promise.reject(e));
+    if (!st) return [];
+    if (!st.isFile() || st.isSymbolicLink()) throw new Error('RSI ledger backup refused: expected a regular local file.');
+    return [{ name: 'rsi/ledger.jsonl', data: await readFile(rsiLedger.file) }];
+  }
   async function runBackup(cfg) {
     if (backupRunning) throw new Error('A backup is already running.');
     if (!cfg.backup?.folder) throw new Error('Choose a backup destination first.');
     backupRunning = true;
     try {
-      const result = await backupOnce(cfg.vaults, cfg.backup.folder);
+      const result = await backupOnce(cfg.vaults, cfg.backup.folder, new Date(), await rsiBackupArtifacts());
       const check = await verifyBackup(result.folder);
       if (!check.ok) throw new Error(`Backup verification failed: ${check.errors.join('; ')}`);
       backupStatus = { ok: true, ...result, at: new Date().toISOString() };
@@ -315,6 +325,9 @@ export async function startSetup(opts = {}) {
 
   const routes = {
     'GET /api/state': () => state(),
+    'GET /api/rsi': async () => ({ ideas: await rsiLedger.list() }),
+    'POST /api/rsi/ideas': async (b) => ({ idea: await rsiLedger.create(b) }),
+    'POST /api/rsi/ideas/update': async (b) => ({ idea: await rsiLedger.update(b) }),
     'POST /api/pick-folder': async () => { const p = await pick(); return p === undefined ? { path: null, unavailable: true } : { path: p }; },
     'POST /api/quick': (b) => quickStart(b),
     'POST /api/graph': async (b) => {

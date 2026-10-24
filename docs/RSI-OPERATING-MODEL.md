@@ -1,6 +1,6 @@
 # BrainLink Recursive Improvement System
 
-Status: product requirement and governed operating design; continuous discovery runtime is not implemented.
+Status: product requirement and governed operating design; local proposal ledger implemented; continuous discovery runtime is not implemented.
 Date: 2026-10-25 Asia/Taipei.
 
 ## Product commitment
@@ -90,13 +90,15 @@ Autonomy is configured by operation and data scope, not by a single “RSI on”
 
 ## Current implementation boundary
 
-BrainLink currently includes read-only retrieval and session-filing evaluators. They compare bounded candidates and block review for insufficient cases or privacy violations; they do not change live behavior. Their present fictional development sets and author-run outcomes are not independent or production validation. There is no verified continuous research scheduler, general-purpose idea ledger UI, autonomous experiment orchestrator, or recursive-gain receipt. Do not describe those as implemented.
+BrainLink currently includes read-only retrieval and session-filing evaluators. They compare bounded candidates and block review for insufficient cases or privacy violations; they do not change live behavior. Their present fictional development sets and author-run outcomes are not independent or production validation. A local proposal ledger UI now exists, but there is no verified continuous research scheduler, proposal deduplication, autonomous experiment orchestrator, or recursive-gain receipt. Do not describe those as implemented.
 
-Recommended delivery path: make the idea/experiment ledger and source-backed review queue the first RSI product surface; then add opt-in discovery scheduling; then sandbox execution and post-promotion monitoring. Each stage must be testable and usable independently. Until scheduling and collection exist in code, “continuous” is a product requirement and operating design, not a live background process.
+The first source-backed proposal ledger is now implemented in Setup. It is local to the BrainLink app data directory, uses an append-only hash-linked journal, enforces revision checks and a bounded status lifecycle, and requires evidence/reviewer/rollback fields before acceptance. The ledger is included in the existing verified backup and restore output. This is a local proposal/review surface only: it does not discover sources automatically, execute experiments, or promote code or knowledge.
+
+Next delivery stages: add opt-in discovery scheduling with source freshness and pause controls; add isolated experiment execution and comparable evaluation receipts; then add post-promotion monitoring and regression rollback. Each stage must be testable and usable independently. Until a scheduler and collection mechanism exist in code, “continuous” remains a product requirement, not a live background process.
 
 ## Acceptance gates
 
-1. A user can see why an idea was proposed, its evidence, date, confidence, scope, and status.
+1. A user can see why an idea was proposed, its evidence, date, confidence, scope, and status. (The local ledger now implements the proposal, source URL/claim, memory tags, and review lifecycle foundation.)
 2. The same idea is deduplicated or linked instead of repeatedly rediscovered.
 3. A proposal can be rejected, deferred, tested in isolation, accepted, and rolled back with an audit trail.
 4. The evaluation distinguishes first-order from recursive improvement and labels missing measurements as unknown.

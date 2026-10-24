@@ -1,0 +1,98 @@
+import test from 'node:test';
+import assert from 'node:assert/strict';
+import { mkdtemp, readFile, writeFile } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import path from 'node:path';
+import { createRsiLedger } from '../src/rsi-ledger.mjs';
+import { startSetup } from '../src/setup.mjs';
+
+const temp = (prefix) => mkdtemp(path.join(tmpdir(), 'brainlink-rsi-' + prefix + '-'));
+const validIdea = { title: 'Improve handoff context', user_problem: 'Agents repeat searches after handoff.', hypothesis: 'A source-linked compact packet will reduce redundant reads without reducing task success.', memory_types: ['working', 'episodic'], sources: [{ url: 'https://example.org/research', accessed_at: '2026-10-25', claim: 'Study motivates a test, not proof for BrainLink.' }] };
+
+test('RSI ledger appends proposals, enforces transitions and optimistic revisions', async () => {
+  const ledger = createRsiLedger({ home: await temp('unit'), now: () => new Date('2026-10-25T00:00:00.000Z') });
+  const idea = await ledger.create(validIdea);
+  assert.equal(idea.status, 'discovered');
+  assert.equal(idea.revision, 1);
+  await assert.rejects(ledger.update({ id: idea.id, expected_revision: 1, status: 'accepted' }), /cannot move/);
+  const triaged = await ledger.update({ id: idea.id, expected_revision: 1, status: 'triaged', note: 'Relevant to continuity.' });
+  assert.equal(triaged.revision, 2);
+  await assert.rejects(ledger.update({ id: idea.id, expected_revision: 1, status: 'researching' }), /changed/);
+  await assert.rejects(ledger.update({ id: idea.id, expected_revision: 2, status: 'testing' }), /cannot move/);
+  const researching = await ledger.update({ id: idea.id, expected_revision: 2, status: 'researching' });
+  assert.equal(researching.status, 'researching');
+  assert.equal(researching.history.length, 3);
+  assert.equal((await readFile(ledger.file, 'utf8')).trim().split(/\r?\n/).length, 3);
+});
+
+test('RSI acceptance requires recorded experiment evidence, reviewer and rollback', async () => {
+  const ledger = createRsiLedger({ home: await temp('accept') });
+  const idea = await ledger.create(validIdea);
+  let current = idea;
+  for (const status of ['triaged', 'proposed', 'testing', 'review']) current = await ledger.update({ id: idea.id, expected_revision: current.revision, status });
+  await assert.rejects(ledger.update({ id: idea.id, expected_revision: current.revision, status: 'accepted' }), /requires baseline/);
+  const accepted = await ledger.update({ id: idea.id, expected_revision: current.revision, status: 'accepted', fields: {
+    baseline_version: 'commit:base123', candidate_version: 'commit:abc123', test_set_version: 'fictional-v1', results: 'Task success held; measured read count fell in this fixture.', metrics: ['task success: unchanged', 'reads: lower'], guardrails: ['no privacy leak'], reviewer: 'Independent reviewer', decision_and_reason: 'Accept within stated fixture limits.', rollback: 'Revert commit abc123.',
+  } });
+  assert.equal(accepted.status, 'accepted');
+  await assert.rejects(ledger.update({ id: idea.id, expected_revision: accepted.revision, status: 'rolled_back' }), /why/);
+  const rolledBack = await ledger.update({ id: idea.id, expected_revision: accepted.revision, status: 'rolled_back', note: 'Regression in a fresh test set.' });
+  assert.equal(rolledBack.status, 'rolled_back');
+});
+
+test('RSI ledger rejects secret-bearing text and non-public source URLs', async () => {
+  const ledger = createRsiLedger({ home: await temp('reject') });
+  await assert.rejects(ledger.create({ ...validIdea, user_problem: 'API key: sk-test-123456789012345678901234' }), /secret/i);
+  await assert.rejects(ledger.create({ ...validIdea, sources: [{ url: 'http://127.0.0.1/private' }] }), /HTTPS/);
+  await assert.rejects(ledger.create({ ...validIdea, sources: [{ url: 'https://192.168.1.10/research' }] }), /public HTTPS/);
+  await assert.rejects(ledger.create({ ...validIdea, sources: [{ url: 'https://example.org/research', confidence: 'certain' }] }), /confidence/);
+  await assert.rejects(ledger.create({ ...validIdea, sources: [{ url: 'https://example.org/research', published_at: 'yesterday' }] }), /YYYY-MM-DD/);
+  await assert.rejects(ledger.create({ ...validIdea, memory_types: ['private'] }), /memory_types/);
+  assert.deepEqual(await ledger.list(), []);
+});
+
+test('RSI ledger detects tampering and fails closed', async () => {
+  const ledger = createRsiLedger({ home: await temp('tamper') });
+  await ledger.create(validIdea);
+  const original = await readFile(ledger.file, 'utf8');
+  await writeFile(ledger.file, original.replace('Improve handoff context', 'Altered handoff context'));
+  await assert.rejects(ledger.list(), /integrity check failed/);
+});
+
+test('separate BrainLink instances serialize writes to one RSI journal', async () => {
+  const home = await temp('multi-instance');
+  const first = createRsiLedger({ home }), second = createRsiLedger({ home });
+  const [a, b] = await Promise.all([first.create(validIdea), second.create({ ...validIdea, title: 'Track source freshness' })]);
+  assert.notEqual(a.id, b.id);
+  const listed = await Promise.all([first.list(), second.list()]);
+  assert.equal(listed[0].length, 2);
+  assert.equal(listed[1].length, 2);
+  assert.deepEqual(new Set(listed[0].map(x => x.id)), new Set([a.id, b.id]));
+});
+
+test('RSI Setup panel has unique ids and one render/submit path', async () => {
+  const html = await readFile(new URL('../ui/index.html', import.meta.url), 'utf8');
+  assert.equal((html.match(/id="rsi-panel"/g) || []).length, 1);
+  assert.equal((html.match(/id="rsi-idea-form"/g) || []).length, 1);
+  assert.equal((html.match(/async function loadRsi\(\)/g) || []).length, 1);
+  const scripts = [...html.matchAll(/<script>([\s\S]*?)<\/script>/g)];
+  assert.ok(scripts.length);
+  assert.doesNotThrow(() => new Function(scripts.at(-1)[1]));
+});
+
+test('Setup exposes the RSI ledger only through authenticated local APIs', async () => {
+  const home = await temp('api'), env = { BRAINLINK_HOME: path.join(home, 'app'), BRAINLINK_SEMANTIC: '0' };
+  const app = await startSetup({ env, home, os: 'linux', port: 0, useCli: false });
+  const base = 'http://127.0.0.1:' + app.port;
+  const post = (route, body, token = app.token) => fetch(base + route, { method: 'POST', headers: { 'Content-Type': 'application/json', 'X-BrainLink-Token': token }, body: JSON.stringify(body) });
+  try {
+    assert.equal((await post('/api/rsi/ideas', validIdea, 'wrong-token')).status, 401);
+    const created = await post('/api/rsi/ideas', validIdea).then(r => r.json());
+    assert.equal(created.idea.status, 'discovered');
+    assert.equal((await fetch(base + '/api/rsi', { headers: { 'X-BrainLink-Token': 'wrong-token' } })).status, 401);
+    const listed = await fetch(base + '/api/rsi', { headers: { 'X-BrainLink-Token': app.token } }).then(r => r.json());
+    assert.equal(listed.ideas.length, 1);
+    const bad = await post('/api/rsi/ideas/update', { id: created.idea.id, expected_revision: 1, status: 'accepted' }).then(r => r.json());
+    assert.match(bad.error, /cannot move/);
+  } finally { app.server.close(); }
+});

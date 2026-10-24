@@ -52,7 +52,7 @@ async function filesUnder(root, dir = root, out = []) {
   return out;
 }
 
-export async function backupOnce(vaults, destination, now = new Date()) {
+export async function backupOnce(vaults, destination, now = new Date(), artifacts = []) {
   if (!Array.isArray(vaults) || !vaults.length) throw new Error('Choose at least one vault to back up.');
   if (!destination || !path.isAbsolute(destination)) throw new Error('Choose an absolute backup destination.');
   const destStat = await lstat(destination);
@@ -70,7 +70,12 @@ export async function backupOnce(vaults, destination, now = new Date()) {
   const stamp = now.toISOString().replace(/[:.]/g, '-');
   const backupDir = path.join(dest, `BrainLink-Backup-${stamp}-${randomBytes(4).toString('hex')}`);
   await mkdir(backupDir);
-  const manifest = { format: 'brainlink-backup-v1', created_at: now.toISOString(), vaults: [], files: [] };
+  if (!Array.isArray(artifacts) || artifacts.length > 50) throw new Error('Backup artifacts must be a list of at most 50 files.');
+  for (const artifact of artifacts) {
+    const name = String(artifact?.name || '');
+    if (!/^[a-zA-Z0-9_-]+(?:\/[a-zA-Z0-9_.-]+)*$/.test(name) || name.split('/').some(part => part === '.' || part === '..')) throw new Error('Invalid backup artifact path.');
+  }
+  const manifest = { format: 'brainlink-backup-v1', created_at: now.toISOString(), vaults: [], files: [], artifacts: [] };
   for (const [index, v] of roots.entries()) {
     const folder = `${index + 1}-${safeName(v.name)}`;
     manifest.vaults.push({ name: v.name, folder });
@@ -82,8 +87,18 @@ export async function backupOnce(vaults, destination, now = new Date()) {
       manifest.files.push({ vault: v.name, path: file.rel, bytes: data.length, sha256: hash(data), stored: `vaults/${folder}/${file.rel}` });
     }
   }
+  for (const artifact of artifacts) {
+    const name = String(artifact?.name || '');
+    const data = Buffer.isBuffer(artifact.data) ? artifact.data : Buffer.from(String(artifact.data ?? ''));
+    const stored = 'artifacts/' + name;
+    const target = path.resolve(backupDir, ...stored.split('/'));
+    if (!within(backupDir, target)) throw new Error('Invalid backup artifact path.');
+    await mkdir(path.dirname(target), { recursive: true });
+    await writeFile(target, data, { flag: 'wx' });
+    manifest.artifacts.push({ path: name, bytes: data.length, sha256: hash(data), stored });
+  }
   await writeFile(path.join(backupDir, 'manifest.json'), JSON.stringify(manifest, null, 2) + '\n', { flag: 'wx' });
-  return { folder: backupDir, vault_count: manifest.vaults.length, file_count: manifest.files.length };
+  return { folder: backupDir, vault_count: manifest.vaults.length, file_count: manifest.files.length + manifest.artifacts.length };
 }
 
 export async function verifyBackup(backupDir) {
@@ -105,7 +120,18 @@ export async function verifyBackup(backupDir) {
       if (data.length !== file.bytes || hash(data) !== file.sha256) errors.push(`Hash mismatch: ${file.stored}`);
     } catch { errors.push(`Missing file: ${file.stored}`); }
   }
-  return { ok: errors.length === 0, vault_count: manifest.vaults.length, file_count: manifest.files.length, errors };
+  for (const artifact of manifest.artifacts || []) {
+    if (typeof artifact.path !== 'string' || artifact.path.split('/').some(part => !part || part === '.' || part === '..' || part.includes('\\')) || artifact.stored !== 'artifacts/' + artifact.path) { errors.push('Invalid backup artifact path'); continue; }
+    const full = path.resolve(root, ...artifact.stored.split('/'));
+    if (!within(root, full)) { errors.push('Invalid backup artifact path'); continue; }
+    try {
+      const st = await lstat(full);
+      if (!st.isFile() || st.isSymbolicLink() || !within(root, await realpath(full))) { errors.push('Unsafe backup artifact'); continue; }
+      const data = await readFile(full);
+      if (data.length !== artifact.bytes || hash(data) !== artifact.sha256) errors.push('Backup artifact hash mismatch: ' + artifact.path);
+    } catch { errors.push('Missing backup artifact: ' + artifact.path); }
+  }
+  return { ok: errors.length === 0, vault_count: manifest.vaults.length, file_count: manifest.files.length + (manifest.artifacts || []).length, errors };
 }
 
 // Recovery is deliberately constrained to a new empty directory. Never restore in place or
@@ -132,9 +158,18 @@ export async function restoreBackupToEmpty(backupDir, destination) {
     const expected = `vaults/${folder}/${file.path}`;
     if (file.stored !== expected) throw new Error('Backup file mapping does not match its vault.');
   }
+  for (const artifact of manifest.artifacts || []) {
+    if (typeof artifact.path !== 'string' || artifact.path.split('/').some(part => !part || part === '.' || part === '..' || part.includes('\\')) || artifact.stored !== 'artifacts/' + artifact.path) throw new Error('Invalid backup artifact mapping.');
+  }
   for (const file of manifest.files) {
     const data = await readFile(path.join(source, ...file.stored.split('/')));
     const target = path.join(targetRoot, folders.get(file.vault), ...file.path.split('/'));
+    await mkdir(path.dirname(target), { recursive: true });
+    await writeFile(target, data, { flag: 'wx' });
+  }
+  for (const artifact of manifest.artifacts || []) {
+    const data = await readFile(path.join(source, ...artifact.stored.split('/')));
+    const target = path.join(targetRoot, 'BrainLink', ...artifact.path.split('/'));
     await mkdir(path.dirname(target), { recursive: true });
     await writeFile(target, data, { flag: 'wx' });
   }
