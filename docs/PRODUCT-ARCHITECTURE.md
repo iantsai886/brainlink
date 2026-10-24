@@ -55,12 +55,15 @@ The customer sees one natural vault experience; the four types are an internal r
 - Skills: a portable Agent Skills-format cross-AI handoff workflow is now versioned in Git, with Iango registry metadata and matching Claude Code / Codex discovery copies. Codex CLI discovery is verified; Claude Code CLI is unavailable for local verification. See `skills/README.md`.
 - Backup and Restore: scheduled user-selected destination, integrity check, retention, restore preview, clean-folder drill, and rollback.
 - Improve / RSI: experiment proposals, frozen baseline, fresh cases, costs, failures, reviewer, promotion, and rollback.
+- RSI must continuously discover and assess ideas from privacy-safe product signals, user feedback, and dated external research. Discovery, proposals, evaluation, and promotion are separate states; the first RSI release needs an attributable idea/experiment ledger. The operating model and honest runtime boundary are in `docs/RSI-OPERATING-MODEL.md`.
 - Activity and Audit: privacy-safe event trail, exportable diagnostics, and clear data-flow display.
 - Desktop Shell: one-click launch, background service status, single instance, recovery, update, uninstall-with-data-preserved.
 
 ## Acceptance gates
 
 No capability is called complete until it is separately labelled design, implemented, locally tested, cross-client tested, and ready for use. Release requires clean install, upgrade, rollback, backup/restore drill, permission-leak tests, accessibility review, large-vault performance checks, and user task testing.
+
+RSI also has its own gates: source provenance and freshness; deduplication; a falsifiable user outcome; baseline and fresh cases; task-quality, privacy, reliability and cost guardrails; review; reversible promotion; and post-change monitoring. Claims of recursive gain require evidence that the improvement method itself improves downstream experiments.
 
 ## First complete validation fixture
 
