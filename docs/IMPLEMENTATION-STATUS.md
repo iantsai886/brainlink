@@ -1,10 +1,11 @@
 # BrainLink implementation status
 
-Status snapshot: 2026-10-24 (Asia/Taipei)  
-GitHub repository: `iantsai886/brainlink`  
-Branch: `fix/private-session-excerpts`  
-Code baseline: `41dbed4`  
-Validation environment: Windows, Node.js 24; `npm test`: 231 tests, 225 passed, 0 failed, 6 skipped.
+Status snapshot: 2026-10-24 (Asia/Taipei)
+GitHub repository: `iantsai886/brainlink`
+Branch: `fix/private-session-excerpts`
+Code baseline: `464e1d5` plus the Agent Skill change set in this branch update
+Validation environment: Windows, Node.js 24; `npm test`: 232 tests, 226 passed, 0 failed, 6 skipped.
+Client discovery: Codex CLI `0.164.0-alpha.11.1` found the repository skill in `codex debug prompt-input`; Claude Code CLI is not installed here.
 
 This is an evidence ledger, not a release-readiness claim. “Implemented and locally tested” does not imply packaged, cross-client validated, or ready for customers.
 
@@ -14,7 +15,7 @@ This is an evidence ledger, not a release-readiness claim. “Implemented and lo
 |---|---|---|
 | Working memory | Imported Claude Code and Codex sessions, private session logging, bounded `session_read`, handoff mailbox and explicit close operation. | `docs/SESSION-INDEX.md`, `docs/STRUCTURED-HANDOFF.md`, `docs/SESSION-FILING.md`. Local tests cover scopes and privacy. No universal end-of-session detector or real Claude Code ↔ Codex continuation receipt yet. |
 | Semantic memory | Markdown/Obsidian notes, multi-vault lexical search, optional local semantic search, links/graph, provenance-aware proposed notes, permission filtering before indexing and retrieval. | `src/core.mjs`, `docs/RETRIEVAL-EVAL.md`; privacy canary tests pass. Verified fact promotion and independent held-out quality evaluation remain incomplete. |
-| Procedural memory | Configurable agent roles, rule packs, prompts and shared commands. | These are not yet a portable, versioned Agent Skill catalog with compatibility metadata and per-skill tests. `docs/PRODUCT-ARCHITECTURE.md` describes the intended Git-based skill system. |
+| Procedural memory | Configurable agent roles, rule packs, prompts, shared commands, and a versioned Agent Skills-format cross-AI handoff workflow. | `.agents/skills/brainlink-cross-ai-handoff/SKILL.md` and `.claude/skills/brainlink-cross-ai-handoff/SKILL.md` are byte-identical copies of `skills/brainlink-cross-ai-handoff/SKILL.md`. `test/skills.test.mjs` checks manifest fields, registry metadata, safety instructions, and parity. Codex CLI repository discovery is verified; Claude Code CLI is unavailable, and live two-client handoff remains unverified. |
 | Episodic memory | Private imported sessions; `session_close` creates a private session and proposed note; the local UI can preview and file summaries. Exact project-to-vault destinations can be remembered after user confirmation. | `docs/SESSION-FILING.md`; fictional vault tests cover privacy and routing. Session capture still depends on a supported importer or an AI/client call; summaries are reported, not verified knowledge. |
 | Context efficiency | Summary-first session reads, token estimates, bounded retrieval evaluator and compact tool interfaces. | `docs/SESSION-INDEX.md`, `docs/RETRIEVAL-EVAL.md`. Estimates do not prove provider-billed token savings or equal task quality. |
 | RSI | Read-only evaluator compares a baseline with query variants; it blocks promotion with too few cases or privacy violations and never changes live ranking automatically. | `docs/RETRIEVAL-EVAL.md`. A production RSI loop still needs frozen independent datasets, human review, rollback and post-promotion monitoring. |

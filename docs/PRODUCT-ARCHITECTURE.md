@@ -52,7 +52,7 @@ The customer sees one natural vault experience; the four types are an internal r
 - Memory Pipeline: extraction, classification, destination proposal, provenance, links, approval, and versioning.
 - Context Packets: compact citations-first packets with freshness, confidence, exclusions, and full-source fallback.
 - Graph and Navigation: clickable source-backed relationships with list/search/edit alternatives; 3D is optional.
-- Skills: portable Agent Skills in Git with registry metadata, tests, compatible clients, and rollback.
+- Skills: a portable Agent Skills-format cross-AI handoff workflow is now versioned in Git, with Iango registry metadata and matching Claude Code / Codex discovery copies. Codex CLI discovery is verified; Claude Code CLI is unavailable for local verification. See `skills/README.md`.
 - Backup and Restore: scheduled user-selected destination, integrity check, retention, restore preview, clean-folder drill, and rollback.
 - Improve / RSI: experiment proposals, frozen baseline, fresh cases, costs, failures, reviewer, promotion, and rollback.
 - Activity and Audit: privacy-safe event trail, exportable diagnostics, and clear data-flow display.
