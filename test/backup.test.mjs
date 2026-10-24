@@ -59,6 +59,17 @@ test('backup rejects symlinked files when the host permits symlinks', async (t) 
   await assert.rejects(backupOnce([{ name: 'Personal', path: root }], dest), /symbolic link/);
 });
 
+test('overlapping config saves use distinct atomic temp files', async () => {
+  const home = await tmp('config-concurrent');
+  const file = path.join(home, 'config.json');
+  await Promise.all(Array.from({ length: 12 }, (_, i) => saveConfig(normalize({
+    locale: i % 2 ? 'en' : 'zh-TW', vaults: [{ name: `Vault ${i}`, path: path.join(home, `vault-${i}`) }],
+  }), file)));
+  const saved = JSON.parse(await readFile(file, 'utf8'));
+  assert.match(saved.vaults[0].name, /^Vault \d+$/);
+  assert.deepEqual((await readdir(home)).filter((name) => name.includes('.tmp-')), []);
+});
+
 test('authenticated Setup enables scheduled backup only after a verified first copy', async () => {
   const root = await tmp('api-source');
   const dest = await tmp('api-destination');

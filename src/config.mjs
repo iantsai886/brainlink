@@ -1,8 +1,10 @@
 // Customer configuration: vaults, agents, rules and per-connection settings. Everything that
 // was hard-coded for one person in vault-agent v0.2 lives here, so the code names no person,
 // vault, agent or timezone.
-import { readFile, writeFile, mkdir, rename } from 'node:fs/promises';
+import { readFile, writeFile, mkdir, rename, unlink } from 'node:fs/promises';
 import { existsSync } from 'node:fs';
+import { randomBytes } from 'node:crypto';
+import { setTimeout as delay } from 'node:timers/promises';
 import { homedir } from 'node:os';
 import path from 'node:path';
 import { validateSync } from './sync/settings.mjs';
@@ -170,12 +172,25 @@ export async function loadConfig(file = configPath()) {
   return cfg;
 }
 
-// Atomic write so a crash never leaves a half-written config.
+// Atomic write so a crash never leaves a half-written config. On Windows, antivirus
+// scanners or readers can briefly hold the destination during replacement. Unique temp
+// names also prevent overlapping settings requests from colliding on one process-wide file.
 export async function saveConfig(cfg, file = configPath()) {
   const errors = validate(normalize(cfg));
   if (errors.length) throw new Error(errors.join('; '));
   await mkdir(path.dirname(file), { recursive: true });
-  const tmp = `${file}.tmp-${process.pid}`;
-  await writeFile(tmp, JSON.stringify(cfg, null, 2) + '\n', { mode: 0o600 });
-  await rename(tmp, file);
+  const tmp = `${file}.tmp-${process.pid}-${randomBytes(6).toString('hex')}`;
+  try {
+    await writeFile(tmp, JSON.stringify(cfg, null, 2) + '\n', { flag: 'wx', mode: 0o600 });
+    for (let attempt = 0; ; attempt++) {
+      try { await rename(tmp, file); break; }
+      catch (error) {
+        if (process.platform !== 'win32' || !['EPERM', 'EACCES', 'EBUSY'].includes(error.code) || attempt >= 19) throw error;
+        await delay(25);
+      }
+    }
+  } catch (error) {
+    await unlink(tmp).catch(() => {});
+    throw error;
+  }
 }

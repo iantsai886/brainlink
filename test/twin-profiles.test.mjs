@@ -196,13 +196,28 @@ test('profile-scoped session reads stay inside the profile and closeouts remain 
 test('profile-scoped handoffs require explicit grants and filter mailbox bodies by owner', async () => {
   const root = await mkdtemp(path.join(tmpdir(), 'brainlink-twin-handoffs-'));
   const orgPath = path.join(root, 'org');
+  const clientPath = path.join(root, 'client');
   await mkdir(path.join(orgPath, 'Handoffs'), { recursive: true });
+  await mkdir(clientPath, { recursive: true });
   const cfg = fixture(orgPath);
+  cfg.vaults.push({ name: 'Fictional Client', path: clientPath, private: true, schema: 'standard', writes: 'on' });
   cfg.handoff = { vault: 'Fictional Org', folder: 'Handoffs' };
   const profile = cfg.twin_profiles[0];
   profile.allowed_actions.push('handoff_read', 'write_handoff');
   profile.agent_access[0].vaults[0].access = 'propose';
   profile.agent_access[0].vaults[0].operations.push('handoff_read', 'write_handoff');
+  cfg.ai_agents.push({ id: 'agent_client', name: 'Fictional Client AI', kind: 'local', tokenHash: hashToken('fictional-client-handoff-token'), connected: true });
+  cfg.twin_profiles.push({
+    id: 'client_twin_3', name: 'Fictional Client Twin', mode: 'client', owner: 'fictional-client-owner',
+    vaults: [{ name: 'Fictional Client', access: 'read' }, { name: 'Fictional Org', access: 'propose' }],
+    source_policy: { private_default: true, provenance_required: true, session_capture: 'summary-proposal' },
+    memory_policy: { working: true, semantic: true, procedural: true, episodic: true },
+    allowed_actions: ['search', 'read_note', 'handoff_read', 'write_handoff'],
+    agent_access: [{ agent_id: 'agent_client', vaults: [
+      { name: 'Fictional Client', access: 'read', operations: ['search', 'read_note'] },
+      { name: 'Fictional Org', access: 'propose', operations: ['handoff_read', 'write_handoff'] },
+    ] }],
+  });
   const env = { BRAINLINK_HOME: path.join(root, 'app'), BRAINLINK_AGENT_TOKEN: 'fictional-agent-token' };
   assert.deepEqual(validate(cfg), []);
   const ungranted = structuredClone(cfg);
@@ -214,6 +229,7 @@ test('profile-scoped handoffs require explicit grants and filter mailbox bodies 
   const deniedList = await deniedMcp.handle({ jsonrpc: '2.0', id: 30, method: 'tools/call', params: { name: 'list_handoffs', arguments: {} } });
   assert.equal(deniedList.result.isError, true);
   const mcp = createMcp(createContext(cfg, { env }));
+  const clientMcp = createMcp(createContext(cfg, { env: { ...env, BRAINLINK_AGENT_TOKEN: 'fictional-client-handoff-token' } }));
   const names = (await mcp.handle({ jsonrpc: '2.0', id: 30, method: 'tools/list' })).result.tools.map((tool) => tool.name);
   assert.ok(names.includes('list_handoffs'));
   assert.ok(names.includes('send_handoff'));
@@ -221,6 +237,19 @@ test('profile-scoped handoffs require explicit grants and filter mailbox bodies 
     to: 'all', subject: 'Fictional org handoff', body: 'ORG_HANDOFF_CANARY_71', session_or_task_id: 'org-handoff-1', confirm: true,
   } } });
   assert.equal(sent.result.structuredContent.written, true);
+  const clientSent = await clientMcp.handle({ jsonrpc: '2.0', id: 34, method: 'tools/call', params: { name: 'send_handoff', arguments: {
+    to: 'all', subject: 'Fictional client-only handoff', body: 'CLIENT_HANDOFF_CANARY_84', session_or_task_id: 'client-handoff-1', confirm: true,
+  } } });
+  assert.equal(clientSent.result.structuredContent.written, true);
+  const clientList = await clientMcp.handle({ jsonrpc: '2.0', id: 35, method: 'tools/call', params: { name: 'list_handoffs', arguments: { to: 'all' } } });
+  assert.equal(clientList.result.structuredContent.items.length, 1);
+  assert.match(JSON.stringify(clientList), /CLIENT_HANDOFF_CANARY_84/);
+  assert.doesNotMatch(JSON.stringify(clientList), /ORG_HANDOFF_CANARY_71|PERSONAL_HANDOFF_CANARY_82|UNASSIGNED_HANDOFF_CANARY_93/);
+  const clientForeignAck = await clientMcp.handle({ jsonrpc: '2.0', id: 36, method: 'tools/call', params: { name: 'send_handoff', arguments: {
+    to: 'all', subject: 'Client cannot update company item', body: 'Should be rejected.', ack_of: sent.result.structuredContent.path, session_or_task_id: 'client-foreign-ack-1', confirm: true,
+  } } });
+  assert.equal(clientForeignAck.result.isError, true);
+  assert.doesNotMatch(JSON.stringify(clientForeignAck), /ORG_HANDOFF_CANARY_71/);
   const foreignPath = path.join(orgPath, 'Handoffs', '2026-10-24-2358-from-personal-to-all-personal-secret.md');
   await writeFile(foreignPath, '---\ntype: handoff\nhandoff_schema: 1\nstatus: REQUEST\nwritten_at: 2026-10-24T23:58:00+08:00\nto: all\nsubject: Private personal handoff\ntwin_profile_id: personal_twin_2\n---\n\n# Private personal handoff\n\nPERSONAL_HANDOFF_CANARY_82\n');
   const deniedAck = await mcp.handle({ jsonrpc: '2.0', id: 32, method: 'tools/call', params: { name: 'send_handoff', arguments: {
