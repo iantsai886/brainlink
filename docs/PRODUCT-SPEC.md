@@ -56,6 +56,12 @@ BrainLink is the memory, permissions, provenance and handoff layer; AI agents ar
 
 At session close, BrainLink should prepare a reviewed summary, explain its destination, preserve source links, and let the user correct or withdraw a proposal. Destination choice should reuse an exact user-approved project route first; otherwise it may suggest a folder from related notes in the explicitly selected vault and abstain when evidence is ambiguous. Saving remains preview-gated. RSI may evaluate placement, links, retrieval quality and token/time cost; it must not silently promote uncertain facts, broaden permissions, or change live behavior without validation and rollback.
 
+## 3b. GitHub-backed shared knowledge (proposed)
+
+Users may opt to keep selected Markdown knowledge in GitHub so authorized AI clients can reuse it and edits have a reviewable commit history. GitHub is an optional shared publication layer; it does not replace the existing vault or BrainLink's permission-filtered access. The current sync implementation does not connect to GitHub. The proposal, user flow and acceptance criteria are in [GitHub-backed shared knowledge](GITHUB-SHARED-KNOWLEDGE.md).
+
+Security defaults: separate repositories for Personal, Organisation and each Client scope; explicit folder allowlists; private notes, sessions and secrets excluded before preview and staging; credentials supplied by the OS Git helper; no force-push or silent conflict resolution. A repository's collaborator access applies to the whole repo, not an individual folder, so an AI granted direct GitHub access can bypass BrainLink's per-agent filtering. First publication must be reviewed, and automatic sync requires a separate opt-in. GitHub history may retain content after edits or deletes; do not describe GitHub as end-to-end encrypted or as a complete backup. This capability is proposed only and is not implemented or validated.
+
 ## 4. Core (from vault-agent v0.2, made generic)
 
 Everything Ian-specific moves into **config**. Nothing in code names Ian, Iango, Anna, Brain, Drive or Taipei.
