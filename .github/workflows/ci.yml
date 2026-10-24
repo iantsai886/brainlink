@@ -53,6 +53,14 @@ jobs:
         shell: pwsh
         run: ./packaging/windows/build-windows.ps1
 
+      - name: Smoke-test staged application runtime
+        shell: pwsh
+        run: |
+          $node = Join-Path $PWD 'build/windows/stage/node/node.exe'
+          $app = Join-Path $PWD 'build/windows/stage/app/bin/brainlink.mjs'
+          $version = & $node $app --version
+          if ($version -ne (Get-Content package.json | ConvertFrom-Json).version) { throw "Staged runtime failed: $version" }
+
       - name: Upload installer artifact
         uses: actions/upload-artifact@v4
         with:
@@ -90,6 +98,14 @@ jobs:
 
       - name: Build x64 and arm64 packages with pinned Node.js
         run: bash packaging/linux/build-linux.sh
+
+      - name: Install and smoke-test x64 Debian package
+        run: |
+          sudo dpkg -i dist/brainlink_*_amd64.deb
+          test "$(brainlink --version)" = "$(node -p "require('./package.json').version")"
+          mkdir -p "$RUNNER_TEMP/brainlink-smoke-vault"
+          BRAINLINK_HOME="$RUNNER_TEMP/brainlink-smoke-home" brainlink init --vault "$RUNNER_TEMP/brainlink-smoke-vault" --name Smoke
+          sudo dpkg -r brainlink
 
       - name: Upload Linux artifacts
         uses: actions/upload-artifact@v4
