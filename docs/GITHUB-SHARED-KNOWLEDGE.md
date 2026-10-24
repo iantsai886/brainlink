@@ -1,6 +1,6 @@
 # GitHub-backed shared knowledge
 
-Status: proposed full product capability; first read-only local-clone preview slice is implemented. BrainLink still does not fetch, push, commit, or synchronize GitHub repositories. The preview API and synthetic privacy tests are in `src/sync/github-preview.mjs`, `src/setup.mjs`, and `test/github-preview.test.mjs`. See [HANDOFF-SYNC.md](HANDOFF-SYNC.md) and the live [implementation status](IMPLEMENTATION-STATUS.md).
+Status: proposed full product capability; read-only preview and explicit local-commit slices are implemented. BrainLink still does not fetch, push, or synchronize GitHub repositories. The authenticated Setup flow and synthetic privacy tests are in `src/sync/github-preview.mjs`, `src/setup.mjs`, `ui/index.html`, and `test/github-preview.test.mjs`. See [HANDOFF-SYNC.md](HANDOFF-SYNC.md) and the live [implementation status](IMPLEMENTATION-STATUS.md).
 
 ## Product goal
 
@@ -41,14 +41,14 @@ Let a user keep selected Markdown knowledge in a GitHub repository so authorized
 4. Simultaneous edits, offline operation, authentication failure, interrupted push and restore preserve both versions and never drop uncommitted work.
 5. Measure retrieval task success, latency, and actual model input tokens against a full-vault context baseline. Git history proves change tracking; it does not by itself prove token savings.
 
-The first slice currently verifies candidate filtering, secret refusal, credential-free GitHub origin validation, dirty local-file blocking, body-free preview output, Setup-token authentication, and that no Git operation changes the checkout. It does not test or perform fetch, commit, push, remote permissions, or cross-device sync.
+The implemented local slices verify candidate filtering, secret refusal, credential-free GitHub origin validation, body-free preview, authenticated endpoints, refusal of dirty checkouts, explicit commit of only selected files, rollback after commit failure, and absence of note bodies from API results. Commit hooks are suppressed for this operation. No fetch, push, remote permission, or cross-device behavior has been implemented or tested.
 
 ## Implementation slices
 
-1. Done: add safe local-repository validation, authenticated read-only candidate/preview endpoints, and a localized Setup UI for choosing a non-private vault, local clone, and explicit note paths. No provider setting or remote operation is enabled.
-2. Validate UI behavior, accessibility, and localized privacy messaging; then design a separately reviewed local commit flow.
-3. Add explicit reviewed local commits, then opt-in push/pull with conflict retention and restore guidance.
-4. Add profile-aware UI, localized privacy explanation, and per-repository status/history.
+1. Done: safe local-repository validation, authenticated candidate/preview endpoints, localized Setup UI, and separately confirmed local commits. No provider setting or remote operation is enabled.
+2. Validate UI behavior, accessibility, and localized privacy messaging; add a reviewable commit receipt and recovery guidance.
+3. Design opt-in push/pull with conflict retention and restore guidance, then implement only after security review.
+4. Add profile-aware repository boundaries, localized privacy explanation, and per-repository remote status/history.
 5. Run cross-device and cross-AI acceptance with fictional data before considering a customer release.
 
 No GitHub credentials, repository URL, permissions, or user vault content are configured or transmitted by this proposal.

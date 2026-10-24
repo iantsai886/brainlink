@@ -6,7 +6,7 @@ import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { normalize, saveConfig } from '../src/config.mjs';
 import { createContext } from '../src/core.mjs';
-import { listGitHubShareCandidates, previewGitHubRepository } from '../src/sync/github-preview.mjs';
+import { listGitHubShareCandidates, previewGitHubRepository, commitGitHubSelectedNotes } from '../src/sync/github-preview.mjs';
 import { startSetup } from '../src/setup.mjs';
 
 const tmp = (tag) => mkdtemp(path.join(tmpdir(), `brainlink-gh-preview-${tag}-`));
@@ -75,7 +75,48 @@ test('GitHub preview rejects credential-bearing/non-GitHub remotes and flags dir
   assert.doesNotMatch(JSON.stringify(preview), /local uncommitted edit|PUBLIC_NOTE_BODY_CANARY_7421/);
 });
 
-test('Setup GitHub preview endpoints require the local token and remain read-only', async () => {
+test('explicit local commit publishes only selected notes and never pushes', async () => {
+  const f = await fixture();
+  git(f.repo, 'config', 'user.name', 'BrainLink Test');
+  git(f.repo, 'config', 'user.email', 'brainlink-test@example.invalid');
+  git(f.repo, 'commit', '--allow-empty', '-m', 'fixture baseline');
+  await writeFile(path.join(f.vault, 'Second.md'), '---\ntitle: Second\n---\nSECOND_NOTE_BODY_CANARY_3916\n');
+  const result = await commitGitHubSelectedNotes({ ctx: f.ctx, repoPath: f.repo, vaultName: 'Company', paths: ['Public.md'] });
+  assert.equal(result.committed, true);
+  assert.match(result.commit, /^[a-f0-9]{7,}$/);
+  assert.deepEqual(result.files, [{ path: 'Public.md', action: 'add' }]);
+  assert.equal(await readFile(path.join(f.repo, 'BrainLink', 'notes', 'Public.md'), 'utf8'), await readFile(path.join(f.vault, 'Public.md'), 'utf8'));
+  assert.equal(git(f.repo, 'status', '--porcelain'), '');
+  assert.equal(git(f.repo, 'show', '--pretty=format:', '--name-only').replaceAll('\\', '/'), 'BrainLink/notes/Public.md');
+  assert.equal(git(f.repo, 'log', '-1', '--format=%s'), 'BrainLink: update selected shared notes');
+  assert.doesNotMatch(JSON.stringify(result), /SECOND_NOTE_BODY_CANARY_3916|PUBLIC_NOTE_BODY_CANARY_7421/);
+});
+
+test('local commit refuses a dirty repository without changing any files', async () => {
+  const f = await fixture();
+  git(f.repo, 'config', 'user.name', 'BrainLink Test');
+  git(f.repo, 'config', 'user.email', 'brainlink-test@example.invalid');
+  git(f.repo, 'commit', '--allow-empty', '-m', 'fixture baseline');
+  await writeFile(path.join(f.repo, 'unrelated.txt'), 'keep this local work');
+  await assert.rejects(commitGitHubSelectedNotes({ ctx: f.ctx, repoPath: f.repo, vaultName: 'Company', paths: ['Public.md'] }), /repository has changes/);
+  assert.equal(await readFile(path.join(f.repo, 'unrelated.txt'), 'utf8'), 'keep this local work');
+  assert.equal(await readFile(path.join(f.repo, 'BrainLink', 'notes', 'Public.md'), 'utf8').then(() => true, () => false), false);
+});
+
+test('failed local commit restores selected files and leaves the index clean', async () => {
+  const f = await fixture();
+  git(f.repo, 'config', 'user.name', 'BrainLink Test');
+  git(f.repo, 'config', 'user.email', 'brainlink-test@example.invalid');
+  git(f.repo, 'commit', '--allow-empty', '-m', 'fixture baseline');
+  git(f.repo, 'config', 'user.useConfigOnly', 'true');
+  git(f.repo, 'config', '--unset', 'user.name');
+  git(f.repo, 'config', '--unset', 'user.email');
+  await assert.rejects(commitGitHubSelectedNotes({ ctx: f.ctx, repoPath: f.repo, vaultName: 'Company', paths: ['Public.md'] }), /Git could not complete/);
+  assert.equal(await readFile(path.join(f.repo, 'BrainLink', 'notes', 'Public.md'), 'utf8').then(() => true, () => false), false);
+  assert.equal(git(f.repo, 'status', '--porcelain'), '');
+});
+
+test('Setup GitHub preview endpoints require the local token; commit endpoint is separately authenticated', async () => {
   const f = await fixture();
   const home = path.join(f.root, 'app-home');
   await mkdir(home, { recursive: true });
@@ -96,6 +137,15 @@ test('Setup GitHub preview endpoints require the local token and remain read-onl
     assert.equal(response.status, 200);
     assert.equal(body.preview_only, true);
     assert.doesNotMatch(JSON.stringify(body), /PUBLIC_NOTE_BODY_CANARY_7421/);
+    assert.equal(git(f.repo, 'status', '--porcelain'), '');
+    assert.equal((await post('/api/github/commit-selected', { repository: f.repo, vault: 'Company', paths: ['Public.md'] }, 'wrong')).status, 401);
+    git(f.repo, 'config', 'user.name', 'BrainLink Test');
+    git(f.repo, 'config', 'user.email', 'brainlink-test@example.invalid');
+    git(f.repo, 'commit', '--allow-empty', '-m', 'fixture baseline');
+    const committedResponse = await post('/api/github/commit-selected', { repository: f.repo, vault: 'Company', paths: ['Public.md'] });
+    const committed = await committedResponse.json();
+    assert.equal(committedResponse.status, 200);
+    assert.equal(committed.committed, true);
     assert.equal(git(f.repo, 'status', '--porcelain'), '');
   } finally { app.server.close(); }
 });

@@ -2,7 +2,8 @@
 // it never fetches, stages, commits, pushes, or changes configuration.
 import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
-import { lstat, readFile, realpath } from 'node:fs/promises';
+import { lstat, readFile, realpath, mkdir, writeFile, rm, mkdtemp } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { findSecrets, loadVault } from '../core.mjs';
 
@@ -18,6 +19,15 @@ async function git(repo, args) {
   } catch {
     // Git stderr may contain a credential-bearing remote URL. Never relay it to Setup or logs.
     throw new Error('Could not inspect this local Git repository. Confirm Git is installed and the repository is readable.');
+  }
+}
+
+async function gitRaw(repo, args, env = process.env) {
+  try {
+    const { stdout } = await run('git', ['-C', repo, ...args], { windowsHide: true, timeout: 15000, maxBuffer: 1024 * 1024, env });
+    return stdout;
+  } catch {
+    throw new Error('Git could not complete the requested local operation. Check the repository and Git identity, then retry.');
   }
 }
 
@@ -115,4 +125,80 @@ export async function previewGitHubRepository({ ctx, repoPath, vaultName, paths 
     files, counts,
     notice: 'Read-only preview. No Git files, credentials, configuration, or remote repository were changed or contacted.',
   };
+}
+
+// Explicitly publishes selected notes to a local checkout and records one local commit.
+// It requires a completely clean checkout so rollback cannot disturb unrelated user work.
+// It never fetches or pushes; callers must obtain the user's explicit confirmation first.
+export async function commitGitHubSelectedNotes({ ctx, repoPath, vaultName, paths }) {
+  if (!Array.isArray(paths) || !paths.length || paths.length > MAX_SELECTED_NOTES || paths.some((p) => !safeNotePath(p)) || new Set(paths).size !== paths.length) {
+    throw new Error(`Select 1–${MAX_SELECTED_NOTES} distinct Markdown paths from the visible notes list.`);
+  }
+  const vault = ctx.byName.get(vaultName);
+  if (!vault || !ctx.enabled.includes(vaultName)) throw new Error('Choose an enabled vault.');
+  if (vault.private) throw new Error('Private vaults are not eligible for GitHub sharing.');
+  const index = await loadVault(ctx, vaultName);
+  const byPath = new Map(index.notes.filter((note) => !note.private && !note.generated).map((note) => [note.rel, note]));
+  if (paths.some((p) => !byPath.has(p))) throw new Error('One or more selected notes are unavailable for sharing in this vault.');
+  const notes = paths.map((p) => byPath.get(p));
+  if (notes.some((note) => findSecrets(note.raw).length)) throw new Error('A selected note needs a privacy review before it can be shared.');
+
+  const root = await repositoryRoot(repoPath);
+  if (await git(root, ['status', '--porcelain=v1', '--untracked-files=all'])) {
+    throw new Error('The local repository has changes. Commit or safely set them aside before publishing selected notes.');
+  }
+  try { await git(root, ['rev-parse', '--verify', 'HEAD']); }
+  catch { throw new Error('Create the first commit in this repository before publishing notes.'); }
+
+  const records = [];
+  for (const note of notes) {
+    const relative = `${NOTES_ROOT}/${note.rel}`;
+    const target = path.resolve(root, ...relative.split('/'));
+    if (!within(root, target)) throw new Error('The selected notes path is outside the repository.');
+    await rejectSymlinkPath(root, relative);
+    let previous;
+    try { previous = await readFile(target, 'utf8'); }
+    catch (error) { if (error.code !== 'ENOENT') throw new Error('Could not safely read a selected repository note.'); }
+    records.push({ note, relative, target, previous, action: previous == null ? 'add' : previous === note.raw ? 'unchanged' : 'update' });
+  }
+  const changed = records.filter((r) => r.action !== 'unchanged');
+  if (!changed.length) return { provider: 'github', vault: vaultName, committed: false, files: records.map(({ note, action }) => ({ path: note.rel, action })), notice: 'All selected notes already match. No commit was created and nothing was pushed.' };
+
+  const written = [];
+  let hooksDir;
+  let commitCreated = false;
+  try {
+    for (const record of changed) {
+      await mkdir(path.dirname(record.target), { recursive: true });
+      await writeFile(record.target, record.note.raw, { encoding: 'utf8', flag: 'wx' }).catch(async (error) => {
+        // Existing destinations were read above; wx prevents overwriting a file that appeared meanwhile.
+        if (error.code !== 'EEXIST' || record.previous == null) throw error;
+        const current = await readFile(record.target, 'utf8');
+        if (current !== record.previous) throw new Error('A selected repository file changed during publication. Retry the preview.');
+        await writeFile(record.target, record.note.raw, { encoding: 'utf8' });
+      });
+      written.push(record);
+    }
+    await gitRaw(root, ['add', '--', ...changed.map((r) => r.relative)]);
+    const staged = (await gitRaw(root, ['diff', '--cached', '--name-only', '-z'])).split('\0').filter(Boolean).sort();
+    const expected = changed.map((r) => r.relative.replaceAll('\\', '/')).sort();
+    if (staged.length !== expected.length || staged.some((p, i) => p !== expected[i])) throw new Error('Git staged an unexpected file set; publication was cancelled.');
+    hooksDir = await mkdtemp(path.join(tmpdir(), 'brainlink-empty-hooks-'));
+    await gitRaw(root, ['-c', `core.hooksPath=${hooksDir}`, 'commit', '-m', 'BrainLink: update selected shared notes']);
+    commitCreated = true;
+    const sha = (await git(root, ['rev-parse', '--short', 'HEAD'])).trim();
+    return { provider: 'github', vault: vaultName, committed: true, commit: sha, files: records.map(({ note, action }) => ({ path: note.rel, action })), notice: 'Local commit created. No fetch or push was performed.' };
+  } catch (error) {
+    // Restore only the files this operation wrote; the initial clean-tree gate prevents collateral damage.
+    if (!commitCreated) {
+      for (const record of written.reverse()) {
+        if (record.previous == null) await rm(record.target, { force: true }).catch(() => {});
+        else await writeFile(record.target, record.previous, 'utf8').catch(() => {});
+      }
+      await gitRaw(root, ['reset', '--quiet', 'HEAD', '--', ...changed.map((r) => r.relative)]).catch(() => {});
+    }
+    throw error;
+  } finally {
+    if (hooksDir) await rm(hooksDir, { recursive: true, force: true }).catch(() => {});
+  }
 }
