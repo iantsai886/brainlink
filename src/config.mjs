@@ -11,6 +11,8 @@ export const DEFAULT_PLATFORMS = ['Claude', 'ChatGPT', 'ChatGPT Codex', 'Gemini'
 export const CLOSE_MODES = ['append-section', 'new-note', 'append-task', 'proposal-only'];
 export const SCHEMAS = ['standard', 'provenance'];
 export const WRITE_MODES = ['on', 'proposal-only', 'off'];
+export const TWIN_MODES = ['personal', 'organisation'];
+export const TWIN_ACTIONS = ['search', 'read_note', 'read_session', 'handoff_read', 'propose_note', 'write_note'];
 
 // Where BrainLink keeps config.json, activity.log and backups for this OS user.
 export function appHome(env = process.env, platform = process.platform, home = homedir()) {
@@ -39,7 +41,7 @@ export const AGENT_KINDS = ['local', 'remote'];
 export const CONFIG_SCHEMA_VERSION = 2;
 
 export function emptyConfig() {
-  return { version: CONFIG_SCHEMA_VERSION, timezone: null, locale: null, vaults: [], agents: [], ai_agents: [], handoff: null, platforms: DEFAULT_PLATFORMS, http: { port: 8765, token: null }, connections: {}, sessions: { shareSummaries: false, shareFullText: false }, session_filing: { projectVaults: {}, projectFolders: {} }, backup: { enabled: false, folder: null, intervalHours: 24 } };
+  return { version: CONFIG_SCHEMA_VERSION, timezone: null, locale: null, vaults: [], agents: [], ai_agents: [], twin_profiles: [], handoff: null, platforms: DEFAULT_PLATFORMS, http: { port: 8765, token: null }, connections: {}, sessions: { shareSummaries: false, shareFullText: false }, session_filing: { projectVaults: {}, projectFolders: {} }, backup: { enabled: false, folder: null, intervalHours: 24 } };
 }
 
 // Fill defaults so the rest of the code never checks for missing keys.
@@ -51,6 +53,7 @@ export function normalize(raw = {}) {
   }));
   cfg.agents = (raw.agents || []).map((a) => ({ role: '', activation: [`Connect to ${a.name}`], close: [`${a.name} close loop`], connect_notes: [], tail_notes: [], recent_dir: null, stale_days: 14, capture_approved: false, ...a }));
   cfg.ai_agents = (raw.ai_agents || []).map((a) => ({ kind: 'local', tokenHash: null, revoked: false, connected: false, createdAt: null, lastSeenAt: null, ...a }));
+  cfg.twin_profiles = raw.twin_profiles ?? [];
   cfg.http = { port: 8765, token: null, ...(raw.http || {}) };
   cfg.connections = raw.connections || {};
   cfg.backup = { enabled: false, folder: null, intervalHours: 24, ...(raw.backup || {}) };
@@ -102,6 +105,50 @@ export function validate(cfg) {
     if (aiAgentNames.has(a.name?.toLowerCase())) errors.push(`duplicate agent "${a.name}"`);
     aiAgentNames.add(a.name?.toLowerCase());
     if (!AGENT_KINDS.includes(a.kind)) errors.push(`agent "${a.name}": kind must be ${AGENT_KINDS.join(' | ')}`);
+  }
+  const profileIds = new Set();
+  const assignedTwinAgents = new Set();
+  if (!Array.isArray(cfg.twin_profiles)) errors.push('twin_profiles must be an array');
+  for (const p of Array.isArray(cfg.twin_profiles) ? cfg.twin_profiles : []) {
+    if (!p || typeof p !== 'object' || Array.isArray(p)) { errors.push('twin profile must be an object'); continue; }
+    if (!/^[a-zA-Z0-9_-]{1,64}$/.test(p.id || '') || profileIds.has(p.id)) errors.push('twin profile needs a unique short id');
+    profileIds.add(p.id);
+    if (!p.name || typeof p.name !== 'string' || p.name.length > 120) errors.push(`twin profile "${p.id || ''}": name is required (max 120 characters)`);
+    if (!TWIN_MODES.includes(p.mode)) errors.push(`twin profile "${p.id || ''}": mode must be ${TWIN_MODES.join(' | ')}`);
+    if (!p.owner || typeof p.owner !== 'string' || p.owner.length > 160) errors.push(`twin profile "${p.id || ''}": owner is required (max 160 characters)`);
+    if (!Array.isArray(p.vaults) || !p.vaults.length) errors.push(`twin profile "${p.id || ''}": vaults must be a non-empty array`);
+    const profileVaults = new Set();
+    for (const item of Array.isArray(p.vaults) ? p.vaults : []) {
+      if (!item || !names.has(item.name)) errors.push(`twin profile "${p.id || ''}": references an unknown vault`);
+      else if (profileVaults.has(item.name)) errors.push(`twin profile "${p.id || ''}": duplicate vault "${item.name}"`);
+      else profileVaults.add(item.name);
+      if (!['read', 'propose', 'write'].includes(item?.access)) errors.push(`twin profile "${p.id || ''}": vault access must be read | propose | write`);
+    }
+    if (!Array.isArray(p.allowed_actions) || p.allowed_actions.some((action) => !TWIN_ACTIONS.includes(action))) errors.push(`twin profile "${p.id || ''}": allowed_actions must use supported actions`);
+    if (!p.source_policy || typeof p.source_policy !== 'object' || typeof p.source_policy.private_default !== 'boolean' || typeof p.source_policy.provenance_required !== 'boolean' || !['metadata-only', 'summary-proposal', 'full-text-opt-in'].includes(p.source_policy.session_capture)) errors.push(`twin profile "${p.id || ''}": source_policy needs private_default, provenance_required and a supported session_capture policy`);
+    if (!p.memory_policy || ['working', 'semantic', 'procedural', 'episodic'].some((key) => typeof p.memory_policy[key] !== 'boolean')) errors.push(`twin profile "${p.id || ''}": memory_policy must declare all four memory types`);
+    if (!Array.isArray(p.agent_access)) errors.push(`twin profile "${p.id || ''}": agent_access must be an array`);
+    const profileAgents = new Set();
+    for (const access of Array.isArray(p.agent_access) ? p.agent_access : []) {
+      if (!cfg.ai_agents.some((agent) => agent.id === access.agent_id && !agent.revoked)) errors.push(`twin profile "${p.id || ''}": agent_access references an unknown or revoked AI agent`);
+      if (profileAgents.has(access.agent_id)) errors.push(`twin profile "${p.id || ''}": duplicate agent access`);
+      if (assignedTwinAgents.has(access.agent_id)) errors.push('an AI agent may be assigned to only one Twin profile');
+      profileAgents.add(access.agent_id);
+      assignedTwinAgents.add(access.agent_id);
+      if (!Array.isArray(access.vaults) || !access.vaults.length) errors.push(`twin profile "${p.id || ''}": agent vault access must be a non-empty subset of profile vaults`);
+      const agentVaults = new Set();
+      for (const grant of Array.isArray(access.vaults) ? access.vaults : []) {
+        const profileGrant = p.vaults?.find((item) => item.name === grant?.name);
+        if (!profileGrant) errors.push(`twin profile "${p.id || ''}": agent vault access must be a subset of profile vaults`);
+        if (agentVaults.has(grant?.name)) errors.push(`twin profile "${p.id || ''}": duplicate agent vault access`);
+        agentVaults.add(grant?.name);
+        const accessRank = { read: 0, propose: 1, write: 2 };
+        if (!['read', 'propose', 'write'].includes(grant?.access) || accessRank[grant?.access] > accessRank[profileGrant?.access]) errors.push(`twin profile "${p.id || ''}": agent vault access exceeds the profile grant`);
+        if (!Array.isArray(grant?.operations) || grant.operations.some((op) => !TWIN_ACTIONS.includes(op) || !p.allowed_actions?.includes(op))) errors.push(`twin profile "${p.id || ''}": agent operations must be supported and allowed by the profile`);
+        const requiredAccess = { propose_note: 1, write_note: 2 };
+        if (Array.isArray(grant?.operations) && grant.operations.some((op) => requiredAccess[op] > accessRank[grant?.access])) errors.push(`twin profile "${p.id || ''}": agent operation exceeds its vault access`);
+      }
+    }
   }
   if (cfg.handoff && (!names.has(cfg.handoff.vault) || !cfg.handoff.folder)) errors.push('handoff needs an existing vault and a folder');
   if (cfg.timezone) { try { new Intl.DateTimeFormat('en', { timeZone: cfg.timezone }); } catch { errors.push(`unknown timezone "${cfg.timezone}"`); } }

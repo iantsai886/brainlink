@@ -30,6 +30,7 @@ import { recommendSessionVault } from './sessions/routing.mjs';
 import { listSessionEndCues, dismissSessionEndCue, sessionEndCueId } from './sessions/end-cue.mjs';
 import { listSessionFilingFolders, suggestedSessionFolder } from './sessions/folders.mjs';
 import { sessionHookStatus, setSessionHook } from './sessions/hooks.mjs';
+import { twinProfileStatus } from './twin-profiles.mjs';
 
 const UI_STATIC_TYPES = { '.js': 'text/javascript; charset=utf-8', '.css': 'text/css; charset=utf-8', '.json': 'application/json; charset=utf-8' };
 const UI_DIR = path.join(ROOT, 'ui');
@@ -192,6 +193,7 @@ export async function startSetup(opts = {}) {
       version: VERSION, config_path: file, os, locale: cfg.locale,
       default_excluded_folders: DEFAULT_EXCLUDED_FOLDERS, suggested_excluded_folders: SUGGESTED_EXCLUDED_FOLDERS,
       vaults, agents: cfg.agents, ai_agents: cfg.ai_agents.map(publicAgent), handoff: cfg.handoff, timezone: cfg.timezone,
+      twin_profiles: twinProfileStatus(cfg),
       packs: Object.entries(PACKS).map(([id, p]) => ({ id, title: p.title, description: p.description })),
       clients: await detect(clientOpts()),
       http: { port: cfg.http.port, token_set: Boolean(cfg.http.token) },
