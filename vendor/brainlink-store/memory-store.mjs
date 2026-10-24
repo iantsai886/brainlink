@@ -216,7 +216,9 @@ export function createMemoryStore({ vaults, readOnly = false, clock = () => new 
       if (kinds.length) throw new Invalid('secret found; redact before import', { kinds });
       const id = 's_' + sha(`${input.client}:${input.source_id}`).slice(0, 16);
       const m = msgs.map((x, i) => ({ seq: i + 1, role: x.role, at: x.at, text: x.text }));
-      const s = { id, client: input.client, source_id: input.source_id, vault: input.vault, project: input.project || '', title: input.title || '', summary: input.summary || '',
+      const profileId = input.profile_id == null ? null : String(input.profile_id).trim();
+      if (o.profile_id && profileId !== o.profile_id) throw new Invalid('session Twin profile mismatch');
+      const s = { id, client: input.client, source_id: input.source_id, vault: input.vault, project: input.project || '', profile_id: profileId || null, title: input.title || '', summary: input.summary || '',
         started_at: input.started_at, updated_at: m.at(-1)?.at || input.started_at, message_count: m.length, note_refs: [...(input.note_refs || [])], private: !!input.private };
       s.etag = sha(JSON.stringify(canon({ s: { ...s }, m })));
       const prev = sessions.get(id);
@@ -230,6 +232,7 @@ export function createMemoryStore({ vaults, readOnly = false, clock = () => new 
       let x = typeof ref === 'string' ? sessions.get(ref) : sessions.get('s_' + sha(`${ref.client}:${ref.source_id}`).slice(0, 16));
       if (!x && typeof ref === 'string') throw new NotFound('session', { id: ref });
       if (!x) { await api.putSession({ ...ref, title: ref.title || '', summary: '', started_at: messages[0]?.at || clock(), messages: [] }, o); return api.appendSession({ ...ref }, messages, o); }
+      if (o.profile_id && x.s.profile_id !== o.profile_id) throw new NotFound('session', { id: typeof ref === 'string' ? ref : undefined });
       guard(x.s.vault, o);
       const kinds = findSecretKinds(messages.map((m) => m.text).join('\n'));
       if (kinds.length) throw new Invalid('secret found; redact before logging', { kinds });
@@ -242,12 +245,12 @@ export function createMemoryStore({ vaults, readOnly = false, clock = () => new 
     async listSessions(o = {}) {
       const q = o.q ? norm(o.q) : '';
       return [...sessions.values()].map((x) => x.s)
-        .filter((s) => allowed(s.vault, o) && !(o.remote && s.private) && (!o.client || s.client === o.client) && (!o.vault || s.vault === o.vault)
+        .filter((s) => allowed(s.vault, o) && !(o.remote && s.private) && (!o.profile_id || s.profile_id === o.profile_id) && (!o.client || s.client === o.client) && (!o.vault || s.vault === o.vault)
           && (!o.since || s.updated_at >= o.since) && (!q || norm(`${s.title} ${s.summary}`).includes(q)))
         .sort((a, b) => b.updated_at.localeCompare(a.updated_at)).slice(0, o.limit || 20).map((s) => structuredClone(s));
     },
     async readSession(id, o = {}) {
-      const x = sessions.get(id); if (!x) throw new NotFound('session', { id }); guard(x.s.vault, o);
+      const x = sessions.get(id); if (!x || (o.profile_id && x.s.profile_id !== o.profile_id)) throw new NotFound('session', { id }); guard(x.s.vault, o);
       if (o.remote && x.s.private) throw new PrivacyDenied('session is private', { id });
       const off = o.offset || 0; const lim = o.limit || 0;
       const messages = lim ? x.msgs.slice(off, off + lim).map((m) => ({ ...m })) : [];
@@ -255,7 +258,7 @@ export function createMemoryStore({ vaults, readOnly = false, clock = () => new 
       return { session: sessionOut(x), messages, next_offset: next };
     },
     async setSessionPrivate(id, isPrivate, o = {}) {
-      const x = sessions.get(id); if (!x) throw new NotFound('session', { id }); guard(x.s.vault, o); writable();
+      const x = sessions.get(id); if (!x || (o.profile_id && x.s.profile_id !== o.profile_id)) throw new NotFound('session', { id }); guard(x.s.vault, o); writable();
       x.s.private = !!isPrivate;
       x.s.etag = sha(JSON.stringify(canon({ s: { ...x.s, etag: '' }, m: x.msgs })));
       emit({ kind: 'session_upsert', vault: x.s.vault, id: x.s.id, version: x.msgs.length, etag: x.s.etag, path: `sessions/${x.s.client}/${x.s.id}` });

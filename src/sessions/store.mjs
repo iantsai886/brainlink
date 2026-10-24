@@ -29,7 +29,7 @@ export async function createSessionStore({ dir, clock = () => new Date().toISOSt
   const inner = createMemoryStore({ vaults: [{ name: SESSIONS_VAULT, private: true }], clock });
   for (const { session, messages } of await loadLines(file)) {
     await inner.putSession({ client: session.client, source_id: session.source_id, vault: SESSIONS_VAULT, project: session.project,
-      title: session.title, summary: session.summary, started_at: session.started_at, note_refs: session.note_refs, private: session.private, messages });
+      profile_id: session.profile_id || null, title: session.title, summary: session.summary, started_at: session.started_at, note_refs: session.note_refs, private: session.private, messages });
   }
 
   // Two importers can both call putSession/appendSession concurrently (src/sessions/index.mjs
@@ -59,8 +59,9 @@ export async function createSessionStore({ dir, clock = () => new Date().toISOSt
       await persist();
       return r;
     },
-    async appendSession(ref, messages) {
-      const r = await inner.appendSession(typeof ref === 'string' ? ref : { ...ref, vault: SESSIONS_VAULT }, messages);
+    async appendSession(ref, messages, opts = {}) {
+      const scope = typeof ref === 'string' ? opts : { ...opts, profile_id: ref.profile_id ?? opts.profile_id };
+      const r = await inner.appendSession(typeof ref === 'string' ? ref : { ...ref, vault: SESSIONS_VAULT }, messages, scope);
       await persist();
       return r;
     },

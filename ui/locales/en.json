@@ -365,5 +365,5 @@
   "twinProfiles.memory.procedural": "Procedural",
   "twinProfiles.memory.episodic": "Episodic",
   "twinProfiles.capture": "Session capture",
-  "twinProfiles.limits": "Only named agent tokens assigned to a profile receive these read/search limits. Writes, session history, and handoffs are blocked for them for now. Other AI connections keep their existing scope."
+  "twinProfiles.limits": "These limits apply only to named agent tokens assigned to a profile. Session access requires an explicit grant and matching profile ownership; closeouts require approval. General writes and handoffs remain blocked. Other AI connections keep their existing scope."
 }

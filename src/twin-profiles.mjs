@@ -14,13 +14,13 @@ export function twinProfileStatus(cfg) {
       name: cfg.ai_agents.find((agent) => agent.id === agent_id)?.name || 'Unknown agent',
       vaults: vaults.map(({ name, access, operations }) => ({ name, access, operations: [...operations] })),
     })),
-    declaration_status: 'agent_read_scope_active',
+    declaration_status: 'agent_profile_scope_active',
   }));
   return {
     schema: 1,
     enforcement: 'scoped_agent_read_only',
     profiles,
-    next_gate: 'Only named AI-agent tokens assigned to a profile receive read/search scope. Other clients keep their existing connection scope. Profile writes, session history, and handoffs remain unavailable until those data paths are profile-scoped.',
+    next_gate: 'Named AI-agent tokens use profile-scoped vault access. Session reads require an explicit read_session grant and an exact profile_id match; private closeouts require propose_note plus filing-folder access and are approval-gated. Other clients keep their existing connection scope. General writes and handoffs remain unavailable until their data paths are profile-scoped.',
   };
 }
 
@@ -42,9 +42,10 @@ const READ_TOOL_ACTION = Object.freeze({
   brainlink_guide: 'read_note',
   vault_search: 'search', vault_recent: 'search', open_loops: 'search', brain_brief: 'search',
   vault_health: 'search', vault_related: 'search', vault_read_note: 'read_note',
+  session_list: 'read_session', session_read: 'read_session', session_close: 'propose_note',
   session_filing_folders: 'search', agent_connect: 'read_note', search: 'search', fetch: 'read_note',
 });
-const VAULT_ARGUMENT_TOOLS = new Set(['vault_search', 'vault_recent', 'open_loops', 'brain_brief', 'vault_health', 'vault_read_note', 'vault_related', 'session_filing_folders']);
+const VAULT_ARGUMENT_TOOLS = new Set(['vault_search', 'vault_recent', 'open_loops', 'brain_brief', 'vault_health', 'vault_read_note', 'vault_related', 'session_filing_folders', 'session_close']);
 
 export function twinToolAuthorization(ctx, name, args = {}) {
   const scope = ctx.twinScope || { mode: 'legacy', grants: [] };

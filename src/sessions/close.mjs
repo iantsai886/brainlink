@@ -33,20 +33,22 @@ export async function closeSession(ctx, store, args, now = new Date()) {
 
   // Prefix deliberately differs from imported "codex" / "claude-code" clients. Their global
   // sharing toggle must never turn an explicitly private closure into a visible imported session.
-  const client = `brainlink-close-${clientIdFor(id.ai_platform)}`;
+  const profileId = ctx.twinScope?.mode === 'scoped' ? ctx.twinScope.profile_id : null;
+  const profileTag = profileId ? `profile-${createHash('sha256').update(profileId).digest('hex').slice(0, 12)}-` : '';
+  const client = `brainlink-${profileTag}close-${clientIdFor(id.ai_platform)}`;
   const sessionId = 's_' + createHash('sha256').update(`${client}:${sourceId}`).digest('hex').slice(0, 16);
   try {
     await store.readSession(sessionId, {});
     return { ok: false, errors: ['This task ID was already closed. Review the existing private session; do not overwrite its outcome.'], session_id: sessionId };
   } catch (error) { if (error.code !== 'E_NOT_FOUND') throw error; }
-  const session = { id: sessionId, client, title: `${args.title} (${sessionId.slice(-6)})`, project: args.project || '', summary, updated_at: now.toISOString(), private: true };
+  const session = { id: sessionId, client, profile_id: profileId, title: `${args.title} (${sessionId.slice(-6)})`, project: args.project || '', summary, updated_at: now.toISOString(), private: true };
   const identity = { ...id, session_or_task_id: sourceId };
   const folder = typeof args.folder === 'string' ? args.folder : undefined;
   const draft = await fileSessionSummary(ctx, session, args.vault, false, identity, folder);
   if (!draft.ok || !args.confirm) return { ...draft, session_id: sessionId, session_saved: false };
 
-  const stored = await store.putSession({ client, source_id: sourceId, project: session.project, title: session.title,
-    summary, started_at: now.toISOString(), note_refs: [], private: true, messages: [] });
+  const stored = await store.putSession({ client, source_id: sourceId, profile_id: profileId, project: session.project, title: session.title,
+    summary, started_at: now.toISOString(), note_refs: [], private: true, messages: [] }, profileId ? { profile_id: profileId } : {});
   const note = await fileSessionSummary(ctx, { ...session, id: stored.id }, args.vault, true, identity, folder);
   return { ...note, session_id: stored.id, session_saved: true };
 }

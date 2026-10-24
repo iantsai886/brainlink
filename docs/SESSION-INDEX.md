@@ -10,13 +10,17 @@ One JSON Lines store under `<appHome>/sessions/sessions.jsonl`, wrapping `brainl
 `Sessions`. Each record is the contract's `Session` type (`brainlink-store/interface.d.ts`):
 
 ```
-{ id, client, source_id, vault: "Sessions", project, title, summary,
+{ id, client, source_id, vault: "Sessions", project, profile_id?, title, summary,
   started_at, updated_at, message_count, note_refs, private, etag }
 ```
 
 `id = s_<sha256(client:source_id)[:16]>`, so re-running an importer on the same file is idempotent.
-`private` defaults to `false` in the store contract itself (so existing callers/fixtures that never
-set it are unaffected); **every importer in this repo passes `private: true` explicitly**, per the
+`profile_id` is an optional Personal/Organisation Twin owner. It is `null` for older records and
+unassigned imported sessions. The store filters it before session query matching and refuses an
+ID read when the caller's `profile_id` does not match. Profile closeouts persist their owner; a
+scoped AI cannot assign an existing imported session to itself. `private` defaults to `false` in
+the store contract itself (so existing callers/fixtures that never set it are unaffected);
+**every importer in this repo passes `private: true` explicitly**, per the
 milestone rule that imported sessions default to private. `session_log`-created sessions also pass
 `private: true` by default (same reasoning: no history client should default to shared).
 

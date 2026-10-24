@@ -9,6 +9,7 @@ import { startSetup } from '../src/setup.mjs';
 import { createContext } from '../src/core.mjs';
 import { createMcp } from '../src/server.mjs';
 import { hashToken } from '../src/mcp-agents.mjs';
+import { openSessionStore } from '../src/sessions/index.mjs';
 
 const fixture = (vaultPath) => normalize({
   version: 2,
@@ -51,7 +52,7 @@ test('Twin profile declarations validate references and prevent permission escal
 test('Twin status shows limited runtime scope and never exposes agent credentials', () => {
   const status = twinProfileStatus(fixture('C:\\fictional-vault'));
   assert.equal(status.enforcement, 'scoped_agent_read_only');
-  assert.equal(status.profiles[0].declaration_status, 'agent_read_scope_active');
+  assert.equal(status.profiles[0].declaration_status, 'agent_profile_scope_active');
   assert.equal(status.profiles[0].agents[0].name, 'Fictional Codex');
   assert.equal(status.profiles[0].agents[0].vaults[0].operations.includes('write_note'), false);
   assert.doesNotMatch(JSON.stringify(status), /tokenHash|f{64}/);
@@ -97,7 +98,7 @@ test('profile-scoped agents see only granted vaults and only supported read tool
   const scopedGuide = JSON.parse(guideResource.result.contents[0].text);
   assert.deepEqual(scopedGuide.server.enabled_vaults, ['Fictional Org']);
   assert.equal(scopedGuide.twin_profile_scope.writes_available, false);
-  assert.match(scopedGuide.write_rules.join(' '), /read-only/);
+  assert.match(scopedGuide.write_rules.join(' '), /General note writes/);
   assert.doesNotMatch(guideResource.result.contents[0].text, /Fictional Personal|TWIN_PERSONAL_CANARY_77/);
   const guide = await mcp.handle({ jsonrpc: '2.0', id: 6, method: 'tools/call', params: { name: 'brainlink_guide', arguments: {} } });
   assert.equal(guide.result.structuredContent.twin_profile_scope.profile_id, 'org_twin_1');
@@ -112,10 +113,54 @@ test('profile-scoped agents see only granted vaults and only supported read tool
   assert.match(deniedWrite.result.content[0].text, /not available to profile-scoped agents/);
   const deniedSession = await mcp.handle({ jsonrpc: '2.0', id: 4, method: 'tools/call', params: { name: 'session_list', arguments: {} } });
   assert.equal(deniedSession.result.isError, true);
-  assert.match(deniedSession.result.content[0].text, /not available to profile-scoped agents/);
+  assert.match(deniedSession.result.content[0].text, /does not allow read_session/);
   const unassigned = createContext(cfg, { env: { BRAINLINK_AGENT_TOKEN: 'unknown-token' } });
   assert.deepEqual(unassigned.enabled, []);
   assert.equal(unassigned.twinScope.mode, 'unassigned');
+});
+
+test('profile-scoped session reads stay inside the profile and closeouts remain approval-gated', async () => {
+  const root = await mkdtemp(path.join(tmpdir(), 'brainlink-twin-sessions-'));
+  const orgPath = path.join(root, 'org');
+  const privatePath = path.join(root, 'personal');
+  await mkdir(path.join(orgPath, 'Inbox'), { recursive: true });
+  await mkdir(privatePath);
+  const cfg = fixture(orgPath);
+  cfg.vaults.push({ name: 'Fictional Personal', path: privatePath, private: true });
+  const profile = cfg.twin_profiles[0];
+  profile.vaults[0].access = 'propose';
+  profile.allowed_actions.push('read_session', 'propose_note');
+  profile.agent_access[0].vaults[0] = { name: 'Fictional Org', access: 'propose', operations: ['search', 'read_note', 'read_session', 'propose_note'] };
+  const env = { BRAINLINK_HOME: path.join(root, 'app'), HOME: root, BRAINLINK_AGENT_TOKEN: 'fictional-agent-token' };
+  const mcp = createMcp(createContext(cfg, { env }));
+  const store = await openSessionStore(env);
+  const own = await store.putSession({ client: 'fictional-org-ai', source_id: 'own-1', profile_id: 'org_twin_1', vault: 'Sessions', project: 'Example', title: 'Own session', summary: 'ORG_SESSION_CANARY_77', started_at: new Date().toISOString(), private: true, messages: [{ role: 'assistant', at: new Date().toISOString(), text: 'ORG_MESSAGE_CANARY_77' }] });
+  const foreign = await store.putSession({ client: 'fictional-person-ai', source_id: 'private-1', profile_id: 'personal_twin_2', vault: 'Sessions', project: 'Private', title: 'Private session', summary: 'PERSONAL_SESSION_CANARY_88', started_at: new Date().toISOString(), private: true, messages: [{ role: 'assistant', at: new Date().toISOString(), text: 'PERSONAL_MESSAGE_CANARY_88' }] });
+  const unassigned = await store.putSession({ client: 'fictional-import', source_id: 'legacy-1', vault: 'Sessions', project: 'Legacy', title: 'Unassigned import', summary: 'UNASSIGNED_SESSION_CANARY_99', started_at: new Date().toISOString(), private: true, messages: [{ role: 'assistant', at: new Date().toISOString(), text: 'UNASSIGNED_MESSAGE_CANARY_99' }] });
+
+  const listedTools = (await mcp.handle({ jsonrpc: '2.0', id: 20, method: 'tools/list' })).result.tools.map((tool) => tool.name);
+  assert.ok(listedTools.includes('session_list'));
+  assert.ok(listedTools.includes('session_read'));
+  assert.ok(listedTools.includes('session_close'));
+  const listed = await mcp.handle({ jsonrpc: '2.0', id: 21, method: 'tools/call', params: { name: 'session_list', arguments: { q: 'SESSION_CANARY' } } });
+  assert.deepEqual(listed.result.structuredContent.sessions.map((session) => session.id), [own.id]);
+  assert.doesNotMatch(JSON.stringify(listed), /PERSONAL_SESSION_CANARY_88|UNASSIGNED_SESSION_CANARY_99/);
+  const readOwn = await mcp.handle({ jsonrpc: '2.0', id: 22, method: 'tools/call', params: { name: 'session_read', arguments: { id: own.id, full: true } } });
+  assert.match(JSON.stringify(readOwn), /ORG_MESSAGE_CANARY_77/);
+  for (const id of [foreign.id, unassigned.id]) {
+    const denied = await mcp.handle({ jsonrpc: '2.0', id: 23, method: 'tools/call', params: { name: 'session_read', arguments: { id, full: true } } });
+    assert.equal(denied.result.isError, true);
+    assert.doesNotMatch(JSON.stringify(denied), /PERSONAL_SESSION_CANARY_88|UNASSIGNED_SESSION_CANARY_99|PERSONAL_MESSAGE_CANARY_88|UNASSIGNED_MESSAGE_CANARY_99/);
+  }
+  const closeArgs = { vault: 'Fictional Org', title: 'Fictional scoped close', goal: 'Verify scoped closure', outcome: 'Stored only as a profile-owned private summary.', session_or_task_id: 'scoped-close-1' };
+  const preview = await mcp.handle({ jsonrpc: '2.0', id: 24, method: 'tools/call', params: { name: 'session_close', arguments: closeArgs } });
+  assert.equal(preview.result.structuredContent.session_saved, false);
+  assert.equal(preview.result.structuredContent.written, false);
+  const saved = await mcp.handle({ jsonrpc: '2.0', id: 25, method: 'tools/call', params: { name: 'session_close', arguments: { ...closeArgs, confirm: true } } });
+  assert.equal(saved.result.structuredContent.session_saved, true);
+  const savedSession = await (await openSessionStore(env)).readSession(saved.result.structuredContent.session_id, { profile_id: 'org_twin_1' });
+  assert.equal(savedSession.session.profile_id, 'org_twin_1');
+  assert.equal((await store.listSessions({ profile_id: 'personal_twin_2' })).some((session) => session.id === savedSession.session.id), false);
 });
 
 test('authenticated local status exposes Twin scopes without returning agent credentials', async () => {

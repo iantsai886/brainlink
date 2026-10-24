@@ -80,6 +80,8 @@ export interface Session {
   vault: string;
   /** Project / working-directory label from the client's own history (e.g. a repo path or folder name); '' if unknown. */
   project: string;
+  /** Optional Personal/Organisation Twin owner. Unassigned sessions are not visible to scoped profiles. */
+  profile_id?: string | null;
   title: string;
   /** <= ~60 tokens; what session_list/search return. */
   summary: string;

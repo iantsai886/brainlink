@@ -365,5 +365,5 @@
   "twinProfiles.memory.procedural": "Procedural",
   "twinProfiles.memory.episodic": "Episódica",
   "twinProfiles.capture": "Captura de sessão",
-  "twinProfiles.limits": "Só tokens de agentes nomeados e atribuídos a um perfil recebem estes limites de busca/leitura. Escritas, histórico de sessões e transferências estão bloqueados para eles por enquanto. Outras conexões de IA mantêm o escopo atual."
+  "twinProfiles.limits": "Estes limites aplicam-se apenas a tokens de agentes nomeados e atribuídos a um perfil. O acesso a sessões exige autorização explícita e o mesmo perfil; encerramentos exigem aprovação. Escritas gerais e transferências continuam bloqueadas. Outras conexões de IA mantêm o escopo atual."
 }

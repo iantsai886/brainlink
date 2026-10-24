@@ -48,9 +48,10 @@ function fitByTokens(messages, budget) {
 // ever un-hides imported sessions (see isRelaxableImport above), never session_log entries.
 export async function sessionList(store, a = {}) {
   const limit = Math.max(1, Math.min(a.limit ?? 8, 20));
-  const fetched = await store.listSessions({ q: a.q, client: a.client, since: a.since, limit: Math.min(limit * 4, 80) });
+  const fetched = await store.listSessions({ q: a.q, client: a.client, since: a.since, profile_id: a.profile_id, limit: Math.min(limit * 4, 80) });
   const visible = fetched.filter((s) => {
-    const allowed = !s.private || a.include_private || (a.allow_imported_private && isRelaxableImport(s));
+    const profilePrivate = Boolean(a.allow_profile_private && a.profile_id && s.profile_id === a.profile_id);
+    const allowed = !s.private || a.include_private || profilePrivate || (a.allow_imported_private && isRelaxableImport(s));
     return allowed && (!a.project || s.project.includes(a.project));
   });
   return { sessions: visible.slice(0, limit).map(toSessionRecord) };
@@ -58,10 +59,10 @@ export async function sessionList(store, a = {}) {
 
 // Up to MAX_KEY_TURNS short snippets (first, middle, last turn) instead of the raw message log —
 // enough to orient on without a client having to opt into full=true.
-async function keyTurns(store, id, messageCount) {
+async function keyTurns(store, id, messageCount, scope = {}) {
   if (!messageCount) return [];
   const offsets = [...new Set([0, Math.floor((messageCount - 1) / 2), messageCount - 1])].slice(0, MAX_KEY_TURNS);
-  const picked = await Promise.all(offsets.map((offset) => store.readSession(id, { offset, limit: 1 })));
+  const picked = await Promise.all(offsets.map((offset) => store.readSession(id, { ...scope, offset, limit: 1 })));
   return picked.map(({ messages: [m] }) => ({ role: m.role, at: m.at, text: clip(redactText(m.text), KEY_TURN_CHARS / 4) }));
 }
 
@@ -75,16 +76,18 @@ const PRIVATE_FULL_MESSAGE = 'Full message text for this session is private; cha
 // sessionList's allow_imported_private, only ever apply to imported sessions (isRelaxableImport).
 export async function sessionRead(store, a = {}) {
   if (!a.id) throw new Error('id is required');
-  const peek = await store.readSession(a.id, {});
+  const scope = a.profile_id ? { profile_id: a.profile_id } : {};
+  const peek = await store.readSession(a.id, scope);
   const session = peek.session;
   const relaxable = isRelaxableImport(session);
-  const summaryOk = a.include_private || (a.allow_imported_private && relaxable);
+  const profilePrivate = Boolean(a.allow_profile_private && a.profile_id && session.profile_id === a.profile_id);
+  const summaryOk = a.include_private || profilePrivate || (a.allow_imported_private && relaxable);
   if (session.private && !summaryOk) return { id: session.id, private: true, message: PRIVATE_MESSAGE };
   const base = summaryOf(session);
-  const fullOk = a.include_private || (a.allow_imported_full_private && relaxable);
+  const fullOk = a.include_private || profilePrivate || (a.allow_imported_full_private && relaxable);
   if (a.full) {
     if (session.private && !fullOk) return { ...base, message: PRIVATE_FULL_MESSAGE };
-    const batch = await store.readSession(a.id, { offset: a.offset || 0, limit: FULL_PAGE_FETCH });
+    const batch = await store.readSession(a.id, { ...scope, offset: a.offset || 0, limit: FULL_PAGE_FETCH });
     const messages = fitByTokens(batch.messages, FULL_PAGE_TOKENS);
     const nextOffset = (a.offset || 0) + messages.length < session.message_count ? (a.offset || 0) + messages.length : null;
     return { ...base, messages: messages.map((m) => ({ ...m, text: redactText(m.text) })), next_offset: nextOffset };
@@ -93,7 +96,7 @@ export async function sessionRead(store, a = {}) {
   // never grant access to the body of a private imported session.
   if (session.private && !fullOk) return { ...base, key_turns: [] };
   // summary + metadata + up to 3 key-turn snippets — comfortably under the ~800 token default budget
-  return { ...base, key_turns: await keyTurns(store, a.id, session.message_count) };
+  return { ...base, key_turns: await keyTurns(store, a.id, session.message_count, scope) };
 }
 
 // a: { title?, text, role?, session_id?, project?, private? }. platform = ctx.platform (BRAINLINK_AI_PLATFORM).
