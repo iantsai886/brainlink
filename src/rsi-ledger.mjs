@@ -22,6 +22,25 @@ const clean = (v, max = MAX_TEXT) => typeof v === 'string' ? v.trim().slice(0, m
 const canonical = (v) => JSON.stringify(v);
 const digest = (v) => createHash('sha256').update(canonical(v)).digest('hex');
 
+function similarity(left, right) {
+  const words = (value) => new Set(clean(value, 4000).toLowerCase().normalize('NFKC').match(/[\p{L}\p{N}]+/gu) || []);
+  const a = words(left), b = words(right);
+  if (!a.size || !b.size) return 0;
+  let overlap = 0;
+  for (const word of a) if (b.has(word)) overlap++;
+  return overlap / (a.size + b.size - overlap);
+}
+
+function duplicateCandidates(rows, fields) {
+  return rows.map((row) => {
+    const title = similarity(fields.title, row.fields.title);
+    const problem = similarity(fields.user_problem, row.fields.user_problem);
+    return { id: row.id, title: row.fields.title, status: row.status, score: Math.round((title * 0.45 + problem * 0.55) * 100) };
+  }).filter((candidate) => candidate.score >= 55)
+    .sort((a, b) => b.score - a.score || a.title.localeCompare(b.title))
+    .slice(0, 3);
+}
+
 function validatePayload(input, { partial = false } = {}) {
   if (!input || typeof input !== 'object' || Array.isArray(input)) throw new Error('Idea must be an object.');
   const out = {};
@@ -141,6 +160,7 @@ export function createRsiLedger({ home, now = () => new Date() }) {
   };
   return {
     list: () => locked(async () => project(await readEvents(file))),
+    similar: (input) => locked(async () => duplicateCandidates(project(await readEvents(file)), validatePayload(input))),
     create: (input) => locked(async () => {
       const fields = validatePayload(input);
       const id = `BL-RSI-${now().toISOString().slice(0, 10).replaceAll('-', '')}-${randomUUID().slice(0, 8)}`;

@@ -543,7 +543,10 @@ $('rsi-idea-form').addEventListener('submit', (e) => act(async () => {
   e.preventDefault();
   const form = e.currentTarget, data = new FormData(form), sourceUrl = String(data.get('source_url') || '').trim();
   const sources = sourceUrl ? [{ url: sourceUrl, title: String(data.get('source_title') || ''), published_at: String(data.get('source_published') || ''), accessed_at: new Date().toISOString(), claim: String(data.get('source_claim') || ''), confidence: String(data.get('source_confidence') || ''), limitations: String(data.get('source_limitations') || '') }] : [];
-  await api('POST', '/api/rsi/ideas', { title: String(data.get('title')), user_problem: String(data.get('user_problem')), hypothesis: String(data.get('hypothesis') || ''), memory_types: [...form.querySelector('[name="memory_types"]').selectedOptions].map(x => x.value), sources });
+  const proposal = { title: String(data.get('title')), user_problem: String(data.get('user_problem')), hypothesis: String(data.get('hypothesis') || ''), memory_types: [...form.querySelector('[name="memory_types"]').selectedOptions].map(x => x.value), sources };
+  const { similar } = await api('POST', '/api/rsi/ideas/check', proposal);
+  if (similar.length && !window.confirm(t('rsi.duplicates') + '\n\n' + similar.map(x => x.title + ' (' + x.score + '%)').join('\n'))) return;
+  await api('POST', '/api/rsi/ideas', proposal);
   form.reset(); await loadRsi(); toast(t('rsi.saved'));
 }));
 document.addEventListener('click', (e) => {

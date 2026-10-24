@@ -447,5 +447,6 @@
   "rsi.status.deferred": "Adiada",
   "rsi.status.rolled_back": "Revertida",
   "rsi.localPrivacy": "Armazenado localmente nos dados do BrainLink. Não insira dados de clientes, notas privadas ou segredos.",
-  "rsi.save": "Salvar ideia"
+  "rsi.save": "Salvar ideia",
+  "rsi.duplicates": "Estas ideias existentes parecem semelhantes. Salvar mesmo assim como uma proposta separada?"
 }

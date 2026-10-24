@@ -326,6 +326,7 @@ export async function startSetup(opts = {}) {
   const routes = {
     'GET /api/state': () => state(),
     'GET /api/rsi': async () => ({ ideas: await rsiLedger.list() }),
+    'POST /api/rsi/ideas/check': async (b) => ({ similar: await rsiLedger.similar(b) }),
     'POST /api/rsi/ideas': async (b) => ({ idea: await rsiLedger.create(b) }),
     'POST /api/rsi/ideas/update': async (b) => ({ idea: await rsiLedger.update(b) }),
     'POST /api/pick-folder': async () => { const p = await pick(); return p === undefined ? { path: null, unavailable: true } : { path: p }; },

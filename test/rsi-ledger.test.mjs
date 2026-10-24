@@ -70,6 +70,18 @@ test('separate BrainLink instances serialize writes to one RSI journal', async (
   assert.deepEqual(new Set(listed[0].map(x => x.id)), new Set([a.id, b.id]));
 });
 
+test('RSI similarity check suggests overlapping ideas without blocking intentional duplicates', async () => {
+  const ledger = createRsiLedger({ home: await temp('similar') });
+  const saved = await ledger.create(validIdea);
+  const matches = await ledger.similar({ ...validIdea, title: 'Improve handoff context', user_problem: 'Agents repeat searches after handoff.' });
+  assert.equal(matches[0].id, saved.id);
+  assert.ok(matches[0].score >= 55);
+  assert.deepEqual(await ledger.similar({ title: 'Water garden plants', user_problem: 'The greenhouse needs watering schedules.' }), []);
+  // Suggestions are advisory: callers can still intentionally record a related experiment.
+  const intentional = await ledger.create({ ...validIdea, title: 'Improve handoff context for mobile' });
+  assert.equal(intentional.status, 'discovered');
+});
+
 test('RSI Setup panel has unique ids and one render/submit path', async () => {
   const html = await readFile(new URL('../ui/index.html', import.meta.url), 'utf8');
   assert.equal((html.match(/id="rsi-panel"/g) || []).length, 1);
@@ -89,6 +101,9 @@ test('Setup exposes the RSI ledger only through authenticated local APIs', async
     assert.equal((await post('/api/rsi/ideas', validIdea, 'wrong-token')).status, 401);
     const created = await post('/api/rsi/ideas', validIdea).then(r => r.json());
     assert.equal(created.idea.status, 'discovered');
+    assert.equal((await post('/api/rsi/ideas/check', validIdea, 'wrong-token')).status, 401);
+    const similar = await post('/api/rsi/ideas/check', validIdea).then(r => r.json());
+    assert.equal(similar.similar[0].id, created.idea.id);
     assert.equal((await fetch(base + '/api/rsi', { headers: { 'X-BrainLink-Token': 'wrong-token' } })).status, 401);
     const listed = await fetch(base + '/api/rsi', { headers: { 'X-BrainLink-Token': app.token } }).then(r => r.json());
     assert.equal(listed.ideas.length, 1);

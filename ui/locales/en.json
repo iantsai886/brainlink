@@ -447,5 +447,6 @@
   "rsi.status.deferred": "Deferred",
   "rsi.status.rolled_back": "Rolled back",
   "rsi.localPrivacy": "Stored locally in BrainLink app data. Do not enter customer details, private notes, or secrets.",
-  "rsi.save": "Save idea"
+  "rsi.save": "Save idea",
+  "rsi.duplicates": "These existing ideas look similar. Save this as a separate proposal anyway?"
 }
