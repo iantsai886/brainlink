@@ -4,7 +4,7 @@ Status snapshot: 2026-10-24 (Asia/Taipei)
 GitHub repository: `iantsai886/brainlink`
 Branch: `fix/private-session-excerpts`
 Code baseline: current `fix/private-session-excerpts` branch snapshot
-Validation environment: Windows, Node.js 24.18.0; `npm test`: 241 tests, 235 passed, 0 failed, 6 skipped. Browser review used an isolated fictional vault.
+Validation environment: Windows, Node.js 24.18.0; `npm test`: 241 tests, 235 passed, 0 failed, 6 skipped. Focused Notes model suite: 9 passed, 0 failed. Browser review used an isolated fictional vault for the previous session-reminder UI; the latest correction/withdrawal UI has not had browser usability review.
 Client discovery: Codex CLI `0.164.0-alpha.11.1` found the repository skill in `codex debug prompt-input`; Claude Code CLI is not installed here.
 
 This is an evidence ledger, not a release-readiness claim. “Implemented and locally tested” does not imply packaged, cross-client validated, or ready for customers.
@@ -16,7 +16,7 @@ This is an evidence ledger, not a release-readiness claim. “Implemented and lo
 | Working memory | Imported Claude Code and Codex sessions, private session logging, bounded `session_read`, handoff mailbox, explicit close operation, opt-in SessionEnd setup, and dismissible local reminders. | `src/sessions/end-cue.mjs`, `src/sessions/hooks.mjs`, `docs/SESSION-FILING.md`. Tests cover configuration preservation, generated command execution, authentication and private-field exclusion; isolated browser review confirms enable and dismissal controls. Live hook lifecycle acceptance, automatic summary extraction, and live Claude Code ↔ Codex runtime receipt remain open. |
 | Semantic memory | Markdown/Obsidian notes, multi-vault lexical search, optional local semantic search, links/graph, provenance-aware proposed notes, permission filtering before indexing and retrieval. | `src/core.mjs`, `docs/RETRIEVAL-EVAL.md`; privacy canary tests pass. Verified fact promotion and independent held-out quality evaluation remain incomplete. |
 | Procedural memory | Configurable agent roles, rule packs, prompts, shared commands, and a versioned Agent Skills-format cross-AI handoff workflow. | `.agents/skills/brainlink-cross-ai-handoff/SKILL.md` and `.claude/skills/brainlink-cross-ai-handoff/SKILL.md` are byte-identical copies of `skills/brainlink-cross-ai-handoff/SKILL.md`. `test/skills.test.mjs` checks manifest fields, registry metadata, safety instructions, and parity. Codex CLI repository discovery is verified; Claude Code CLI is unavailable, and live two-client handoff remains unverified. |
-| Episodic memory | Private imported sessions; `session_close` creates a private session and proposed note; the local UI can preview and file summaries. Exact project-to-vault destinations can be remembered after user confirmation. | `docs/SESSION-FILING.md`; fictional vault tests cover privacy and routing. Session capture still depends on a supported importer or an AI/client call; summaries are reported, not verified knowledge. |
+| Episodic memory | Private imported sessions; `session_close` creates a private session and proposed note; the local UI can preview, file, correct, and withdraw proposed summaries while retaining source and a dated changelog. Exact project-to-vault destinations can be remembered after user confirmation. | `docs/SESSION-FILING.md`; fictional vault tests cover privacy, routing, correction and withdrawal. Session capture still depends on a supported importer or an AI/client call; summaries are reported, not verified knowledge. |
 | Context efficiency | Summary-first session reads, token estimates, bounded retrieval evaluator and compact tool interfaces. | `docs/SESSION-INDEX.md`, `docs/RETRIEVAL-EVAL.md`. Estimates do not prove provider-billed token savings or equal task quality. |
 | RSI | Read-only evaluator compares a baseline with query variants; it blocks promotion with too few cases or privacy violations and never changes live ranking automatically. | `docs/RETRIEVAL-EVAL.md`. A production RSI loop still needs frozen independent datasets, human review, rollback and post-promotion monitoring. |
 
@@ -34,11 +34,10 @@ This is an evidence ledger, not a release-readiness claim. “Implemented and lo
 ## Next engineering sequence
 
 1. Validate installed hooks through a real client lifecycle; add AI-assisted reviewed summaries while keeping transcript reading off by default and durable filing approval-gated.
-2. Add correction and reversal for proposed episodes, with source-linked changes and an audit trail.
-3. Run a live Claude Code ↔ Codex handoff and retain receipts for pickup, acknowledgement, and private-note non-disclosure.
-4. Expand frozen retrieval and filing evaluations to at least 20 representative cases per decision set; measure task success, privacy, latency and token estimates together.
-5. Build and install the Windows package on Windows, verify sign-in launch and uninstall cleanup, then run a restore drill on a separate empty location.
-6. Complete accessibility, large-vault performance and user task checks before calling the product ready to sell.
+2. Run a live Claude Code ↔ Codex handoff and retain receipts for pickup, acknowledgement, and private-note non-disclosure.
+3. Expand frozen retrieval and filing evaluations to at least 20 representative cases per decision set; measure task success, privacy, latency and token estimates together.
+4. Build and install the Windows package on Windows, verify sign-in launch and uninstall cleanup, then run a restore drill on a separate empty location.
+5. Complete accessibility, large-vault performance and user task checks before calling the product ready to sell.
 
 ## Current limits
 

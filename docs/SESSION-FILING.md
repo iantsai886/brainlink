@@ -12,6 +12,14 @@ Connected MCP clients also have `session_close` and the `close-session` prompt. 
 
 The session and vault note are two separate writes, not a transaction. If the session write succeeds but the note write fails (for example, concurrent filename creation or disk failure), the tool returns the failure with `session_saved: true`; the user can inspect the private session in the local UI and file it there. Do not claim both were saved unless `written: true` is returned. Simultaneous closes from separate BrainLink processes have not been tested for cross-process atomicity.
 
+## Correct or withdraw a proposed episode
+
+The Notes editor supports user correction of an episode body. Saving a changed body appends a dated `Summary corrected` entry to its existing `## Changelog` (or creates that section) and uses the store's full-etag compare-and-swap, so a concurrent edit is not overwritten. This history is an application receipt, not a cryptographic audit log; metadata-only edits are not separately annotated yet.
+
+For a private note with `type: episode`, `status: proposed`, and a `source` matching `BrainLink session <id>`, the editor offers **Withdraw proposal**. It confirms before acting, changes only the status to `withdrawn`, retains the full summary, private flag and session source, and appends a dated changelog entry. It refuses unrelated sources, non-private notes, non-proposed notes, unsaved edits and stale revisions. Withdrawal does not delete the source session or erase the episode. This is reversible through the ordinary revisioned note editor, subject to vault write permissions.
+
+Validation: `ui/app/test/m2.test.mjs` covers body correction history, private source retention, withdrawal guards and stale-etag conflicts using fictional notes. Run `node --import ./test/_preload.mjs --test ui/app/test/m2.test.mjs` for the focused UI-model checks, then `npm test` for the repository suite. The note editor changes are local and have not yet received an installed-app/browser usability review.
+
 Validation: `test/session-filing.test.mjs` and `test/session-close.test.mjs` use fictional company and personal vaults and verify preview-only behavior, private frontmatter and read blocking, chosen-vault-only writing, no overwrite, rejection of empty summary and secrets, exact-project destination recommendations, API authentication, exclusion of raw private turns, a scoped MCP close, and non-exposure through the imported-session sharing switch. Run with `node --import ./test/_preload.mjs --test test/session-filing.test.mjs test/session-close.test.mjs`.
 
 ## End-of-session integration boundary
@@ -35,4 +43,4 @@ Validation: `test/session-hooks.test.mjs` checks merge/disable preservation, bac
 
 Official references checked 2026-10-24: [Claude Code hooks reference](https://code.claude.com/docs/en/hooks#sessionend) and [Codex hooks documentation](https://learn.chatgpt.com/docs/hooks).
 
-Remaining for the complete product: AI-assisted summary with review, automatic destination recommendation with explainable evidence, source-linked and reversible classification, user correction, live hook and cross-client handoff verification, token/time measurement, and privacy evaluation across personal/company/client fixtures. A lifecycle cue or AI-reported summary alone is not a verified experience or long-term rule.
+Remaining for the complete product: AI-assisted summary with review, automatic destination recommendation with explainable evidence, metadata-change history, live hook and cross-client handoff verification, token/time measurement, and privacy evaluation across personal/company/client fixtures. A lifecycle cue or AI-reported summary alone is not a verified experience or long-term rule.
