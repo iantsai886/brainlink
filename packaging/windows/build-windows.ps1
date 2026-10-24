@@ -1,5 +1,5 @@
 # Builds dist\BrainLink-Setup-<version>.exe on Windows.
-# Needs: Node 22 (to read package.json), Inno Setup 6 (iscc.exe on PATH or default location).
+# Needs: PowerShell 7 and Inno Setup 6 (iscc.exe on PATH or default location).
 # Optional signing: set $env:BRAINLINK_SIGN=1 and configure the "brainlink" sign tool (see BrainLink.iss).
 $ErrorActionPreference = "Stop"
 $Here = Split-Path -Parent $MyInvocation.MyCommand.Path

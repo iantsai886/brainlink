@@ -5,7 +5,7 @@
 - `brainlink-<version>-linux-<arch>.tar.gz`: per-user, no root. Extract it and run `./install.sh`. It installs to `~/.local/share/brainlink`, adds `~/.local/bin/brainlink` and a "BrainLink" app-menu entry, and opens Setup when a desktop is present. Remove it with `~/.local/share/brainlink/uninstall.sh`, which first removes BrainLink from connected AI apps.
 - `brainlink_<version>_<amd64|arm64>.deb`: Debian/Ubuntu (`sudo apt install ./brainlink_….deb`). Installs to `/opt/brainlink`, adds `/usr/bin/brainlink` and an app-menu entry.
 
-Both bundle the official Node 22 runtime (checksum-verified). Settings live in `~/.config/brainlink` (or `$XDG_CONFIG_HOME`). Obsidian vaults are found from native, AppImage, Flatpak and Snap installs. The folder picker uses `zenity` or `kdialog`; without either, Setup asks for the path.
+Both bundle the pinned official Node 24.22.1 runtime (checksum-verified against Node's matching SHA-256 manifest). Settings live in `~/.config/brainlink` (or `$XDG_CONFIG_HOME`). Obsidian vaults are found from native, AppImage, Flatpak and Snap installs. The folder picker uses `zenity` or `kdialog`; without either, Setup asks for the path.
 
 **Tested in containers (2026-10-19):** Debian 12 arm64 and amd64, Ubuntu 24.04 arm64 and Fedora 41 arm64 (tarball). Covered: install, `brainlink init`, `connect all` (Claude Desktop and Cursor configs), MCP over stdio (search), the Setup server, `brief`, uninstall (AI configs cleaned, settings kept), `.deb` install and removal with dpkg.
 

@@ -60,3 +60,43 @@ jobs:
           path: dist/BrainLink-Setup-*.exe
           if-no-files-found: error
           retention-days: 7
+
+  macos-package:
+    name: Build unsigned macOS installer
+    runs-on: macos-latest
+    timeout-minutes: 30
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Build universal package with pinned Node.js
+        run: bash packaging/macos/build-pkg.sh
+
+      - name: Upload installer artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: brainlink-macos-installer
+          path: dist/BrainLink-*.pkg*
+          if-no-files-found: error
+          retention-days: 7
+
+  linux-package:
+    name: Build Linux packages
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Build x64 and arm64 packages with pinned Node.js
+        run: bash packaging/linux/build-linux.sh
+
+      - name: Upload Linux artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: brainlink-linux-packages
+          path: |
+            dist/brainlink-*.tar.gz*
+            dist/brainlink_*.deb*
+          if-no-files-found: error
+          retention-days: 7

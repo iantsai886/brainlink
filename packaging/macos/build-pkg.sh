@@ -1,5 +1,5 @@
 #!/bin/bash
-# Builds dist/BrainLink-<version>.pkg: BrainLink.app (universal Node 22 runtime + app) and the
+# Builds dist/BrainLink-<version>.pkg: BrainLink.app (universal pinned Node runtime + app) and the
 # `brainlink` command. Signs and notarises when certificates are configured:
 #   DEVELOPER_ID_APP="Developer ID Application: Name (TEAMID)"
 #   DEVELOPER_ID_INSTALLER="Developer ID Installer: Name (TEAMID)"

@@ -39,7 +39,7 @@ The customer's notes never leave their machine. The AI connects to `brainlink` l
 └────────────────────────────────────────────────────────────────────────────────┘
 ```
 
-- **Runtime:** the existing zero-dependency Node 22 core, shipped with an embedded official Node runtime so the customer installs nothing else.
+- **Runtime:** the existing zero-dependency Node core, shipped with the pinned official Node 24.22.1 runtime so the customer installs nothing else.
 - **No cloud service in v1.** Licence check is offline (signed key). This keeps cost ~0 and privacy simple.
 
 ## 4. Core (from vault-agent v0.2, made generic)
@@ -113,7 +113,7 @@ Still weak: cross-language and synonym questions without a translation (needs a 
 | | macOS | Windows |
 |---|---|---|
 | Installer | `.pkg` (pkgbuild + productbuild): `/Applications/BrainLink.app` + `/usr/local/bin/brainlink` symlink | Inno Setup `.exe` (per-user, no admin) in v1; MSIX in v1.1 |
-| Runtime | official Node 22 universal (arm64 + x64) inside the app bundle | official Node 22 x64 `node.exe` inside the install dir |
+| Runtime | official Node 24.22.1 universal (arm64 + x64) inside the app bundle | official Node 24.22.1 x64 `node.exe` inside the install dir |
 | Signing | **Developer ID Application + Developer ID Installer** certificates (Apple Developer Program, US$99/yr) → `notarytool submit` → `stapler staple`. Until then: unsigned test build (right-click → Open) | Authenticode via **Azure Trusted Signing** (~US$10/mo) or an OV cert; avoids SmartScreen warnings |
 | Store | **Not Mac App Store**: its sandbox blocks writing other apps' MCP config files and reading arbitrary vault folders without per-folder bookmarks. Direct download. | Microsoft Store optional later (MSIX) — same sandbox caveats, lower priority |
 | Updates | in-app "check for update" against a signed `latest.json` on Iango's site (v1.1) | same |
