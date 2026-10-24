@@ -34,6 +34,12 @@ test('pre-release installer notice matches the full, non-expiring build', async 
   assert.match(notice, /no trial timer,\s*feature expiry,\s*licence-key requirement, or account check/i);
   assert.doesNotMatch(notice, /14-day trial|limited features|circumvent the licence check/i);
 });
+
+test('customer one-pager does not advertise a trial or feature limit', async () => {
+  const page = await readFile(path.join(ROOT, 'docs', 'one-pager.html'), 'utf8');
+  assert.match(page, /available without a countdown, licence key, or account/i);
+  assert.doesNotMatch(page, /14.day trial|first 14 days|free trial|trial ended/i);
+});
 const long = Array.from({ length: 300 }, (_, i) => `filler${i}`).join(' ');
 
 // Company vault = copy of the sample with the Founder OS pack; private vault = journal pack.
