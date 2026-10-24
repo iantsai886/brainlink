@@ -13,7 +13,7 @@ import { createContext, chunkMarkdown, search, readNote, related, zonedNow, find
 import { findObsidianVaults, nestedVaults } from '../src/obsidian.mjs';
 import { proposeNote, sendHandoff, listHandoffs, frontmatter, resolveIdentity } from '../src/writes.mjs';
 import { connectAgent, closeLoop, resolveAgent, latestCaptures } from '../src/agents.mjs';
-import { createMcp, serveHttp } from '../src/server.mjs';
+import { createMcp, serveHttp, VERSION } from '../src/server.mjs';
 import { buildPack, scaffold, mergePack } from '../src/packs.mjs';
 import { connectClient, disconnectClient, detect, codexToml } from '../src/connectors.mjs';
 import { startSetup } from '../src/setup.mjs';
@@ -22,6 +22,18 @@ const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const SAMPLE = path.join(ROOT, 'samples', 'acme-studio');
 const tmp = (p) => mkdtemp(path.join(tmpdir(), `brainlink-${p}-`));
 const NOW = new Date('2026-10-18T01:30:00Z');
+test('runtime version comes from the canonical package manifest', async () => {
+  const pkg = JSON.parse(await readFile(path.join(ROOT, 'package.json'), 'utf8'));
+  assert.equal(VERSION, pkg.version);
+});
+test('pre-release installer notice matches the full, non-expiring build', async () => {
+  const notice = await readFile(path.join(ROOT, 'LICENSE.txt'), 'utf8');
+  const macNotice = await readFile(path.join(ROOT, 'packaging', 'macos', 'resources', 'license.txt'), 'utf8');
+  assert.equal(macNotice.trim(), notice.trim());
+  assert.match(notice, /all implemented product features enabled/i);
+  assert.match(notice, /no trial timer,\s*feature expiry,\s*licence-key requirement, or account check/i);
+  assert.doesNotMatch(notice, /14-day trial|limited features|circumvent the licence check/i);
+});
 const long = Array.from({ length: 300 }, (_, i) => `filler${i}`).join(' ');
 
 // Company vault = copy of the sample with the Founder OS pack; private vault = journal pack.

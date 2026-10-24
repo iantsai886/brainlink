@@ -2,7 +2,7 @@
 
 Status: product architecture baseline
 Date: 2026-10-23 Asia/Taipei
-Baseline: main at v1.2.6 merge; verify version/tag alignment before release
+Baseline: full-source `main` history; current development target is 1.2.8. `package.json` is canonical; v1.2.7 is a separate tagged release line and is not the source branch head.
 
 ## Product definition
 

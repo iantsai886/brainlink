@@ -3,6 +3,7 @@
 // resources and prompts.
 import { createServer as createHttpServer } from 'node:http';
 import { readFile } from 'node:fs/promises';
+import { createRequire } from 'node:module';
 import { timingSafeEqual } from 'node:crypto';
 import { search, searchWithVerdict, readNote, related, vaultRoot, safeJoin, semanticStatus } from './core.mjs';
 import { proposeNote, sendHandoff, listHandoffs, remember, appendDaily } from './writes.mjs';
@@ -14,7 +15,8 @@ import { openSessionStore, importAll } from './sessions/index.mjs';
 import { sessionList, sessionRead, sessionLog } from './sessions/mcp.mjs';
 import { closeSession } from './sessions/close.mjs';
 
-export const VERSION = '1.2.6';
+const require = createRequire(import.meta.url);
+export const VERSION = require('../package.json').version;
 export const SERVER_NAME = 'brainlink';
 const SUPPORTED_PROTOCOLS = ['2025-06-18', '2025-03-26', '2024-11-05'];
 const RO = { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: false };

@@ -1,12 +1,12 @@
-# BrainLink MCP — Product Spec v1 (approved)
+# BrainLink — Product and Engineering Specification
 
-Status: **approved by Ian 2026-10-18** · drafted 2026-10-17 · Platforms decided with Ian: **macOS + Windows desktop** (no iPhone/iPad in v1); **Linux added 2026-10-19** at Ian's request. First build: **macOS**.
+Status: living specification, updated 2026-10-24. This version supersedes the October 18 plan where they conflict, especially on onboarding, trial/licensing and the product's Personal/Organisation Twin direction. Current code, tests and dated evidence in `docs/IMPLEMENTATION-STATUS.md` determine implementation status.
 
 ## 1. What it is
 
-A desktop app + local MCP server that turns any Obsidian / Markdown folder into a **shared, rule-following second brain for every AI** the customer uses: Claude (Desktop, Code), ChatGPT Codex, Cursor, Gemini CLI, Grok/any Streamable-HTTP client, and ChatGPT connectors (via an optional tunnel).
+A desktop app + local MCP server that turns user-controlled Obsidian / Markdown vaults into a **governed memory layer shared by authorized AI agents**. Over time, that layer can support a Personal Twin for one person or an Organisation Twin for a company, while keeping data scope, provenance and approval visible.
 
-The customer's notes never leave their machine. The AI connects to `brainlink` locally; BrainLink enforces the customer's vault rules on every read and write.
+The local-first product connects authorized clients to BrainLink. Data is filtered by vault and permissions before retrieval; a remote client requires a separately configured, secured relay and is never assumed to have access by default.
 
 **Promise:** "One brain. Every AI. Nothing overwritten."
 
@@ -27,8 +27,8 @@ The customer's notes never leave their machine. The AI connects to `brainlink` l
 │   └─ opens Setup UI ─────────┐         ├─ brainlink serve      (stdio MCP)      │
 │                              ▼         ├─ brainlink serve --http (local HTTP)   │
 │   Setup UI (http://127.0.0.1:<port>, local only, one-time session token)        │
-│   1. Pick vault folder(s)  2. Choose a rule pack  3. Define agents             │
-│   4. "Connect" buttons per AI  5. Enter licence key                            │
+│   1. Add/manage vaults  2. Review privacy  3. Connect AI clients               │
+│   4. Browse/edit notes, links, graph, backup and session filing                 │
 │                                                                                │
 │  config.json  (macOS ~/Library/Application Support/BrainLink,                  │
 │                Windows %APPDATA%\BrainLink)                                    │
@@ -39,8 +39,22 @@ The customer's notes never leave their machine. The AI connects to `brainlink` l
 └────────────────────────────────────────────────────────────────────────────────┘
 ```
 
-- **Runtime:** the existing zero-dependency Node core, shipped with the pinned official Node 24.22.1 runtime so the customer installs nothing else.
-- **No cloud service in v1.** Licence check is offline (signed key). This keeps cost ~0 and privacy simple.
+- **Runtime:** the zero-dependency Node core, shipped with the pinned official Node 24.22.1 runtime so the customer installs nothing else.
+- **Current build:** every implemented feature is enabled. There is no trial timer, expiration, licence key or account check. Commercial plans and limits are not implemented or approved.
+- **Local first:** no cloud relay is implied. Any remote client connection needs an explicit transport, authentication, privacy and deployment design.
+
+## 3a. Twin and memory model
+
+BrainLink is the memory, permissions, provenance and handoff layer; AI agents are replaceable clients. Personal Twin and Organisation Twin describe the product experience built on that layer, not an autonomous person or authority to act. The system organizes four memory types internally without making users file every item into four separate screens:
+
+| Memory type | BrainLink responsibility | User-facing outcome |
+|---|---|---|
+| Working | Current task, scoped context and handoff state | Continue work across authorized agents |
+| Episodic | Session summaries, outcomes, corrections and source links | Find what happened and what changed |
+| Semantic | Durable notes, decisions and linked knowledge | Retrieve concise, cited context |
+| Procedural | Versioned skills, role instructions and repeatable workflows | Reuse validated ways of working |
+
+At session close, BrainLink should prepare a reviewed summary, explain its destination, preserve source links, and let the user correct or withdraw a proposal. RSI may evaluate placement, links, retrieval quality and token/time cost; it must not silently promote uncertain facts, broaden permissions, or change live behavior without validation and rollback.
 
 ## 4. Core (from vault-agent v0.2, made generic)
 
@@ -83,7 +97,9 @@ Clean-room implementations of the strongest patterns in Obsidian Copilot, Khoj a
 
 Not yet: scheduled briefs (needs a background helper), cross-encoder rerank, cloud embedding providers.
 
-## 4c. Retrieval quality on a real vault (2026-10-18)
+## 4c. Historical retrieval-quality experiment (2026-10-18)
+
+This is a historical development receipt, not a current product-quality or marketing claim. It used small question sets, including a 7-query held-out set; see `docs/RETRIEVAL-EVAL.md` and the current implementation ledger for the stricter evaluation requirements.
 
 Scored read-only on Iango's own Brain vault (2,135 notes, 15k chunks; nothing written), with the Technical Reviewer's independent gold sets. Questions were typed as written; the evaluation notes themselves were excluded.
 
@@ -102,55 +118,38 @@ Still weak: cross-language and synonym questions without a translation (needs a 
 
 ## 5. Onboarding (target: under 1 minute)
 
-1. Install (.pkg / .exe) → app opens Setup UI in the browser.
-2. **Pick vault folder** (native folder dialog: `osascript` on Mac, PowerShell on Windows; or paste a path). BrainLink scans it and shows note count.
+1. Install (.pkg / .exe / .deb or Linux tar.gz) → app opens Setup UI in the browser.
+2. **Add vault folders** (native folder dialog where available, or paste a path). BrainLink scans each and shows note count and privacy scope.
 3. **Pick a rule pack**, name agents and phrases (e.g. "Connect to Max" / "Max close loop").
 4. **Connect AIs**: one button each. BrainLink detects installed clients and writes their MCP config, keeping a timestamped backup: Claude Desktop (`claude_desktop_config.json`), Claude Code (`~/.claude.json` via `claude mcp add` when present), Cursor (`~/.cursor/mcp.json`), Codex (`~/.codex/config.toml`), Gemini CLI (`~/.gemini/settings.json`). For HTTP clients it shows URL + generated token.
 5. **Test**: "Ask your AI: *Connect to Max*" — Setup UI shows the live call log so the user sees it work.
 
 ## 6. Packaging & distribution
 
-| | macOS | Windows |
-|---|---|---|
-| Installer | `.pkg` (pkgbuild + productbuild): `/Applications/BrainLink.app` + `/usr/local/bin/brainlink` symlink | Inno Setup `.exe` (per-user, no admin) in v1; MSIX in v1.1 |
-| Runtime | official Node 24.22.1 universal (arm64 + x64) inside the app bundle | official Node 24.22.1 x64 `node.exe` inside the install dir |
-| Signing | **Developer ID Application + Developer ID Installer** certificates (Apple Developer Program, US$99/yr) → `notarytool submit` → `stapler staple`. Until then: unsigned test build (right-click → Open) | Authenticode via **Azure Trusted Signing** (~US$10/mo) or an OV cert; avoids SmartScreen warnings |
-| Store | **Not Mac App Store**: its sandbox blocks writing other apps' MCP config files and reading arbitrary vault folders without per-folder bookmarks. Direct download. | Microsoft Store optional later (MSIX) — same sandbox caveats, lower priority |
-| Updates | in-app "check for update" against a signed `latest.json` on Iango's site (v1.1) | same |
+| | macOS | Windows | Linux |
+|---|---|---|---|
+| Installer | `.pkg` (pkgbuild + productbuild): `/Applications/BrainLink.app` + CLI link | Inno Setup `.exe` (per-user, no admin) | `.deb` (amd64/arm64) or per-user tar.gz installer |
+| Runtime | official Node 24.22.1 universal (arm64 + x64) inside the app bundle | official Node 24.22.1 x64 `node.exe` inside the install dir | official Node 24.22.1 x64 or arm64 inside the package |
+| Signing | Developer ID signing and notarisation are still release gates | Authenticode signing is still a release gate | Signed repository/package distribution is not yet designed |
+| Store | Direct download; Mac App Store sandbox needs separate design | Microsoft Store/MSIX needs separate design | Package repository and update policy need separate design |
+| Updates | Signed update manifest and updater are not implemented | same | same |
 
-## 7. Licensing & payment
+## 7. Commercial model and legal terms
 
-- **Merchant of record: Lemon Squeezy or Paddle** — handles card payment, VAT/GST, invoices, Taiwan business payouts; both issue licence keys via webhook.
-- **Licence key = Ed25519-signed token** (`BL1.<payload>.<sig>`, payload `{email, plan, seats, expires, updates_until}`), verified **offline** with the public key in the app. Iango keeps the private key (`brainlink-license issue …` tool, never shipped).
-- **Free mode without key:** 1 vault, read + search only, 2 AI connections. Key unlocks writes, agents, unlimited AIs, HTTP mode.
-- 14-day trial key issued from the website.
+No pricing, paid feature limits, payment provider, licence-key system, or account plan has been approved or implemented. The previous free-tier limits and 14-day trial proposal are superseded. Keep the full development build enabled and non-expiring. Before sale, research current alternatives and costs, choose a model with Ian, and obtain legal review of final terms. Do not add trial countdowns or feature gates as an implementation shortcut.
 
-## 8. Pricing (proposal)
+## 8. Release and quality gates
 
-| Plan | Price | Includes |
-|---|---|---|
-| Free | US$0 | 1 vault, read/search, 2 AIs |
-| **Personal** | **US$79 one-time** (1 year of updates; renew updates US$39/yr) | Unlimited vaults & AIs, agents + close loop, safe writes, HTTP mode, 2 devices |
-| Team | US$12 / user / month (min 3) | Shared-folder setup, team rule pack, priority support |
-| Iango Setup | from NT$15,000 | Iango designs the customer's vault, agents and rules (consulting upsell) |
+The repository's GitHub Actions workflow runs the core and UI suites on Windows, macOS and Linux with Node 22/24 and builds unsigned desktop packages using the pinned Node runtime. Workflow artifacts are development evidence, not a public release. A release still needs successful remote build receipts, real install/upgrade/uninstall checks, signing, accessibility and user-task validation, privacy evaluation, a backup restore drill, and an approved commercial/legal package.
 
-Rationale: one-time pricing sells well for local developer tools (no server cost to cover); Team is where recurring revenue and Iango's consulting margin live.
+## 9. Current implementation target
 
-## 9. v1 build scope (this session)
+The current source branch targets the next development build, `1.2.8`, after the separate `v1.2.7` release tag. `package.json` is the sole version source; the server, installers and lockfile must stay aligned. No new release tag is created by ordinary development pushes.
 
-1. `brainlink` core: generic config, bundled graph module, BRAINLINK_* env, timezone, rule packs, licence verify.
-2. Setup UI + "Connect AI" config writers (with backups) + folder picker.
-3. Synthetic sample vault ("Acme Studio") — no Ian data.
-4. macOS `.pkg` build script → unsigned test installer; signing/notarisation steps scripted, run when certificates exist.
-5. Windows: NSIS installer `.exe` + portable zip built on macOS; Windows code paths covered by tests; **not yet run on a real Windows PC**.
-5b. Linux: `.deb` (amd64, arm64) + per-user tar.gz installer; tested in Debian 12, Ubuntu 24.04 and Fedora 41 containers.
-6. Tests (`npm test`) covering core, config, licence, connectors, installer layout.
-7. Sales one-pager.
-
-Out of v1: iPhone/iPad, hosted relay, embeddings, auto-update, MSIX, Team sync.
+Keep the priority on a simple desktop app, multi-vault management, interactive graph and note editing, governed cross-AI handoff, reviewable session filing, permission-aware retrieval, measurable token/time efficiency, backup/restore, and evidence-based RSI. Current implementation and unresolved release gaps are tracked in `docs/IMPLEMENTATION-STATUS.md`.
 
 ## 10. Legal / IP
 
 - Clean-room code; no code from Obsidian Copilot / Khoj (AGPL). Patterns only, documented.
 - Bundled Node.js runtime is MIT; include its LICENSE in the app.
-- No customer data leaves the device; privacy policy states this.
+- BrainLink does not upload vaults to Iango. Connected AI providers may receive the specific context a user requests; product privacy terms must explain that clearly.

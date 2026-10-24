@@ -1,15 +1,19 @@
-BrainLink MCP — End User Licence Agreement (draft, have it reviewed before sale)
+BrainLink MCP — Pre-release Use Notice
 
 Copyright (c) 2026 Iango. All rights reserved.
 
-1. Licence. Iango grants you a non-exclusive, non-transferable licence to install and use
-   BrainLink on the number of devices your plan allows (Free: limited features; Personal: 2
-   devices; Team: one seat per named user).
-2. Your data. BrainLink runs on your computer. Your notes are not sent to Iango. AI apps you
-   connect receive the note content they request under their own terms.
-3. Restrictions. You may not resell, sublicense, or circumvent the licence check.
-4. Updates. Personal licences include 12 months of updates; the app keeps working afterwards.
-5. No warranty. BrainLink is provided "as is". It never overwrites or deletes notes by design,
-   but keep backups of your vault. Iango's liability is limited to the amount you paid.
-6. Third-party software. BrainLink bundles the Node.js runtime (MIT licence, see
-   node/LICENSE inside the app).
+This development build has all implemented product features enabled. It has no trial timer,
+feature expiry, licence-key requirement, or account check. The development version is not an
+offer of a paid plan, and commercial pricing or account limits have not been implemented.
+
+BrainLink is designed to process your Markdown vaults on your computer. When you connect an AI
+client, that client may receive the note content you ask it to use, under that provider's own
+terms. Keep backups of your vault and do not store credentials, access tokens, or payment data in
+BrainLink notes.
+
+This pre-release software is provided "as is" without warranty to the extent permitted by law.
+These notes are not the final commercial terms. Iango must approve and review a separate end-user
+agreement before paid distribution.
+
+Third-party software: BrainLink bundles the Node.js runtime. Its MIT licence is included as
+node/LICENSE in the installed application.
