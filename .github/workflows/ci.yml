@@ -61,6 +61,28 @@ jobs:
           $version = & $node $app --version
           if ($version -ne (Get-Content package.json | ConvertFrom-Json).version) { throw "Staged runtime failed: $version" }
 
+      - name: Install, run and uninstall Windows package
+        shell: pwsh
+        run: |
+          $version = (Get-Content package.json | ConvertFrom-Json).version
+          $installer = Join-Path $PWD "dist/BrainLink-Setup-$version.exe"
+          $installCode = Start-Process -FilePath $installer -ArgumentList '/VERYSILENT','/SUPPRESSMSGBOXES','/NORESTART' -Wait -PassThru
+          if ($installCode.ExitCode -ne 0) { throw "Installer failed with $($installCode.ExitCode)" }
+          $installRoot = Join-Path $env:LOCALAPPDATA 'Programs/BrainLink'
+          $env:APPDATA = Join-Path $env:RUNNER_TEMP 'brainlink-win-smoke-profile'
+          $vault = Join-Path $env:RUNNER_TEMP 'brainlink-win-smoke-vault'
+          New-Item -ItemType Directory -Force $vault | Out-Null
+          $version = & (Join-Path $installRoot 'bin/brainlink.cmd') --version
+          if ($version -ne (Get-Content package.json | ConvertFrom-Json).version) { throw "Installed runtime failed: $version" }
+          & (Join-Path $installRoot 'bin/brainlink.cmd') init --vault $vault --name Smoke
+          $config = Join-Path $env:APPDATA 'BrainLink/config.json'
+          if (-not (Test-Path $config)) { throw 'Installed app did not create its isolated config' }
+          $uninstaller = Join-Path $installRoot 'unins000.exe'
+          $uninstallCode = Start-Process -FilePath $uninstaller -ArgumentList '/VERYSILENT','/SUPPRESSMSGBOXES','/NORESTART' -Wait -PassThru
+          if ($uninstallCode.ExitCode -ne 0) { throw "Uninstaller failed with $($uninstallCode.ExitCode)" }
+          if (Test-Path $installRoot) { throw 'Uninstaller left the application files behind' }
+          if (-not (Test-Path $config)) { throw 'Uninstaller removed the user configuration' }
+
       - name: Upload installer artifact
         uses: actions/upload-artifact@v4
         with:
@@ -79,6 +101,15 @@ jobs:
 
       - name: Build universal package with pinned Node.js
         run: bash packaging/macos/build-pkg.sh
+
+      - name: Expand and smoke-test packaged macOS runtime
+        run: |
+          version="$(node -p "require('./package.json').version")"
+          pkgutil --expand-full "dist/BrainLink-$version.pkg" "$RUNNER_TEMP/brainlink-pkg"
+          app="$(find "$RUNNER_TEMP/brainlink-pkg" -path '*/BrainLink.app/Contents/Resources/app/bin/brainlink.mjs' -print -quit)"
+          test -n "$app"
+          resources="${app%/app/bin/brainlink.mjs}"
+          test "$("$resources/node/bin/node" "$app" --version)" = "$(node -p "require('./package.json').version")"
 
       - name: Upload installer artifact
         uses: actions/upload-artifact@v4
