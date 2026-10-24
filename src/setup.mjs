@@ -484,8 +484,31 @@ export async function startSetup(opts = {}) {
     'POST /api/sessions/hooks/set': (b) => setSessionHook(b.client, b.enabled, { home, env, os }),
     'POST /api/sessions/end-cues': async () => ({ cues: (await listSessionEndCues(path.join(appHome(env), 'sessions', 'end-cues'))).slice(0, 100).map((cue) => ({ id: sessionEndCueId(cue), client: cue.client, ended_at: cue.ended_at })) }),
     'POST /api/sessions/end-cues/dismiss': (b) => dismissSessionEndCue(path.join(appHome(env), 'sessions', 'end-cues'), b.id),
-    'POST /api/sessions': (b) => sessions.list({ q: b.q, client: b.client, project: b.project, since: b.since, limit: b.limit, include_private: Boolean(b.include_private) }),
+    'POST /api/sessions': async (b) => {
+      const result = await sessions.list({ q: b.q, client: b.client, project: b.project, since: b.since, limit: b.limit, include_private: Boolean(b.include_private) });
+      const store = await sessions.store();
+      const annotated = await Promise.all(result.sessions.map(async (item) => {
+        const { session } = await store.readSession(item.id);
+        return { ...item, profile_id: session.profile_id || null };
+      }));
+      return { ...result, sessions: annotated };
+    },
     'POST /api/sessions/read': (b) => sessions.read({ id: b.id, include_private: Boolean(b.include_private) }),
+    'POST /api/sessions/assign-twin': async (b) => {
+      const profileId = String(b.profile_id || '');
+      const cfg = normalize(await loadConfig(file));
+      const profile = cfg.twin_profiles.find((item) => item.id === profileId);
+      if (!profile) throw new Error('Choose an existing Twin profile.');
+      if (!(profile.allowed_actions || []).includes('read_session') || !(profile.agent_access || []).some((agent) => (agent.vaults || []).some((grant) => (grant.operations || []).includes('read_session')))) {
+        throw new Error('This Twin has no agent explicitly authorized to read sessions.');
+      }
+      const before = await sessions.read({ id: b.id, include_private: true });
+      if (before.profile_id) throw new Error('This session is already assigned to a Twin and cannot be reassigned.');
+      const store = await sessions.store();
+      if (typeof store.assignSessionProfile !== 'function') throw new Error('This session store does not support Twin assignment.');
+      const assigned = await store.assignSessionProfile(b.id, profile.id);
+      return { ok: true, session: { id: assigned.id, profile_id: assigned.profile_id, private: assigned.private }, profile: { id: profile.id, name: profile.name, mode: profile.mode } };
+    },
     'POST /api/sessions/recommend': async (b) => {
       const cfg = await loadConfig(file);
       const session = await sessions.read({ id: b.id, include_private: true });

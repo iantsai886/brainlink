@@ -66,6 +66,22 @@ test('session store: persists across reopen; setSessionPrivate toggles and survi
   assert.equal((await store.listSessions())[0].private, false);
 });
 
+test('session store: explicit Twin assignment is one-way, private, and survives reopen', async () => {
+  const dir = await tmp('sessions-twin-owner');
+  let store = await createSessionStore({ dir });
+  const session = await store.putSession({ client: 'codex', source_id: 'fictional/1', project: '/fictional', title: 'Synthetic work', summary: 'No real personal data.', started_at: '2026-10-24T00:00:00Z', note_refs: [], private: false, messages: [{ role: 'user', at: '2026-10-24T00:00:00Z', text: 'Synthetic message.' }] });
+  const assigned = await store.assignSessionProfile(session.id, 'personal_twin');
+  assert.equal(assigned.profile_id, 'personal_twin');
+  assert.equal(assigned.private, true, 'Twin assignment always keeps the source private');
+  await assert.rejects(store.assignSessionProfile(session.id, 'org_twin'), /already belongs/);
+  await assert.rejects(store.setSessionPrivate(session.id, false), /must remain private/);
+  store = await createSessionStore({ dir });
+  const persisted = await store.readSession(session.id, { profile_id: 'personal_twin', limit: 10 });
+  assert.equal(persisted.session.private, true);
+  assert.equal(persisted.messages[0].text, 'Synthetic message.');
+  await assert.rejects(store.readSession(session.id, { profile_id: 'org_twin' }), (error) => error.code === 'E_NOT_FOUND');
+});
+
 // ---- Claude Code importer ----
 
 test('claude-code importer: imports fixture session, redacts secrets, skips tool_use, idempotent re-run', async () => {

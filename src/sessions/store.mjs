@@ -70,6 +70,11 @@ export async function createSessionStore({ dir, clock = () => new Date().toISOSt
       await persist();
       return r;
     },
+    async assignSessionProfile(id, profileId) {
+      const r = await inner.assignSessionProfile(id, profileId);
+      await persist();
+      return r;
+    },
     listSessions: (o) => inner.listSessions(o),
     readSession: (id, o) => inner.readSession(id, o),
   };

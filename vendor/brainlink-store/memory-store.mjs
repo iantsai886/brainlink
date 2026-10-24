@@ -259,7 +259,19 @@ export function createMemoryStore({ vaults, readOnly = false, clock = () => new 
     },
     async setSessionPrivate(id, isPrivate, o = {}) {
       const x = sessions.get(id); if (!x || (o.profile_id && x.s.profile_id !== o.profile_id)) throw new NotFound('session', { id }); guard(x.s.vault, o); writable();
+      if (x.s.profile_id && !isPrivate) throw new Invalid('Twin-owned sessions must remain private');
       x.s.private = !!isPrivate;
+      x.s.etag = sha(JSON.stringify(canon({ s: { ...x.s, etag: '' }, m: x.msgs })));
+      emit({ kind: 'session_upsert', vault: x.s.vault, id: x.s.id, version: x.msgs.length, etag: x.s.etag, path: `sessions/${x.s.client}/${x.s.id}` });
+      return sessionOut(x);
+    },
+    async assignSessionProfile(id, profileId, o = {}) {
+      const x = sessions.get(id); if (!x) throw new NotFound('session', { id }); guard(x.s.vault, o); writable();
+      if (x.s.profile_id) throw new Invalid('session already belongs to a Twin profile');
+      const next = String(profileId || '').trim();
+      if (!/^[a-zA-Z0-9_-]{1,64}$/.test(next)) throw new Invalid('valid Twin profile id required');
+      x.s.profile_id = next;
+      x.s.private = true;
       x.s.etag = sha(JSON.stringify(canon({ s: { ...x.s, etag: '' }, m: x.msgs })));
       emit({ kind: 'session_upsert', vault: x.s.vault, id: x.s.id, version: x.msgs.length, etag: x.s.etag, path: `sessions/${x.s.client}/${x.s.id}` });
       return sessionOut(x);

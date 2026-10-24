@@ -20,6 +20,7 @@ export function sessionsService(env) {
   let ready = null;
   const store = () => ready ||= openSessionStore(env).then(async (s) => { await importAll({ store: s, env }); return s; });
   return {
+    store,
     list: async (a = {}) => sessionList(await store(), a),
     read: async (a = {}) => sessionRead(await store(), a),
     async setPrivate(id, isPrivate) { const r = await (await store()).setSessionPrivate(id, Boolean(isPrivate)); return { id: r.id, private: r.private }; },

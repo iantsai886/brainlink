@@ -163,6 +163,8 @@ export interface BrainStore {
   readSession(id: string, opts?: Access & { offset?: number; limit?: number }): Promise<SessionPage>;
   /** Toggle per-session privacy (see Session.private). E_NOT_FOUND, E_PRIVACY, E_READ_ONLY. */
   setSessionPrivate(id: string, isPrivate: boolean, opts?: Access): Promise<Session>;
+  /** Assign an unowned session to one Twin profile. Assignment is one-way and forces private=true. */
+  assignSessionProfile(id: string, profileId: string, opts?: Access): Promise<Session>;
 }
 
 export declare function createMemoryStore(opts: {

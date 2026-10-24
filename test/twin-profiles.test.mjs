@@ -65,6 +65,9 @@ test('Twin status appears in the main UI and escapes every profile-provided labe
   assert.match(html, /esc\(p\.name\)/);
   assert.match(html, /esc\(t\('twinProfiles\.owner', \{ owner: p\.owner \}\)\)/);
   assert.match(html, /twinProfiles\.limits/);
+  assert.match(html, /data-sess-profile/);
+  assert.match(html, /data-sess-assign/);
+  assert.match(html, /sessions\.twinPrivate/);
 });
 
 test('profile-scoped agents see only granted vaults and only supported read tools', async () => {
@@ -223,5 +226,41 @@ test('authenticated local status exposes Twin scopes without returning agent cre
     assert.equal(state.twin_profiles.profiles[0].vaults[0].access, 'propose');
     assert.equal(state.twin_profiles.profiles[0].agents[0].vaults[0].access, 'read');
     assert.doesNotMatch(JSON.stringify(state.twin_profiles), /tokenHash|f{64}|Fictional company content/);
+  } finally { setup.server.close(); }
+});
+
+test('local Setup assigns an unowned session only to a session-authorized Twin and keeps it private', async () => {
+  const root = await mkdtemp(path.join(tmpdir(), 'brainlink-twin-session-assignment-'));
+  const home = path.join(root, 'home');
+  const vaultPath = path.join(root, 'vault');
+  await mkdir(vaultPath);
+  const env = { BRAINLINK_HOME: path.join(home, 'app') };
+  const cfg = fixture(vaultPath);
+  cfg.twin_profiles[0].allowed_actions.push('read_session');
+  cfg.twin_profiles[0].agent_access[0].vaults[0].operations.push('read_session');
+  await saveConfig(cfg, path.join(env.BRAINLINK_HOME, 'config.json'));
+  const store = await openSessionStore(env);
+  const source = await store.putSession({ client: 'codex', source_id: 'fictional/assignment', project: '/fictional', title: 'Synthetic handoff', summary: 'Synthetic-only test session.', started_at: '2026-10-24T00:00:00Z', note_refs: [], private: true, messages: [{ role: 'user', at: '2026-10-24T00:00:00Z', text: 'Synthetic private content.' }] });
+  const setup = await startSetup({ env, home, os: 'linux', port: 0, useCli: false });
+  const base = `http://127.0.0.1:${setup.port}`;
+  const api = async (route, body) => {
+    const response = await fetch(`${base}${route}`, { method: 'POST', headers: { 'X-BrainLink-Token': setup.token, 'Content-Type': 'application/json' }, body: JSON.stringify(body || {}) });
+    return { status: response.status, body: await response.json() };
+  };
+  try {
+    const invalid = await api('/api/sessions/assign-twin', { id: source.id, profile_id: 'missing_profile' });
+    assert.equal(invalid.status, 400);
+    const assigned = await api('/api/sessions/assign-twin', { id: source.id, profile_id: 'org_twin_1' });
+    assert.equal(assigned.status, 200);
+    assert.equal(assigned.body.session.profile_id, 'org_twin_1');
+    assert.equal(assigned.body.session.private, true);
+    const visible = await api('/api/sessions', { include_private: true });
+    assert.equal(visible.body.sessions[0].profile_id, 'org_twin_1');
+    const repeat = await api('/api/sessions/assign-twin', { id: source.id, profile_id: 'org_twin_1' });
+    assert.equal(repeat.status, 400);
+    assert.match(repeat.body.error, /already belongs/);
+    const owned = await (await openSessionStore(env)).readSession(source.id, { profile_id: 'org_twin_1', limit: 10 });
+    assert.equal(owned.messages[0].text, 'Synthetic private content.');
+    await assert.rejects((await openSessionStore(env)).readSession(source.id, { profile_id: 'another_twin' }), (error) => error.code === 'E_NOT_FOUND');
   } finally { setup.server.close(); }
 });

@@ -461,6 +461,7 @@ function dayLabel(iso) {
 }
 function renderSessions(list) {
   if (!list.length) { $('sessions-list').innerHTML = `<p class="muted">${esc(t('sessions.empty'))}</p>`; return; }
+  const assignableProfiles = (S.twin_profiles?.profiles || []).filter((p) => (p.allowed_actions || []).includes('read_session') && (p.agents || []).some((a) => (a.vaults || []).some((v) => (v.operations || []).includes('read_session'))));
   let lastDay = null, html = '';
   for (const s of list) {
     const day = dayLabel(s.started_at);
@@ -472,9 +473,10 @@ function renderSessions(list) {
       </div>
       <div class="muted" style="font-size:14px">${esc(s.summary || t('sessions.noSummary'))}</div>
       <div class="row muted" style="font-size:13px">${esc(new Date(s.started_at).toLocaleString(LOCALE))} · ${s.turns} ${s.turns === 1 ? esc(t('sessions.messageOne')) : esc(t('sessions.messageMany'))}
+        ${s.profile_id ? `<span class="pill">${esc(S.twin_profiles?.profiles?.find((p) => p.id === s.profile_id)?.name || s.profile_id)}</span>` : (assignableProfiles.length ? `<label><select aria-label="${esc(t('sessions.chooseTwin'))}" data-sess-profile="${esc(s.id)}"><option value="">${esc(t('sessions.chooseTwin'))}</option>${assignableProfiles.map((p) => `<option value="${esc(p.id)}">${esc(p.name)}</option>`).join('')}</select></label><button class="link" data-sess-assign="${esc(s.id)}">${esc(t('sessions.assignTwin'))}</button>` : `<span class="muted">${esc(t('sessions.noAuthorizedTwin'))}</span>`)}
         <button class="link" data-sess-read="${esc(s.id)}">${esc(t('sessions.open'))}</button>
         ${s.summary ? `<button class="link" data-sess-file="${esc(s.id)}">${esc(t('sessions.fileSummary'))}</button>` : ''}
-        <button class="link" data-sess-toggle="${esc(s.id)}" data-sess-private="${s.private ? '1' : ''}">${s.private ? esc(t('sessions.makeShared')) : esc(t('sessions.makePrivate'))}</button>
+        ${s.profile_id ? `<span class="muted">${esc(t('sessions.twinPrivate'))}</span>` : `<button class="link" data-sess-toggle="${esc(s.id)}" data-sess-private="${s.private ? '1' : ''}">${s.private ? esc(t('sessions.makeShared')) : esc(t('sessions.makePrivate'))}</button>`}
       </div></div>`;
   }
   $('sessions-list').innerHTML = html;
@@ -927,6 +929,15 @@ document.addEventListener('click', (e) => {
     if (result.destination_rule_saved) toast(t('sessions.destinationRemembered'));
   });
   if (d.sessToggle) act(() => api('POST', '/api/sessions/private', { id: d.sessToggle, private: !d.sessPrivate }));
+  if (d.sessAssign) act(async () => {
+    const select = [...document.querySelectorAll('[data-sess-profile]')].find((item) => item.dataset.sessProfile === d.sessAssign);
+    const profile = (S.twin_profiles?.profiles || []).find((item) => item.id === select?.value);
+    if (!profile) { toast(t('sessions.invalidTwinChoice')); return; }
+    if (!confirm(t('sessions.assignTwinWarning', { profile: profile.name }))) return;
+    await api('POST', '/api/sessions/assign-twin', { id: d.sessAssign, profile_id: profile.id });
+    toast(t('sessions.assignedTwin', { profile: profile.name }));
+    await loadSessions();
+  });
   if (d.syncPick) $('sync-folder').value = d.syncPick;
   if (d.syncOnbPick) $('sync-onb-folder').value = d.syncOnbPick;
 });
