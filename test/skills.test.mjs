@@ -13,6 +13,8 @@ const paths = [
 ];
 
 function parseSkill(text, relativePath) {
+  // GitHub's Windows checkout can materialize committed LF files as CRLF.
+  text = text.replace(/\r\n/g, '\n');
   assert.ok(text.startsWith('---\n'), `${relativePath}: frontmatter must start the file`);
   const end = text.indexOf('\n---\n', 4);
   assert.ok(end > 4, `${relativePath}: frontmatter must close`);

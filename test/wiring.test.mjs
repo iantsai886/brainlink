@@ -147,7 +147,12 @@ test('connectors: connect()/test()/disconnect() normalize to {ok,message} over t
 test('CLI: `brainlink connect --all` connects every present client and skips the rest', async () => {
   const home = await tmp('cli-home');
   await mkdir(path.join(home, '.cursor'), { recursive: true });
-  await mkdir(path.join(home, 'AppData', 'Roaming', 'Claude'), { recursive: true });
+  const claudeFile = process.platform === 'win32'
+    ? path.join(home, 'AppData', 'Roaming', 'Claude', 'claude_desktop_config.json')
+    : process.platform === 'darwin'
+      ? path.join(home, 'Library', 'Application Support', 'Claude', 'claude_desktop_config.json')
+      : path.join(home, '.config', 'Claude', 'claude_desktop_config.json');
+  await mkdir(path.dirname(claudeFile), { recursive: true });
   const env = { ...process.env, HOME: home, APPDATA: path.join(home, 'AppData', 'Roaming'), BRAINLINK_HOME: path.join(home, 'app') };
   await new Promise((resolve, reject) => {
     const child = spawn(process.execPath, [path.join(ROOT, 'bin', 'brainlink.mjs'), 'connect', '--all'], { env });
@@ -157,7 +162,7 @@ test('CLI: `brainlink connect --all` connects every present client and skips the
   });
   const cursor = JSON.parse(await readFile(path.join(home, '.cursor', 'mcp.json'), 'utf8'));
   assert.ok(cursor.mcpServers.brainlink);
-  const claude = JSON.parse(await readFile(path.join(home, 'AppData', 'Roaming', 'Claude', 'claude_desktop_config.json'), 'utf8'));
+  const claude = JSON.parse(await readFile(claudeFile, 'utf8'));
   assert.ok(claude.mcpServers.brainlink);
   await assert.rejects(readFile(path.join(home, '.gemini', 'settings.json')), 'gemini was never present, so --all must not create it');
 });
@@ -166,7 +171,12 @@ test('CLI: `brainlink connect --all` keeps going past one app\'s unreadable conf
   const home = await tmp('cli-home-bad-config');
   await mkdir(path.join(home, '.cursor'), { recursive: true });
   await writeFile(path.join(home, '.cursor', 'mcp.json'), '{ broken'); // cursor is present but its config is not valid JSON
-  await mkdir(path.join(home, 'AppData', 'Roaming', 'Claude'), { recursive: true });
+  const claudeFile = process.platform === 'win32'
+    ? path.join(home, 'AppData', 'Roaming', 'Claude', 'claude_desktop_config.json')
+    : process.platform === 'darwin'
+      ? path.join(home, 'Library', 'Application Support', 'Claude', 'claude_desktop_config.json')
+      : path.join(home, '.config', 'Claude', 'claude_desktop_config.json');
+  await mkdir(path.dirname(claudeFile), { recursive: true });
   const env = { ...process.env, HOME: home, APPDATA: path.join(home, 'AppData', 'Roaming'), BRAINLINK_HOME: path.join(home, 'app') };
   const out = await new Promise((resolve, reject) => {
     const child = spawn(process.execPath, [path.join(ROOT, 'bin', 'brainlink.mjs'), 'connect', '--all'], { env });
@@ -175,7 +185,7 @@ test('CLI: `brainlink connect --all` keeps going past one app\'s unreadable conf
     child.on('exit', (code) => (code === 0 ? resolve(buf) : reject(new Error(`exit ${code}: ${buf}`))));
   });
   // cursor's bad config must not stop claude desktop from being connected.
-  const claude = JSON.parse(await readFile(path.join(home, 'AppData', 'Roaming', 'Claude', 'claude_desktop_config.json'), 'utf8'));
+  const claude = JSON.parse(await readFile(claudeFile, 'utf8'));
   assert.ok(claude.mcpServers.brainlink);
   assert.equal(await readFile(path.join(home, '.cursor', 'mcp.json'), 'utf8'), '{ broken', 'the broken file is never overwritten');
   // Every app's outcome is reported, not just the first failure.

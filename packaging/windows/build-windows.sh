@@ -8,18 +8,18 @@ HERE="$(cd "$(dirname "$0")" && pwd)"
 ROOT="$(cd "$HERE/../.." && pwd)"
 VERSION="$(node -p "require('$ROOT/package.json').version")"
 NODE_VERSION="$(cat "$ROOT/vendor/node/VERSION")"
-ZIP="$ROOT/vendor/node/node-$NODE_VERSION-win-x64.zip"
+ZIP="$ROOT/vendor/node/node-v$NODE_VERSION-win-x64.zip"
 WORK="$ROOT/build/windows"
 STAGE="$WORK/stage"
 DIST="$ROOT/dist"
 command -v makensis >/dev/null || { echo "makensis not found (brew install makensis)"; exit 1; }
 NODE_DIST="https://nodejs.org/dist/v$NODE_VERSION"
 [ -f "$ROOT/vendor/node/SHASUMS256.txt" ] || curl -fsS "$NODE_DIST/SHASUMS256.txt" -o "$ROOT/vendor/node/SHASUMS256.txt"
-[ -f "$ZIP" ] || curl -fsS "$NODE_DIST/node-$NODE_VERSION-win-x64.zip" -o "$ZIP"
-(cd "$ROOT/vendor/node" && grep " node-$NODE_VERSION-win-x64.zip$" SHASUMS256.txt | shasum -a 256 -c --quiet)
+[ -f "$ZIP" ] || curl -fsS "$NODE_DIST/node-v$NODE_VERSION-win-x64.zip" -o "$ZIP"
+(cd "$ROOT/vendor/node" && grep " node-v$NODE_VERSION-win-x64.zip$" SHASUMS256.txt | shasum -a 256 -c --quiet)
 
 rm -rf "$WORK" && mkdir -p "$STAGE/node" "$STAGE/app" "$STAGE/bin" "$DIST"
-unzip -q -j "$ZIP" "node-$NODE_VERSION-win-x64/node.exe" "node-$NODE_VERSION-win-x64/LICENSE" -d "$STAGE/node"
+unzip -q -j "$ZIP" "node-v$NODE_VERSION-win-x64/node.exe" "node-v$NODE_VERSION-win-x64/LICENSE" -d "$STAGE/node"
 cp -R "$ROOT/bin" "$ROOT/src" "$ROOT/ui" "$ROOT/samples" "$ROOT/package.json" "$ROOT/LICENSE.txt" "$ROOT/README.md" "$STAGE/app/"
 mkdir -p "$STAGE/app/node_modules/brainlink-store"
 cp "$ROOT/vendor/brainlink-store/memory-store.mjs" "$ROOT/vendor/brainlink-store/errors.mjs" "$ROOT/vendor/brainlink-store/package.json" "$STAGE/app/node_modules/brainlink-store/"

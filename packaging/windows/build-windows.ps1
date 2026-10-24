@@ -7,12 +7,13 @@ $Root = Resolve-Path "$Here\..\.."
 $Version = (Get-Content "$Root\package.json" | ConvertFrom-Json).version
 $NodeVersion = (Get-Content "$Root\vendor\node\VERSION").Trim()
 $NodeDist = "https://nodejs.org/dist/v$NodeVersion"
+$NodeArchivePrefix = "node-v$NodeVersion"
 $Stage = "$Root\build\windows\stage"
 Remove-Item -Recurse -Force "$Root\build\windows" -ErrorAction SilentlyContinue
 New-Item -ItemType Directory -Force "$Stage\node", "$Stage\app", "$Root\vendor\node" | Out-Null
 
 # 1. Official Node runtime, checksum-verified.
-$Zip = "node-$NodeVersion-win-x64.zip"
+$Zip = "$NodeArchivePrefix-win-x64.zip"
 $ZipPath = "$Root\vendor\node\$Zip"
 if (-not (Test-Path "$Root\vendor\node\SHASUMS256.txt")) { Invoke-WebRequest "$NodeDist/SHASUMS256.txt" -OutFile "$Root\vendor\node\SHASUMS256.txt" }
 if (-not (Test-Path $ZipPath)) { Invoke-WebRequest "$NodeDist/$Zip" -OutFile $ZipPath }
@@ -22,7 +23,7 @@ $Expected = $SumLine.Line.Split(" ")[0]
 $Actual = (Get-FileHash $ZipPath -Algorithm SHA256).Hash.ToLower()
 if ($Expected -ne $Actual) { throw "Checksum mismatch for $Zip" }
 Expand-Archive $ZipPath -DestinationPath "$Root\build\windows\node-unzip"
-Copy-Item "$Root\build\windows\node-unzip\node-$NodeVersion-win-x64\node.exe", "$Root\build\windows\node-unzip\node-$NodeVersion-win-x64\LICENSE" "$Stage\node\"
+Copy-Item "$Root\build\windows\node-unzip\$NodeArchivePrefix-win-x64\node.exe", "$Root\build\windows\node-unzip\$NodeArchivePrefix-win-x64\LICENSE" "$Stage\node\"
 
 # 2. App files (no tests, tools, vendor or keys).
 foreach ($p in "bin", "src", "ui", "samples", "package.json", "LICENSE.txt", "README.md") { Copy-Item -Recurse "$Root\$p" "$Stage\app\" }
