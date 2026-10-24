@@ -18,20 +18,20 @@ test('startup setting creates and removes only its own launcher', async () => {
   const root = await mkdtemp(path.join(os.tmpdir(), 'brainlink-startup-'));
   const env = { APPDATA: root };
   try {
-    assert.equal(await isStartupEnabled(env), false);
+    assert.equal(await isStartupEnabled(env, undefined, 'win32'), false);
     assert.equal(await setStartupEnabled(true, { env, os: 'win32', nodePath: 'C:\\node.exe', cliPath: 'C:\\brainlink.mjs' }), true);
-    const file = startupLauncherPath(env);
+    const file = startupLauncherPath(env, undefined, 'win32');
     assert.match(await readFile(file, 'utf8'), /BrainLink managed startup launcher/);
-    assert.equal(await isStartupEnabled(env), true);
+    assert.equal(await isStartupEnabled(env, undefined, 'win32'), true);
     assert.equal(await setStartupEnabled(false, { env, os: 'win32' }), false);
-    assert.equal(await isStartupEnabled(env), false);
+    assert.equal(await isStartupEnabled(env, undefined, 'win32'), false);
   } finally { await rm(root, { recursive: true, force: true }); }
 });
 
 test('startup setting preserves an unrelated existing startup file', async () => {
   const root = await mkdtemp(path.join(os.tmpdir(), 'brainlink-startup-'));
   const env = { APPDATA: root };
-  const file = startupLauncherPath(env);
+  const file = startupLauncherPath(env, undefined, 'win32');
   try {
     await mkdir(path.dirname(file), { recursive: true });
     await writeFile(file, 'user-owned launcher');
