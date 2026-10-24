@@ -1,10 +1,10 @@
 # BrainLink — Product and Engineering Specification
 
-Status: living specification, updated 2026-10-24. This version supersedes the October 18 plan where they conflict, especially on onboarding, trial/licensing and the product's Personal/Organisation Twin direction. Current code, tests and dated evidence in `docs/IMPLEMENTATION-STATUS.md` determine implementation status.
+Status: living specification, updated 2026-10-24. This version supersedes the October 18 plan where they conflict, especially on onboarding, trial/licensing and the product's Personal/Organisation/Client Twin direction. Current code, tests and dated evidence in `docs/IMPLEMENTATION-STATUS.md` determine implementation status.
 
 ## 1. What it is
 
-A desktop app + local MCP server that turns user-controlled Obsidian / Markdown vaults into a **governed memory layer shared by authorized AI agents**. Over time, that layer can support a Personal Twin for one person or an Organisation Twin for a company, while keeping data scope, provenance and approval visible.
+A desktop app + local MCP server that turns user-controlled Obsidian / Markdown vaults into a **governed memory layer shared by authorized AI agents**. Over time, that layer can support a Personal Twin for one person, an Organisation Twin for a company, and isolated Client Twins for client work, while keeping data scope, provenance and approval visible.
 
 The local-first product connects authorized clients to BrainLink. Data is filtered by vault and permissions before retrieval; a remote client requires a separately configured, secured relay and is never assumed to have access by default.
 
@@ -45,7 +45,7 @@ The local-first product connects authorized clients to BrainLink. Data is filter
 
 ## 3a. Twin and memory model
 
-BrainLink is the memory, permissions, provenance and handoff layer; AI agents are replaceable clients. Personal Twin and Organisation Twin describe the product experience built on that layer, not an autonomous person or authority to act. The system organizes four memory types internally without making users file every item into four separate screens:
+BrainLink is the memory, permissions, provenance and handoff layer; AI agents are replaceable clients. Personal, Organisation and Client Twin describe the product experience built on that layer, not an autonomous person or authority to act. The system organizes four memory types internally without making users file every item into four separate screens:
 
 | Memory type | BrainLink responsibility | User-facing outcome |
 |---|---|---|

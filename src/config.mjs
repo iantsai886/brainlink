@@ -11,7 +11,7 @@ export const DEFAULT_PLATFORMS = ['Claude', 'ChatGPT', 'ChatGPT Codex', 'Gemini'
 export const CLOSE_MODES = ['append-section', 'new-note', 'append-task', 'proposal-only'];
 export const SCHEMAS = ['standard', 'provenance'];
 export const WRITE_MODES = ['on', 'proposal-only', 'off'];
-export const TWIN_MODES = ['personal', 'organisation'];
+export const TWIN_MODES = ['personal', 'organisation', 'client'];
 export const TWIN_ACTIONS = ['search', 'read_note', 'read_session', 'handoff_read', 'write_handoff', 'propose_note', 'write_note'];
 
 // Where BrainLink keeps config.json, activity.log and backups for this OS user.

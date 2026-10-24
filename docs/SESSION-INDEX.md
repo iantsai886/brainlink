@@ -15,7 +15,7 @@ One JSON Lines store under `<appHome>/sessions/sessions.jsonl`, wrapping `brainl
 ```
 
 `id = s_<sha256(client:source_id)[:16]>`, so re-running an importer on the same file is idempotent.
-`profile_id` is an optional Personal/Organisation Twin owner. It is `null` for older records and
+`profile_id` is an optional Personal/Organisation/Client Twin owner. It is `null` for older records and
 unassigned imported sessions. The store filters it before session query matching and refuses an
 ID read when the caller's `profile_id` does not match. Profile closeouts persist their owner; a
 scoped AI cannot assign an existing imported session to itself. `private` defaults to `false` in

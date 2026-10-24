@@ -147,7 +147,7 @@ test('profile-scoped session reads stay inside the profile and closeouts remain 
     });
   };
   addScopedProfile({ id: 'personal_twin_2', name: 'Fictional Personal Twin', mode: 'personal', owner: 'fictional-person', vault: 'Fictional Personal', agentId: 'agent_personal', token: 'fictional-personal-token' });
-  addScopedProfile({ id: 'client_twin_3', name: 'Fictional Client Twin', mode: 'organisation', owner: 'fictional-client-owner', vault: 'Fictional Client', agentId: 'agent_client', token: 'fictional-client-token' });
+  addScopedProfile({ id: 'client_twin_3', name: 'Fictional Client Twin', mode: 'client', owner: 'fictional-client-owner', vault: 'Fictional Client', agentId: 'agent_client', token: 'fictional-client-token' });
   const env = { BRAINLINK_HOME: path.join(root, 'app'), HOME: root, BRAINLINK_AGENT_TOKEN: 'fictional-agent-token' };
   assert.deepEqual(validate(cfg), []);
   const mcp = createMcp(createContext(cfg, { env }));

@@ -46,7 +46,7 @@ The customer sees one natural vault experience; the four types are an internal r
 ## Product modules
 
 - Vault Manager: add, remove, scan, scope, and health status for many vaults.
-- Twin Profiles: Personal Twin and Organisation Twin configuration with separate policies.
+- Twin Profiles: Personal, Organisation and Client Twin configuration with separate policies.
 - Agent Connections: provider identity, capabilities, allowed vaults, tools, read/write scope, consent, and revocation.
 - Session Capture: supported end-of-session capture with explicit fallback export.
 - Memory Pipeline: extraction, classification, destination proposal, provenance, links, approval, and versioning.
