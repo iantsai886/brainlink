@@ -7,17 +7,19 @@ HERE="$(cd "$(dirname "$0")" && pwd)"
 ROOT="$(cd "$HERE/../.." && pwd)"
 VERSION="$(node -p "require('$ROOT/package.json').version")"
 NODE_VERSION="$(cat "$ROOT/vendor/node/VERSION")"
+NODE_DIST="https://nodejs.org/dist/v$NODE_VERSION"
 WORK="$ROOT/build/linux"
 DIST="$ROOT/dist"
 rm -rf "$WORK" && mkdir -p "$WORK" "$DIST"
 TAR=tar; command -v gtar >/dev/null && TAR=gtar
+[ -f "$ROOT/vendor/node/SHASUMS256.txt" ] || curl -fsS "$NODE_DIST/SHASUMS256.txt" -o "$ROOT/vendor/node/SHASUMS256.txt"
 sips -z 256 256 "$ROOT/packaging/macos/icon/icon-1024.png" --out "$WORK/brainlink.png" >/dev/null 2>&1 || cp "$ROOT/packaging/macos/icon/icon-1024.png" "$WORK/brainlink.png"
 
 for ARCH in x64 arm64; do
   NAME="brainlink-$VERSION-linux-$ARCH"
   S="$WORK/$NAME"
   NT="$ROOT/vendor/node/node-$NODE_VERSION-linux-$ARCH.tar.xz"
-  [ -f "$NT" ] || curl -sfo "$NT" "https://nodejs.org/dist/$NODE_VERSION/$(basename "$NT")"
+  [ -f "$NT" ] || curl -fsS "$NODE_DIST/$(basename "$NT")" -o "$NT"
   (cd "$ROOT/vendor/node" && grep " $(basename "$NT")$" SHASUMS256.txt | shasum -a 256 -c --quiet)
   mkdir -p "$S/node/bin" "$S/app" "$S/bin"
   tar -xJf "$NT" -C "$WORK" "node-$NODE_VERSION-linux-$ARCH/bin/node" "node-$NODE_VERSION-linux-$ARCH/LICENSE"

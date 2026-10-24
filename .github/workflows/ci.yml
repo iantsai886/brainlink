@@ -37,3 +37,26 @@ jobs:
 
       - name: Run core and UI suites
         run: npm run test:all
+
+  windows-package:
+    name: Build unsigned Windows installer
+    runs-on: windows-latest
+    timeout-minutes: 20
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Install Inno Setup
+        run: choco install innosetup --yes --no-progress
+
+      - name: Build installer with pinned, checksum-verified Node.js
+        shell: pwsh
+        run: ./packaging/windows/build-windows.ps1
+
+      - name: Upload installer artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: brainlink-windows-installer
+          path: dist/BrainLink-Setup-*.exe
+          if-no-files-found: error
+          retention-days: 7

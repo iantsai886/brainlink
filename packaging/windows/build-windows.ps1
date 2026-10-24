@@ -6,6 +6,7 @@ $Here = Split-Path -Parent $MyInvocation.MyCommand.Path
 $Root = Resolve-Path "$Here\..\.."
 $Version = (Get-Content "$Root\package.json" | ConvertFrom-Json).version
 $NodeVersion = (Get-Content "$Root\vendor\node\VERSION").Trim()
+$NodeDist = "https://nodejs.org/dist/v$NodeVersion"
 $Stage = "$Root\build\windows\stage"
 Remove-Item -Recurse -Force "$Root\build\windows" -ErrorAction SilentlyContinue
 New-Item -ItemType Directory -Force "$Stage\node", "$Stage\app", "$Root\vendor\node" | Out-Null
@@ -13,8 +14,11 @@ New-Item -ItemType Directory -Force "$Stage\node", "$Stage\app", "$Root\vendor\n
 # 1. Official Node runtime, checksum-verified.
 $Zip = "node-$NodeVersion-win-x64.zip"
 $ZipPath = "$Root\vendor\node\$Zip"
-if (-not (Test-Path $ZipPath)) { Invoke-WebRequest "https://nodejs.org/dist/$NodeVersion/$Zip" -OutFile $ZipPath }
-$Expected = (Select-String -Path "$Root\vendor\node\SHASUMS256.txt" -Pattern " $Zip$").Line.Split(" ")[0]
+if (-not (Test-Path "$Root\vendor\node\SHASUMS256.txt")) { Invoke-WebRequest "$NodeDist/SHASUMS256.txt" -OutFile "$Root\vendor\node\SHASUMS256.txt" }
+if (-not (Test-Path $ZipPath)) { Invoke-WebRequest "$NodeDist/$Zip" -OutFile $ZipPath }
+$SumLine = Select-String -Path "$Root\vendor\node\SHASUMS256.txt" -Pattern " $Zip$" | Select-Object -First 1
+if (-not $SumLine) { throw "No official checksum found for $Zip" }
+$Expected = $SumLine.Line.Split(" ")[0]
 $Actual = (Get-FileHash $ZipPath -Algorithm SHA256).Hash.ToLower()
 if ($Expected -ne $Actual) { throw "Checksum mismatch for $Zip" }
 Expand-Archive $ZipPath -DestinationPath "$Root\build\windows\node-unzip"

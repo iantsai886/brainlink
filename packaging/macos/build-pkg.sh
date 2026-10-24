@@ -11,6 +11,7 @@ ROOT="$(cd "$HERE/../.." && pwd)"
 VERSION="$(node -p "require('$ROOT/package.json').version")"
 BUNDLE_ID="${BUNDLE_ID:-com.iango.brainlink}"
 NODE_VERSION="$(cat "$ROOT/vendor/node/VERSION")"
+NODE_DIST="https://nodejs.org/dist/v$NODE_VERSION"
 WORK="$ROOT/build/macos"
 DIST="$ROOT/dist"
 APP="$WORK/root/Applications/BrainLink.app"
@@ -19,6 +20,11 @@ echo "BrainLink $VERSION · Node $NODE_VERSION · $BUNDLE_ID"
 rm -rf "$WORK" && mkdir -p "$WORK/node" "$APP/Contents/MacOS" "$APP/Contents/Resources/bin" "$APP/Contents/Resources/node/bin" "$DIST"
 
 # 1. Universal Node runtime from the checksum-verified official tarballs.
+[ -f "$ROOT/vendor/node/SHASUMS256.txt" ] || curl -fsS "$NODE_DIST/SHASUMS256.txt" -o "$ROOT/vendor/node/SHASUMS256.txt"
+for arch in arm64 x64; do
+  archive="$ROOT/vendor/node/node-$NODE_VERSION-darwin-$arch.tar.gz"
+  [ -f "$archive" ] || curl -fsS "$NODE_DIST/$(basename "$archive")" -o "$archive"
+done
 (cd "$ROOT/vendor/node" && grep -E "darwin-(arm64|x64).tar.gz" SHASUMS256.txt | shasum -a 256 -c --quiet)
 for arch in arm64 x64; do
   mkdir -p "$WORK/node/$arch"

@@ -4,7 +4,7 @@ Status snapshot: 2026-10-24 (Asia/Taipei)
 GitHub repository: `iantsai886/brainlink`
 Branch: `fix/private-session-excerpts`
 Code baseline: current `fix/private-session-excerpts` branch snapshot
-Validation environment: Windows, Node.js 24.18.0; `npm run test:all`: core 241 tests (235 passed, 0 failed, 6 skipped) and UI 27 tests (27 passed, 0 failed). GitHub Actions is configured for Node 22/24 on Windows, macOS and Linux; its first remote run has not yet been confirmed. Browser review used an isolated fictional vault for the previous session-reminder UI; the latest correction/withdrawal UI has not had browser usability review.
+Validation environment: Windows, Node.js 24.18.0; `npm run test:all`: core 241 tests (235 passed, 0 failed, 6 skipped) and UI 27 tests (27 passed, 0 failed). GitHub Actions is configured for Node 22/24 on Windows, macOS and Linux and builds an unsigned Windows installer; its first remote run has not yet been confirmed. The pinned Node 24.22.1 Windows archive passed official SHA-256 verification and its bundled executable reported v24.22.1. Inno Setup is unavailable locally, so installer compilation remains pending the remote workflow. Browser review used an isolated fictional vault for the previous session-reminder UI; the latest correction/withdrawal UI has not had browser usability review.
 Client discovery: Codex CLI `0.164.0-alpha.11.1` found the repository skill in `codex debug prompt-input`; Claude Code CLI is not installed here.
 
 This is an evidence ledger, not a release-readiness claim. “Implemented and locally tested” does not imply packaged, cross-client validated, or ready for customers.

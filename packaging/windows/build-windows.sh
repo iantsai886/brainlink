@@ -13,7 +13,9 @@ WORK="$ROOT/build/windows"
 STAGE="$WORK/stage"
 DIST="$ROOT/dist"
 command -v makensis >/dev/null || { echo "makensis not found (brew install makensis)"; exit 1; }
-[ -f "$ZIP" ] || curl -sfo "$ZIP" "https://nodejs.org/dist/$NODE_VERSION/node-$NODE_VERSION-win-x64.zip"
+NODE_DIST="https://nodejs.org/dist/v$NODE_VERSION"
+[ -f "$ROOT/vendor/node/SHASUMS256.txt" ] || curl -fsS "$NODE_DIST/SHASUMS256.txt" -o "$ROOT/vendor/node/SHASUMS256.txt"
+[ -f "$ZIP" ] || curl -fsS "$NODE_DIST/node-$NODE_VERSION-win-x64.zip" -o "$ZIP"
 (cd "$ROOT/vendor/node" && grep " node-$NODE_VERSION-win-x64.zip$" SHASUMS256.txt | shasum -a 256 -c --quiet)
 
 rm -rf "$WORK" && mkdir -p "$STAGE/node" "$STAGE/app" "$STAGE/bin" "$DIST"
