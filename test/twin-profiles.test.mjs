@@ -129,16 +129,32 @@ test('profile-scoped session reads stay inside the profile and closeouts remain 
   await mkdir(path.join(orgPath, 'Inbox'), { recursive: true });
   await mkdir(privatePath);
   const cfg = fixture(orgPath);
-  cfg.vaults.push({ name: 'Fictional Personal', path: privatePath, private: true });
+  const clientPath = path.join(root, 'client');
+  await mkdir(clientPath);
+  cfg.vaults.push({ name: 'Fictional Personal', path: privatePath, private: true, schema: 'standard', writes: 'on' }, { name: 'Fictional Client', path: clientPath, private: true, schema: 'standard', writes: 'on' });
   const profile = cfg.twin_profiles[0];
   profile.vaults[0].access = 'propose';
   profile.allowed_actions.push('read_session', 'propose_note');
   profile.agent_access[0].vaults[0] = { name: 'Fictional Org', access: 'propose', operations: ['search', 'read_note', 'read_session', 'propose_note'] };
+  const addScopedProfile = ({ id, name, mode, owner, vault, agentId, token }) => {
+    cfg.ai_agents.push({ id: agentId, name: `${name} agent`, kind: 'local', tokenHash: hashToken(token), connected: true });
+    cfg.twin_profiles.push({
+      id, name, mode, owner, vaults: [{ name: vault, access: 'read' }],
+      source_policy: { private_default: true, provenance_required: true, session_capture: 'summary-proposal' },
+      memory_policy: { working: true, semantic: true, procedural: true, episodic: true },
+      allowed_actions: ['search', 'read_note', 'read_session'],
+      agent_access: [{ agent_id: agentId, vaults: [{ name: vault, access: 'read', operations: ['search', 'read_note', 'read_session'] }] }],
+    });
+  };
+  addScopedProfile({ id: 'personal_twin_2', name: 'Fictional Personal Twin', mode: 'personal', owner: 'fictional-person', vault: 'Fictional Personal', agentId: 'agent_personal', token: 'fictional-personal-token' });
+  addScopedProfile({ id: 'client_twin_3', name: 'Fictional Client Twin', mode: 'organisation', owner: 'fictional-client-owner', vault: 'Fictional Client', agentId: 'agent_client', token: 'fictional-client-token' });
   const env = { BRAINLINK_HOME: path.join(root, 'app'), HOME: root, BRAINLINK_AGENT_TOKEN: 'fictional-agent-token' };
+  assert.deepEqual(validate(cfg), []);
   const mcp = createMcp(createContext(cfg, { env }));
   const store = await openSessionStore(env);
   const own = await store.putSession({ client: 'fictional-org-ai', source_id: 'own-1', profile_id: 'org_twin_1', vault: 'Sessions', project: 'Example', title: 'Own session', summary: 'ORG_SESSION_CANARY_77', started_at: new Date().toISOString(), private: true, messages: [{ role: 'assistant', at: new Date().toISOString(), text: 'ORG_MESSAGE_CANARY_77' }] });
   const foreign = await store.putSession({ client: 'fictional-person-ai', source_id: 'private-1', profile_id: 'personal_twin_2', vault: 'Sessions', project: 'Private', title: 'Private session', summary: 'PERSONAL_SESSION_CANARY_88', started_at: new Date().toISOString(), private: true, messages: [{ role: 'assistant', at: new Date().toISOString(), text: 'PERSONAL_MESSAGE_CANARY_88' }] });
+  const clientSession = await store.putSession({ client: 'fictional-client-ai', source_id: 'client-1', profile_id: 'client_twin_3', vault: 'Sessions', project: 'Client', title: 'Client session', summary: 'CLIENT_SESSION_CANARY_98', started_at: new Date().toISOString(), private: true, messages: [{ role: 'assistant', at: new Date().toISOString(), text: 'CLIENT_MESSAGE_CANARY_98' }] });
   const unassigned = await store.putSession({ client: 'fictional-import', source_id: 'legacy-1', vault: 'Sessions', project: 'Legacy', title: 'Unassigned import', summary: 'UNASSIGNED_SESSION_CANARY_99', started_at: new Date().toISOString(), private: true, messages: [{ role: 'assistant', at: new Date().toISOString(), text: 'UNASSIGNED_MESSAGE_CANARY_99' }] });
 
   const listedTools = (await mcp.handle({ jsonrpc: '2.0', id: 20, method: 'tools/list' })).result.tools.map((tool) => tool.name);
@@ -147,13 +163,24 @@ test('profile-scoped session reads stay inside the profile and closeouts remain 
   assert.ok(listedTools.includes('session_close'));
   const listed = await mcp.handle({ jsonrpc: '2.0', id: 21, method: 'tools/call', params: { name: 'session_list', arguments: { q: 'SESSION_CANARY' } } });
   assert.deepEqual(listed.result.structuredContent.sessions.map((session) => session.id), [own.id]);
-  assert.doesNotMatch(JSON.stringify(listed), /PERSONAL_SESSION_CANARY_88|UNASSIGNED_SESSION_CANARY_99/);
+  assert.doesNotMatch(JSON.stringify(listed), /PERSONAL_SESSION_CANARY_88|CLIENT_SESSION_CANARY_98|UNASSIGNED_SESSION_CANARY_99/);
   const readOwn = await mcp.handle({ jsonrpc: '2.0', id: 22, method: 'tools/call', params: { name: 'session_read', arguments: { id: own.id, full: true } } });
   assert.match(JSON.stringify(readOwn), /ORG_MESSAGE_CANARY_77/);
-  for (const id of [foreign.id, unassigned.id]) {
-    const denied = await mcp.handle({ jsonrpc: '2.0', id: 23, method: 'tools/call', params: { name: 'session_read', arguments: { id, full: true } } });
-    assert.equal(denied.result.isError, true);
-    assert.doesNotMatch(JSON.stringify(denied), /PERSONAL_SESSION_CANARY_88|UNASSIGNED_SESSION_CANARY_99|PERSONAL_MESSAGE_CANARY_88|UNASSIGNED_MESSAGE_CANARY_99/);
+  const scopedClients = [
+    { id: 'organisation', mcp, own, foreign: [foreign, clientSession, unassigned], token: 'fictional-agent-token' },
+    { id: 'personal', mcp: createMcp(createContext(cfg, { env: { ...env, BRAINLINK_AGENT_TOKEN: 'fictional-personal-token' } })), own: foreign, foreign: [own, clientSession, unassigned], token: 'fictional-personal-token' },
+    { id: 'client', mcp: createMcp(createContext(cfg, { env: { ...env, BRAINLINK_AGENT_TOKEN: 'fictional-client-token' } })), own: clientSession, foreign: [own, foreign, unassigned], token: 'fictional-client-token' },
+  ];
+  for (const scoped of scopedClients) {
+    const scopedList = await scoped.mcp.handle({ jsonrpc: '2.0', id: 23, method: 'tools/call', params: { name: 'session_list', arguments: { q: 'SESSION_CANARY' } } });
+    assert.deepEqual(scopedList.result.structuredContent.sessions.map((session) => session.id), [scoped.own.id], `${scoped.id} Twin sees its assigned session only`);
+    const listJson = JSON.stringify(scopedList);
+    for (const record of scoped.foreign) assert.equal(listJson.includes(record.summary), false, `${scoped.id} list excludes foreign summary`);
+    for (const record of scoped.foreign) {
+      const denied = await scoped.mcp.handle({ jsonrpc: '2.0', id: 24, method: 'tools/call', params: { name: 'session_read', arguments: { id: record.id, full: true } } });
+      assert.equal(denied.result.isError, true, `${scoped.id} Twin cannot read ${record.profile_id || 'unassigned'} session`);
+      assert.doesNotMatch(JSON.stringify(denied), /ORG_MESSAGE_CANARY_77|PERSONAL_MESSAGE_CANARY_88|CLIENT_MESSAGE_CANARY_98|UNASSIGNED_MESSAGE_CANARY_99/);
+    }
   }
   const closeArgs = { vault: 'Fictional Org', title: 'Fictional scoped close', goal: 'Verify scoped closure', outcome: 'Stored only as a profile-owned private summary.', session_or_task_id: 'scoped-close-1' };
   const preview = await mcp.handle({ jsonrpc: '2.0', id: 24, method: 'tools/call', params: { name: 'session_close', arguments: closeArgs } });
