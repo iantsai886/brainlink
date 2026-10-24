@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtemp, mkdir, writeFile } from 'node:fs/promises';
+import { mkdtemp, mkdir, readFile, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { normalize, validate, saveConfig } from '../src/config.mjs';
@@ -52,6 +52,15 @@ test('Twin status is explicitly declaration-only and never exposes agent credent
   assert.equal(status.profiles[0].agents[0].name, 'Fictional Codex');
   assert.equal(status.profiles[0].agents[0].vaults[0].operations.includes('write_note'), false);
   assert.doesNotMatch(JSON.stringify(status), /tokenHash|f{64}/);
+});
+
+test('Twin status appears in the main UI and escapes every profile-provided label', async () => {
+  const html = await readFile(new URL('../ui/index.html', import.meta.url), 'utf8');
+  assert.match(html, /id="twin-profiles-panel"/);
+  assert.match(html, /id="twin-profiles"/);
+  assert.match(html, /esc\(p\.name\)/);
+  assert.match(html, /esc\(t\('twinProfiles\.owner', \{ owner: p\.owner \}\)\)/);
+  assert.match(html, /twinProfiles\.notEnforced/);
 });
 
 test('authenticated local status exposes the read-only Twin profile and marks enforcement as pending', async () => {

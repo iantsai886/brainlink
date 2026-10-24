@@ -182,6 +182,12 @@ ol.todo li { padding-left: 4px; }
     </div>
   </section>
 
+  <details class="card" id="twin-profiles-panel" style="margin-top:12px" hidden>
+    <summary data-i18n="twinProfiles.title"></summary>
+    <p class="hint" data-i18n="twinProfiles.hint"></p>
+    <div id="twin-profiles" class="cards" aria-live="polite"></div>
+  </details>
+
   <section id="agents-panel" hidden>
     <h2 data-i18n="agents.title"></h2>
     <p class="hint" data-i18n="agents.hint"></p>
@@ -245,12 +251,6 @@ ol.todo li { padding-left: 4px; }
     <h2><span class="step" id="n2">2</span> <span data-i18n="rolePack.step2Title"></span></h2>
     <p class="hint" data-i18n="rolePack.hint"></p>
     <div id="agents" class="cards"></div>
-  </section>
-
-  <section id="s-twin-profiles">
-    <h2 data-i18n="twinProfiles.title"></h2>
-    <p class="hint" data-i18n="twinProfiles.hint"></p>
-    <div id="twin-profiles" class="cards" aria-live="polite"></div>
   </section>
 
   <section id="s-connect">
@@ -745,6 +745,7 @@ async function load() {
   if (onboardingSync) renderSyncOnboarding();
   $('ready').hidden = !hasVault || onboardingSync;
   $('brain-panel').hidden = !hasVault || onboardingSync;
+  $('twin-profiles-panel').hidden = !hasVault || onboardingSync;
   $('ask-panel').hidden = !hasVault || onboardingSync;
   $('smart').textContent = S.semantic?.available ? t('brain.smartOn', { model: S.semantic.model }) : t('brain.smartOff');
   if (!hasVault) renderStart(); else if (!onboardingSync) { renderReady(last); drawGraph().catch(() => {}); }
