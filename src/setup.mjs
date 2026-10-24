@@ -206,7 +206,7 @@ export async function startSetup(opts = {}) {
       sessions_has_private: ((await sessions.list({ include_private: true, limit: 20 }).catch(() => ({ sessions: [] }))).sessions || []).some((x) => x.private),
       snapshot: { ...snapshotSettings(cfg), suggested_folder: suggestSnapshotFolder(home), ...(await loadSnapshotStatus(snapshotStateFile)) },
       backup: { ...cfg.backup, status: backupStatus, running: backupRunning },
-      startup_at_login: os === 'win32' ? await isStartupEnabled(env, home) : false,
+      startup_at_login: ['win32', 'darwin', 'linux'].includes(os) ? await isStartupEnabled(env, home, os) : false,
     };
   }
 

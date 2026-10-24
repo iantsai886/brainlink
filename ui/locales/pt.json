@@ -337,7 +337,7 @@
   "backup.restoreConfirm": "Restaurar neste destino vazio? Os cofres atuais não serão alterados.",
   "backup.restored": "{count} arquivos restaurados em {folder}. Revise-os antes de usá-los.",
   "startup.enabled": "Iniciar o BrainLink em segundo plano ao entrar",
-  "startup.hint": "Mantém os backups programados ativos após entrar. O atalho do menu Iniciar continua abrindo o app quando clicado. Disponível no Windows.",
+  "startup.hint": "Inicia o BrainLink silenciosamente ao entrar para manter os backups programados ativos. O ícone do app continua abrindo a configuração quando clicado. Compatível com Windows, macOS e Linux com ambiente gráfico.",
   "startup.enabledToast": "O BrainLink iniciará silenciosamente quando você entrar.",
   "startup.disabledToast": "A inicialização em segundo plano está desativada. Os backups programados só executam enquanto o BrainLink está aberto."
 }
