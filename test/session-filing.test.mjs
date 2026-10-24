@@ -1,12 +1,13 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtemp, mkdir, readdir, readFile } from 'node:fs/promises';
+import { mkdtemp, mkdir, readdir, readFile, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { normalize, saveConfig } from '../src/config.mjs';
 import { createContext, readNote } from '../src/core.mjs';
 import { fileSessionSummary, filingFields } from '../src/sessions/filing.mjs';
 import { recommendSessionVault } from '../src/sessions/routing.mjs';
+import { listSessionFilingFolders, suggestedSessionFolder } from '../src/sessions/folders.mjs';
 import { openSessionStore } from '../src/sessions/index.mjs';
 import { startSetup } from '../src/setup.mjs';
 
@@ -82,10 +83,39 @@ test('destination recommendation uses only an exact saved project choice and wri
   assert.equal(recommendSessionVault({ project: '' }, cfg).vault, null);
 });
 
+test('folder suggestions reuse only an exact project choice that still exists in the chosen vault', async () => {
+  const root = await mkdtemp(path.join(tmpdir(), 'bl-filing-folder-route-'));
+  await mkdir(path.join(root, 'Projects', 'Northwind'), { recursive: true });
+  await mkdir(path.join(root, 'Inbox'), { recursive: true });
+  const cfg = normalize({ vaults: [{ name: 'Company', path: root }], session_filing: {
+    projectFolders: { Northwind: { vault: 'Company', folder: 'Projects/Northwind' }, Similar: { vault: 'Company', folder: 'Missing' } },
+  } });
+  const ctx = createContext(cfg);
+  assert.equal(await suggestedSessionFolder(ctx, { project: 'Northwind' }, 'Company'), 'Projects/Northwind');
+  assert.equal(await suggestedSessionFolder(ctx, { project: 'Northwind-Other' }, 'Company'), null);
+  assert.equal(await suggestedSessionFolder(ctx, { project: 'Northwind' }, 'Personal'), null);
+  assert.equal(await suggestedSessionFolder(ctx, { project: 'Similar' }, 'Company'), null);
+});
+
+test('folder picker excludes hidden, protected and .brainlinkignore folders', async () => {
+  const root = await mkdtemp(path.join(tmpdir(), 'bl-filing-folder-picker-'));
+  await mkdir(path.join(root, 'Inbox'), { recursive: true });
+  await mkdir(path.join(root, 'Projects', 'Visible'), { recursive: true });
+  await mkdir(path.join(root, 'Projects', 'Excluded'), { recursive: true });
+  await mkdir(path.join(root, '00 INDEX'), { recursive: true });
+  await mkdir(path.join(root, '.private'), { recursive: true });
+  await writeFile(path.join(root, '.brainlinkignore'), 'Excluded\n');
+  const ctx = createContext(normalize({ vaults: [{ name: 'Company', path: root }] }));
+  const folders = await listSessionFilingFolders(ctx, 'Company');
+  assert.deepEqual(folders.map((folder) => folder.path), ['Inbox', 'Projects', 'Projects/Visible']);
+  assert.equal((await fileSessionSummary(ctx, { id: 'x', summary: 'safe summary' }, 'Company', false, {}, 'Projects/Excluded')).ok, false);
+});
+
 test('local filing API requires its token and writes a private note only after confirmation', async () => {
   const home = await mkdtemp(path.join(tmpdir(), 'bl-filing-api-'));
   const vault = path.join(home, 'vault');
   await mkdir(path.join(vault, 'Inbox'), { recursive: true });
+  await mkdir(path.join(vault, 'Projects', 'fictional-project'), { recursive: true });
   const env = { BRAINLINK_HOME: path.join(home, 'app'), HOME: home, BRAINLINK_SEMANTIC: '0' };
   const personal = path.join(home, 'personal');
   await mkdir(path.join(personal, 'Inbox'), { recursive: true });
@@ -103,19 +133,25 @@ test('local filing API requires its token and writes a private note only after c
   const recommend = (id) => fetch(`http://127.0.0.1:${app.port}/api/sessions/recommend`, {
     method: 'POST', headers: { 'Content-Type': 'application/json', 'X-BrainLink-Token': app.token }, body: JSON.stringify({ id }),
   }).then((r) => r.json());
+  const folders = (id, vaultName) => fetch(`http://127.0.0.1:${app.port}/api/sessions/filing-folders`, {
+    method: 'POST', headers: { 'Content-Type': 'application/json', 'X-BrainLink-Token': app.token }, body: JSON.stringify({ id, vault: vaultName }),
+  }).then((r) => r.json());
   try {
     assert.equal((await recommend(saved.id)).vault, null);
     assert.equal((await call({ id: saved.id, vault: 'Company', confirm: true }, 'wrong')).status, 401);
-    const preview = await (await call({ id: saved.id, vault: 'Company', confirm: false })).json();
+    const folderOptions = await folders(saved.id, 'Company');
+    assert.ok(folderOptions.folders.some((folder) => folder.path === 'Projects/fictional-project'));
+    const preview = await (await call({ id: saved.id, vault: 'Company', folder: 'Projects/fictional-project', confirm: false })).json();
     assert.equal(preview.written, false);
     assert.match(preview.preview, /private: true/);
     assert.doesNotMatch(preview.preview, /private raw turn marker/);
-    assert.equal((await readdir(path.join(vault, 'Inbox'))).length, 0);
-    const written = await (await call({ id: saved.id, vault: 'Company', confirm: true, rememberDestination: true })).json();
+    assert.equal((await readdir(path.join(vault, 'Projects', 'fictional-project'))).length, 0);
+    const written = await (await call({ id: saved.id, vault: 'Company', folder: 'Projects/fictional-project', confirm: true, rememberDestination: true })).json();
     assert.equal(written.written, true);
     assert.equal(written.destination_rule_saved, true);
     assert.match(await readFile(path.join(vault, ...written.path.slice('Company/'.length).split('/')), 'utf8'), /private: true/);
     assert.deepEqual(await recommend(next.id), { vault: 'Company', reason: 'Suggested from your saved choice for this exact project.', project: 'fictional-project', remember_available: true });
+    assert.equal((await folders(next.id, 'Company')).suggested_folder, 'Projects/fictional-project');
     assert.equal((await readdir(path.join(personal, 'Inbox'))).length, 0);
   } finally { app.server.close(); }
 });

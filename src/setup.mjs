@@ -28,6 +28,7 @@ import { fileSessionSummary } from './sessions/filing.mjs';
 import { isStartupEnabled, setStartupEnabled } from './startup.mjs';
 import { recommendSessionVault } from './sessions/routing.mjs';
 import { listSessionEndCues, dismissSessionEndCue, sessionEndCueId } from './sessions/end-cue.mjs';
+import { listSessionFilingFolders, suggestedSessionFolder } from './sessions/folders.mjs';
 import { sessionHookStatus, setSessionHook } from './sessions/hooks.mjs';
 
 const UI_STATIC_TYPES = { '.js': 'text/javascript; charset=utf-8', '.css': 'text/css; charset=utf-8', '.json': 'application/json; charset=utf-8' };
@@ -488,17 +489,30 @@ export async function startSetup(opts = {}) {
       const session = await sessions.read({ id: b.id, include_private: true });
       return { ...recommendSessionVault(session, cfg), project: session.project || null, remember_available: Boolean(session.project && session.project.length <= 1024) };
     },
+    'POST /api/sessions/filing-folders': async (b) => {
+      const cfg = await loadConfig(file);
+      const vaultName = String(b.vault || '');
+      const ctx = createContext(cfg, { env: { ...env, BRAINLINK_AI_PLATFORM: 'BrainLink Local' } });
+      const session = await sessions.read({ id: b.id, include_private: true });
+      const destination = ctx.byName.get(vaultName);
+      if (!destination || destination.writes === 'off') throw new Error('Choose a writable destination vault.');
+      return { folders: await listSessionFilingFolders(ctx, vaultName),
+        suggested_folder: await suggestedSessionFolder(ctx, session, vaultName),
+        default_folder: destination.flat ? '' : destination.intake_folder };
+    },
     'POST /api/sessions/file': async (b) => {
       if (b.confirm !== true && b.confirm !== false) throw new Error('Choose preview or confirm.');
       const cfg = await loadConfig(file);
       const ctx = createContext(cfg, { env: { ...env, BRAINLINK_AI_PLATFORM: 'BrainLink Local' } });
       const session = await sessions.read({ id: b.id, include_private: true });
-      const result = await fileSessionSummary(ctx, session, String(b.vault || ''), b.confirm);
+      const folder = typeof b.folder === 'string' ? b.folder : undefined;
+      const result = await fileSessionSummary(ctx, session, String(b.vault || ''), b.confirm, {}, folder);
       if (b.confirm === true && b.rememberDestination === true && result.written && session.project && session.project.length <= 1024) {
         const latest = await loadConfig(file);
         const projectVaults = { ...latest.session_filing.projectVaults, [session.project]: String(b.vault || '') };
+        const projectFolders = { ...latest.session_filing.projectFolders, [session.project]: { vault: String(b.vault || ''), folder: folder ?? '' } };
         try {
-          await saveConfig({ ...latest, session_filing: { ...latest.session_filing, projectVaults } }, file);
+          await saveConfig({ ...latest, session_filing: { ...latest.session_filing, projectVaults, projectFolders } }, file);
           result.destination_rule_saved = true;
         } catch { result.destination_rule_saved = false; }
       }
