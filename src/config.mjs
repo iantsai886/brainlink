@@ -39,7 +39,7 @@ export const AGENT_KINDS = ['local', 'remote'];
 export const CONFIG_SCHEMA_VERSION = 2;
 
 export function emptyConfig() {
-  return { version: CONFIG_SCHEMA_VERSION, timezone: null, locale: null, vaults: [], agents: [], ai_agents: [], handoff: null, platforms: DEFAULT_PLATFORMS, http: { port: 8765, token: null }, connections: {}, sessions: { shareSummaries: false, shareFullText: false }, backup: { enabled: false, folder: null, intervalHours: 24 } };
+  return { version: CONFIG_SCHEMA_VERSION, timezone: null, locale: null, vaults: [], agents: [], ai_agents: [], handoff: null, platforms: DEFAULT_PLATFORMS, http: { port: 8765, token: null }, connections: {}, sessions: { shareSummaries: false, shareFullText: false }, session_filing: { projectVaults: {} }, backup: { enabled: false, folder: null, intervalHours: 24 } };
 }
 
 // Fill defaults so the rest of the code never checks for missing keys.
@@ -54,6 +54,8 @@ export function normalize(raw = {}) {
   cfg.http = { port: 8765, token: null, ...(raw.http || {}) };
   cfg.connections = raw.connections || {};
   cfg.backup = { enabled: false, folder: null, intervalHours: 24, ...(raw.backup || {}) };
+  cfg.session_filing = { projectVaults: {}, ...(raw.session_filing || {}) };
+  if (!cfg.session_filing.projectVaults || typeof cfg.session_filing.projectVaults !== 'object' || Array.isArray(cfg.session_filing.projectVaults)) cfg.session_filing.projectVaults = {};
   // Local-only choice that decides what connected AI apps may see of imported sessions. An AI
   // client can never set or override this (see src/sessions/mcp.mjs / src/server.mjs): only the
   // user, in BrainLink Settings, changes it. shareSummaries covers session_list + summary

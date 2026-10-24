@@ -839,10 +839,15 @@ document.addEventListener('click', (e) => {
   })(d.sessRead);
   if (d.sessFile) (async (id) => {
     const choices = (S.vaults || []).filter((v) => v.exists && v.writes !== 'off').map((v) => `<option value="${esc(v.name)}">${esc(v.name)}</option>`).join('');
+    let recommendation = { vault: null, reason: '', project: null, remember_available: false };
+    try { recommendation = await api('POST', '/api/sessions/recommend', { id }); } catch {}
     $('session-detail').innerHTML = `<div class="card"><b>${esc(t('sessions.fileSummary'))}</b><p class="muted">${esc(t('sessions.fileHint'))}</p>
       <label>${esc(t('sessions.destination'))}<select id="session-file-vault">${choices}</select></label>
+      ${recommendation.vault ? `<p class="hint">${esc(t('sessions.destinationSuggestion', { vault: recommendation.vault }))}</p>` : `<p class="hint">${esc(t('sessions.noDestinationSuggestion'))}</p>`}
+      ${recommendation.remember_available ? `<label class="muted" style="display:flex;flex-direction:row;gap:6px;align-items:center"><input type="checkbox" id="session-remember-destination" style="width:auto"><span>${esc(t('sessions.rememberDestination'))}</span></label>` : ''}
       <div class="row"><button class="secondary" data-file-preview="${esc(id)}">${esc(t('sessions.preview'))}</button><button class="primary" data-file-confirm="${esc(id)}" hidden>${esc(t('sessions.savePrivate'))}</button></div>
       <pre id="session-file-preview" style="white-space:pre-wrap;overflow-wrap:anywhere"></pre></div>`;
+    if (recommendation.vault) $('session-file-vault').value = recommendation.vault;
     if (!choices) $('session-detail').textContent = t('sessions.noDestination');
   })(d.sessFile);
   if (d.filePreview) act(async () => {
@@ -856,9 +861,10 @@ document.addEventListener('click', (e) => {
   if (d.fileConfirm) act(async () => {
     const vault = $('session-file-vault').value;
     if ($('session-file-preview').dataset.vault !== vault) throw new Error(t('sessions.previewFirst'));
-    const result = await api('POST', '/api/sessions/file', { id: d.fileConfirm, vault, confirm: true });
+    const result = await api('POST', '/api/sessions/file', { id: d.fileConfirm, vault, confirm: true, rememberDestination: Boolean($('session-remember-destination')?.checked) });
     if (!result.ok || !result.written) throw new Error((result.errors || []).join('; ') || result.next || 'Not saved.');
     toast(t('sessions.savedPrivate', { path: result.path }));
+    if (result.destination_rule_saved) toast(t('sessions.destinationRemembered'));
   });
   if (d.sessToggle) act(() => api('POST', '/api/sessions/private', { id: d.sessToggle, private: !d.sessPrivate }));
   if (d.syncPick) $('sync-folder').value = d.syncPick;

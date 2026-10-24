@@ -26,6 +26,7 @@ import { listHandoffs } from './writes.mjs';
 import { backupOnce, verifyBackup, restoreBackupToEmpty, loadBackupStatus, saveBackupStatus } from './backup.mjs';
 import { fileSessionSummary } from './sessions/filing.mjs';
 import { isStartupEnabled, setStartupEnabled } from './startup.mjs';
+import { recommendSessionVault } from './sessions/routing.mjs';
 
 const UI_STATIC_TYPES = { '.js': 'text/javascript; charset=utf-8', '.css': 'text/css; charset=utf-8', '.json': 'application/json; charset=utf-8' };
 const UI_DIR = path.join(ROOT, 'ui');
@@ -474,12 +475,26 @@ export async function startSetup(opts = {}) {
     },
     'POST /api/sessions': (b) => sessions.list({ q: b.q, client: b.client, project: b.project, since: b.since, limit: b.limit, include_private: Boolean(b.include_private) }),
     'POST /api/sessions/read': (b) => sessions.read({ id: b.id, include_private: Boolean(b.include_private) }),
+    'POST /api/sessions/recommend': async (b) => {
+      const cfg = await loadConfig(file);
+      const session = await sessions.read({ id: b.id, include_private: true });
+      return { ...recommendSessionVault(session, cfg), project: session.project || null, remember_available: Boolean(session.project && session.project.length <= 1024) };
+    },
     'POST /api/sessions/file': async (b) => {
       if (b.confirm !== true && b.confirm !== false) throw new Error('Choose preview or confirm.');
       const cfg = await loadConfig(file);
       const ctx = createContext(cfg, { env: { ...env, BRAINLINK_AI_PLATFORM: 'BrainLink Local' } });
       const session = await sessions.read({ id: b.id, include_private: true });
-      return fileSessionSummary(ctx, session, String(b.vault || ''), b.confirm);
+      const result = await fileSessionSummary(ctx, session, String(b.vault || ''), b.confirm);
+      if (b.confirm === true && b.rememberDestination === true && result.written && session.project && session.project.length <= 1024) {
+        const latest = await loadConfig(file);
+        const projectVaults = { ...latest.session_filing.projectVaults, [session.project]: String(b.vault || '') };
+        try {
+          await saveConfig({ ...latest, session_filing: { ...latest.session_filing, projectVaults } }, file);
+          result.destination_rule_saved = true;
+        } catch { result.destination_rule_saved = false; }
+      }
+      return result;
     },
     'POST /api/sessions/private': (b) => sessions.setPrivate(b.id, b.private),
     // What connected AI apps (not this local UI) may see of imported/logged sessions. The user's
