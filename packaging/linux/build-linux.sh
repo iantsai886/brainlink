@@ -14,7 +14,11 @@ rm -rf "$WORK" && mkdir -p "$WORK" "$DIST"
 TAR=tar; command -v gtar >/dev/null && TAR=gtar
 TAR_OPTS=(--no-xattrs)
 TAR_FORMAT=gnutar
-"$TAR" --version 2>&1 | grep -q 'GNU tar' && TAR_FORMAT=gnu
+TAR_OWNERSHIP_OPTS=(--uid 0 --gid 0 --uname root --gname root)
+if "$TAR" --version 2>&1 | grep -q 'GNU tar'; then
+  TAR_FORMAT=gnu
+  TAR_OWNERSHIP_OPTS=(--owner=root:0 --group=root:0)
+fi
 "$TAR" --help 2>&1 | grep -q -- '--no-mac-metadata' && TAR_OPTS+=(--no-mac-metadata)
 [ -f "$ROOT/vendor/node/SHASUMS256.txt" ] || curl -fsS "$NODE_DIST/SHASUMS256.txt" -o "$ROOT/vendor/node/SHASUMS256.txt"
 sips -z 256 256 "$ROOT/packaging/macos/icon/icon-1024.png" --out "$WORK/brainlink.png" >/dev/null 2>&1 || cp "$ROOT/packaging/macos/icon/icon-1024.png" "$WORK/brainlink.png"
@@ -49,8 +53,8 @@ for ARCH in x64 arm64; do
   printf 'Package: brainlink\nVersion: %s\nArchitecture: %s\nMaintainer: Iango <support@iango.ai>\nInstalled-Size: %s\nSection: utils\nPriority: optional\nHomepage: https://iango.ai/brainlink\nDescription: One Markdown second brain for every AI\n BrainLink connects an Obsidian or Markdown folder to Claude, ChatGPT Codex,\n Cursor, Gemini and other MCP clients, with safe, attributed writes.\n' "$VERSION" "$DEBARCH" "$SIZE" > "$D/control/control"
   printf '#!/bin/sh\n# Remove BrainLink from the invoking user'"'"'s AI apps is per-user; see brainlink disconnect-all.\nexit 0\n' > "$D/control/prerm"; chmod 755 "$D/control/prerm"
   (cd "$D" && echo "2.0" > debian-binary \
-    && COPYFILE_DISABLE=1 "$TAR" --format "$TAR_FORMAT" "${TAR_OPTS[@]}" --uid 0 --gid 0 --uname root --gname root -czf control.tar.gz -C control . \
-    && COPYFILE_DISABLE=1 "$TAR" --format "$TAR_FORMAT" "${TAR_OPTS[@]}" --uid 0 --gid 0 --uname root --gname root -czf data.tar.gz -C root . \
+    && COPYFILE_DISABLE=1 "$TAR" --format "$TAR_FORMAT" "${TAR_OPTS[@]}" "${TAR_OWNERSHIP_OPTS[@]}" -czf control.tar.gz -C control . \
+    && COPYFILE_DISABLE=1 "$TAR" --format "$TAR_FORMAT" "${TAR_OPTS[@]}" "${TAR_OWNERSHIP_OPTS[@]}" -czf data.tar.gz -C root . \
     && node "$HERE/ar.mjs" "$DIST/brainlink_${VERSION}_$DEBARCH.deb" debian-binary control.tar.gz data.tar.gz)
 done
 (cd "$DIST" && for f in brainlink-$VERSION-linux-*.tar.gz brainlink_${VERSION}_*.deb; do shasum -a 256 "$f" > "$f.sha256"; done)

@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtemp, mkdir, writeFile } from 'node:fs/promises';
+import { mkdtemp, mkdir, readFile, writeFile } from 'node:fs/promises';
 import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
 import { tmpdir } from 'node:os';
@@ -43,6 +43,23 @@ test('retrieval fixture rejects missing labels, duplicate IDs and oversized reph
   assert.match(validateRetrievalFixture(invalid).join('; '), /unique/);
   assert.match(validateRetrievalFixture(invalid).join('; '), /expected/);
   assert.match(validateRetrievalFixture(invalid).join('; '), /rephrasings/);
+});
+
+test('frozen Acme RSI benchmark keeps its private canary out and is eligible only for human review', async () => {
+  const root = await mkdtemp(path.join(tmpdir(), 'bl-rsi-frozen-'));
+  const vaultPath = path.resolve('samples/evaluation/vault');
+  const fixturePath = path.resolve('samples/evaluation/retrieval-rsi-v1.json');
+  const fixture = JSON.parse(await readFile(fixturePath, 'utf8'));
+  const ctx = createContext(normalize({ vaults: [{ name: 'Acme Eval', path: vaultPath }] }), {
+    env: { BRAINLINK_HOME: path.join(root, 'app'), BRAINLINK_VAULTS: 'Acme Eval', BRAINLINK_SEMANTIC: '0' },
+  });
+  const report = await evaluateRetrieval(ctx, fixture);
+  assert.equal(report.case_count, 21);
+  assert.ok(['eligible_for_review', 'no_demonstrated_gain'].includes(report.decision));
+  assert.equal(report.baseline.privacy_violations, 0);
+  assert.equal(report.result.privacy_violations, 0);
+  assert.equal(report.result.mean_estimated_output_tokens, report.baseline.mean_estimated_output_tokens);
+  assert.doesNotMatch(JSON.stringify(report), /RSI_PRIVATE_CANARY_9D7|Acquisition Budget\.md|Northwind Coffee\.md/);
 });
 
 test('semantic cache prunes vectors from notes no longer visible in the vault index', async () => {
