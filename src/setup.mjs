@@ -18,6 +18,7 @@ import { resolveNoteWikilinks } from './links.mjs';
 import { VERSION, createMcp } from './server.mjs';
 import { findObsidianVaults, nestedVaults } from './obsidian.mjs';
 import { syncSettings, chooseSync, suggestFolders, PROVIDERS, PROVIDER_LABELS } from './sync/settings.mjs';
+import { listGitHubShareCandidates, previewGitHubRepository } from './sync/github-preview.mjs';
 import { sessionsService } from './host.mjs';
 import { addAgent, renameAgent, removeAgent, revokeAgent, markConnected, findAgentByToken, publicAgent, localAgentSnippet, remoteAgentSnippet } from './mcp-agents.mjs';
 import { buildGraph3D, noteDetail3D } from './graph3d.mjs';
@@ -392,6 +393,17 @@ export async function startSetup(opts = {}) {
       const next = chooseSync(cfg, { provider: b.provider, folder: b.folder, device: b.device });
       await saveConfig(next, file);
       return { ok: true, sync: syncSettings(next) };
+    },
+    'POST /api/github/share-candidates': async (b) => {
+      const cfg = await loadConfig(file);
+      const vaultName = String(b.vault || '');
+      const ctx = createContext(cfg, { env: { ...env, BRAINLINK_SEMANTIC: '0' } });
+      return { vault: vaultName, notes: await listGitHubShareCandidates(ctx, vaultName) };
+    },
+    'POST /api/github/preview': async (b) => {
+      const cfg = await loadConfig(file);
+      const ctx = createContext(cfg, { env: { ...env, BRAINLINK_SEMANTIC: '0' } });
+      return previewGitHubRepository({ ctx, repoPath: String(b.repository || ''), vaultName: String(b.vault || ''), paths: b.paths });
     },
     'POST /api/agent': async (b) => {
       const cfg = await loadConfig(file);

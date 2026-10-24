@@ -15,9 +15,11 @@ updates `config.json` only. Actually moving note files into that folder still ne
 `engine.mjs` to the folder store's vault paths; this matches what `docs/progress.md` already
 flags and `brainlink sync`'s CLI output already says ("notes: pending the store integration").
 
-GitHub is not a current sync provider. Ian's request to use a GitHub-hosted Second Brain for
-shared AI access and change tracking is now captured as a product proposal in
-[`GITHUB-SHARED-KNOWLEDGE.md`](GITHUB-SHARED-KNOWLEDGE.md). The proposal keeps personal,
-organisation and client data in separately scoped repositories by default, uses explicit
-allowlists, and requires privacy checks before any stage/commit/push. Do not infer GitHub support
-from the current folder-sync settings or sync engine.
+GitHub is not a current sync provider. The request to use a GitHub-hosted Second Brain for shared
+AI access and change tracking is captured in [`GITHUB-SHARED-KNOWLEDGE.md`](GITHUB-SHARED-KNOWLEDGE.md).
+An authenticated local Setup API now validates an existing GitHub clone and previews selected
+visible notes without returning bodies or changing the checkout. It does not contact GitHub,
+configure a provider, fetch, stage, commit, push or synchronize content. The proposal keeps
+personal, organisation and client data in separately scoped repositories by default, uses
+explicit allowlists, and requires privacy checks before any future stage/commit/push. Do not infer
+GitHub sync support from this preview endpoint, the current folder-sync settings, or the sync engine.

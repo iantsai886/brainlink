@@ -283,6 +283,18 @@ ol.todo li { padding-left: 4px; }
       <div id="sync-suggestions" class="muted" style="font-size:13px;align-self:end"></div>
     </div>
     <div class="row" style="margin-top:12px"><button class="primary" id="sync-save" data-i18n="sync.saveBtn"></button></div>
+    <details style="margin-top:16px">
+      <summary data-i18n="github.title"></summary>
+      <p class="hint" data-i18n="github.hint"></p>
+      <div class="grid2">
+        <label><span data-i18n="github.vault"></span><select id="github-vault"></select></label>
+        <label><span data-i18n="github.repository"></span><input id="github-repository" class="mono" data-i18n-placeholder="github.repositoryPlaceholder"></label>
+      </div>
+      <div class="row" style="margin-top:10px"><button id="github-load" data-i18n="github.load"></button><button class="primary" id="github-preview" data-i18n="github.preview" disabled></button></div>
+      <div id="github-candidates" style="margin-top:10px"></div>
+      <p id="github-status" class="muted" role="status"></p>
+      <div id="github-result" class="notice" hidden></div>
+    </details>
   </section>
 
   <section id="s-backup">
@@ -793,6 +805,10 @@ async function load() {
   $('packs').innerHTML = S.packs.map((p) => `<label class="pack ${p.id === pack ? 'sel' : ''}"><span><input type="radio" name="pack" value="${p.id}" ${p.id === pack ? 'checked' : ''}><b>${esc(p.title)}</b></span><small>${esc(p.description)}</small></label>`).join('');
   const SY = S.sync;
   $('sync-provider').innerHTML = SY.providers.map((p) => `<option value="${esc(p)}" ${p === SY.provider ? 'selected' : ''}>${esc(t('sync.provider.' + p))}</option>`).join('');
+  const shareableVaults = S.vaults.filter((v) => !v.private && v.exists);
+  $('github-vault').innerHTML = shareableVaults.map((v) => `<option value="${esc(v.name)}">${esc(v.name)}</option>`).join('');
+  $('github-load').disabled = !shareableVaults.length;
+  if (!shareableVaults.length) $('github-status').textContent = t('github.noVault');
   $('sync-device').value = SY.device || '';
   $('sync-folder').value = SY.folder || '';
   $('backup-enabled').checked = Boolean(S.backup?.enabled);
@@ -965,6 +981,32 @@ $('sync-save').onclick = () => act(async () => {
   const r = await api('POST', '/api/sync', { provider, folder: provider === 'local' ? null : $('sync-folder').value, device: $('sync-device').value });
   toast(provider === 'local' ? t('sync.localToast') : t('sync.providerToast', { folder: r.sync.folder }));
 });
+let githubCandidates = [];
+function githubSelection() {
+  return [...document.querySelectorAll('[data-github-path]:checked')].map((el) => el.value);
+}
+function renderGitHubCandidates() {
+  $('github-candidates').innerHTML = githubCandidates.length ? githubCandidates.map((n, i) => `<label class="muted" style="display:flex;flex-direction:row;gap:8px;align-items:center;margin:6px 0"><input type="checkbox" data-github-path value="${esc(n.path)}" checked style="width:auto"><span>${esc(n.title)} <span class="mono">· ${esc(n.path)}</span></span></label>`).join('') : '';
+  $('github-preview').disabled = !githubCandidates.length;
+}
+$('github-load').onclick = async () => {
+  $('github-status').textContent = t('github.loading'); $('github-result').hidden = true;
+  try {
+    const r = await api('POST', '/api/github/share-candidates', { vault: $('github-vault').value });
+    githubCandidates = r.notes || []; renderGitHubCandidates();
+    $('github-status').textContent = githubCandidates.length ? t('github.loaded', { count: githubCandidates.length }) : t('github.empty');
+  } catch (e) { $('github-status').textContent = e.message; }
+};
+$('github-preview').onclick = async () => {
+  $('github-status').textContent = t('github.previewing'); $('github-result').hidden = true;
+  try {
+    const r = await api('POST', '/api/github/preview', { vault: $('github-vault').value, repository: $('github-repository').value.trim(), paths: githubSelection() });
+    $('github-result').hidden = false;
+    $('github-result').innerHTML = `<b>${esc(t('github.previewResult'))}</b><ul>${r.files.map((x) => `<li><span class="mono">${esc(x.path)}</span> — ${esc(t('github.action.' + x.action))}</li>`).join('')}</ul><p>${esc(t('github.noRemote'))}</p>`;
+    $('github-status').textContent = '';
+  } catch (e) { $('github-status').textContent = e.message; }
+};
+document.addEventListener('change', (e) => { if (e.target.matches('[data-github-path]')) $('github-preview').disabled = !githubSelection().length; });
 $('backup-pick').onclick = async () => {
   try {
     const r = await api('POST', '/api/backup/pick-folder');
