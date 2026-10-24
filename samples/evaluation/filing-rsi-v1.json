@@ -1,0 +1,27 @@
+{
+  "schema": 1,
+  "vault": "Acme Filing Eval",
+  "intake_folder": "Inbox",
+  "cases": [
+    { "id": "filing_001", "project": "Bluebird-alpha", "summary": "Bluebird Strategy records today's fictional launch decision.", "expected_folder": "Projects" },
+    { "id": "filing_002", "project": "Bluebird-beta", "summary": "Bluebird Launch tracks the agreed release checks.", "expected_folder": "Projects" },
+    { "id": "filing_003", "project": "Orchard-alpha", "summary": "Orchard Rollout has the fictional acceptance milestones.", "expected_folder": "Projects" },
+    { "id": "filing_004", "project": "Orchard-beta", "summary": "Orchard Roadmap lists the agreed project sequence.", "expected_folder": "Projects" },
+    { "id": "filing_005", "project": "Northwind-alpha", "summary": "Northwind Coffee confirmed its fictional client priorities.", "expected_folder": "Clients" },
+    { "id": "filing_006", "project": "Northwind-beta", "summary": "Harbor Clinic confirmed the client review requirements.", "expected_folder": "Clients" },
+    { "id": "filing_007", "project": "Silverline-alpha", "summary": "Silverline Studio confirmed a client scope question.", "expected_folder": "Clients" },
+    { "id": "filing_008", "project": "Juniper-alpha", "summary": "Juniper Farm confirmed its fictional client update.", "expected_folder": "Clients" },
+    { "id": "filing_009", "project": "Accessibility-alpha", "summary": "Accessibility Checklist describes the repeatable keyboard audit.", "expected_folder": "Playbooks" },
+    { "id": "filing_010", "project": "Launch-qa-alpha", "summary": "Launch QA lists reusable pre-release review steps.", "expected_folder": "Playbooks" },
+    { "id": "filing_011", "project": "Brand-sprint-alpha", "summary": "Brand Sprint records the reusable workshop sequence.", "expected_folder": "Playbooks" },
+    { "id": "filing_012", "project": "Meeting-alpha", "summary": "Meeting Protocol defines the repeatable meeting capture.", "expected_folder": "Playbooks" },
+    { "id": "filing_013", "project": "Remote-work-alpha", "summary": "Remote Work Study records source and evidence limitations.", "expected_folder": "Knowledge Intake" },
+    { "id": "filing_014", "project": "Moodboard-alpha", "summary": "AI Moodboards is candidate research awaiting review.", "expected_folder": "Knowledge Intake" },
+    { "id": "filing_015", "project": "Search-eval-alpha", "summary": "Search Evaluation captures a reusable evaluation method.", "expected_folder": "Knowledge Intake" },
+    { "id": "filing_016", "project": "Backup-alpha", "summary": "Backup Principles describes candidate recovery guidance.", "expected_folder": "Knowledge Intake" },
+    { "id": "filing_017", "project": "Mixed-alpha", "summary": "Bluebird Strategy and Northwind Coffee are both mentioned in this fictional discussion.", "expected_folder": null },
+    { "id": "filing_018", "project": "Private-alpha", "summary": "Private Acquisition Brief is mentioned only in confidential material.", "expected_folder": null, "forbidden_folders": ["Private"] },
+    { "id": "filing_019", "project": "Unrelated-alpha", "summary": "Discussed a cactus telescope and lunar origami; no vault note is relevant.", "expected_folder": null },
+    { "id": "filing_020", "project": "Same-folder-alpha", "summary": "Bluebird Strategy and Bluebird Launch both inform the same project update.", "expected_folder": "Projects" }
+  ]
+}

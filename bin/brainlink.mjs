@@ -19,6 +19,7 @@ import { importAll } from '../src/sessions/index.mjs';
 import { recordSessionEndCue, listSessionEndCues } from '../src/sessions/end-cue.mjs';
 import { setSessionHook } from '../src/sessions/hooks.mjs';
 import { evaluateRetrieval } from '../src/retrieval-eval.mjs';
+import { evaluateSessionFiling } from '../src/sessions/filing-eval.mjs';
 
 // `brainlink brief | head` closes the pipe early: exit quietly instead of crashing.
 process.stdout.on('error', (e) => { if (e.code === 'EPIPE') process.exit(0); throw e; });
@@ -55,6 +56,7 @@ const HELP = `BrainLink MCP ${VERSION} — one Markdown brain for every AI
   brainlink status                     config, vaults, timezone
   brainlink brief [--vault V] [--days 7]  what changed and what is open
   brainlink eval --fixture FILE       compare retrieval with a labelled fixture (read-only)
+  brainlink eval-filing --fixture FILE evaluate session folder suggestions (read-only)
   brainlink map                        rebuild each vault's Home map
   brainlink sync                       one sync pass (local by default; set up in Setup)
   brainlink session-end-cue --client claude-code|codex  record a local, metadata-only end cue from stdin
@@ -189,6 +191,14 @@ async function main() {
       const fixture = JSON.parse(await readFile(path.resolve(fixtureFile), 'utf8'));
       const { ctx } = await openContext();
       out(JSON.stringify(await evaluateRetrieval(ctx, fixture), null, 2));
+      return;
+    }
+    case 'eval-filing': {
+      const fixtureFile = opt('fixture');
+      if (!fixtureFile) fail('--fixture FILE is required');
+      const fixture = JSON.parse(await readFile(path.resolve(fixtureFile), 'utf8'));
+      const { ctx } = await openContext();
+      out(JSON.stringify(await evaluateSessionFiling(ctx, fixture), null, 2));
       return;
     }
     case 'map': {
