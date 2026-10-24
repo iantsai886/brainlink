@@ -287,6 +287,8 @@ ol.todo li { padding-left: 4px; }
     </div>
     <div class="row" style="margin-top:12px"><button id="backup-pick" data-i18n="backup.choose"></button><button class="primary" id="backup-save" data-i18n="backup.save"></button><button id="backup-run" data-i18n="backup.run"></button></div>
     <p id="backup-status" class="muted" role="status"></p>
+    <label class="muted" style="display:flex;flex-direction:row;gap:6px;align-items:center;margin-top:10px"><input type="checkbox" id="startup-at-login" style="width:auto"><span data-i18n="startup.enabled"></span></label>
+    <p class="hint" data-i18n="startup.hint"></p>
     <details><summary data-i18n="backup.restoreTitle"></summary>
       <p class="hint" data-i18n="backup.restoreHint"></p>
       <div class="grid2"><label><span data-i18n="backup.restoreSource"></span><input id="backup-restore-source" class="mono"></label>
@@ -765,6 +767,7 @@ async function load() {
   $('sync-device').value = SY.device || '';
   $('sync-folder').value = SY.folder || '';
   $('backup-enabled').checked = Boolean(S.backup?.enabled);
+  $('startup-at-login').checked = Boolean(S.startup_at_login);
   $('backup-folder').value = S.backup?.folder || '';
   $('backup-hours').value = String(S.backup?.intervalHours || 24);
   $('backup-status').textContent = S.backup?.status ? (S.backup.status.ok
@@ -896,6 +899,18 @@ $('backup-save').onclick = () => act(async () => {
     folder: $('backup-folder').value, intervalHours: Number($('backup-hours').value) });
   toast(r.backup.enabled ? t('backup.saved') : t('backup.disabled'));
 });
+$('startup-at-login').onchange = async () => {
+  const requested = $('startup-at-login').checked;
+  try {
+    const r = await api('POST', '/api/startup', { enabled: requested });
+    $('startup-at-login').checked = Boolean(r.enabled);
+    toast(t(r.enabled ? 'startup.enabledToast' : 'startup.disabledToast'));
+    await load();
+  } catch (e) {
+    $('startup-at-login').checked = !requested;
+    toast(e.message, true);
+  }
+};
 $('backup-run').onclick = () => act(async () => {
   const r = await api('POST', '/api/backup/run');
   toast(t('backup.lastVerified', { count: r.file_count, folder: r.folder }));

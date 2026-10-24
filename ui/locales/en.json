@@ -320,5 +320,9 @@
   "backup.restoreDestination": "Empty restore destination",
   "backup.restoreBtn": "Restore to empty folder",
   "backup.restoreConfirm": "Restore this backup into the empty destination? Existing vaults will not be changed.",
-  "backup.restored": "Restored {count} files to {folder}. Review them before using them."
+  "backup.restored": "Restored {count} files to {folder}. Review them before using them.",
+  "startup.enabled": "Start BrainLink in the background when I sign in",
+  "startup.hint": "Keeps scheduled backups running after sign-in. The normal Start menu shortcut still opens the app when clicked. Available on Windows.",
+  "startup.enabledToast": "BrainLink will start quietly when you sign in.",
+  "startup.disabledToast": "Background startup is off. Scheduled backups run only while BrainLink is open."
 }

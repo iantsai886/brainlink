@@ -79,6 +79,13 @@ Section "BrainLink" SecMain
 SectionEnd
 
 Section "Uninstall"
+  ; Remove only the exact BrainLink-managed per-user startup launcher; preserve any user-owned file.
+  IfFileExists "$APPDATA\Microsoft\Windows\Start Menu\Programs\Startup\BrainLink Background.vbs" 0 +5
+  FileOpen $0 "$APPDATA\Microsoft\Windows\Start Menu\Programs\Startup\BrainLink Background.vbs" r
+  FileRead $0 $1
+  FileClose $0
+  StrCmp $1 "' BrainLink managed startup launcher v1$\r$\n" 0 +2
+  Delete "$APPDATA\Microsoft\Windows\Start Menu\Programs\Startup\BrainLink Background.vbs"
   ; Remove BrainLink from connected AI apps first (keeps their other settings; backups are made).
   ${If} ${FileExists} "$INSTDIR\node\node.exe"
     nsExec::ExecToLog '"$INSTDIR\node\node.exe" "$INSTDIR\app\bin\brainlink.mjs" disconnect-all'

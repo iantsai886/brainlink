@@ -25,6 +25,7 @@ import { snapshotSettings, chooseSnapshot, suggestSnapshotFolder, clearSnapshot,
 import { listHandoffs } from './writes.mjs';
 import { backupOnce, verifyBackup, restoreBackupToEmpty, loadBackupStatus, saveBackupStatus } from './backup.mjs';
 import { fileSessionSummary } from './sessions/filing.mjs';
+import { isStartupEnabled, setStartupEnabled } from './startup.mjs';
 
 const UI_STATIC_TYPES = { '.js': 'text/javascript; charset=utf-8', '.css': 'text/css; charset=utf-8', '.json': 'application/json; charset=utf-8' };
 const UI_DIR = path.join(ROOT, 'ui');
@@ -202,6 +203,7 @@ export async function startSetup(opts = {}) {
       sessions_has_private: ((await sessions.list({ include_private: true, limit: 20 }).catch(() => ({ sessions: [] }))).sessions || []).some((x) => x.private),
       snapshot: { ...snapshotSettings(cfg), suggested_folder: suggestSnapshotFolder(home), ...(await loadSnapshotStatus(snapshotStateFile)) },
       backup: { ...cfg.backup, status: backupStatus, running: backupRunning },
+      startup_at_login: os === 'win32' ? await isStartupEnabled(env, home) : false,
     };
   }
 
@@ -542,6 +544,7 @@ export async function startSetup(opts = {}) {
       const cfg = await loadConfig(file);
       return runBackup(cfg);
     },
+    'POST /api/startup': async (b) => ({ ok: true, enabled: await setStartupEnabled(Boolean(b.enabled), { env, home, os }) }),
     'POST /api/backup/restore': async (b) => {
       if (b.confirm !== true) throw new Error('Confirm restoring into an empty folder first.');
       return { ok: true, ...(await restoreBackupToEmpty(String(b.backupFolder || ''), String(b.destination || ''))) };

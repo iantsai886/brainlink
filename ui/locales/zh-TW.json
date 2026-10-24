@@ -320,5 +320,9 @@
   "backup.restoreDestination": "空白還原位置",
   "backup.restoreBtn": "還原到空白資料夾",
   "backup.restoreConfirm": "要還原到指定的空白資料夾嗎？目前資料庫不會被修改。",
-  "backup.restored": "已還原 {count} 個檔案到 {folder}。使用前請先檢查。"
+  "backup.restored": "已還原 {count} 個檔案到 {folder}。使用前請先檢查。",
+  "startup.enabled": "登入 Windows 時在背景啟動 BrainLink",
+  "startup.hint": "登入後會讓排程備份持續運作。開始功能表的捷徑仍可在你點擊時開啟程式。此功能目前適用於 Windows。",
+  "startup.enabledToast": "BrainLink 會在你登入時於背景啟動。",
+  "startup.disabledToast": "背景啟動已關閉；排程備份只會在 BrainLink 開啟時執行。"
 }
