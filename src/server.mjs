@@ -15,6 +15,7 @@ import { openSessionStore, importAll } from './sessions/index.mjs';
 import { sessionList, sessionRead, sessionLog } from './sessions/mcp.mjs';
 import { closeSession } from './sessions/close.mjs';
 import { listSessionFilingFolders } from './sessions/folders.mjs';
+import { twinToolAuthorization, twinToolListed, twinToolVaultChoices } from './twin-profiles.mjs';
 
 const require = createRequire(import.meta.url);
 export const VERSION = require('../package.json').version;
@@ -43,8 +44,13 @@ export function createMcp(ctx, { onCall = () => {} } = {}) {
     ctx.readOnly
       ? 'This connection is READ-ONLY.'
       : 'WRITE: never overwrite. Every write needs your identity (ai_platform, agent_or_role, session_or_task_id) and returns a preview unless confirm=true; show the preview to the user before confirming unless their own phrase (e.g. a close-loop phrase) already authorised it. Never store credentials, tokens or account numbers. Keep each vault\'s material in that vault.',
-    'SMART: vault_search accepts rephrasings and translations (queries) — add an English translation for non-English questions; respect status not_in_brain, folder, tag and since/until filters. "What changed / what\'s open?" → brain_brief, vault_recent, open_loops. "Remember …" → remember. Quick thoughts → append_daily. Meetings, decisions, people, projects, ideas → propose_note with a template. Mention existing notes by their exact title; BrainLink links them and adds a Related section automatically.',
-    'SESSIONS: session_list / session_read cover imported Claude Code and Codex history plus anything logged with session_log (for clients with no readable local history). When the user ends work, choose an explicit vault; call session_filing_folders to see its allowed folders, select a clearly relevant existing folder, and pass it to session_close for preview. If there is no clear fit, omit folder to use the configured intake folder. Never guess a vault or claim an unverified summary is fact. Whether private imported sessions are visible to you is the user\'s own choice in BrainLink Settings.',
+    ctx.twinScope?.mode === 'scoped'
+      ? 'SMART: use only the listed read/search tools and the enabled vault choices. Respect not_in_brain and never infer content that retrieval did not return.'
+      : 'SMART: vault_search accepts rephrasings and translations (queries) — add an English translation for non-English questions; respect status not_in_brain, folder, tag and since/until filters. "What changed / what\'s open?" → brain_brief, vault_recent, open_loops. "Remember …" → remember. Quick thoughts → append_daily. Meetings, decisions, people, projects, ideas → propose_note with a template. Mention existing notes by their exact title; BrainLink links them and adds a Related section automatically.',
+    ctx.twinScope?.mode === 'scoped'
+      ? 'TWIN PROFILE SCOPE: session history, session capture, session filing, writes and handoffs are unavailable to this token.'
+      : 'SESSIONS: session_list / session_read cover imported Claude Code and Codex history plus anything logged with session_log (for clients with no readable local history). When the user ends work, choose an explicit vault; call session_filing_folders to see its allowed folders, select a clearly relevant existing folder, and pass it to session_close for preview. If there is no clear fit, omit folder to use the configured intake folder. Never guess a vault or claim an unverified summary is fact. Whether private imported sessions are visible to you is the user\'s own choice in BrainLink Settings.',
+    ...(ctx.twinScope?.mode === 'scoped' ? [`TWIN PROFILE SCOPE: you are ${ctx.twinScope.profile_name}; your enabled vaults are filtered to your assigned profile. Only the search/read tools currently listed are available. Writes, session history and handoffs are blocked for profile-scoped tokens.`] : []),
     agents.length ? `AGENTS: ${agents.map((a) => `${a.name} (${a.vault}) — "${a.activation[0]}" → agent_connect; "${a.close[0]}" → agent_close_loop`).join('; ')}.` : '',
     hasHandoff ? `INTER-AI: send_handoff / list_handoffs use the ${cfg.handoff.vault}/${cfg.handoff.folder} mailbox.` : '',
   ].filter(Boolean).join('\n');
@@ -57,7 +63,10 @@ export function createMcp(ctx, { onCall = () => {} } = {}) {
     })),
     agents: agents.map((a) => ({ name: a.name, vault: a.vault, role: a.role, activation_phrases: a.activation, close_phrases: a.close, close_writes_to: a.close_target })),
     identity: { required_on_writes: ['ai_platform', 'agent_or_role', 'session_or_task_id'], ai_platform_values: cfg.platforms, made_by_line: 'Made by {ai_platform} ({agent_or_role}).' },
-    write_rules: [
+    write_rules: ctx.twinScope?.mode === 'scoped' ? [
+      'This profile-scoped connection is read-only. Writes, session history and handoffs are unavailable.',
+      'Only the profile permitted_vaults and available_operations listed above are available to this token.',
+    ] : [
       'New files or appends only; nothing is ever overwritten or deleted.',
       'Preview first (confirm=false); confirm=true writes.',
       'New knowledge → propose_note (defaults to each vault\'s intake folder; other folders must already exist).',
@@ -66,6 +75,7 @@ export function createMcp(ctx, { onCall = () => {} } = {}) {
     ],
     templates: Object.fromEntries(Object.entries(TEMPLATES).map(([k, t]) => [k, { folder: t.folder, fields: t.fields }])),
     ...(hasHandoff ? { handoff_mailbox: `${cfg.handoff.vault}/${cfg.handoff.folder}` } : {}),
+    ...(ctx.twinScope?.mode === 'scoped' ? { twin_profile_scope: { profile_id: ctx.twinScope.profile_id, permitted_vaults: ctx.enabled, available_operations: [...new Set(ctx.twinScope.grants.flatMap((grant) => grant.operations))], writes_available: false, session_history_available: false, handoffs_available: false } } : {}),
   });
 
   const vaultProp = { type: 'string', enum: ctx.enabled, description: 'Which vault. Vaults are never mixed.' };
@@ -245,7 +255,11 @@ export function createMcp(ctx, { onCall = () => {} } = {}) {
     { name: 'remember', title: 'Remember this', description: 'Save a fact for every AI', arguments: [{ name: 'fact', description: 'What to remember', required: true }] },
     { name: 'close-session', title: 'Close this work', description: 'Prepare a private, source-attributed session outcome for one vault' },
   ];
-  const prompts = async () => [...agentPrompts(), ...builtinPrompts, ...(await listCommands(ctx).catch(() => [])).map((c) => ({ name: c.name, title: c.title, description: `${c.description} (from ${c.vault})`, ...(c.takesInput ? { arguments: [{ name: 'input', description: 'Text for this command', required: false }] } : {}) }))];
+  const prompts = async () => {
+    const all = [...agentPrompts(), ...builtinPrompts, ...(await listCommands(ctx).catch(() => [])).map((c) => ({ name: c.name, title: c.title, description: `${c.description} (from ${c.vault})`, ...(c.takesInput ? { arguments: [{ name: 'input', description: 'Text for this command', required: false }] } : {}) }))];
+    if (ctx.twinScope?.mode !== 'scoped') return all;
+    return all.filter((p) => (p.name === 'brief' && twinToolListed(ctx, 'brain_brief')) || (p.name.startsWith('connect-') && twinToolListed(ctx, 'agent_connect')));
+  };
   const getPrompt = async (name, args = {}) => {
     const msg = (text, description) => ({ description, messages: [{ role: 'user', content: { type: 'text', text } }] });
     if (name === 'brief') return msg(`Call brain_brief for ${ctx.enabled[0]} and tell me in a few lines what changed, what is open, and one suggested next step.`, 'Brief me');
@@ -277,12 +291,21 @@ export function createMcp(ctx, { onCall = () => {} } = {}) {
           return ok({ protocolVersion: SUPPORTED_PROTOCOLS.includes(asked) ? asked : SUPPORTED_PROTOCOLS[0], capabilities: { tools: { listChanged: false }, resources: { listChanged: false }, prompts: { listChanged: false } }, serverInfo: { name: SERVER_NAME, title: 'BrainLink MCP', version: VERSION }, instructions });
         }
         case 'ping': return ok({});
-        case 'tools/list': return ok({ tools: tools.map(({ run, ...t }) => t) });
+        case 'tools/list': return ok({ tools: tools.filter((t) => twinToolListed(ctx, t.name)).map(({ run, ...t }) => {
+          if (t.inputSchema?.properties?.vault) {
+            const vault = { ...t.inputSchema.properties.vault, enum: twinToolVaultChoices(ctx, t.name) };
+            return { ...t, inputSchema: { ...t.inputSchema, properties: { ...t.inputSchema.properties, vault } } };
+          }
+          return t;
+        }) });
         case 'tools/call': {
           const tool = tools.find((t) => t.name === params?.name);
           if (!tool) return err(-32602, `Unknown tool ${params?.name}`);
           try {
-            const out = await tool.run(params.arguments || {});
+            const args = params.arguments || {};
+            const authorization = twinToolAuthorization(ctx, tool.name, args);
+            if (!authorization.allowed) throw new Error(authorization.reason);
+            const out = await tool.run(args);
             const failed = out?.ok === false;
             onCall({ tool: tool.name, ok: !failed, written: Boolean(out?.written), agent: ctx.mcpAgent?.name || null });
             return ok({ content: [{ type: 'text', text: JSON.stringify(out, null, 1) }], structuredContent: Array.isArray(out) ? { items: out } : out, isError: failed });
@@ -295,7 +318,14 @@ export function createMcp(ctx, { onCall = () => {} } = {}) {
         case 'resources/templates/list': return ok({ resourceTemplates: [] });
         case 'resources/read': return ok({ contents: [await readResource(params?.uri)] });
         case 'prompts/list': return ok({ prompts: await prompts() });
-        case 'prompts/get': return ok(await getPrompt(params?.name, params?.arguments));
+        case 'prompts/get': {
+          if (ctx.twinScope?.mode === 'scoped') {
+            const name = params?.name || '';
+            const allowed = (name === 'brief' && twinToolListed(ctx, 'brain_brief')) || (name.startsWith('connect-') && twinToolListed(ctx, 'agent_connect'));
+            if (!allowed) throw new Error(`This prompt is not available to profile-scoped agents: ${name}.`);
+          }
+          return ok(await getPrompt(params?.name, params?.arguments));
+        }
         default: return err(-32601, `Method not found: ${method}`);
       }
     } catch (e) { return err(-32603, String(e.message || e)); }

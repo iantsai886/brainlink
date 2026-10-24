@@ -347,15 +347,14 @@
   "startup.enabledToast": "BrainLink 會在你登入時於背景啟動。",
   "startup.disabledToast": "背景啟動已關閉；排程備份只會在 BrainLink 開啟時執行。",
   "twinProfiles.title": "Twin 設定狀態",
-  "twinProfiles.hint": "Personal Twin 與 Organisation Twin 的唯讀宣告。這些設定目前尚未限制 AI 存取。",
-  "twinProfiles.notEnforced": "目前只有設定宣告：BrainLink 執行階段尚未強制套用這些權限。請勿將這些項目視為安全邊界。",
+  "twinProfiles.hint": "Personal Twin 與 Organisation Twin 的唯讀權限範圍。指定的 AI Agent 只能存取列出的資料庫與核准的搜尋／讀取操作。",
   "twinProfiles.empty": "尚未宣告任何 Twin。",
   "twinProfiles.mode.personal": "個人 Twin",
   "twinProfiles.mode.organisation": "組織 Twin",
   "twinProfiles.owner": "擁有者：{owner}",
   "twinProfiles.vaults": "資料庫：",
   "twinProfiles.agents": "AI Agents：",
-  "twinProfiles.actions": "允許的操作",
+  "twinProfiles.actions": "宣告的操作",
   "twinProfiles.privateDefault": "預設為私人",
   "twinProfiles.provenance": "需要來源紀錄",
   "twinProfiles.yes": "是",
@@ -365,5 +364,6 @@
   "twinProfiles.memory.semantic": "語意記憶",
   "twinProfiles.memory.procedural": "程序記憶",
   "twinProfiles.memory.episodic": "情節記憶",
-  "twinProfiles.capture": "工作階段擷取"
+  "twinProfiles.capture": "工作階段擷取",
+  "twinProfiles.limits": "只有指派到 Twin 的指定 Agent token 會套用這些讀取／搜尋限制。目前會封鎖它們的寫入、工作階段歷史與交接；其他 AI 連線仍使用原有權限。"
 }

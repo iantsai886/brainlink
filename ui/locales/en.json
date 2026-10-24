@@ -347,15 +347,14 @@
   "startup.enabledToast": "BrainLink will start quietly when you sign in.",
   "startup.disabledToast": "Background startup is off. Scheduled backups run only while BrainLink is open.",
   "twinProfiles.title": "Twin profile status",
-  "twinProfiles.hint": "Read-only declarations for Personal and Organisation Twins. These profiles do not restrict AI access yet.",
-  "twinProfiles.notEnforced": "Declaration only: profile permissions are not enforced by BrainLink runtime yet. Do not rely on these entries as a security boundary.",
+  "twinProfiles.hint": "Read-only profile scopes for Personal and Organisation Twins. Named AI agents can access only listed vaults and approved search/read operations.",
   "twinProfiles.empty": "No Twin profiles are declared yet.",
   "twinProfiles.mode.personal": "Personal Twin",
   "twinProfiles.mode.organisation": "Organisation Twin",
   "twinProfiles.owner": "Owner: {owner}",
   "twinProfiles.vaults": "Vaults:",
   "twinProfiles.agents": "Agents:",
-  "twinProfiles.actions": "Allowed actions",
+  "twinProfiles.actions": "Declared actions",
   "twinProfiles.privateDefault": "Private by default",
   "twinProfiles.provenance": "Provenance required",
   "twinProfiles.yes": "Yes",
@@ -365,5 +364,6 @@
   "twinProfiles.memory.semantic": "Semantic",
   "twinProfiles.memory.procedural": "Procedural",
   "twinProfiles.memory.episodic": "Episodic",
-  "twinProfiles.capture": "Session capture"
+  "twinProfiles.capture": "Session capture",
+  "twinProfiles.limits": "Only named agent tokens assigned to a profile receive these read/search limits. Writes, session history, and handoffs are blocked for them for now. Other AI connections keep their existing scope."
 }

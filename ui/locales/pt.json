@@ -347,15 +347,14 @@
   "startup.enabledToast": "O BrainLink iniciará silenciosamente quando você entrar.",
   "startup.disabledToast": "A inicialização em segundo plano está desativada. Os backups programados só executam enquanto o BrainLink está aberto.",
   "twinProfiles.title": "Estado dos perfis Twin",
-  "twinProfiles.hint": "Declarações somente de leitura para Personal Twin e Organisation Twin. Estes perfis ainda não restringem o acesso da IA.",
-  "twinProfiles.notEnforced": "Apenas declaração: o BrainLink ainda não aplica estas permissões em tempo de execução. Não considere estes itens uma barreira de segurança.",
+  "twinProfiles.hint": "Escopos somente de leitura para Personal Twin e Organisation Twin. Agentes nomeados só acessam os cofres e operações de busca/leitura aprovados.",
   "twinProfiles.empty": "Nenhum perfil Twin declarado.",
   "twinProfiles.mode.personal": "Personal Twin",
   "twinProfiles.mode.organisation": "Organisation Twin",
   "twinProfiles.owner": "Responsável: {owner}",
   "twinProfiles.vaults": "Cofres:",
   "twinProfiles.agents": "Agentes:",
-  "twinProfiles.actions": "Ações permitidas",
+  "twinProfiles.actions": "Ações declaradas",
   "twinProfiles.privateDefault": "Privado por padrão",
   "twinProfiles.provenance": "Proveniência obrigatória",
   "twinProfiles.yes": "Sim",
@@ -365,5 +364,6 @@
   "twinProfiles.memory.semantic": "Semântica",
   "twinProfiles.memory.procedural": "Procedural",
   "twinProfiles.memory.episodic": "Episódica",
-  "twinProfiles.capture": "Captura de sessão"
+  "twinProfiles.capture": "Captura de sessão",
+  "twinProfiles.limits": "Só tokens de agentes nomeados e atribuídos a um perfil recebem estes limites de busca/leitura. Escritas, histórico de sessões e transferências estão bloqueados para eles por enquanto. Outras conexões de IA mantêm o escopo atual."
 }
