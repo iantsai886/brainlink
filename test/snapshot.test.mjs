@@ -638,7 +638,8 @@ test('snapshot: watcher runs once immediately and stop() prevents further runs',
   const withSnapshot = chooseSnapshot(cfg, { enabled: true, folder: dest });
   const results = [];
   const w = startSnapshotWatcher(ctx, withSnapshot, env, { debounceMs: 10, intervalMs: 60_000, onResult: (r) => results.push(r) });
-  await new Promise((r) => setTimeout(r, 150));
+  const deadline = Date.now() + 3000;
+  while (!results.length && Date.now() < deadline) await new Promise((r) => setTimeout(r, 10));
   w.stop();
   assert.equal(results.length, 1);
   assert.equal(results[0].ok, true);

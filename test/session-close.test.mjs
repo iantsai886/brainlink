@@ -21,18 +21,24 @@ test('MCP close previews, then saves one scoped private episode without exposing
   const company = path.join(root, 'company');
   const personal = path.join(root, 'personal');
   await mkdir(path.join(company, 'Inbox'), { recursive: true });
+  await mkdir(path.join(company, 'Projects', 'Fictional Launch'), { recursive: true });
   await mkdir(path.join(personal, 'Inbox'), { recursive: true });
   const env = { BRAINLINK_HOME: path.join(root, 'app'), HOME: root, BRAINLINK_AI_PLATFORM: 'Codex', BRAINLINK_VAULTS: 'Company', BRAINLINK_SEMANTIC: '0' };
   const cfg = normalize({ version: CONFIG_SCHEMA_VERSION, vaults: [{ name: 'Company', path: company }, { name: 'Personal', path: personal }], sessions: { shareSummaries: true, shareFullText: true } });
   const ctx = createContext(cfg, { env });
   const mcp = createMcp(ctx);
-  const args = { vault: 'Company', title: 'Fictional launch', goal: 'Plan the fictional launch', outcome: 'Drafted a plan; no deployment.', decisions: ['Review next week'], next_actions: ['Get approval'], session_or_task_id: 'fake-task-1' };
+  const choices = await call(mcp, 'session_filing_folders', { vault: 'Company' });
+  assert.equal(choices.error, false);
+  assert.ok(choices.value.some((folder) => folder.path === 'Projects/Fictional Launch'));
+  const forbiddenChoices = await call(mcp, 'session_filing_folders', { vault: 'Personal' });
+  assert.equal(forbiddenChoices.error, true, 'a connection cannot enumerate a vault outside its enabled scope');
+  const args = { vault: 'Company', folder: 'Projects/Fictional Launch', title: 'Fictional launch', goal: 'Plan the fictional launch', outcome: 'Drafted a plan; no deployment.', decisions: ['Review next week'], next_actions: ['Get approval'], session_or_task_id: 'fake-task-1' };
   const preview = await call(mcp, 'session_close', args);
   assert.equal(preview.error, false);
   assert.equal(preview.value.written, false);
   assert.equal(preview.value.session_saved, false);
   assert.match(preview.value.preview, /private: true/);
-  assert.equal((await readdir(path.join(company, 'Inbox'))).length, 0);
+  assert.equal((await readdir(path.join(company, 'Projects', 'Fictional Launch'))).length, 0);
   assert.equal((await (await openSessionStore(env)).listSessions()).length, 0);
 
   const wrong = await call(mcp, 'session_close', { ...args, vault: 'Personal', confirm: true });
@@ -65,5 +71,6 @@ test('MCP close rejects unsafe or incomplete outcomes before saving', async () =
   const base = { vault: 'Company', title: 'Example', goal: 'Plan', outcome: 'Drafted', session_or_task_id: 'x', confirm: true };
   assert.equal((await call(mcp, 'session_close', { ...base, goal: '' })).error, true);
   assert.equal((await call(mcp, 'session_close', { ...base, outcome: 'API key sk-abcdefghijklmnopqrstuvwxyz123' })).error, true);
+  assert.equal((await call(mcp, 'session_close', { ...base, folder: '../Outside' })).error, true);
   assert.equal((await readdir(path.join(root, 'Inbox'))).length, 0);
 });

@@ -41,11 +41,12 @@ export async function closeSession(ctx, store, args, now = new Date()) {
   } catch (error) { if (error.code !== 'E_NOT_FOUND') throw error; }
   const session = { id: sessionId, client, title: `${args.title} (${sessionId.slice(-6)})`, project: args.project || '', summary, updated_at: now.toISOString(), private: true };
   const identity = { ...id, session_or_task_id: sourceId };
-  const draft = await fileSessionSummary(ctx, session, args.vault, false, identity);
+  const folder = typeof args.folder === 'string' ? args.folder : undefined;
+  const draft = await fileSessionSummary(ctx, session, args.vault, false, identity, folder);
   if (!draft.ok || !args.confirm) return { ...draft, session_id: sessionId, session_saved: false };
 
   const stored = await store.putSession({ client, source_id: sourceId, project: session.project, title: session.title,
     summary, started_at: now.toISOString(), note_refs: [], private: true, messages: [] });
-  const note = await fileSessionSummary(ctx, { ...session, id: stored.id }, args.vault, true, identity);
+  const note = await fileSessionSummary(ctx, { ...session, id: stored.id }, args.vault, true, identity, folder);
   return { ...note, session_id: stored.id, session_saved: true };
 }
