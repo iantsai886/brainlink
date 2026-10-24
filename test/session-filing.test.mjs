@@ -35,6 +35,33 @@ test('private session summary files only to the chosen vault after preview', asy
   assert.equal((await fileSessionSummary(ctx, session, 'Company', true)).ok, false, 'never overwrite existing capture');
 });
 
+test('session filing previews links from the chosen vault and excludes private and other-vault notes', async () => {
+  const root = await mkdtemp(path.join(tmpdir(), 'bl-filing-links-'));
+  const company = path.join(root, 'company');
+  const personal = path.join(root, 'personal');
+  await mkdir(path.join(company, 'Inbox'), { recursive: true });
+  await mkdir(path.join(personal, 'Inbox'), { recursive: true });
+  await import('node:fs/promises').then(({ writeFile }) => Promise.all([
+    writeFile(path.join(company, 'Public Roadmap.md'), 'Northwind launch timing is pending review. This public roadmap captures the fictional project milestones, expected owner updates, and open questions for the next planning meeting.'),
+    writeFile(path.join(company, 'Private Review.md'), '---\nprivate: true\n---\nNorthwind secret acquisition plan.'),
+    writeFile(path.join(personal, 'Personal Notes.md'), 'Northwind launch timing and family plans.'),
+  ]));
+  const ctx = createContext(normalize({ vaults: [
+    { name: 'Company', path: company }, { name: 'Personal', path: personal },
+  ] }), { env: { BRAINLINK_AI_PLATFORM: 'BrainLink Local', BRAINLINK_HOME: path.join(root, 'app') } });
+  const session = { id: 'fictional-links-001', title: 'Northwind status', summary: 'Public Roadmap says Northwind launch timing remains pending review.', client: 'codex', project: 'Northwind' };
+  const preview = await fileSessionSummary(ctx, session, 'Company');
+  assert.equal(preview.ok, true);
+  assert.deepEqual(preview.linked_to, ['Public Roadmap']);
+  assert.match(preview.preview, /\[\[Public Roadmap\]\]/);
+  assert.doesNotMatch(preview.preview, /Private Review|acquisition plan|Personal Notes|family plans/);
+  const saved = await fileSessionSummary(ctx, session, 'Company', true);
+  assert.equal(saved.written, true);
+  const rel = saved.path.slice('Company/'.length);
+  assert.match(await readFile(path.join(company, ...rel.split('/')), 'utf8'), /\[\[Public Roadmap\]\]/);
+  assert.equal((await readdir(path.join(personal, 'Inbox'))).length, 0);
+});
+
 test('filing refuses missing summary, missing destination and credentials', async () => {
   assert.throws(() => filingFields({ id: 'x', summary: '' }, 'Company'), /no summary/);
   assert.throws(() => filingFields({ id: 'x', summary: 'ok' }, ''), /destination/);
