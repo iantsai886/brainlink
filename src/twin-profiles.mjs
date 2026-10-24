@@ -20,7 +20,7 @@ export function twinProfileStatus(cfg) {
     schema: 1,
     enforcement: 'scoped_agent_read_only',
     profiles,
-    next_gate: 'Named AI-agent tokens use profile-scoped vault access. Session reads require an explicit read_session grant and exact profile_id match; private closeouts require propose_note plus filing-folder access and are approval-gated. Handoff read/send require separate grants and carry a profile owner. General note writes, session logging, and handoff acknowledgements remain unavailable until those paths are profile-scoped.',
+    next_gate: 'Named AI-agent tokens use profile-scoped vault access. Session reads require an explicit read_session grant and exact profile_id match; private closeouts require propose_note plus filing-folder access and are approval-gated. Handoff read/send require separate grants and carry a profile owner; acknowledgements can target only an available handoff owned by the same Twin. General note writes and session logging remain unavailable; richer reply/update semantics are not implemented.',
   };
 }
 

@@ -1,7 +1,7 @@
 // Identity-aware writes. Every write is a new file or an append (never an overwrite), carries
 // attribution in the vault's frontmatter schema, passes a secret scan, and returns a preview
 // unless confirm=true.
-import { writeFile, appendFile, readdir, readFile, stat, open, mkdir } from 'node:fs/promises';
+import { writeFile, appendFile, readdir, readFile, stat, open, mkdir, realpath } from 'node:fs/promises';
 import path from 'node:path';
 import { TEMPLATES, renderTemplate } from './templates.mjs';
 import { suggestLinks, relatedSection, safeUpdateMap } from './links.mjs';
@@ -255,6 +255,28 @@ export async function sendHandoff(ctx, a, now = new Date()) {
   if (a.priority && !PRIORITIES.includes(a.priority)) errors.push(`priority must be one of ${PRIORITIES.join(', ')}`);
   if (a.scope && !['personal', 'company', 'client'].includes(a.scope)) errors.push('scope must be personal, company, or client');
   if (a.confidence && !['verified', 'reported', 'inferred', 'unknown'].includes(a.confidence)) errors.push('confidence must be verified, reported, inferred, or unknown');
+  if (a.ack_of) {
+    const root = vaultRoot(ctx, h.vault);
+    const ref = String(a.ack_of).replace(/\\/g, '/');
+    const rel = ref.startsWith(`${h.vault}/`) ? ref.slice(h.vault.length + 1) : ref;
+    const parts = rel.split('/');
+    if (!rel.startsWith(`${h.folder}/`) || parts.some((part) => !part || part === '.' || part === '..') || !HANDOFF_RE.test(parts.at(-1) || '')) {
+      errors.push('ack_of must identify a handoff inside the configured mailbox');
+    } else {
+      const target = safeJoin(root, rel);
+      let header = null, unavailable = true;
+      try {
+        const [realRoot, realTarget] = await Promise.all([realpath(root), realpath(target)]);
+        const relative = path.relative(realRoot, realTarget);
+        if (relative && relative !== '..' && !relative.startsWith(`..${path.sep}`) && !path.isAbsolute(relative)) {
+          header = await readHandoffHeader(realTarget);
+          unavailable = !header || isPrivateMeta(header.meta) || fmSaysPrivate(header.block) || await isExcludedPath(root, rel)
+            || (ctx.twinScope?.mode === 'scoped' && header.meta.twin_profile_id !== ctx.twinScope.profile_id);
+        }
+      } catch {}
+      if (unavailable) errors.push('ack_of does not identify an available handoff within this Twin profile');
+    }
+  }
   const refs = a.source_refs || [];
   if (!Array.isArray(refs) || refs.length > 8 || refs.some((ref) => typeof ref !== 'string' || !ref.endsWith('.md') || /[\r\n\[\]]/.test(ref))) errors.push('source_refs must be up to 8 Markdown paths in the handoff vault');
   if (!(await isDir(safeJoin(vaultRoot(ctx, h.vault), h.folder)))) errors.push(`handoff folder "${h.folder}" does not exist in ${h.vault}`);

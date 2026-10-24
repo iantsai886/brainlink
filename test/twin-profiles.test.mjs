@@ -196,10 +196,20 @@ test('profile-scoped handoffs require explicit grants and filter mailbox bodies 
   assert.equal(sent.result.structuredContent.written, true);
   const foreignPath = path.join(orgPath, 'Handoffs', '2026-10-24-2358-from-personal-to-all-personal-secret.md');
   await writeFile(foreignPath, '---\ntype: handoff\nhandoff_schema: 1\nstatus: REQUEST\nwritten_at: 2026-10-24T23:58:00+08:00\nto: all\nsubject: Private personal handoff\ntwin_profile_id: personal_twin_2\n---\n\n# Private personal handoff\n\nPERSONAL_HANDOFF_CANARY_82\n');
+  const deniedAck = await mcp.handle({ jsonrpc: '2.0', id: 32, method: 'tools/call', params: { name: 'send_handoff', arguments: {
+    to: 'all', subject: 'Attempt foreign acknowledgement', body: 'Must not acknowledge another Twin.', ack_of: 'Fictional Org/Handoffs/2026-10-24-2358-from-personal-to-all-personal-secret.md', session_or_task_id: 'org-foreign-ack-1', confirm: true,
+  } } });
+  assert.equal(deniedAck.result.isError, true);
+  assert.match(deniedAck.result.content[0].text, /available handoff within this Twin profile/);
+  assert.doesNotMatch(JSON.stringify(deniedAck), /PERSONAL_HANDOFF_CANARY_82/);
+  const ownAck = await mcp.handle({ jsonrpc: '2.0', id: 33, method: 'tools/call', params: { name: 'send_handoff', arguments: {
+    to: 'Codex', subject: 'Acknowledged fictional company handoff', body: 'Reviewed within the same profile.', ack_of: sent.result.structuredContent.path, session_or_task_id: 'org-own-ack-1', confirm: true,
+  } } });
+  assert.equal(ownAck.result.structuredContent.written, true);
   const unassignedPath = path.join(orgPath, 'Handoffs', '2026-10-24-2359-from-legacy-to-all-unassigned.md');
   await writeFile(unassignedPath, '---\ntype: handoff\nhandoff_schema: 1\nstatus: REQUEST\nwritten_at: 2026-10-24T23:59:00+08:00\nto: all\nsubject: Unassigned handoff\n---\n\n# Unassigned handoff\n\nUNASSIGNED_HANDOFF_CANARY_93\n');
   const list = await mcp.handle({ jsonrpc: '2.0', id: 32, method: 'tools/call', params: { name: 'list_handoffs', arguments: { to: 'all' } } });
-  assert.equal(list.result.structuredContent.items.length, 1);
+  assert.equal(list.result.structuredContent.items.length, 1, 'acknowledgements addressed directly to Codex are not in the all inbox');
   assert.match(JSON.stringify(list), /ORG_HANDOFF_CANARY_71/);
   assert.doesNotMatch(JSON.stringify(list), /PERSONAL_HANDOFF_CANARY_82|UNASSIGNED_HANDOFF_CANARY_93/);
   const stored = await readFile(path.join(orgPath, 'Handoffs', path.basename(sent.result.structuredContent.path)), 'utf8');
