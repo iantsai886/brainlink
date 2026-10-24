@@ -218,6 +218,32 @@ function handoffBox(ctx) {
   return h;
 }
 
+// Read only bounded frontmatter before recipient filtering. Mailbox bodies are not touched until
+// the target client and private/excluded gates have passed.
+async function readHandoffHeader(file, maxBytes = 64 * 1024) {
+  const fh = await open(file, 'r');
+  try {
+    const chunk = Buffer.alloc(4096);
+    let data = '', position = 0;
+    while (position < maxBytes) {
+      const { bytesRead } = await fh.read(chunk, 0, Math.min(chunk.length, maxBytes - position), position);
+      if (!bytesRead) break;
+      data += chunk.toString('utf8', 0, bytesRead);
+      position += bytesRead;
+      const lines = data.split(/\r?\n/);
+      const first = lines.findIndex((line) => line.trim() === '---');
+      if (first < 0 || lines.slice(0, first).some((line) => line.trim())) return null;
+      const last = lines.findIndex((line, index) => index > first && line.trim() === '---');
+      if (last >= 0) {
+        const raw = lines.slice(0, last + 1).join('\n');
+        const parsed = parseFrontmatter(`${raw}\n`);
+        return { raw: parsed.frontmatter, meta: parsed.meta, block: parsed.frontmatter };
+      }
+    }
+    return null; // malformed or oversized headers fail closed
+  } finally { await fh.close(); }
+}
+
 export async function sendHandoff(ctx, a, now = new Date()) {
   const h = handoffBox(ctx);
   const id = resolveIdentity(ctx, a);
@@ -263,13 +289,20 @@ export async function listHandoffs(ctx, { to, limit = 10 } = {}) {
   for (const f of names) {
     const rel = `${h.folder}/${f}`;
     if (await isExcludedPath(root, rel)) continue;
-    const m = f.match(/-from-([a-z0-9-]+?)-to-([a-z0-9-]+?)-/);
-    if (want && m && !(m[2] === want || m[2] === 'all' || m[2].startsWith(want))) continue;
-    const { meta, body, frontmatter: fmBlock } = parseFrontmatter(await readFile(safeJoin(dir, f), 'utf8'));
-    if (isPrivateMeta(meta) || fmSaysPrivate(fmBlock)) continue;
+    const m = f.match(/-from-(.+)-to-/);
+    const full = safeJoin(dir, f);
+    const header = await readHandoffHeader(full).catch(() => null);
+    if (!header || isPrivateMeta(header.meta) || fmSaysPrivate(header.block)) continue;
+    // Read the recipient from frontmatter: splitting a slugged name such as "Claude Code"
+    // at hyphens makes filename-only matching ambiguous with the subject slug.
+    const recipient = slug(header.meta.to || f.match(/-to-([a-z0-9-]+?)-/)?.[1] || '');
+    if (want && !(recipient === want || recipient === 'all' || recipient.startsWith(want))) continue;
+    const document = parseFrontmatter(await readFile(full, 'utf8'));
+    if (document.frontmatter.replace(/\r\n/g, '\n') !== header.block.replace(/\r\n/g, '\n') || isPrivateMeta(document.meta) || fmSaysPrivate(document.frontmatter)) continue;
+    const { meta, body } = document;
     const dm = f.match(/^(\d{4}-\d{2}-\d{2})-(\d{2})(\d{2})-/);
     const sent_at = meta.written_at || (dm ? `${dm[1]}T${dm[2]}:${dm[3]}:00` : '');
-    out.push({ path: `${h.vault}/${rel}`, from: m?.[1], to: m?.[2], status: meta.status || '', priority: meta.priority || '', subject: meta.subject || f, decision_needed: meta.decision_needed || '', excerpt: body.trim().slice(0, 300), ack_of: meta.ack_of || '', sent_at });
+    out.push({ path: `${h.vault}/${rel}`, from: m?.[1], to: recipient, status: meta.status || '', priority: meta.priority || '', subject: meta.subject || f, decision_needed: meta.decision_needed || '', excerpt: body.trim().slice(0, 300), ack_of: meta.ack_of || '', sent_at });
     if (out.length >= limit) break;
   }
   return out;

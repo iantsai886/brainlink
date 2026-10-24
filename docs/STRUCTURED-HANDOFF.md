@@ -1,6 +1,6 @@
 # Structured cross-AI handoff
 
-Status: implemented and locally tested; not cross-client validated or released.
+Status: implemented and locally tested through a two-client MCP integration fixture; not validated in live Claude Code and Codex sessions or released.
 
 `send_handoff` now accepts either the original free-form `body` or a structured
 handoff with `goal`. Optional fields are `current_state`, `decisions`,
@@ -23,9 +23,10 @@ checks the fields and public source link, then tries a private source link and
 checks that no second handoff was written. It is an API-level local test, not
 proof that Claude Code and Codex have completed a real handoff together.
 
-Reproduce: `node --import ./test/_preload.mjs --test --test-name-pattern="structured handoff|handoffs: send" test/brainlink.test.mjs`.
-Full `npm test` on Windows/Node 24.18.0 after this change: 207 tests,
-201 pass, 1 fail (`brainlink-store/contract-tests.mjs` missing from the
-available local package), 5 skip (symlink privilege and Linux-only tests).
+`test/cross-client-handoff.test.mjs` adds a local two-client protocol fixture. It creates separate Claude Code and Codex MCP contexts over fictional company data, verifies preview-before-confirm, blocks a private source reference, has Codex pick up the saved task, and returns an acknowledgement through `ack_of`. Recipient filtering reads only bounded frontmatter before opening the body, and correctly supports hyphenated names such as “Claude Code.” This verifies BrainLink's MCP behavior and handoff format; it does not run either AI model or establish live client interoperability.
+
+Reproduce the complete local handoff flow with `node --import ./test/_preload.mjs --test test/cross-client-handoff.test.mjs test/brainlink.test.mjs`.
+Latest full suite on Windows/Node 24.18.0: `npm test` — 233 tests, 227 passed,
+0 failed, 6 skipped (Windows symlink privilege and Linux-only coverage).
 Rollback: revert the commit adding this feature; existing free-form handoffs
 remain in the mailbox as Markdown and require no migration.

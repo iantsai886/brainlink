@@ -10,7 +10,7 @@ The manifest follows the [Agent Skills specification](https://agentskills.io/spe
 - **Clients:** Codex CLI and Claude Code, where the repo-local skill directory is enabled.
 - **Tools:** connected BrainLink MCP `brainlink_guide`, `send_handoff`, and `list_handoffs`.
 - **Scope:** no private source text, no cross-lane data, no guessed destination. Sending is preview-first and requires approval unless the user clearly authorized the handoff.
-- **Validation:** Agent Skills manifest/parity test; BrainLink structured-handoff and privacy fixture tests; Codex CLI local prompt-input discovery check. Claude Code CLI is not installed in the validation environment; live two-client handoff is still pending.
+- **Validation:** Agent Skills manifest/parity test; local two-client MCP fixture for preview, pickup, private-source rejection, and acknowledgement; Codex CLI local prompt-input discovery check. Claude Code CLI is not installed in the validation environment; live two-client runtime handoff is still pending.
 - **Rollback:** revert the Git change to the canonical skill and both client copies. No vault migration is needed.
 
-To validate the files and client copies, run `node --test test/skills.test.mjs`. The broader BrainLink tests exercise the real handoff tool's preview, source filtering, and privacy behavior; they do not simulate a real model or claim cross-client completion.
+To validate the files and client copies, run `node --test test/skills.test.mjs`. To run the fictional two-client MCP flow, run `node --import ./test/_preload.mjs --test test/cross-client-handoff.test.mjs`. It exercises the real MCP tools without simulating model behavior or claiming live client completion.
