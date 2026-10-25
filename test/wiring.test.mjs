@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtemp, mkdir, readFile, writeFile, cp } from 'node:fs/promises';
+import { mkdtemp, mkdir, readFile, writeFile, cp, readdir } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { spawn } from 'node:child_process';
 import path from 'node:path';
@@ -140,6 +140,49 @@ test('connectors: connect()/test()/disconnect() normalize to {ok,message} over t
   assert.equal(d.ok, true);
   const bad = await connect('nope-not-a-client', opts);
   assert.equal(bad.ok, false);
+});
+
+test('connectors: Antigravity one-click setup merges and backs up global MCP config, and disconnect preserves other servers', async () => {
+  const home = await tmp('antigravity-connect');
+  const folder = path.join(home, '.gemini', 'config');
+  const file = path.join(folder, 'mcp_config.json');
+  await mkdir(folder, { recursive: true });
+  const original = JSON.stringify({ mcpServers: { 'google-docs': { command: 'docs-mcp' }, brainlink: { command: 'old' } } }, null, 2) + '\n';
+  await writeFile(file, original);
+  const opts = {
+    home, os: 'win32', env: {}, launch: { command: process.execPath, args: ['brainlink.mjs', 'serve'] }, useCli: false,
+    now: new Date('2026-10-25T12:00:00.000Z'),
+  };
+
+  const before = await detect(opts);
+  assert.equal(before.antigravity.present, true);
+  assert.equal(before.antigravity.connected, true);
+  assert.equal(before.antigravity.canConnect, true);
+
+  const connected = await connect('antigravity', opts);
+  assert.equal(connected.ok, true);
+  const config = JSON.parse(await readFile(file, 'utf8'));
+  assert.equal(config.mcpServers['google-docs'].command, 'docs-mcp', 'other MCP entries must be preserved');
+  assert.equal(config.mcpServers.brainlink.env.BRAINLINK_AI_PLATFORM, 'Google Antigravity');
+  const backupName = (await readdir(folder)).find((name) => name.includes('.brainlink-backup-'));
+  assert.ok(backupName, 'existing global MCP settings must be backed up');
+  assert.equal(await readFile(path.join(folder, backupName), 'utf8'), original);
+
+  const removed = await disconnect('antigravity', opts);
+  assert.equal(removed.ok, true);
+  const after = JSON.parse(await readFile(file, 'utf8'));
+  assert.equal(after.mcpServers.brainlink, undefined);
+  assert.equal(after.mcpServers['google-docs'].command, 'docs-mcp');
+});
+
+test('connectors: Antigravity is available as a manual setup but is not auto-detected from Gemini folders', async () => {
+  const home = await tmp('antigravity-manual-detect');
+  await mkdir(path.join(home, '.gemini', 'config'), { recursive: true });
+  const opts = { home, os: 'win32', env: {}, launch: { command: process.execPath, args: ['brainlink.mjs', 'serve'] }, useCli: false };
+  const found = await detect(opts);
+  assert.equal(found.antigravity.present, false);
+  assert.equal(found.antigravity.manual, true);
+  assert.equal(found.antigravity.canConnect, true);
 });
 
 // ---- bin/brainlink.mjs: connect --all and sync ----
