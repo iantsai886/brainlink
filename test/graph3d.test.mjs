@@ -184,3 +184,21 @@ test('ui/notes3d.css: the map is larger by default than the old 4:3 box', async 
   assert.doesNotMatch(block, /aspect-ratio:\s*4\s*\/\s*3/, 'must no longer be the old, smaller 4:3 box');
   assert.match(block, /min-height:\s*\d+px/, 'needs a height floor so it is never cramped, independent of aspect-ratio');
 });
+
+test('3D graph has a searchable, keyboard-accessible note list in every supported language', async () => {
+  const { readFile } = await import('node:fs/promises');
+  const src = await readFile(new URL('../ui/notes3d.js', import.meta.url), 'utf8');
+  const css = await readFile(new URL('../ui/notes3d.css', import.meta.url), 'utf8');
+  assert.match(src, /id="notes3d-search" type="search"/);
+  assert.match(src, /role="status" aria-live="polite"/);
+  assert.match(src, /matches\.slice\(0, 50\)/, 'large vaults must not render every note into the accessibility list at once');
+  assert.match(src, /data-graph-note-id=.*aria-pressed=/);
+  assert.match(src, /if \(graphNote\) \{ openById\(graphNote\.dataset\.graphNoteId\); return; \}/, 'keyboard activation of a note button must open the same detail panel as a graph click');
+  assert.match(src, /brainlink:locale-changed/);
+  assert.match(css, /\.notes3d-node:focus-visible/);
+  const keys = ['notes3d.browseNotes', 'notes3d.browseSearch', 'notes3d.browsePlaceholder', 'notes3d.browseEmpty', 'notes3d.browseCount', 'notes3d.browseMore'];
+  for (const locale of ['en', 'zh-TW', 'pt']) {
+    const catalog = JSON.parse(await readFile(new URL(`../ui/locales/${locale}.json`, import.meta.url), 'utf8'));
+    for (const key of keys) assert.ok(catalog[key], `${locale} ${key}`);
+  }
+});

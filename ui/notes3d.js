@@ -88,6 +88,14 @@
           <div class="notes3d-links" id="notes3d-links"></div>
         </aside>
       </div>`;
+    root.insertAdjacentHTML('beforeend', `
+      <details class="notes3d-browse">
+        <summary data-i18n="notes3d.browseNotes"></summary>
+        <label for="notes3d-search" data-i18n="notes3d.browseSearch"></label>
+        <input id="notes3d-search" type="search" data-i18n-placeholder="notes3d.browsePlaceholder" autocomplete="off">
+        <p id="notes3d-browse-status" class="muted" role="status" aria-live="polite"></p>
+        <div id="notes3d-node-list" class="notes3d-node-list" role="list"></div>
+      </details>`);
   }
 
   function focusNode(graph, node) {
@@ -143,6 +151,7 @@
       if (!node) return;
       selectedId = node.id;
       graphInstance?.refresh(); // re-applies nodeColor/nodeVal so the selected node is visibly highlighted
+      renderNodeList();
       focusNode(graphInstance, node);
       openPanel(node);
     }
@@ -152,7 +161,35 @@
       openById(node.id);
     }
 
+    function tr(key, vars = {}) {
+      const template = window.brainlinkT?.(key) || key;
+      return template.replace(/\{(\w+)\}/g, (_, name) => String(vars[name] ?? ''));
+    }
+
+    function renderNodeList() {
+      const list = document.getElementById('notes3d-node-list');
+      const status = document.getElementById('notes3d-browse-status');
+      const input = document.getElementById('notes3d-search');
+      if (!list || !status || !input) return;
+      const query = input.value.trim().toLocaleLowerCase();
+      const matches = nodesById.filter((node) => !query || `${node.title} ${node.type || ''} ${node.group || ''}`.toLocaleLowerCase().includes(query))
+        .sort((a, b) => a.title.localeCompare(b.title));
+      const visible = matches.slice(0, 50);
+      list.innerHTML = visible.map((node) => `<div role="listitem"><button type="button" class="notes3d-node" data-graph-note-id="${esc(node.id)}" aria-pressed="${node.id === selectedId ? 'true' : 'false'}"><span>${esc(node.title)}</span><small>${esc(node.type || node.group || '')}</small></button></div>`).join('');
+      status.textContent = matches.length > 50 ? tr('notes3d.browseMore', { count: matches.length, limit: 50 }) : tr('notes3d.browseCount', { count: matches.length });
+      if (query && !matches.length) status.textContent = tr('notes3d.browseEmpty');
+    }
+
+    root.addEventListener('input', (e) => { if (e.target.id === 'notes3d-search') renderNodeList(); });
+    window.addEventListener('brainlink:locale-changed', () => {
+      root.querySelectorAll('[data-i18n]').forEach((el) => { el.textContent = tr(el.dataset.i18n); });
+      root.querySelectorAll('[data-i18n-placeholder]').forEach((el) => { el.placeholder = tr(el.dataset.i18nPlaceholder); });
+      renderNodeList();
+    });
+
     root.addEventListener('click', (e) => {
+      const graphNote = e.target.closest('[data-graph-note-id]');
+      if (graphNote) { openById(graphNote.dataset.graphNoteId); return; }
       if (e.target.id === 'notes3d-edit-toggle') {
         const editor = document.getElementById('notes3d-editor');
         editor.value = currentDetail?.body || '';
@@ -208,6 +245,7 @@
       canvas.innerHTML = '';
       nodesById = g.nodes;
       byTitle = new Map(g.nodes.map((n) => [n.title.toLowerCase(), n]));
+      renderNodeList();
       const css = getComputedStyle(document.documentElement);
       const colorVars = ['c1', 'c2', 'c3', 'c4', 'c5', 'c6', 'c7', 'c8'];
       const counts = new Map();

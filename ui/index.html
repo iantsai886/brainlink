@@ -442,6 +442,7 @@ function t(key, vars) {
   if (vars) for (const k in vars) s = s.split(`{${k}}`).join(vars[k]);
   return s;
 }
+window.brainlinkT = t;
 function applyI18n() {
   document.documentElement.lang = LOCALE;
   document.querySelectorAll('[data-i18n]').forEach((el) => { el.innerHTML = t(el.dataset.i18n); });
@@ -453,6 +454,7 @@ async function setLocale(locale, { persist = true } = {}) {
   STR = LOCALE === 'en' ? FALLBACK : await fetchLocale(LOCALE).catch(() => FALLBACK);
   $('lang').value = LOCALE;
   applyI18n();
+  window.dispatchEvent(new Event('brainlink:locale-changed'));
   if (persist) api('POST', '/api/locale', { locale: LOCALE }).catch(() => {});
 }
 async function ensureLocale(saved) {
