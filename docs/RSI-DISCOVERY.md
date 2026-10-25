@@ -44,6 +44,14 @@ Runs start manually ("Run now") or from a schedule (every 1, 7, 14 or 30 days). 
 
 `origin: "discovery"` plus `discovery.{run_id, source, topic, signal, matched_terms, workflow_terms, score}`, and one source with canonical URL, title, publication date (or `unknown`), access date, claim (`Abstract states (not verified): …`), confidence (always `low`), and limitations (automatic, unreviewed, preprints may not be peer reviewed, no evidence of improvement for BrainLink). The card in Setup shows why the item is relevant: the user's problem, shared terms, BrainLink workflow terms and the match score.
 
+## Manual source freshness check
+
+For a discovered proposal, Setup can recheck the already stored public arXiv identifier or DOI. BrainLink builds the request from that identifier and the adapter's fixed allowlisted endpoint; it does not accept a URL from the UI. arXiv checks use the exact paper ID and Crossref checks use an exact DOI filter. The request does not resend the user's topic, problem statement, vault, or session data. This is an explicit user action, not background monitoring.
+
+The check compares a SHA-256 fingerprint of the stored and observed citation metadata (canonical source URL, title, publication date, and the same short unverified claim field). It records only the proposal ID, source type, check time, status, and fingerprints in `rsi/discovery.json`; it does not save another title/abstract snapshot or mutate the immutable proposal, its claim, review state, or provenance. Statuses are `unchanged`, `changed`, `not_found`, `unsafe`, `unavailable`, or `paused`. “Unchanged” means only that these selected metadata fields matched at check time; it does not validate the paper's claims or prove relevance. A changed result asks the reviewer to inspect the citation manually. Recent receipts are capped at 50 and included in the existing private app-data backup.
+
+The check does not verify the truth of the source content, automatically update citations, or retain every version of the source. Automated tests use synthetic responses; live arXiv/Crossref behavior has not been validated in this implementation run.
+
 ## Limits
 
 - Two sources (arXiv preprints and Crossref scholarly metadata). Standards bodies, open-source releases, user feedback and support issues are not yet sources. Crossref metadata quality and coverage depend on member deposits; its API returns metadata and does not provide article full text.

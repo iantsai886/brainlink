@@ -8,8 +8,9 @@ import { lookup as dnsLookup } from 'node:dns/promises';
 import { isIP } from 'node:net';
 import { mkdir, readFile, rename, unlink, writeFile } from 'node:fs/promises';
 import path from 'node:path';
-import { randomUUID } from 'node:crypto';
+import { createHash, randomUUID } from 'node:crypto';
 import { findSecrets } from './core.mjs';
+import { canonicalSourceUrl } from './rsi-ledger.mjs';
 import { setTimeout as delay } from 'node:timers/promises';
 
 // The only network origins and endpoint paths discovery may contact. Adding a source is a reviewed code change.
@@ -219,6 +220,36 @@ const crossrefDate = (item) => {
   return `${parts[0]}-${month}-${day}`;
 };
 
+const sourceClaim = (entry) => `Abstract states (not verified): ${firstSentence(entry.summary)}`.slice(0, 500);
+const sourceSnapshot = (entry) => ({ url: canonicalSourceUrl(entry.url), title: entry.title, published_at: entry.published_at, claim: sourceClaim(entry) });
+const sourceFingerprint = (source) => createHash('sha256').update(JSON.stringify({ url: canonicalSourceUrl(source.url), title: source.title || '', published_at: source.published_at || 'unknown', claim: source.claim || '' })).digest('hex');
+
+function freshnessUrl(sourceId, rawSourceUrl) {
+  let sourceUrl;
+  try { sourceUrl = new URL(rawSourceUrl); } catch { throw new Error('The saved discovery source is invalid.'); }
+  const source = DISCOVERY_SOURCES[sourceId];
+  if (!source || sourceUrl.protocol !== 'https:' || sourceUrl.username || sourceUrl.password || sourceUrl.port) throw new Error('The saved discovery source is not supported.');
+  const endpoint = new URL(`https://${source.host}${source.path}`);
+  if (sourceId === 'arxiv') {
+    if (!['arxiv.org', 'www.arxiv.org'].includes(sourceUrl.hostname.toLowerCase())) throw new Error('The saved arXiv source is not supported.');
+    const id = sourceUrl.pathname.match(/^\/abs\/([\w.-]{4,40})$/)?.[1];
+    if (!id) throw new Error('The saved arXiv source is not supported.');
+    endpoint.searchParams.set('id_list', id);
+    endpoint.searchParams.set('max_results', '1');
+    return endpoint.href;
+  }
+  if (sourceId === 'crossref') {
+    if (sourceUrl.hostname.toLowerCase() !== 'doi.org') throw new Error('The saved Crossref source is not supported.');
+    let doi; try { doi = decodeURIComponent(sourceUrl.pathname.slice(1)); } catch { doi = ''; }
+    if (!/^10\.\d{4,9}\/[\-._;()/:A-Z0-9]+$/i.test(doi)) throw new Error('The saved Crossref source is not supported.');
+    endpoint.searchParams.set('filter', `doi:${doi}`);
+    endpoint.searchParams.set('rows', '1');
+    endpoint.searchParams.set('select', 'DOI,title,abstract,published,type');
+    return endpoint.href;
+  }
+  throw new Error('The saved discovery source is not supported.');
+}
+
 export function parseCrossref(json) {
   let data;
   try { data = typeof json === 'string' ? JSON.parse(json) : json; } catch { throw new Error('Crossref response was not valid JSON.'); }
@@ -287,7 +318,7 @@ function candidateFor(entry, relevance, { runId, sourceId, topic, accessedAt }) 
       memory_types: relevance.memory_types,
       sources: [{
         url: entry.url, title: entry.title, published_at: entry.published_at, accessed_at: accessedAt,
-        claim: `Abstract states (not verified): ${firstSentence(entry.summary)}`.slice(0, 500),
+        claim: sourceClaim(entry),
         confidence: 'low',
         limitations: 'Found automatically from public research metadata. The abstract was not reviewed by a person, source metadata may be incomplete or unreviewed, and nothing here shows the idea improves BrainLink.',
       }],
@@ -310,7 +341,7 @@ export function createRsiDiscovery({ home, ledger, fetchImpl, lookup, now = () =
     let raw; try { raw = JSON.parse(await readFile(file, 'utf8')); } catch (e) { if (e.code === 'ENOENT') raw = {}; else throw new Error('Discovery settings are unreadable; fix or remove the local discovery.json file.'); }
     const settings = { ...DEFAULT_DISCOVERY, ...(raw.settings || {}) };
     if (!Array.isArray(settings.sources) || !settings.sources.length || settings.sources.some((id) => !Object.hasOwn(DISCOVERY_SOURCES, id))) throw new Error('Discovery settings contain an unknown source; review or reset the local discovery settings.');
-    return { settings, runs: Array.isArray(raw.runs) ? raw.runs : [], events: Array.isArray(raw.events) ? raw.events : [] };
+    return { settings, runs: Array.isArray(raw.runs) ? raw.runs : [], events: Array.isArray(raw.events) ? raw.events : [], checks: Array.isArray(raw.checks) ? raw.checks : [] };
   }
   function save(mutator) {
     const next = writes.then(async () => {
@@ -318,6 +349,7 @@ export function createRsiDiscovery({ home, ledger, fetchImpl, lookup, now = () =
       const updated = await mutator(current);
       updated.runs = updated.runs.slice(0, MAX_RUNS_KEPT);
       updated.events = updated.events.slice(0, MAX_EVENTS_KEPT);
+      updated.checks = (Array.isArray(updated.checks) ? updated.checks : []).slice(0, 50);
       await mkdir(path.dirname(file), { recursive: true });
       const temp = `${file}.${process.pid}.${randomUUID().slice(0, 8)}.tmp`;
       try {
@@ -385,6 +417,47 @@ export function createRsiDiscovery({ home, ledger, fetchImpl, lookup, now = () =
     try { return await running; } finally { running = null; }
   }
 
+  async function refreshSource(ideaId) {
+    if (running) throw new Error('Research discovery is already running. Try the source check again when it finishes.');
+    const { settings } = await load();
+    if (!settings.enabled) throw new Error('Turn on research discovery before checking a saved source.');
+    if (settings.paused) throw new Error('Research discovery is paused. Resume it before checking a saved source.');
+    if (typeof ideaId !== 'string' || !/^BL-RSI-\d{8}-[a-f0-9-]{8,36}$/.test(ideaId)) throw new Error('Invalid RSI idea id.');
+    const idea = (await ledger.list()).find((row) => row.id === ideaId);
+    if (!idea || idea.origin !== 'discovery') throw new Error('Discovered proposal not found.');
+    const sourceId = idea.discovery?.source;
+    const original = (idea.fields.sources || []).find((item) => item?.url);
+    if (!DISCOVERY_SOURCES[sourceId] || !original) throw new Error('This proposal has no supported discovery source to check.');
+    const url = freshnessUrl(sourceId, original.url);
+    running = (async () => {
+      const receipt = {
+        check_id: `CHK-${now().toISOString().slice(0, 10).replaceAll('-', '')}-${randomUUID().slice(0, 8)}`,
+        idea_id: idea.id, source: sourceId, checked_at: now().toISOString(), status: 'unavailable',
+        baseline_fingerprint: sourceFingerprint(original), observed_fingerprint: null,
+      };
+      try {
+        const payload = await fetchFeed(url, { fetchImpl, lookup });
+        const entries = sourceId === 'crossref' ? parseCrossref(payload) : parseAtom(payload, sourceId);
+        const match = entries.find((entry) => canonicalSourceUrl(entry.url) === canonicalSourceUrl(original.url));
+        if (!match) receipt.status = 'not_found';
+        else {
+          const hostile = hostileReason(match);
+          if (hostile) receipt.status = 'unsafe';
+          else {
+            const current = sourceSnapshot(match);
+            receipt.observed_fingerprint = sourceFingerprint(current);
+            receipt.status = receipt.observed_fingerprint === receipt.baseline_fingerprint ? 'unchanged' : 'changed';
+          }
+        }
+      } catch (error) { receipt.error = safeError(error); }
+      const latest = await load();
+      if (!latest.settings.enabled || latest.settings.paused) return { ...receipt, status: 'paused', observed_fingerprint: null, error: undefined };
+      const saved = await save((state) => ({ ...state, checks: [receipt, ...state.checks] }));
+      return saved.checks[0];
+    })();
+    try { return await running; } finally { running = null; }
+  }
+
   return {
     file,
     status: async () => view(await load()),
@@ -396,6 +469,7 @@ export function createRsiDiscovery({ home, ledger, fetchImpl, lookup, now = () =
     pause: async () => view(await save((state) => state.settings.paused ? state : event({ ...state, settings: { ...state.settings, paused: true } }, 'paused'))),
     resume: async () => view(await save((state) => state.settings.paused ? event({ ...state, settings: { ...state.settings, paused: false } }, 'resumed') : state)),
     run,
+    refreshSource,
     // True when the scheduler should start a run now; a run of either trigger resets the clock.
     due: async () => {
       const { settings, runs } = await load();

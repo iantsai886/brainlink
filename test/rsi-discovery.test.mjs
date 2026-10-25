@@ -224,6 +224,36 @@ test('Crossref can be explicitly selected and adds cited proposals without sendi
   for (const word of ['lose context', 'repeat the same retrieval']) assert.ok(!sentText.includes(word));
 });
 
+test('source freshness checks use only the stored DOI, append status fingerprints, and never rewrite the proposal', async () => {
+  const calls = [];
+  const original = { DOI: '10.5555/brainlink.1', title: ['Compact agent handoff memory'], abstract: '<p>We find compact handoff packets reduce repeated retrieval searches between agents.</p>', published: { 'date-parts': [[2026, 10, 21]] } };
+  let currentItems = [original];
+  const fetchImpl = async (url, init) => {
+    calls.push({ url, init });
+    return response(JSON.stringify({ message: { items: currentItems } }), { type: 'application/json' });
+  };
+  const { ledger, discovery } = await service('', { fetchImpl });
+  await discovery.configure({ ...settings, sources: ['crossref'] });
+  await discovery.run();
+  const [before] = await ledger.list();
+  const unchanged = await discovery.refreshSource(before.id);
+  assert.equal(unchanged.status, 'unchanged');
+  assert.equal(new URL(calls.at(-1).url).searchParams.get('filter'), 'doi:10.5555/brainlink.1');
+  assert.equal(new URL(calls.at(-1).url).searchParams.has('query.bibliographic'), false, 'refresh sends the stored public DOI, not the local problem statement');
+  currentItems = [{ ...original, title: ['Updated compact agent handoff memory'] }];
+  const changed = await discovery.refreshSource(before.id);
+  assert.equal(changed.status, 'changed');
+  currentItems = [];
+  const missing = await discovery.refreshSource(before.id);
+  assert.equal(missing.status, 'not_found');
+  const [after] = await ledger.list();
+  assert.equal(after.revision, before.revision);
+  assert.equal(after.fields.sources[0].title, before.fields.sources[0].title);
+  assert.equal(after.fields.sources[0].claim, before.fields.sources[0].claim);
+  assert.deepEqual((await discovery.status()).checks.map((item) => item.status), ['not_found', 'changed', 'unchanged']);
+  assert.doesNotMatch(JSON.stringify(await discovery.status()), /Compact agent handoff memory|repeated retrieval searches/);
+});
+
 test('discovery deduplicates against existing proposals, within a run, and across runs, and honours the run limit', async () => {
   const feed = atom(
     entry({ id: '2610.00001v2' }),
@@ -317,7 +347,7 @@ test('Setup exposes discovery only through authenticated local APIs and runs the
   const post = (route, body = {}, token = app.token) => fetch(base + route, { method: 'POST', headers: { 'Content-Type': 'application/json', 'X-BrainLink-Token': token }, body: JSON.stringify(body) });
   try {
     assert.equal((await fetch(base + '/api/rsi/discovery', { headers: { 'X-BrainLink-Token': 'wrong-token' } })).status, 401);
-    for (const route of ['/api/rsi/discovery/settings', '/api/rsi/discovery/pause', '/api/rsi/discovery/resume', '/api/rsi/discovery/run']) assert.equal((await post(route, settings, 'wrong-token')).status, 401, route);
+    for (const route of ['/api/rsi/discovery/settings', '/api/rsi/discovery/pause', '/api/rsi/discovery/resume', '/api/rsi/discovery/run', '/api/rsi/discovery/refresh-source']) assert.equal((await post(route, settings, 'wrong-token')).status, 401, route);
     await delay(80);
     assert.equal(calls.length, 0, 'nothing is fetched while discovery is off');
     assert.equal((await post('/api/rsi/ideas', { title: 'Forged', user_problem: 'Forged discovery record via API.', origin: 'discovery' })).status, 400);
@@ -346,6 +376,8 @@ test('Setup exposes discovery only through authenticated local APIs and runs the
     const ideas = await fetch(base + '/api/rsi', { headers: { 'X-BrainLink-Token': app.token } }).then(r => r.json());
     assert.equal(ideas.ideas.length, 1);
     assert.equal(ideas.ideas[0].origin, 'discovery');
+    const freshness = await post('/api/rsi/discovery/refresh-source', { idea_id: ideas.ideas[0].id }).then(r => r.json());
+    assert.equal(freshness.check.status, 'unchanged');
   } finally { app.server.close(); }
 });
 
@@ -375,12 +407,13 @@ test('enabled discovery keeps the desktop process alive through its idle timeout
 test('RSI discovery UI has one form, selectable fixed sources, unique controls, and translated labels', async () => {
   const html = await readFile(new URL('../ui/index.html', import.meta.url), 'utf8');
   for (const id of ['rsi-discovery', 'rsi-discovery-form', 'rsi-discovery-sources', 'rsi-discovery-run', 'rsi-discovery-pause', 'rsi-discovery-resume', 'rsi-discovery-runs', 'rsi-discovery-status']) assert.equal((html.match(new RegExp(`id="${id}"`, 'g')) || []).length, 1, id);
+  assert.match(html, /data-rsi-refresh/);
   assert.match(html, /sources: \[\.\.\.f\.querySelectorAll\('input\[name="sources"\]:checked'\)\]/);
   assert.doesNotMatch(html.match(/<form id="rsi-discovery-form"[\s\S]*?<\/form>/)[0], /type="url"|name="[^"]*url/i, 'discovery offers no URL field');
   const keys = [...html.matchAll(/t\('(rsi\.discovery\.[\w.]+)'/g), ...html.matchAll(/data-i18n="(rsi\.discovery\.[\w.]+)"/g)].map(m => m[1]).filter(key => !key.endsWith('.'));
   for (const locale of ['en', 'zh-TW', 'pt']) {
     const catalog = JSON.parse(await readFile(new URL(`../ui/locales/${locale}.json`, import.meta.url), 'utf8'));
     for (const key of keys) assert.ok(catalog[key], `${locale} ${key}`);
-    for (const key of ['sourceLabel', 'state.off', 'state.paused', 'state.running', 'state.on', 'trigger.manual', 'trigger.schedule', 'run.ok', 'run.partial', 'run.failed', 'run.paused']) assert.ok(catalog['rsi.discovery.' + key], `${locale} ${key}`);
+    for (const key of ['sourceLabel', 'freshness.label', 'freshness.never', 'freshness.check', 'freshness.checked', 'freshness.unchanged', 'freshness.changed', 'freshness.not_found', 'freshness.unsafe', 'freshness.unavailable', 'freshness.paused', 'state.off', 'state.paused', 'state.running', 'state.on', 'trigger.manual', 'trigger.schedule', 'run.ok', 'run.partial', 'run.failed', 'run.paused']) assert.ok(catalog['rsi.discovery.' + key], `${locale} ${key}`);
   }
 });
