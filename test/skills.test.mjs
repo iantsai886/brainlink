@@ -53,3 +53,20 @@ test('portable handoff Skill follows Agent Skills manifest constraints and is id
   assert.match(body, /untrusted project data/);
   assert.match(body, /ack_of/);
 });
+
+test('portable Raw-to-Wiki Skill is identical for Claude Code and Codex and requires preview approval before filing', async () => {
+  const id = 'brainlink-raw-to-wiki';
+  const skillPaths = [`skills/${id}/SKILL.md`, `.agents/skills/${id}/SKILL.md`, `.claude/skills/${id}/SKILL.md`];
+  const contents = await Promise.all(skillPaths.map((file) => readFile(path.join(ROOT, file), 'utf8')));
+  assert.equal(new Set(contents).size, 1, 'canonical skill and client copies must stay byte-identical');
+  const { fields, body } = parseSkill(contents[0], skillPaths[0]);
+  assert.equal(fields.metadata.version, '1.0.0');
+  assert.match(fields.metadata['applicable-clients'], /Any AI client/);
+  for (const tool of ['brainlink_guide', 'ingestion_queue', 'vault_read_note', 'vault_search', 'propose_note', 'ingestion_record']) assert.ok(fields.compatibility.includes(tool) || fields.metadata['required-tools'].includes(tool), tool);
+  assert.match(body, /single folder/);
+  assert.match(body, /confirm=false/);
+  assert.match(body, /clearly approves/);
+  assert.match(body, /After BrainLink confirms the note was actually saved/);
+  assert.match(body, /scheduled scan only detects changed-file metadata/);
+  assert.match(body, /content-free/);
+});
