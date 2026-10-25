@@ -1,5 +1,5 @@
-// Read-only first slice for GitHub-backed shared notes. It inspects an existing local clone;
-// it never fetches, stages, commits, pushes, or changes configuration.
+// User-reviewed GitHub shared-note preview, selected commit/push, and add-only import operations.
+// Repository changes and vault writes remain separate, explicit actions with privacy checks.
 import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
 import { lstat, readFile, realpath, mkdir, writeFile, rm, mkdtemp } from 'node:fs/promises';

@@ -6,7 +6,7 @@ import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { normalize, saveConfig } from '../src/config.mjs';
-import { createContext } from '../src/core.mjs';
+import { createContext, search } from '../src/core.mjs';
 import { listGitHubShareCandidates, previewGitHubRepository, commitGitHubSelectedNotes, pushGitHubSelectedNotes, listGitHubPullCandidates, importGitHubSelectedNotes } from '../src/sync/github-preview.mjs';
 import { startSetup } from '../src/setup.mjs';
 
@@ -179,6 +179,7 @@ test('remote pull lists safe notes, imports only selected new files and filters 
   const imported = await importGitHubSelectedNotes({ ctx: f.ctx, repoPath: f.repo, vaultName: 'Company', paths: ['Remote.md'] });
   assert.deepEqual(imported.imported, ['Remote.md']);
   assert.equal(await readFile(path.join(f.vault, 'Remote.md'), 'utf8'), await readFile(path.join(f.repo, 'BrainLink', 'notes', 'Remote.md'), 'utf8'));
+  assert.equal((await search(f.ctx, 'Company', 'source-backed workflow shared between authorized agents'))[0].path, 'Remote.md');
   assert.equal(await readFile(path.join(f.vault, 'Private.md'), 'utf8'), '---\nprivate: true\n---\nPRIVATE_NOTE_BODY_CANARY_8164\n');
 });
 
