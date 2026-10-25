@@ -100,6 +100,8 @@
   "sessions.noSummary": "(sem resumo)",
   "sessions.pendingCloseout": "Sessões aguardando encerramento",
   "sessions.pendingCloseoutHint": "Estas sessões terminaram. Revise os resultados com a IA e peça para registrar as conclusões. O lembrete não salva um resumo.",
+  "sessions.reviewEndedSession": "Rever sessão",
+  "sessions.endedSessionNotImported": "Sessão ainda não importada",
   "sessions.dismissCue": "Dispensar lembrete",
   "sessions.hooksTitle": "Lembretes de encerramento",
   "sessions.hooksHint": "Ative lembretes para todas as sessões locais de cada aplicativo. Apenas o identificador e o horário de encerramento ficam neste computador; o texto da conversa não é coletado. As configurações existentes são preservadas.",

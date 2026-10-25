@@ -100,6 +100,8 @@
   "sessions.noSummary": "（沒有摘要）",
   "sessions.pendingCloseout": "等待收尾的對話",
   "sessions.pendingCloseoutHint": "這些對話已結束。請與 AI 確認成果，再請它收尾歸檔。提醒本身不會儲存摘要。",
+  "sessions.reviewEndedSession": "查看這次對話",
+  "sessions.endedSessionNotImported": "尚未匯入對話",
   "sessions.dismissCue": "關閉提醒",
   "sessions.hooksTitle": "收尾提醒",
   "sessions.hooksHint": "為各應用程式的所有本機對話啟用提醒。僅在這台電腦保留對話識別碼與結束時間，不收集對話文字。原有設定會保留。",

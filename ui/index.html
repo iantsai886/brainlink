@@ -506,7 +506,7 @@ async function loadSessions() {
 async function loadSessionEndCues() {
   try {
     const { cues } = await api('POST', '/api/sessions/end-cues', {});
-    const html = cues.length ? `<div class="card"><b>${esc(t('sessions.pendingCloseout'))}</b><p class="muted">${esc(t('sessions.pendingCloseoutHint'))}</p>${cues.map((cue) => `<div class="row"><span>${esc(clientLabel(cue.client))} · ${esc(new Date(cue.ended_at).toLocaleString(LOCALE))}</span><button class="link" data-cue-dismiss="${esc(cue.id)}">${esc(t('sessions.dismissCue'))}</button></div>`).join('')}</div>` : '';
+    const html = cues.length ? `<div class="card"><b>${esc(t('sessions.pendingCloseout'))}</b><p class="muted">${esc(t('sessions.pendingCloseoutHint'))}</p>${cues.map((cue) => `<div class="row"><span>${esc(clientLabel(cue.client))} · ${esc(new Date(cue.ended_at).toLocaleString(LOCALE))}</span>${cue.session_ref ? `<button class="link" data-sess-read="${esc(cue.session_ref)}" data-sess-private-read="1">${esc(t('sessions.reviewEndedSession'))}</button>` : `<span class="muted">${esc(t('sessions.endedSessionNotImported'))}</span>`}<button class="link" data-cue-dismiss="${esc(cue.id)}">${esc(t('sessions.dismissCue'))}</button></div>`).join('')}</div>` : '';
     if ($('session-end-cues').innerHTML !== html) $('session-end-cues').innerHTML = html;
   } catch (e) { $('session-end-cues').innerHTML = `<p class="error-box">${esc(e.message)}</p>`; }
 }
@@ -1011,10 +1011,10 @@ document.addEventListener('click', (e) => {
     // Independent of whatever session is currently shown: proves any session can read any other.
     $('session-detail').innerHTML = `<p class="skeleton">${esc(t('sessions.detailLoading'))}</p>`;
     try {
-      const s = await api('POST', '/api/sessions/read', { id, include_private: $('sess-private').checked });
+      const s = await api('POST', '/api/sessions/read', { id, include_private: d.sessPrivateRead === '1' || $('sess-private').checked });
       $('session-detail').innerHTML = `<div class="card"><b><span class="badge" style="background:${clientColor(s.client)}">${esc(clientLabel(s.client))}</span> ${esc(s.title || t('sessions.untitled'))}</b>
         <div class="muted" style="font-size:14px">${esc(s.summary || t('sessions.noSummary'))}</div>
-        <div class="muted" style="font-size:13px">${s.project ? esc(s.project) + ' · ' : ''}${s.message_count} ${s.message_count === 1 ? esc(t('sessions.messageOne')) : esc(t('sessions.messageMany'))} · ${esc(new Date(s.started_at).toLocaleString(LOCALE))}${s.note_refs?.length ? ' · ' + esc(t('sessions.refs', { list: s.note_refs.join(', ') })) : ''}</div></div>`;
+        <div class="muted" style="font-size:13px">${s.project ? esc(s.project) + ' · ' : ''}${s.message_count} ${s.message_count === 1 ? esc(t('sessions.messageOne')) : esc(t('sessions.messageMany'))} · ${esc(new Date(s.started_at).toLocaleString(LOCALE))}${s.note_refs?.length ? ' · ' + esc(t('sessions.refs', { list: s.note_refs.join(', ') })) : ''}</div>${s.summary ? `<button class="link" data-sess-file="${esc(s.id)}">${esc(t('sessions.fileSummary'))}</button>` : ''}</div>`;
     } catch (e) { $('session-detail').innerHTML = `<p class="error-box">${esc(t('sessions.detailError', { msg: e.message }))}</p>`; }
   })(d.sessRead);
   if (d.sessFile) (async (id) => {

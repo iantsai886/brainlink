@@ -6,10 +6,11 @@
 // anything, and never moves a proposal past `discovered`.
 import { lookup as dnsLookup } from 'node:dns/promises';
 import { isIP } from 'node:net';
-import { mkdir, readFile, rename, writeFile } from 'node:fs/promises';
+import { mkdir, readFile, rename, unlink, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import { randomUUID } from 'node:crypto';
 import { findSecrets } from './core.mjs';
+import { setTimeout as delay } from 'node:timers/promises';
 
 // The only network origin discovery may contact. Adding a source is a reviewed code change.
 export const DISCOVERY_SOURCES = Object.freeze({
@@ -18,6 +19,16 @@ export const DISCOVERY_SOURCES = Object.freeze({
 const ALLOWED_HOSTS = new Set(Object.values(DISCOVERY_SOURCES).map(s => s.host));
 const MAX_BYTES = 1_000_000;
 const TIMEOUT_MS = 15_000;
+
+export async function replaceDiscoveryFile(temp, file, { os = process.platform, renameFile = rename, wait = delay } = {}) {
+  for (let attempt = 0; ; attempt++) {
+    try { await renameFile(temp, file); return; }
+    catch (error) {
+      if (os !== 'win32' || !['EPERM', 'EACCES', 'EBUSY'].includes(error.code) || attempt >= 19) throw error;
+      await wait(25);
+    }
+  }
+}
 const MAX_ENTRIES_PER_FEED = 25;
 const MAX_RUNS_KEPT = 10;
 const MAX_EVENTS_KEPT = 20;
@@ -271,8 +282,13 @@ export function createRsiDiscovery({ home, ledger, fetchImpl, lookup, now = () =
       updated.events = updated.events.slice(0, MAX_EVENTS_KEPT);
       await mkdir(path.dirname(file), { recursive: true });
       const temp = `${file}.${process.pid}.${randomUUID().slice(0, 8)}.tmp`;
-      await writeFile(temp, JSON.stringify(updated, null, 2), { encoding: 'utf8', mode: 0o600 });
-      await rename(temp, file);
+      try {
+        await writeFile(temp, JSON.stringify(updated, null, 2), { encoding: 'utf8', mode: 0o600, flag: 'wx' });
+        await replaceDiscoveryFile(temp, file);
+      } catch (error) {
+        await unlink(temp).catch(() => {});
+        throw error;
+      }
       return updated;
     });
     writes = next.catch(() => {});

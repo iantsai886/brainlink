@@ -5,7 +5,7 @@ import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { setTimeout as delay } from 'node:timers/promises';
 import { createRsiLedger } from '../src/rsi-ledger.mjs';
-import { createRsiDiscovery, fetchFeed, parseAtom, assessRelevance, validateDiscoverySettings, feedUrl } from '../src/rsi-discovery.mjs';
+import { createRsiDiscovery, fetchFeed, parseAtom, assessRelevance, validateDiscoverySettings, feedUrl, replaceDiscoveryFile } from '../src/rsi-discovery.mjs';
 import { startSetup } from '../src/setup.mjs';
 
 const temp = (prefix) => mkdtemp(path.join(tmpdir(), 'brainlink-rsi-discovery-' + prefix + '-'));
@@ -17,6 +17,27 @@ const settings = { enabled: true, topics: ['agent memory'], signals: [SIGNAL], i
 const entry = ({ id = '2610.00001v1', title = 'Compact handoff packets for agent memory', summary = 'We show that compact context packets reduce repeated retrieval searches after an agent handoff in long sessions.', published = '2026-10-20T00:00:00Z' } = {}) =>
   `<entry><id>http://arxiv.org/abs/${id}</id><published>${published}</published><title>${title}</title><summary>${summary}</summary></entry>`;
 const atom = (...entries) => `<?xml version="1.0" encoding="UTF-8"?><feed xmlns="http://www.w3.org/2005/Atom">${entries.join('')}</feed>`;
+
+test('Windows RSI settings replacement retries transient sharing violations and stays bounded', async () => {
+  let attempts = 0;
+  const waits = [];
+  await replaceDiscoveryFile('tmp', 'settings', {
+    os: 'win32',
+    renameFile: async () => {
+      attempts++;
+      if (attempts < 3) { const error = new Error('temporary file lock'); error.code = 'EPERM'; throw error; }
+    },
+    wait: async (ms) => waits.push(ms),
+  });
+  assert.equal(attempts, 3);
+  assert.deepEqual(waits, [25, 25]);
+
+  attempts = 0;
+  await assert.rejects(replaceDiscoveryFile('tmp', 'settings', {
+    os: 'linux', renameFile: async () => { attempts++; const error = new Error('busy'); error.code = 'EBUSY'; throw error; }, wait: async () => {},
+  }), /busy/);
+  assert.equal(attempts, 1, 'non-Windows failures are not retried');
+});
 const response = (body, { status = 200, type = 'application/atom+xml; charset=utf-8', headers = {} } = {}) => new Response(body, { status, headers: { 'content-type': type, ...headers } });
 function recordingFetch(body, calls = []) {
   const impl = async (url, init) => { calls.push({ url, init }); return typeof body === 'function' ? body(url, init) : response(body); };

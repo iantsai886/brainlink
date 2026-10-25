@@ -29,7 +29,7 @@ import { backupOnce, verifyBackup, restoreBackupToEmpty, loadBackupStatus, saveB
 import { fileSessionSummary } from './sessions/filing.mjs';
 import { isStartupEnabled, setStartupEnabled } from './startup.mjs';
 import { recommendSessionVault } from './sessions/routing.mjs';
-import { listSessionEndCues, dismissSessionEndCue, sessionEndCueId } from './sessions/end-cue.mjs';
+import { listSessionEndCues, dismissSessionEndCue, sessionEndCueId, matchSessionEndCue } from './sessions/end-cue.mjs';
 import { listSessionFilingFolders, suggestedSessionFolder } from './sessions/folders.mjs';
 import { sessionHookStatus, setSessionHook } from './sessions/hooks.mjs';
 import { twinProfileStatus } from './twin-profiles.mjs';
@@ -594,7 +594,13 @@ export async function startSetup(opts = {}) {
       try { return await sessionHookStatus(client, { home, env }); } catch (e) { return { client, error: e.message }; }
     })) }),
     'POST /api/sessions/hooks/set': (b) => setSessionHook(b.client, b.enabled, { home, env, os }),
-    'POST /api/sessions/end-cues': async () => ({ cues: (await listSessionEndCues(path.join(appHome(env), 'sessions', 'end-cues'))).slice(0, 100).map((cue) => ({ id: sessionEndCueId(cue), client: cue.client, ended_at: cue.ended_at })) }),
+    'POST /api/sessions/end-cues': async () => {
+      const cues = (await listSessionEndCues(path.join(appHome(env), 'sessions', 'end-cues'))).slice(0, 100);
+      const store = await sessions.store();
+      const imported = await store.listSessions({ limit: 100000 });
+      return { cues: cues.map((cue) => ({ id: sessionEndCueId(cue), client: cue.client, ended_at: cue.ended_at,
+        session_ref: matchSessionEndCue(cue, imported) })) };
+    },
     'POST /api/sessions/end-cues/dismiss': (b) => dismissSessionEndCue(path.join(appHome(env), 'sessions', 'end-cues'), b.id),
     'POST /api/sessions': async (b) => {
       const result = await sessions.list({ q: b.q, client: b.client, project: b.project, since: b.since, limit: b.limit, include_private: Boolean(b.include_private) });

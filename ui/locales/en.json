@@ -100,6 +100,8 @@
   "sessions.noSummary": "(no summary)",
   "sessions.pendingCloseout": "Sessions awaiting closeout",
   "sessions.pendingCloseoutHint": "These sessions ended. Review their outcomes with your AI and ask it to close the loop. A reminder does not save a summary.",
+  "sessions.reviewEndedSession": "Review session",
+  "sessions.endedSessionNotImported": "Session not imported yet",
   "sessions.dismissCue": "Dismiss reminder",
   "sessions.hooksTitle": "Closeout reminders",
   "sessions.hooksHint": "Enable reminders for all local sessions in each app. Only the session identifier and end time stay on this computer; transcript text is not collected. Existing app hooks are preserved.",

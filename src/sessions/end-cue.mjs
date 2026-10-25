@@ -6,6 +6,22 @@ const CLIENTS = new Set(['claude-code', 'codex']);
 const MAX_EVENT_BYTES = 32 * 1024;
 export const sessionEndCueId = (cue) => createHash('sha256').update(`${cue.client}\0${cue.session_id}`).digest('hex');
 
+// Match a minimal SessionEnd cue to an already imported transcript without opening its
+// contents. Client formats deliberately differ: Claude files use <session-id>.jsonl;
+// Codex rollouts use rollout-<session-id>.jsonl. Require one exact, unique match.
+export function matchSessionEndCue(cue, sessions) {
+  if (!CLIENTS.has(cue?.client) || typeof cue.session_id !== 'string' || !Array.isArray(sessions)) return null;
+  const expected = cue.client === 'claude-code'
+    ? `${cue.session_id}.jsonl`
+    : `rollout-${cue.session_id}.jsonl`;
+  const matches = sessions.filter((session) => {
+    if (session?.client !== cue.client || typeof session.source_id !== 'string') return false;
+    const source = session.source_id.replace(/\\/g, '/');
+    return source === expected || source.endsWith(`/${expected}`);
+  });
+  return matches.length === 1 ? matches[0].id : null;
+}
+
 export async function dismissSessionEndCue(dir, id) {
   if (!/^[a-f0-9]{64}$/.test(id || '')) throw new Error('Invalid session cue ID');
   await readFile(path.join(dir, `${id}.json`));
