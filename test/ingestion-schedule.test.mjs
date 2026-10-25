@@ -68,8 +68,9 @@ test('ingestion scan UI has manual and scheduled controls with all locale string
     assert.equal((html.match(new RegExp(`id="${id}"`, 'g')) || []).length, 1, id);
   }
   assert.match(html, /api\('POST', '\/api\/ingestion\/run'/);
+  assert.match(html, /data-open-note="\$\{esc\(r\.vault\)\}::\$\{esc\(item\.path\)\}"/, 'queue entries open their source note in the existing safe reader');
   for (const locale of ['en', 'zh-TW', 'pt']) {
     const catalog = JSON.parse(await readFile(new URL(`../ui/locales/${locale}.json`, import.meta.url), 'utf8'));
-    for (const key of ['ingestion.title', 'ingestion.hint', 'ingestion.enabled', 'ingestion.vault', 'ingestion.folder', 'ingestion.time', 'ingestion.save', 'ingestion.run', 'ingestion.never', 'ingestion.running', 'ingestion.lastRun', 'ingestion.failed', 'ingestion.saved', 'ingestion.disabled', 'ingestion.scanDone', 'ingestion.empty', 'ingestion.trigger.manual', 'ingestion.trigger.schedule']) assert.ok(catalog[key], `${locale} ${key}`);
+    for (const key of ['ingestion.title', 'ingestion.hint', 'ingestion.enabled', 'ingestion.vault', 'ingestion.folder', 'ingestion.time', 'ingestion.save', 'ingestion.run', 'ingestion.never', 'ingestion.running', 'ingestion.lastRun', 'ingestion.failed', 'ingestion.saved', 'ingestion.disabled', 'ingestion.scanDone', 'ingestion.empty', 'ingestion.limited', 'ingestion.trigger.manual', 'ingestion.trigger.schedule']) assert.ok(catalog[key], `${locale} ${key}`);
   }
 });

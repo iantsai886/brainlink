@@ -1,6 +1,6 @@
 # Raw-to-Wiki knowledge flow: reference review
 
-Status: the manually triggered and daily scheduled source scan are implemented and locally tested. Setup provides the scan settings, last-run status, and manual queue view. The scheduled scan runs at a user-selected local time while BrainLink is running; the existing launch-at-sign-in option can start it after login. Scans detect eligible new/changed Markdown and prepare a review queue. They do not summarize with an AI or file knowledge unattended. Reviewed on 2026-10-25 from Ian's supplied 167-second reel transcript and seven selected stills in `C:\Users\iants\OneDrive\Documents\deepseek-harness\default-workspace\media\`.
+Status: the manually triggered and daily scheduled source scan are implemented and locally tested. Setup provides the scan settings, last-run status, and manual queue view; each result opens in the existing read-only note viewer. The scheduled scan runs at a user-selected local time while BrainLink is running; the existing launch-at-sign-in option can start it after login. Scans detect eligible new/changed Markdown and prepare a review queue. They do not summarize with an AI or file knowledge unattended. Reviewed on 2026-10-25 from Ian's supplied 167-second reel transcript and seven selected stills in `C:\Users\iants\OneDrive\Documents\deepseek-harness\default-workspace\media\`.
 
 ## Main idea
 

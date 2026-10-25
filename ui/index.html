@@ -1342,7 +1342,7 @@ $('ingestion-save').onclick = () => act(async () => {
 });
 $('ingestion-run').onclick = () => act(async () => {
   const r = await api('POST', '/api/ingestion/run', { vault: $('ingestion-vault').value, folder: $('ingestion-folder').value });
-  $('ingestion-queue').innerHTML = r.candidates.length ? r.candidates.map((item) => `<div class="card"><b>${esc(item.title)}</b><span class="mono muted">${esc(item.path)}</span><small class="muted">${esc(item.updated_at)}</small></div>`).join('') : `<p class="muted">${esc(t('ingestion.empty'))}</p>`;
+  $('ingestion-queue').innerHTML = r.candidates.length ? `${r.limited ? `<p class="muted">${esc(t('ingestion.limited', { shown: r.candidates.length, total: r.queued_total }))}</p>` : ''}${r.candidates.map((item) => `<div class="card"><button class="link" data-open-note="${esc(r.vault)}::${esc(item.path)}"><b>${esc(item.title)}</b></button><span class="mono muted">${esc(item.path)}</span><small class="muted">${esc(item.updated_at)}</small></div>`).join('')}` : `<p class="muted">${esc(t('ingestion.empty'))}</p>`;
   toast(t('ingestion.scanDone', { count: r.queued_total }));
 });
 $('backup-restore-pick-source').onclick = async () => {

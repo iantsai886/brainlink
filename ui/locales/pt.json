@@ -428,6 +428,7 @@
   "ingestion.disabled": "Verificações automáticas desativadas. Você ainda pode verificar manualmente.",
   "ingestion.scanDone": "Verificação concluída: {count} arquivos novos ou alterados.",
   "ingestion.empty": "Nenhum arquivo novo ou alterado nesta pasta.",
+  "ingestion.limited": "Mostrando os {shown} mais recentes de {total}. Registre estes arquivos antes de ver o próximo grupo.",
   "ingestion.trigger.manual": "Manual",
   "ingestion.trigger.schedule": "Agendada",
   "backup.title": "Backups privados",

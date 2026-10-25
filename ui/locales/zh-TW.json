@@ -428,6 +428,7 @@
   "ingestion.disabled": "已關閉背景掃描；你仍可手動掃描。",
   "ingestion.scanDone": "掃描完成：找到 {count} 個新增或變更檔案。",
   "ingestion.empty": "這個資料夾沒有新增或變更的檔案。",
+  "ingestion.limited": "目前顯示最新的 {shown} 個，共 {total} 個。完成或略過這些項目後，下一批才會顯示。",
   "ingestion.trigger.manual": "手動",
   "ingestion.trigger.schedule": "排程",
   "backup.title": "私人備份",

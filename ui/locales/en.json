@@ -428,6 +428,7 @@
   "ingestion.disabled": "Daily background scans turned off. You can still scan manually.",
   "ingestion.scanDone": "Scan complete: {count} new or changed files.",
   "ingestion.empty": "No new or changed files in this folder.",
+  "ingestion.limited": "Showing the newest {shown} of {total}. File or skip these before the next batch appears.",
   "ingestion.trigger.manual": "Manual",
   "ingestion.trigger.schedule": "Scheduled",
   "backup.title": "Private backups",
