@@ -42,11 +42,11 @@ test('portable handoff Skill follows Agent Skills manifest constraints and is id
   const contents = await Promise.all(paths.map((file) => readFile(path.join(ROOT, file), 'utf8')));
   assert.equal(new Set(contents).size, 1, 'canonical and client discovery copies must stay byte-identical');
   const { fields, body } = parseSkill(contents[0], paths[0]);
-  assert.equal(fields.metadata.version, '0.1.0');
+  assert.equal(fields.metadata.version, '0.2.0');
   assert.equal(fields.metadata.owner, 'Iango');
   assert.match(fields.metadata['applicable-clients'], /Claude Code.*Codex CLI/);
-  assert.match(fields.metadata['test-status'], /Codex CLI.*discovery verified/);
-  assert.match(fields.metadata['test-status'], /Claude Code CLI unavailable/);
+  assert.match(fields.metadata['test-status'], /Local fictional MCP handoff and Git checkpoint fixtures pass/);
+  assert.match(fields.metadata['test-status'], /live Claude Code\/Codex handoff not yet verified/);
   assert.match(body, /confirm=false/);
   assert.match(body, /confirm=true/);
   assert.match(body, /private-note contents/);

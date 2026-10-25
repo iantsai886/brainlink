@@ -35,6 +35,7 @@ test('fictional Claude-to-Codex handoff previews, filters private sources, conti
     decisions: ['Keep all data fictional', 'Do not deploy'], modified_files: ['demo/index.html'],
     tests: ['node --test test/demo.test.mjs — passed'], open_questions: ['Check keyboard navigation'],
     next_steps: ['Run the local accessibility check', 'Report its actual result'],
+    git: { repo: 'iantsai886/fictional-demo', branch: 'feature/local-demo', head: 'abcdef1234567', dirty: true, ahead: 2 },
     source_refs: ['Public-Plan.md'], scope: 'company', confidence: 'reported',
     ai_platform: 'Claude Code', agent_or_role: 'implementation agent', session_or_task_id: taskId,
   };
@@ -54,12 +55,16 @@ test('fictional Claude-to-Codex handoff previews, filters private sources, conti
     assert.equal(sent.value.path, preview.value.path);
     const note = await readFile(path.join(mailbox, path.basename(sent.value.path)), 'utf8');
     assert.match(note, /## Goal\n\nFinish the isolated demo UI/);
+    assert.match(note, /git_checkpoint_schema: 1/);
+    assert.match(note, /Git checkpoint \(reported by sender; not verified by BrainLink\)/);
+    assert.match(note, /Working tree dirty: true/);
     assert.match(note, /\[\[Public-Plan\]\]/);
     assert.doesNotMatch(note, /ZQXPRIVATE_HANDOFF_CANARY/);
 
     const pickup = await call(codex, 'list_handoffs', { to: 'Codex' });
     assert.equal(pickup.value.length, 1);
     assert.equal(pickup.value[0].path, sent.value.path);
+    assert.deepEqual(pickup.value[0].git_checkpoint, { repo: 'iantsai886/fictional-demo', branch: 'feature/local-demo', head: 'abcdef1234567', dirty: true, ahead: 2, source: 'reported' });
     assert.match(pickup.value[0].excerpt, /Finish the isolated demo UI/);
     assert.doesNotMatch(JSON.stringify(pickup.value), /ZQXPRIVATE_HANDOFF_CANARY|Private-Plan/);
 
@@ -75,5 +80,28 @@ test('fictional Claude-to-Codex handoff previews, filters private sources, conti
     assert.equal(returned.value[0].ack_of, sent.value.path);
     const source = await readFile(path.join(mailbox, path.basename(returned.value[0].path)), 'utf8');
     assert.doesNotMatch(source, /ZQXPRIVATE_HANDOFF_CANARY/);
+  } finally { await rm(root, { recursive: true, force: true }); }
+});
+
+test('Git handoff checkpoints reject URLs, unsafe branches, invalid SHAs, and unbounded ahead counts', async () => {
+  const root = await mkdtemp(path.join(tmpdir(), 'brainlink-git-checkpoint-'));
+  const vault = path.join(root, 'vault'), mailbox = path.join(vault, 'Handoffs');
+  await mkdir(mailbox, { recursive: true });
+  const ctx = createContext(normalize({ vaults: [{ name: 'Fictional', path: vault }], handoff: { vault: 'Fictional', folder: 'Handoffs' } }), { env: { HOME: root, BRAINLINK_HOME: path.join(root, 'app') } });
+  const base = { to: 'Codex', subject: 'Safe checkpoint', goal: 'Continue fictional work', ai_platform: 'Claude Code', agent_or_role: 'builder', session_or_task_id: 'checkpoint-validation', confirm: false };
+  try {
+    for (const git of [
+      { repo: 'https://github.com/iantsai886/demo', branch: 'main', head: 'abcdef1234567', dirty: false, ahead: 0 },
+      { repo: 'owner/repo', branch: '../main', head: 'abcdef1234567', dirty: false, ahead: 0 },
+      { repo: 'owner/repo', branch: 'main', head: 'not-a-sha', dirty: false, ahead: 0 },
+      { repo: 'owner/repo', branch: 'main', head: 'abcdef1234567', dirty: false, ahead: 10001 },
+    ]) {
+      const result = await call(createMcp(ctx), 'send_handoff', { ...base, git });
+      assert.equal(result.value.ok, false);
+      assert.ok(result.value.errors.some(error => error.startsWith('git.')));
+    }
+    const noCheckpoint = await call(createMcp(ctx), 'send_handoff', base);
+    assert.equal(noCheckpoint.value.ok, true);
+    assert.doesNotMatch(noCheckpoint.value.preview, /Git checkpoint|git_checkpoint/);
   } finally { await rm(root, { recursive: true, force: true }); }
 });

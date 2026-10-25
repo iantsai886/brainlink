@@ -216,6 +216,9 @@ export function createMcp(ctx, { onCall = () => {} } = {}) {
           to: { type: 'string' }, subject: { type: 'string' }, body: { type: 'string' }, priority: { type: 'string', enum: ['P0', 'P1', 'P2', 'P3'] },
           goal: { type: 'string' }, current_state: { type: 'string' }, decisions: strs, modified_files: strs, tests: strs,
           open_questions: strs, next_steps: strs, source_refs: strs,
+          git: { type: 'object', description: 'Optional sender-reported repository checkpoint. BrainLink cannot verify another client’s checkout and never changes branches.', properties: {
+            repo: { type: 'string', description: 'GitHub owner/name label only; no URL or path.' }, branch: { type: 'string' }, head: { type: 'string', description: '7–40 character commit SHA.' }, dirty: { type: 'boolean' }, ahead: { type: 'integer', minimum: 0, maximum: 10000 },
+          }, required: ['repo', 'branch', 'head', 'dirty', 'ahead'], additionalProperties: false },
           scope: { type: 'string', enum: ['personal', 'company', 'client'] },
           confidence: { type: 'string', enum: ['verified', 'reported', 'inferred', 'unknown'] },
           decision_needed: { type: 'boolean' }, deadline: { type: 'string' }, ack_of: { type: 'string', description: 'Mailbox path of the handoff this append-only status update replies to. Profile-scoped agents may update only a handoff owned by the same Twin profile.' }, status: { type: 'string', enum: ['REQUEST', 'ACKNOWLEDGED', 'IN_PROGRESS', 'BLOCKED', 'COMPLETED', 'CANCELLED'], description: 'Omit for REQUEST on a new handoff or ACKNOWLEDGED on a reply. Replies require ack_of.' }, source: { type: 'string' }, ...idProps }, required: ['to', 'subject'] },

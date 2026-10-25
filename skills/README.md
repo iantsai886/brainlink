@@ -4,13 +4,13 @@ BrainLink keeps the canonical skill package in `skills/`. Repository clients hav
 
 The manifest follows the [Agent Skills specification](https://agentskills.io/specification): the skill directory and lowercase `name` match, `description` explains use, and BrainLink registry fields are string values under standard `metadata`. Client compatibility is explicit: matching file format does not by itself prove the workflow or MCP server works in a client.
 
-## `brainlink-cross-ai-handoff` 0.1.0
+## `brainlink-cross-ai-handoff` 0.2.0
 
 - **Purpose:** prepare or pick up a task through BrainLink's existing structured handoff mailbox.
 - **Clients:** Codex CLI and Claude Code, where the repo-local skill directory is enabled.
 - **Tools:** connected BrainLink MCP `brainlink_guide`, `send_handoff`, and `list_handoffs`.
 - **Scope:** no private source text, no cross-lane data, no guessed destination. Sending is preview-first and requires approval unless the user clearly authorized the handoff.
-- **Validation:** Agent Skills manifest/parity test; local two-client MCP fixture for preview, pickup, private-source rejection, and acknowledgement; Codex CLI local prompt-input discovery check. Claude Code CLI is not installed in the validation environment; live two-client runtime handoff is still pending.
+- **Validation:** Agent Skills manifest/parity test; local two-client MCP fixture for preview, pickup, private-source rejection, acknowledgement, and sender-reported Git checkpoint checks. Claude Code CLI is not installed in the validation environment; live two-client runtime handoff is still pending.
 - **Rollback:** revert the Git change to the canonical skill and both client copies. No vault migration is needed.
 
 To validate the files and client copies, run `node --test test/skills.test.mjs`. To run the fictional two-client MCP flow, run `node --import ./test/_preload.mjs --test test/cross-client-handoff.test.mjs`. It exercises the real MCP tools without simulating model behavior or claiming live client completion.

@@ -205,6 +205,24 @@ const HANDOFF_FIELDS = [
   ['open_questions', 'Open questions'], ['next_steps', 'Next steps'],
 ];
 
+function validateGitCheckpoint(value) {
+  if (value === undefined) return { value: null, errors: [] };
+  if (!value || typeof value !== 'object' || Array.isArray(value) || Object.keys(value).some(key => !['repo', 'branch', 'head', 'dirty', 'ahead'].includes(key)) || Object.keys(value).length !== 5) return { value: null, errors: ['git must contain repo, branch, head, dirty, and ahead only'] };
+  const { repo, branch, head, dirty, ahead } = value;
+  const errors = [];
+  if (typeof repo !== 'string' || !/^[A-Za-z0-9][A-Za-z0-9_.-]{0,99}\/[A-Za-z0-9][A-Za-z0-9_.-]{0,99}$/.test(repo) || repo.split('/').some(part => part.includes('..'))) errors.push('git.repo must be an owner/name label, not a URL or path');
+  if (typeof branch !== 'string' || branch.length > 120 || !/^[A-Za-z0-9][A-Za-z0-9._/-]*$/.test(branch) || branch.includes('..') || branch.includes('//') || branch.includes('@{') || branch.split('/').some(part => !part || part.startsWith('.') || part.endsWith('.') || part.endsWith('.lock'))) errors.push('git.branch is not a safe Git branch name');
+  if (typeof head !== 'string' || !/^[a-fA-F0-9]{7,40}$/.test(head)) errors.push('git.head must be a 7–40 character commit SHA');
+  if (typeof dirty !== 'boolean') errors.push('git.dirty must be true or false');
+  if (!Number.isInteger(ahead) || ahead < 0 || ahead > 10000) errors.push('git.ahead must be an integer from 0 to 10000');
+  return { value: errors.length ? null : { repo, branch, head: head.toLowerCase(), dirty, ahead, source: 'reported' }, errors };
+}
+
+function gitCheckpointFromMeta(meta) {
+  if (meta.git_checkpoint_schema !== '1') return null;
+  return validateGitCheckpoint({ repo: meta.git_repo, branch: meta.git_branch, head: meta.git_head, dirty: meta.git_dirty === 'true', ahead: Number(meta.git_ahead) }).value;
+}
+
 function handoffSection(label, value) {
   const items = Array.isArray(value) ? value : [value];
   const clean = items.map((item) => String(item || '').trim()).filter(Boolean);
@@ -260,6 +278,8 @@ export async function sendHandoff(ctx, a, now = new Date()) {
   if (a.ack_of && status === 'REQUEST') errors.push('a handoff update cannot return to REQUEST');
   if (a.scope && !['personal', 'company', 'client'].includes(a.scope)) errors.push('scope must be personal, company, or client');
   if (a.confidence && !['verified', 'reported', 'inferred', 'unknown'].includes(a.confidence)) errors.push('confidence must be verified, reported, inferred, or unknown');
+  const git = validateGitCheckpoint(a.git);
+  errors.push(...git.errors);
   if (a.ack_of) {
     const root = vaultRoot(ctx, h.vault);
     const ref = String(a.ack_of).replace(/\\/g, '/');
@@ -296,11 +316,13 @@ export async function sendHandoff(ctx, a, now = new Date()) {
     `session_or_task_id: ${q(id.session_or_task_id)}`, `written_at: ${ts}`, `to: ${q(a.to)}`, `priority: ${a.priority || 'P2'}`, `subject: ${q(subject)}`,
     `decision_needed: ${a.decision_needed ? 'yes' : 'no'}`, `deadline: ${a.deadline || ''}`, `ack_of: ${a.ack_of || ''}`, `source: ${q(a.source || 'handoff')}`,
     `scope: ${q(a.scope || 'unspecified')}`, `confidence: ${q(a.confidence || 'unknown')}`,
+    ...(git.value ? ['git_checkpoint_schema: 1', `git_repo: ${q(git.value.repo)}`, `git_branch: ${q(git.value.branch)}`, `git_head: ${q(git.value.head)}`, `git_dirty: ${git.value.dirty ? 'true' : 'false'}`, `git_ahead: ${git.value.ahead}`] : []),
     ...(ctx.twinScope?.mode === 'scoped' ? [`twin_profile_id: ${q(ctx.twinScope.profile_id)}`] : []), '---'].join('\n');
   const sections = HANDOFF_FIELDS.map(([field, label]) => handoffSection(label, a[field])).join('');
+  const gitSection = git.value ? handoffSection('Git checkpoint (reported by sender; not verified by BrainLink)', `Repository: ${git.value.repo}\nBranch: ${git.value.branch}\nCommit: ${git.value.head}\nWorking tree dirty: ${git.value.dirty}\nCommits ahead: ${git.value.ahead}`) : '';
   const sources = refs.length ? handoffSection('Sources', refs.map((ref) => `[[${ref.replace(/\.md$/i, '')}]]`)) : '';
   const body = a.body ? handoffSection('Body', a.body) : '';
-  return commitNew(ctx, h.vault, rel, `${fm}\n\n# ${subject}\n\n${madeBy(id)}\n${sections}${sources}${body}`, a.confirm);
+  return commitNew(ctx, h.vault, rel, `${fm}\n\n# ${subject}\n\n${madeBy(id)}\n${sections}${gitSection}${sources}${body}`, a.confirm);
 }
 
 // P0: a handoff receipt (Setup UI) reads this same list, so a handoff mailbox folder that ends up
@@ -331,7 +353,7 @@ export async function listHandoffs(ctx, { to, limit = 10 } = {}) {
     const { meta, body } = document;
     const dm = f.match(/^(\d{4}-\d{2}-\d{2})-(\d{2})(\d{2})-/);
     const sent_at = meta.written_at || (dm ? `${dm[1]}T${dm[2]}:${dm[3]}:00` : '');
-    out.push({ path: `${h.vault}/${rel}`, from: m?.[1], to: recipient, status: meta.status || '', priority: meta.priority || '', subject: meta.subject || f, decision_needed: meta.decision_needed || '', excerpt: body.trim().slice(0, 300), ack_of: meta.ack_of || '', sent_at });
+    out.push({ path: `${h.vault}/${rel}`, from: m?.[1], to: recipient, status: meta.status || '', priority: meta.priority || '', subject: meta.subject || f, decision_needed: meta.decision_needed || '', excerpt: body.trim().slice(0, 300), ...(gitCheckpointFromMeta(meta) ? { git_checkpoint: gitCheckpointFromMeta(meta) } : {}), ack_of: meta.ack_of || '', sent_at });
     if (out.length >= limit) break;
   }
   return out;
