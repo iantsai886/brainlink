@@ -307,9 +307,19 @@ ol.todo li { padding-left: 4px; }
       <summary data-i18n="github.title"></summary>
       <p class="hint" data-i18n="github.hint"></p>
       <p class="notice" data-i18n="github.accessWarning"></p>
+      <label id="github-profile-row" hidden><span data-i18n="github.profile"></span><select id="github-profile"></select></label>
+      <div id="github-assignment" hidden>
+        <p id="github-assignment-text" class="muted" role="status"></p>
+        <div class="row"><button id="github-assign-clear" data-i18n="github.assignClear" hidden></button></div>
+      </div>
       <div class="grid2">
         <label><span data-i18n="github.vault"></span><select id="github-vault"></select></label>
-        <label><span data-i18n="github.repository"></span><input id="github-repository" class="mono" data-i18n-placeholder="github.repositoryPlaceholder"></label>
+        <label id="github-repository-row"><span data-i18n="github.repository"></span><input id="github-repository" class="mono" data-i18n-placeholder="github.repositoryPlaceholder"></label>
+      </div>
+      <div id="github-assign-form" hidden>
+        <label><span data-i18n="github.folders"></span><textarea id="github-assign-folders" rows="2" class="mono" data-i18n-placeholder="github.foldersPlaceholder"></textarea></label>
+        <div class="row" style="margin-top:10px"><button id="github-assign-inspect" data-i18n="github.assignInspect"></button><button class="primary" id="github-assign-confirm" data-i18n="github.assignConfirm" disabled></button></div>
+        <div id="github-assign-review" class="notice" hidden></div>
       </div>
       <div class="row" style="margin-top:10px"><button id="github-load" data-i18n="github.load"></button><button class="primary" id="github-preview" data-i18n="github.preview" disabled></button><button id="github-commit" data-i18n="github.commit" disabled></button><button id="github-push" data-i18n="github.push" disabled hidden></button></div>
       <div id="github-candidates" style="margin-top:10px"></div>
@@ -873,6 +883,7 @@ async function load() {
   $('github-vault').innerHTML = shareableVaults.map((v) => `<option value="${esc(v.name)}">${esc(v.name)}</option>`).join('');
   $('github-load').disabled = !shareableVaults.length;
   if (!shareableVaults.length) $('github-status').textContent = t('github.noVault');
+  renderGitHubProfile(shareableVaults);
   $('sync-device').value = SY.device || '';
   $('sync-folder').value = SY.folder || '';
   $('backup-enabled').checked = Boolean(S.backup?.enabled);
@@ -1046,6 +1057,41 @@ $('sync-save').onclick = () => act(async () => {
   toast(provider === 'local' ? t('sync.localToast') : t('sync.providerToast', { folder: r.sync.folder }));
 });
 let githubCandidates = [];
+let githubInspected = null;
+const githubProfileId = () => $('github-profile').value || '';
+const githubAssignment = () => (S.github_assignments || []).find((x) => x.profile_id === githubProfileId()) || null;
+const githubUsesAssignment = () => githubAssignment()?.status === 'assigned';
+const githubRepoValue = () => (githubUsesAssignment() ? '' : $('github-repository').value.trim());
+const githubAssignInput = () => ({ profile_id: githubProfileId(), vault: $('github-vault').value, repository: $('github-repository').value.trim(), folders: $('github-assign-folders').value.split('\n').map((x) => x.trim()).filter(Boolean) });
+// A repository, selection, receipt or pending confirmation never survives a profile change.
+function githubResetState() {
+  githubCandidates = []; githubPullCandidates = []; githubInspected = null;
+  renderGitHubCandidates(); renderGitHubPullCandidates();
+  $('github-status').textContent = ''; $('github-result').hidden = true;
+  $('github-assign-review').hidden = true; $('github-assign-confirm').disabled = true;
+}
+function renderGitHubProfile(shareableVaults) {
+  const list = S.github_assignments || [];
+  const previous = $('github-profile').value;
+  $('github-profile-row').hidden = !list.length;
+  $('github-profile').innerHTML = list.map((x) => `<option value="${esc(x.profile_id)}">${esc(x.name)}</option>`).join('');
+  if (list.some((x) => x.profile_id === previous)) $('github-profile').value = previous;
+  const a = githubAssignment();
+  $('github-assignment').hidden = !a;
+  $('github-assign-form').hidden = true;
+  $('github-repository-row').hidden = false;
+  if (!a) { $('github-pull-check').disabled = false; return; }
+  const ready = a.status === 'assigned';
+  const names = ready ? [a.assignment.vault] : a.vaults;
+  $('github-vault').innerHTML = shareableVaults.filter((v) => names.includes(v.name)).map((v) => `<option value="${esc(v.name)}">${esc(v.name)}</option>`).join('');
+  const scope = ready && a.assignment.folders.length ? a.assignment.folders.join(', ') : t('github.wholeVault');
+  $('github-assignment-text').textContent = ready ? t('github.assigned', { remote: a.assignment.remote, vault: a.assignment.vault, scope }) : t('github.assignment.' + a.status, { remote: a.assignment?.remote || '' });
+  $('github-assign-form').hidden = ready;
+  $('github-repository-row').hidden = ready;
+  $('github-assign-clear').hidden = !a.assignment;
+  $('github-load').disabled = !ready || !$('github-vault').value;
+  $('github-pull-check').disabled = !ready;
+}
 let githubPendingPush = null;
 let githubPullCandidates = [];
 function githubPullSelection() { return [...document.querySelectorAll('[data-github-pull-path]:checked:not(:disabled)')].map((el) => el.value); }
@@ -1062,10 +1108,33 @@ function renderGitHubCandidates() {
   $('github-commit').disabled = true;
   githubPendingPush = null; $('github-push').hidden = true; $('github-push').disabled = true;
 }
+$('github-assign-inspect').onclick = async () => {
+  githubInspected = null; $('github-assign-confirm').disabled = true; $('github-status').textContent = '';
+  try {
+    const r = await api('POST', '/api/github/assignment/inspect', githubAssignInput());
+    githubInspected = r;
+    $('github-assign-review').hidden = false;
+    $('github-assign-review').innerHTML = `<p>${esc(t('github.assignReview', { remote: r.remote, branch: r.branch || t('github.noBranch'), profile: r.profile_name, vault: r.vault }))}</p>${r.blocked.map((m) => `<p>${esc(m)}</p>`).join('')}`;
+    $('github-assign-confirm').disabled = r.blocked.length > 0;
+  } catch (e) { $('github-status').textContent = e.message; }
+};
+$('github-assign-confirm').onclick = () => act(async () => {
+  if (!githubInspected) return;
+  if (!confirm(t('github.assignConfirmPrompt', { remote: githubInspected.remote, profile: githubInspected.profile_name, vault: githubInspected.vault }))) return;
+  await api('POST', '/api/github/assignment/set', { ...githubAssignInput(), confirm_remote: githubInspected.remote });
+  githubResetState(); $('github-repository').value = ''; $('github-assign-folders').value = '';
+  toast(t('github.assignSaved'));
+});
+$('github-assign-clear').onclick = () => act(async () => {
+  if (!confirm(t('github.assignClearPrompt'))) return;
+  await api('POST', '/api/github/assignment/clear', { profile_id: githubProfileId() });
+  githubResetState();
+  toast(t('github.assignCleared'));
+});
 $('github-load').onclick = async () => {
   $('github-status').textContent = t('github.loading'); $('github-result').hidden = true;
   try {
-    const r = await api('POST', '/api/github/share-candidates', { vault: $('github-vault').value });
+    const r = await api('POST', '/api/github/share-candidates', { vault: $('github-vault').value, profile_id: githubProfileId() });
     githubCandidates = r.notes || []; renderGitHubCandidates();
     $('github-status').textContent = githubCandidates.length ? t('github.loaded', { count: githubCandidates.length }) : t('github.empty');
   } catch (e) { $('github-status').textContent = e.message; }
@@ -1073,7 +1142,7 @@ $('github-load').onclick = async () => {
 $('github-preview').onclick = async () => {
   $('github-status').textContent = t('github.previewing'); $('github-result').hidden = true;
   try {
-    const r = await api('POST', '/api/github/preview', { vault: $('github-vault').value, repository: $('github-repository').value.trim(), paths: githubSelection() });
+    const r = await api('POST', '/api/github/preview', { vault: $('github-vault').value, repository: githubRepoValue(), profile_id: githubProfileId(), paths: githubSelection() });
     $('github-result').hidden = false;
     $('github-result').innerHTML = `<b>${esc(t('github.previewResult'))}</b><ul>${r.files.map((x) => `<li><span class="mono">${esc(x.path)}</span> — ${esc(t('github.action.' + x.action))}</li>`).join('')}</ul><p>${esc(t('github.noRemote'))}</p>`;
     $('github-commit').disabled = !r.files.some((x) => ['add', 'update'].includes(x.action));
@@ -1085,20 +1154,21 @@ $('github-commit').onclick = async () => {
   if (!paths.length || !confirm(t('github.confirmCommit', { count: paths.length, paths: paths.join('\n') }))) return;
   $('github-status').textContent = t('github.committing'); $('github-commit').disabled = true;
   try {
-    const r = await api('POST', '/api/github/commit-selected', { vault: $('github-vault').value, repository: $('github-repository').value.trim(), paths });
+    const r = await api('POST', '/api/github/commit-selected', { vault: $('github-vault').value, repository: githubRepoValue(), profile_id: githubProfileId(), paths });
     $('github-status').textContent = r.committed ? t('github.committed', { commit: r.commit }) : t('github.nothingToCommit');
-    githubPendingPush = r.committed ? { commit: r.commit, paths } : null;
+    githubPendingPush = r.committed ? { commit: r.commit, paths, profile: githubProfileId() } : null;
     $('github-push').hidden = !githubPendingPush; $('github-push').disabled = !githubPendingPush;
     $('github-result').hidden = true;
   } catch (e) { $('github-status').textContent = e.message; $('github-commit').disabled = false; }
 };
 $('github-push').onclick = async () => {
   if (!githubPendingPush) return;
+  if (githubPendingPush.profile !== githubProfileId()) { githubPendingPush = null; $('github-push').hidden = true; return; }
   const paths = githubPendingPush.paths;
   if (!confirm(t('github.confirmPush', { count: paths.length, paths: paths.join('\n') }))) return;
   $('github-status').textContent = t('github.pushing'); $('github-push').disabled = true;
   try {
-    const r = await api('POST', '/api/github/push-selected', { vault: $('github-vault').value, repository: $('github-repository').value.trim(), paths, commit: githubPendingPush.commit });
+    const r = await api('POST', '/api/github/push-selected', { vault: $('github-vault').value, repository: githubRepoValue(), profile_id: githubProfileId(), paths, commit: githubPendingPush.commit });
     $('github-status').textContent = t('github.pushed', { commit: r.commit, branch: r.branch });
     githubPendingPush = null; $('github-push').hidden = true;
   } catch (e) { $('github-status').textContent = e.message; $('github-push').disabled = false; }
@@ -1106,7 +1176,7 @@ $('github-push').onclick = async () => {
 $('github-pull-check').onclick = async () => {
   $('github-status').textContent = t('github.pullChecking'); $('github-pull-import').disabled = true;
   try {
-    const r = await api('POST', '/api/github/pull-candidates', { vault: $('github-vault').value, repository: $('github-repository').value.trim() });
+    const r = await api('POST', '/api/github/pull-candidates', { vault: $('github-vault').value, repository: githubRepoValue(), profile_id: githubProfileId() });
     githubPullCandidates = r.files || []; renderGitHubPullCandidates();
     $('github-status').textContent = t('github.pullFound', { count: githubPullCandidates.length, branch: r.branch });
   } catch (e) { githubPullCandidates = []; renderGitHubPullCandidates(); $('github-status').textContent = e.message; }
@@ -1116,16 +1186,18 @@ $('github-pull-import').onclick = async () => {
   if (!paths.length || !confirm(t('github.confirmImport', { count: paths.length, paths: paths.join('\n') }))) return;
   $('github-status').textContent = t('github.importing'); $('github-pull-import').disabled = true;
   try {
-    const r = await api('POST', '/api/github/import-selected', { vault: $('github-vault').value, repository: $('github-repository').value.trim(), paths });
+    const r = await api('POST', '/api/github/import-selected', { vault: $('github-vault').value, repository: githubRepoValue(), profile_id: githubProfileId(), paths });
     $('github-status').textContent = t('github.imported', { count: r.imported.length, unchanged: r.unchanged.length });
     githubPullCandidates = []; renderGitHubPullCandidates();
   } catch (e) { $('github-status').textContent = e.message; $('github-pull-import').disabled = !githubPullSelection().length; }
 };
-document.addEventListener('input', (e) => { if (e.target.id === 'github-repository') { $('github-commit').disabled = true; $('github-push').hidden = true; githubPendingPush = null; githubPullCandidates = []; renderGitHubPullCandidates(); } });
+document.addEventListener('input', (e) => { if (e.target.id === 'github-assign-folders') { githubInspected = null; $('github-assign-confirm').disabled = true; }
+  if (e.target.id === 'github-repository') { githubInspected = null; $('github-assign-confirm').disabled = true; $('github-commit').disabled = true; $('github-push').hidden = true; githubPendingPush = null; githubPullCandidates = []; renderGitHubPullCandidates(); } });
 document.addEventListener('change', (e) => {
   if (e.target.matches('[data-github-path]')) { $('github-preview').disabled = !githubSelection().length; $('github-commit').disabled = true; $('github-push').hidden = true; githubPendingPush = null; }
   if (e.target.matches('[data-github-pull-path]')) $('github-pull-import').disabled = !githubPullSelection().length;
-  if (e.target.id === 'github-vault') { githubCandidates = []; githubPullCandidates = []; renderGitHubCandidates(); renderGitHubPullCandidates(); $('github-status').textContent = ''; $('github-result').hidden = true; }
+  if (e.target.id === 'github-profile') { $('github-repository').value = ''; $('github-assign-folders').value = ''; githubResetState(); renderGitHubProfile(S.vaults.filter((v) => !v.private && v.exists)); }
+  if (e.target.id === 'github-vault') { githubInspected = null; $('github-assign-confirm').disabled = true; githubCandidates = []; githubPullCandidates = []; renderGitHubCandidates(); renderGitHubPullCandidates(); $('github-status').textContent = ''; $('github-result').hidden = true; }
 });
 $('backup-pick').onclick = async () => {
   try {

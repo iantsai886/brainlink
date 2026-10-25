@@ -8,6 +8,7 @@ import { setTimeout as delay } from 'node:timers/promises';
 import { homedir } from 'node:os';
 import path from 'node:path';
 import { validateSync } from './sync/settings.mjs';
+import { validateGitHubAssignments } from './sync/github-assignment.mjs';
 
 export const DEFAULT_PLATFORMS = ['Claude', 'ChatGPT', 'ChatGPT Codex', 'Gemini', 'Grok', 'Cursor', 'other'];
 export const CLOSE_MODES = ['append-section', 'new-note', 'append-task', 'proposal-only'];
@@ -152,6 +153,7 @@ export function validate(cfg) {
       }
     }
   }
+  errors.push(...validateGitHubAssignments(cfg));
   if (cfg.handoff && (!names.has(cfg.handoff.vault) || !cfg.handoff.folder)) errors.push('handoff needs an existing vault and a folder');
   if (cfg.timezone) { try { new Intl.DateTimeFormat('en', { timeZone: cfg.timezone }); } catch { errors.push(`unknown timezone "${cfg.timezone}"`); } }
   if (cfg.locale && !LOCALES.includes(cfg.locale)) errors.push(`locale must be one of ${LOCALES.join(', ')}`);
