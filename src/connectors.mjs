@@ -34,6 +34,11 @@ export const CLIENTS = {
     file: ({ home }) => path.join(home, '.gemini', 'settings.json'),
     note: 'Start a new Gemini CLI session; run /mcp to check.',
   },
+  antigravity: {
+    title: 'Google Antigravity', platform: 'Google Antigravity', role: 'Antigravity agent', format: 'json', manual: true,
+    file: ({ home }) => path.join(home, '.gemini', 'config', 'mcp_config.json'),
+    note: 'BrainLink is in Antigravity global MCP settings. Reload MCP servers or restart Antigravity.',
+  },
   windsurf: {
     title: 'Windsurf', platform: 'other', role: 'Windsurf', format: 'json',
     file: ({ home }) => path.join(home, '.codeium', 'windsurf', 'mcp_config.json'),
@@ -58,13 +63,13 @@ export const UNSUPPORTED = {
 // Client is "present" when its config file or config folder exists.
 async function detectOne(id, c, opts) {
   const file = c.file(opts);
-  const present = (await exists(file)) || (id !== 'claude-code' && (await exists(path.dirname(file))));
+  const present = (await exists(file)) || (!c.manual && id !== 'claude-code' && (await exists(path.dirname(file))));
   let connected = false;
   if (await exists(file)) {
     const raw = await readFile(file, 'utf8');
     connected = c.format === 'toml' ? /^\[mcp_servers\.brainlink\]/m.test(raw) : (() => { try { return Boolean(JSON.parse(raw || '{}').mcpServers?.[SERVER_KEY]); } catch { return false; } })();
   }
-  return { title: c.title, file, present, connected, note: c.note };
+  return { title: c.title, file, present, connected, canConnect: present || Boolean(c.manual), manual: Boolean(c.manual), note: c.note };
 }
 
 export async function detect(opts) {
@@ -119,7 +124,7 @@ export async function connectClient(id, opts) {
   // for it yet). Without this gate, connecting an app that was never installed still "succeeds":
   // it creates the folder, writes a config nobody reads, and then reports Connected -- a false
   // success a fresh-install test caught on an uninstalled Claude Desktop.
-  if (!(await detectOne(id, c, opts)).present) throw new Error(`${c.title} was not found on this computer. Install it, then try Connect again.`);
+  if (!(await detectOne(id, c, opts)).canConnect) throw new Error(`${c.title} was not found on this computer. Install it, then try Connect again.`);
   const entry = serverEntry(id, opts.launch, opts.extraEnv);
   const now = opts.now || new Date();
   // Claude Code owns ~/.claude.json and rewrites it while running; use its CLI when present.

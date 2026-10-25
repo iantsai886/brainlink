@@ -213,6 +213,8 @@
   "connect.addVaultFirst": "Adicione primeiro um caderno",
   "connect.installFirst": "Instale primeiro o {title}",
   "connect.notFoundHint": "Não encontrado neste computador — instale-o e recarregue esta página.",
+  "connect.manualReady": "Pronto para configurar",
+  "connect.manualHint": "Um clique adiciona o BrainLink às configurações MCP globais do Antigravity e faz uma cópia de segurança do arquivo anterior. Depois, recarregue os servidores MCP ou reinicie o Antigravity.",
   "connect.none": "Ainda não foi reconhecido nenhum cliente de IA neste computador.",
   "connect.liveOk": "● ativo",
   "connect.liveFailed": "○ falhou",
