@@ -4,7 +4,7 @@ Status: validated profile declarations and runtime scoping for explicitly assign
 
 ## Contract
 
-The optional `twin_profiles` array in `config.json` records a Twin's identity and intended boundaries:
+The optional `twin_profiles` array in `config.json` records a Twin identity and intended boundaries. Its optional `github_repository` field binds the profile to one absolute local clone path. Setup validates the GitHub origin, rejects assignments that reuse a local clone or remote repository across profiles, and resolves sharing/import operations from the saved assignment while checking the requested vault against the profile's declared list. This boundary applies only to BrainLink's authenticated local Setup GitHub workflow; it cannot constrain AI clients granted direct GitHub access outside BrainLink.
 
 - `id`, `name`, `mode` (`personal`, `organisation`, or `client`), and an owner label;
 - `vaults`: configured vault names and the declared access level (`read`, `propose`, `write`);

@@ -96,6 +96,58 @@ async function repositoryRoot(repoPath) {
   return root;
 }
 
+function remoteRepositoryIdentity(remote) {
+  const scp = /^git@github\.com:([A-Za-z0-9_.-]+)\/([A-Za-z0-9_.-]+?)(?:\.git)?$/.exec(remote || '');
+  if (scp) return `${scp[1]}/${scp[2]}`.toLowerCase();
+  try {
+    const url = new URL(remote);
+    const parts = url.pathname.replace(/\.git$/i, '').split('/').filter(Boolean);
+    return parts.length === 2 ? `${parts[0]}/${parts[1]}`.toLowerCase() : null;
+  } catch { return null; }
+}
+
+export async function inspectGitHubRepositoryPath(repoPath) {
+  const root = await repositoryRoot(repoPath);
+  const remote = await git(root, ['config', '--local', '--get', 'remote.origin.url']);
+  const identity = remoteRepositoryIdentity(remote);
+  if (!identity) throw new Error('Could not identify this GitHub repository safely.');
+  return { path: root, identity };
+}
+
+async function assertProfileRepositoryUnique(cfg, profileId, candidate) {
+  for (const profile of cfg.twin_profiles || []) {
+    if (profile.id === profileId || !profile.github_repository) continue;
+    let existing;
+    try { existing = await inspectGitHubRepositoryPath(profile.github_repository); }
+    catch { throw new Error(`The GitHub repository assignment for profile "${profile.id}" cannot be verified. Repair or clear it before continuing.`); }
+    if (path.resolve(existing.path).toLowerCase() === path.resolve(candidate.path).toLowerCase() || existing.identity === candidate.identity) {
+      throw new Error(`The GitHub repository is already assigned to profile "${profile.id}". Each profile needs its own repository.`);
+    }
+  }
+}
+
+export async function assignGitHubRepositoryToProfile(cfg, profileId, repoPath) {
+  const profile = (cfg.twin_profiles || []).find((item) => item.id === profileId);
+  if (!profile) throw new Error('Choose a configured Twin profile before assigning a GitHub repository.');
+  const repository = await inspectGitHubRepositoryPath(repoPath);
+  await assertProfileRepositoryUnique(cfg, profileId, repository);
+  profile.github_repository = repository.path;
+  return { profile_id: profile.id, repository_path: repository.path, repository: repository.identity };
+}
+
+export async function resolveGitHubProfileRepository(cfg, { profileId, vaultName, legacyRepoPath }) {
+  const profiles = Array.isArray(cfg.twin_profiles) ? cfg.twin_profiles : [];
+  if (!profiles.length) return { profile_id: null, repository_path: legacyRepoPath };
+  if (typeof profileId !== 'string' || !profileId) throw new Error('Choose the Twin profile for this GitHub operation.');
+  const profile = profiles.find((item) => item.id === profileId);
+  if (!profile) throw new Error('The selected Twin profile is not configured.');
+  if (!profile.vaults?.some((item) => item.name === vaultName)) throw new Error(`Vault "${vaultName}" is outside the selected Twin profile.`);
+  if (!profile.github_repository) throw new Error('Assign a separate GitHub repository to this Twin profile in Setup first.');
+  const repository = await inspectGitHubRepositoryPath(profile.github_repository);
+  await assertProfileRepositoryUnique(cfg, profile.id, repository);
+  return { profile_id: profile.id, repository_path: repository.path, repository: repository.identity };
+}
+
 function safeNotePath(value) {
   if (typeof value !== 'string' || value.length > 500 || !value.endsWith('.md') || /[\\:\x00-\x1f]/.test(value)) return false;
   const parts = value.split('/');

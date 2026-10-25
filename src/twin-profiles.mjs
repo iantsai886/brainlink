@@ -5,6 +5,7 @@ export function twinProfileStatus(cfg) {
     name: profile.name,
     mode: profile.mode,
     owner: profile.owner,
+    github_repository: profile.github_repository || null,
     vaults: (profile.vaults || []).map(({ name, access }) => ({ name, access })),
     source_policy: { ...profile.source_policy },
     memory_policy: { ...profile.memory_policy },

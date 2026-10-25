@@ -18,7 +18,7 @@ import { resolveNoteWikilinks } from './links.mjs';
 import { VERSION, createMcp } from './server.mjs';
 import { findObsidianVaults, nestedVaults } from './obsidian.mjs';
 import { syncSettings, chooseSync, suggestFolders, PROVIDERS, PROVIDER_LABELS } from './sync/settings.mjs';
-import { listGitHubShareCandidates, previewGitHubRepository, commitGitHubSelectedNotes, pushGitHubSelectedNotes, listGitHubPullCandidates, importGitHubSelectedNotes, saveGitHubConflictCopies } from './sync/github-preview.mjs';
+import { listGitHubShareCandidates, previewGitHubRepository, commitGitHubSelectedNotes, pushGitHubSelectedNotes, listGitHubPullCandidates, importGitHubSelectedNotes, saveGitHubConflictCopies, assignGitHubRepositoryToProfile, resolveGitHubProfileRepository } from './sync/github-preview.mjs';
 import { sessionsService } from './host.mjs';
 import { addAgent, renameAgent, removeAgent, revokeAgent, markConnected, findAgentByToken, publicAgent, localAgentSnippet, remoteAgentSnippet } from './mcp-agents.mjs';
 import { buildGraph3D, noteDetail3D } from './graph3d.mjs';
@@ -411,38 +411,51 @@ export async function startSetup(opts = {}) {
     'POST /api/github/share-candidates': async (b) => {
       const cfg = await loadConfig(file);
       const vaultName = String(b.vault || '');
+      const repo = await resolveGitHubProfileRepository(cfg, { profileId: String(b.profile_id || ''), vaultName, legacyRepoPath: String(b.repository || '') });
       const ctx = createContext(cfg, { env: { ...env, BRAINLINK_SEMANTIC: '0' } });
-      return { vault: vaultName, notes: await listGitHubShareCandidates(ctx, vaultName) };
+      return { vault: vaultName, profile_id: repo.profile_id, notes: await listGitHubShareCandidates(ctx, vaultName) };
     },
     'POST /api/github/preview': async (b) => {
       const cfg = await loadConfig(file);
+      const repo = await resolveGitHubProfileRepository(cfg, { profileId: String(b.profile_id || ''), vaultName: String(b.vault || ''), legacyRepoPath: String(b.repository || '') });
       const ctx = createContext(cfg, { env: { ...env, BRAINLINK_SEMANTIC: '0' } });
-      return previewGitHubRepository({ ctx, repoPath: String(b.repository || ''), vaultName: String(b.vault || ''), paths: b.paths });
+      return previewGitHubRepository({ ctx, repoPath: repo.repository_path, vaultName: String(b.vault || ''), paths: b.paths });
     },
       'POST /api/github/commit-selected': async (b) => {
         const cfg = await loadConfig(file);
+        const repo = await resolveGitHubProfileRepository(cfg, { profileId: String(b.profile_id || ''), vaultName: String(b.vault || ''), legacyRepoPath: String(b.repository || '') });
         const ctx = createContext(cfg, { env: { ...env, BRAINLINK_SEMANTIC: '0' } });
-        return commitGitHubSelectedNotes({ ctx, repoPath: String(b.repository || ''), vaultName: String(b.vault || ''), paths: b.paths });
+        return commitGitHubSelectedNotes({ ctx, repoPath: repo.repository_path, vaultName: String(b.vault || ''), paths: b.paths });
       },
       'POST /api/github/push-selected': async (b) => {
         const cfg = await loadConfig(file);
+        const repo = await resolveGitHubProfileRepository(cfg, { profileId: String(b.profile_id || ''), vaultName: String(b.vault || ''), legacyRepoPath: String(b.repository || '') });
         const ctx = createContext(cfg, { env: { ...env, BRAINLINK_SEMANTIC: '0' } });
-        return pushGitHubSelectedNotes({ ctx, repoPath: String(b.repository || ''), vaultName: String(b.vault || ''), paths: b.paths, commit: String(b.commit || '') });
+        return pushGitHubSelectedNotes({ ctx, repoPath: repo.repository_path, vaultName: String(b.vault || ''), paths: b.paths, commit: String(b.commit || '') });
       },
       'POST /api/github/pull-candidates': async (b) => {
         const cfg = await loadConfig(file);
+        const repo = await resolveGitHubProfileRepository(cfg, { profileId: String(b.profile_id || ''), vaultName: String(b.vault || ''), legacyRepoPath: String(b.repository || '') });
         const ctx = createContext(cfg, { env: { ...env, BRAINLINK_SEMANTIC: '0' } });
-        return listGitHubPullCandidates({ ctx, repoPath: String(b.repository || ''), vaultName: String(b.vault || '') });
+        return listGitHubPullCandidates({ ctx, repoPath: repo.repository_path, vaultName: String(b.vault || '') });
       },
       'POST /api/github/import-selected': async (b) => {
         const cfg = await loadConfig(file);
+        const repo = await resolveGitHubProfileRepository(cfg, { profileId: String(b.profile_id || ''), vaultName: String(b.vault || ''), legacyRepoPath: String(b.repository || '') });
         const ctx = createContext(cfg, { env: { ...env, BRAINLINK_SEMANTIC: '0' } });
-        return importGitHubSelectedNotes({ ctx, repoPath: String(b.repository || ''), vaultName: String(b.vault || ''), paths: b.paths });
+        return importGitHubSelectedNotes({ ctx, repoPath: repo.repository_path, vaultName: String(b.vault || ''), paths: b.paths });
       },
       'POST /api/github/save-conflict-copies': async (b) => {
         const cfg = await loadConfig(file);
+        const repo = await resolveGitHubProfileRepository(cfg, { profileId: String(b.profile_id || ''), vaultName: String(b.vault || ''), legacyRepoPath: String(b.repository || '') });
         const ctx = createContext(cfg, { env: { ...env, BRAINLINK_SEMANTIC: '0' } });
-        return saveGitHubConflictCopies({ ctx, repoPath: String(b.repository || ''), vaultName: String(b.vault || ''), paths: b.paths });
+        return saveGitHubConflictCopies({ ctx, repoPath: repo.repository_path, vaultName: String(b.vault || ''), paths: b.paths });
+      },
+      'POST /api/github/profile-repository': async (b) => {
+        const cfg = await loadConfig(file);
+        const result = await assignGitHubRepositoryToProfile(cfg, String(b.profile_id || ''), String(b.repository || ''));
+        await saveConfig(cfg, file);
+        return { ok: true, ...result };
       },
     'POST /api/agent': async (b) => {
       const cfg = await loadConfig(file);

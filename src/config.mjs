@@ -110,6 +110,7 @@ export function validate(cfg) {
   }
   const profileIds = new Set();
   const assignedTwinAgents = new Set();
+  const profileGitRepositories = new Map();
   if (!Array.isArray(cfg.twin_profiles)) errors.push('twin_profiles must be an array');
   for (const p of Array.isArray(cfg.twin_profiles) ? cfg.twin_profiles : []) {
     if (!p || typeof p !== 'object' || Array.isArray(p)) { errors.push('twin profile must be an object'); continue; }
@@ -118,6 +119,15 @@ export function validate(cfg) {
     if (!p.name || typeof p.name !== 'string' || p.name.length > 120) errors.push(`twin profile "${p.id || ''}": name is required (max 120 characters)`);
     if (!TWIN_MODES.includes(p.mode)) errors.push(`twin profile "${p.id || ''}": mode must be ${TWIN_MODES.join(' | ')}`);
     if (!p.owner || typeof p.owner !== 'string' || p.owner.length > 160) errors.push(`twin profile "${p.id || ''}": owner is required (max 160 characters)`);
+    if (p.github_repository !== undefined && p.github_repository !== null) {
+      if (typeof p.github_repository !== 'string' || !path.isAbsolute(p.github_repository)) errors.push(`twin profile "${p.id || ''}": github_repository must be an absolute local repository path`);
+      else {
+        const key = path.resolve(p.github_repository).toLocaleLowerCase('en-US');
+        const assigned = profileGitRepositories.get(key);
+        if (assigned) errors.push(`twin profiles "${assigned}" and "${p.id || ''}" cannot share one local GitHub repository path`);
+        else profileGitRepositories.set(key, p.id || '');
+      }
+    }
     if (!Array.isArray(p.vaults) || !p.vaults.length) errors.push(`twin profile "${p.id || ''}": vaults must be a non-empty array`);
     const profileVaults = new Set();
     for (const item of Array.isArray(p.vaults) ? p.vaults : []) {

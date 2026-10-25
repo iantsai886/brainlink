@@ -1,6 +1,6 @@
 # GitHub-backed shared knowledge
 
-Status: proposed full product capability; read-only preview, explicit local commit, explicit one-commit push, and add-only remote-note import are implemented. BrainLink fetches the tracked origin branch only after the user requests a remote check or confirms Push/Import. Push verifies the selected-note commit is the sole child of the fetched tip. Pull filters private/generated/secret-bearing notes before listing, imports only selected new files, and refuses any selected batch containing a local conflict without overwriting. Updating existing remote notes, automatic synchronization, and conflict resolution remain unimplemented. The authenticated Setup flow and synthetic privacy tests are in `src/sync/github-preview.mjs`, `src/setup.mjs`, `ui/index.html`, and `test/github-preview.test.mjs`. See [HANDOFF-SYNC.md](HANDOFF-SYNC.md) and the live [implementation status](IMPLEMENTATION-STATUS.md).
+Status: partial implementation. Read-only preview, explicit local commit, explicit one-commit push, add-only remote-note import, and local-preserving conflict copies are implemented. With Twin profiles configured, each profile can be assigned one GitHub repository; the backend checks the repository origin, prevents duplicate assignments, requires the selected profile and a vault declared by that profile, and uses the saved repository path rather than the request path. Setups without Twin profiles retain the legacy manually supplied repository flow. Updating existing remote notes and automatic synchronization remain unimplemented. Local tests use fictional vaults and repositories; live GitHub account permissions, cross-device use, and cross-client access remain unverified. See [implementation status](IMPLEMENTATION-STATUS.md).
 
 ## Product goal
 
@@ -45,11 +45,11 @@ The implemented slices verify candidate filtering, secret refusal, credential-fr
 
 ## Implementation slices
 
-Current branch addition: users can explicitly save selected remote conflicts as deterministic copies under `BrainLink Conflicts/`. The action rechecks current remote and local conflict state, rejects non-conflicts, preserves local files, and is idempotent. Local full-suite receipts and current UI-inspection limits are recorded in [IMPLEMENTATION-STATUS.md](IMPLEMENTATION-STATUS.md). In-place merging, automatic synchronization, profile-bound repository assignments, live GitHub account acceptance, and cross-device/cross-client retrieval remain open.
+Current additions: selected remote conflicts can be saved as deterministic copies under `BrainLink Conflicts/`, and each configured Twin profile can be assigned a distinct GitHub repository. The conflict-copy action rechecks current state, preserves local files, and is idempotent. Profile operations are scoped to the saved repository and the profile's declared vaults. Local full-suite receipts and remaining limits are recorded in [IMPLEMENTATION-STATUS.md](IMPLEMENTATION-STATUS.md). In-place merging, automatic synchronization, live GitHub account acceptance, and cross-device/cross-client retrieval remain open.
 
 1. Done: safe local-repository validation, authenticated candidate/preview endpoints, localized Setup UI, separately confirmed local commits, and explicit selected-commit push with remote ancestry/path validation.
 2. Validate UI behavior, accessibility, localized privacy messaging, and the GitHub credential-helper flow using a user-controlled test repository.
-3. Add an explicit conflict-resolution workflow that retains both versions and requires the user to choose or merge; then connect repository choices to Personal/Organisation/Client profile scopes.
+3. Validate profile-to-repository assignment in the desktop UI with a user-controlled test account and verify profile, vault, and repository boundaries end to end.
 4. Evaluate automatic sync separately, only after user opt-in, profile isolation, error recovery, and live multi-device acceptance are proven.
 5. Run cross-device and cross-AI acceptance with fictional data before considering a customer release.
 
