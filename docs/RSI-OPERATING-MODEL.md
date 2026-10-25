@@ -1,6 +1,6 @@
 # BrainLink Recursive Improvement System
 
-Status: product requirement and governed operating design; local proposal ledger implemented; continuous discovery runtime is not implemented.
+Status: product requirement and governed operating design; local proposal ledger and opt-in, pausable research discovery (one fixed source, runs only while Setup is open) implemented; continuous discovery, experiment execution and promotion are not implemented.
 Date: 2026-10-25 Asia/Taipei.
 
 ## Product commitment
@@ -90,22 +90,22 @@ Autonomy is configured by operation and data scope, not by a single “RSI on”
 
 ## Current implementation boundary
 
-BrainLink currently includes read-only retrieval and session-filing evaluators. They compare bounded candidates and block review for insufficient cases or privacy violations; they do not change live behavior. Their present fictional development sets and author-run outcomes are not independent or production validation. A local proposal ledger UI now exists and can suggest likely duplicates from title/problem text; this advisory similarity check does not merge or block proposals. There is no verified continuous research scheduler, autonomous experiment orchestrator, or recursive-gain receipt. Do not describe those as implemented.
+BrainLink currently includes read-only retrieval and session-filing evaluators. They compare bounded candidates and block review for insufficient cases or privacy violations; they do not change live behavior. Their present fictional development sets and author-run outcomes are not independent or production validation. A local proposal ledger UI now exists and can suggest likely duplicates from title/problem text; this advisory similarity check does not merge or block proposals. Opt-in research discovery (see [RSI research discovery](RSI-DISCOVERY.md)) can now query one fixed public source, arXiv, for user-chosen topics while Setup is open, and append relevant entries as `discovered` proposals with source provenance and a relevance explanation. There is no verified continuous research service, autonomous experiment orchestrator, or recursive-gain receipt. Do not describe those as implemented.
 
-The first source-backed proposal ledger is now implemented in Setup. It is local to the BrainLink app data directory, uses an append-only hash-linked journal, enforces revision checks and a bounded status lifecycle, and requires evidence/reviewer/rollback fields before acceptance. A similarity check offers up to three advisory matches before saving; the user may still save an overlapping idea intentionally. The ledger is included in the existing verified backup and restore output. This is a local proposal/review surface only: it does not discover sources automatically, execute experiments, or promote code or knowledge.
+The first source-backed proposal ledger is now implemented in Setup. It is local to the BrainLink app data directory, uses an append-only hash-linked journal, enforces revision checks and a bounded status lifecycle, and requires evidence/reviewer/rollback fields before acceptance. A similarity check offers up to three advisory matches before saving; the user may still save an overlapping idea intentionally. The ledger is included in the existing verified backup and restore output. This is a local proposal/review surface only: it does not execute experiments or promote code or knowledge. The separate, off-by-default discovery stage may add `discovered` proposals; it cannot move them further.
 
-Next delivery stages: add opt-in discovery scheduling with source freshness and pause controls; add isolated experiment execution and comparable evaluation receipts; then add post-promotion monitoring and regression rollback. Each stage must be testable and usable independently. Until a scheduler and collection mechanism exist in code, “continuous” remains a product requirement, not a live background process.
+Next delivery stages: opt-in discovery scheduling with pause controls is implemented for one source; next, broaden sources through reviewed allowlist changes and add source-freshness refresh of existing proposals; add isolated experiment execution and comparable evaluation receipts; then add post-promotion monitoring and regression rollback. Each stage must be testable and usable independently. Until a scheduler and collection mechanism exist in code, “continuous” remains a product requirement, not a live background process.
 
 ## Acceptance gates
 
 1. A user can see why an idea was proposed, its evidence, date, confidence, scope, and status. (The local ledger now implements the proposal, source URL/claim, memory tags, and review lifecycle foundation.)
-2. The same idea is deduplicated or linked instead of repeatedly rediscovered.
+2. The same idea is deduplicated or linked instead of repeatedly rediscovered. (Discovery skips proposals with the same canonical source URL or a near-identical title; manual saves get advisory similarity matches.)
 3. A proposal can be rejected, deferred, tested in isolation, accepted, and rolled back with an audit trail.
 4. The evaluation distinguishes first-order from recursive improvement and labels missing measurements as unknown.
 5. Synthetic privacy canaries prove restricted notes are excluded before search results, excerpts, generated packets, logs, exports, and backups.
 6. Token/time claims compare equivalent work and preserve task-quality and privacy guardrails.
 7. No agent can promote a change or widen scope without the appropriate approval.
-8. Discovery can be paused, its sources refreshed, and its stored findings exported or removed through an explicit user-controlled workflow.
+8. Discovery can be paused, its sources refreshed, and its stored findings exported or removed through an explicit user-controlled workflow. (Pause/resume, local run receipts and ledger backup are implemented; findings are removed from consideration by rejection because the ledger is append-only; refreshing existing sources is not implemented.)
 
 ## References
 

@@ -1,5 +1,7 @@
 // Local, append-only RSI proposal ledger. This stores proposal metadata only; it never executes
 // experiments, fetches sources, changes vault content, or promotes a candidate into live behavior.
+// Opt-in discovery (src/rsi-discovery.mjs) may append `discovered` proposals through
+// appendDiscoveries(); their origin and discovery provenance are fixed at creation.
 import { appendFile, mkdir, readFile, open, unlink } from 'node:fs/promises';
 import path from 'node:path';
 import { createHash, randomUUID } from 'node:crypto';
@@ -41,8 +43,39 @@ function duplicateCandidates(rows, fields) {
     .slice(0, 3);
 }
 
+// Canonical form used to recognise the same source across proposals: lower-case host, no
+// fragment, no trailing slash, and arXiv abstract links without their version suffix.
+export function canonicalSourceUrl(raw) {
+  let url; try { url = new URL(raw); } catch { return ''; }
+  url.hash = '';
+  const host = url.hostname.toLowerCase().replace(/^www\./, '');
+  let pathname = url.pathname.replace(/\/+$/, '');
+  if (host === 'arxiv.org') pathname = pathname.replace(/^\/(?:abs|pdf)\/([^/]+?)(?:v\d+)?(?:\.pdf)?$/, '/abs/$1');
+  return `https://${host}${pathname}${url.search}`;
+}
+
+const DISCOVERY_KEYS = ['run_id', 'source', 'topic', 'signal', 'matched_terms', 'workflow_terms', 'score'];
+function validateDiscovery(input) {
+  if (!input || typeof input !== 'object' || Array.isArray(input)) throw new Error('Discovery provenance must be an object.');
+  const out = {};
+  for (const key of DISCOVERY_KEYS) {
+    const value = input[key];
+    if (key === 'score') { if (!Number.isInteger(value) || value < 0 || value > 100) throw new Error('Discovery score must be an integer from 0 to 100.'); out.score = value; }
+    else if (key.endsWith('_terms')) {
+      if (!Array.isArray(value) || value.length > 12 || value.some(x => typeof x !== 'string' || !x || x.length > 60)) throw new Error(`${key} must be a short list of terms.`);
+      out[key] = value;
+    } else {
+      if (typeof value !== 'string' || !value.trim() || value.length > 240) throw new Error(`Discovery ${key} is required.`);
+      out[key] = value.trim();
+    }
+  }
+  return out;
+}
+
 function validatePayload(input, { partial = false } = {}) {
   if (!input || typeof input !== 'object' || Array.isArray(input)) throw new Error('Idea must be an object.');
+  // Provenance is set by BrainLink at creation and never by a caller or a later edit.
+  if ('origin' in input || 'discovery' in input) throw new Error('origin and discovery provenance are recorded by BrainLink and cannot be supplied or edited.');
   const out = {};
   for (const key of FIELDS) {
     if (partial && !(key in input)) continue;
@@ -106,7 +139,7 @@ function project(events) {
   const records = new Map();
   for (const event of events) {
     const row = records.get(event.idea_id);
-    if (event.kind === 'created') records.set(event.idea_id, { id: event.idea_id, status: 'discovered', revision: 1, created_at: event.at, updated_at: event.at, fields: event.fields, history: [{ status: 'discovered', at: event.at, note: 'Created' }] });
+    if (event.kind === 'created') records.set(event.idea_id, { id: event.idea_id, status: 'discovered', revision: 1, created_at: event.at, updated_at: event.at, origin: event.origin || 'manual', ...(event.discovery ? { discovery: event.discovery } : {}), fields: event.fields, history: [{ status: 'discovered', at: event.at, note: event.origin === 'discovery' ? 'Found by opt-in discovery' : 'Created' }] });
     else if (row) {
       if (event.kind === 'updated') row.fields = { ...row.fields, ...event.fields };
       if (event.status) { row.status = event.status; row.history.push({ status: event.status, at: event.at, note: event.note || '' }); }
@@ -150,6 +183,7 @@ export function createRsiLedger({ home, now = () => new Date() }) {
       if (record?.owner === owner) await unlink(lockFile).catch(() => {});
     }
   }
+  const newId = () => `BL-RSI-${now().toISOString().slice(0, 10).replaceAll('-', '')}-${randomUUID().slice(0, 8)}`;
   const locked = (fn) => { const next = queue.then(() => withFileLock(fn)); queue = next.catch(() => {}); return next; };
   const append = async (payload) => {
     await mkdir(path.dirname(file), { recursive: true });
@@ -163,9 +197,40 @@ export function createRsiLedger({ home, now = () => new Date() }) {
     similar: (input) => locked(async () => duplicateCandidates(project(await readEvents(file)), validatePayload(input))),
     create: (input) => locked(async () => {
       const fields = validatePayload(input);
-      const id = `BL-RSI-${now().toISOString().slice(0, 10).replaceAll('-', '')}-${randomUUID().slice(0, 8)}`;
+      const id = newId();
       const at = now().toISOString(); await append({ kind: 'created', idea_id: id, at, fields });
       return project(await readEvents(file)).find(x => x.id === id);
+    }),
+    // Discovery output: each candidate is checked against every existing proposal inside the same
+    // lock that appends it, so concurrent runs or manual saves cannot slip a duplicate in between.
+    // Created records always start in `discovered`; nothing here can triage, test or accept them.
+    appendDiscoveries: (candidates, { shouldContinue = () => true, limit = 5 } = {}) => locked(async () => {
+      if (!Array.isArray(candidates) || candidates.length > 20) throw new Error('Discovery batch must be a list of at most 20 candidates.');
+      if (!Number.isInteger(limit) || limit < 1 || limit > 10) throw new Error('Discovery limit must be from 1 to 10.');
+      const prepared = [];
+      let invalid = 0, overLimit = 0;
+      for (const { fields, discovery } of candidates) {
+        try { prepared.push({ fields: validatePayload(fields), discovery: validateDiscovery(discovery) }); } catch { invalid++; }
+      }
+      const created = [], duplicates = [];
+      if (!(await shouldContinue())) return { created, duplicates, invalid, over_limit: 0, stopped: true };
+      const rows = project(await readEvents(file));
+      const known = new Map();
+      for (const row of rows) for (const source of row.fields.sources || []) known.set(canonicalSourceUrl(source.url), row);
+      for (const candidate of prepared) {
+        const key = canonicalSourceUrl(candidate.fields.sources[0]?.url || '');
+        const sameUrl = key && known.get(key);
+        const sameTitle = sameUrl ? null : rows.find(row => similarity(row.fields.title, candidate.fields.title) >= 0.8);
+        const existing = sameUrl || sameTitle;
+        if (existing) { duplicates.push({ title: candidate.fields.title, existing_id: existing.id, reason: sameUrl ? 'same_source' : 'similar_title' }); continue; }
+        if (created.length >= limit) { overLimit++; continue; }
+        const id = newId(), at = now().toISOString();
+        await append({ kind: 'created', idea_id: id, at, origin: 'discovery', discovery: candidate.discovery, fields: candidate.fields });
+        const row = { id, fields: candidate.fields };
+        rows.push(row); if (key) known.set(key, row);
+        created.push(id);
+      }
+      return { created, duplicates, invalid, over_limit: overLimit, stopped: false };
     }),
     update: ({ id, expected_revision, fields: changes, status, note }) => locked(async () => {
       if (typeof id !== 'string' || !/^BL-RSI-\d{8}-[a-f0-9-]{8,36}$/.test(id)) throw new Error('Invalid RSI idea id.');

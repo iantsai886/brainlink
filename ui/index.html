@@ -236,6 +236,23 @@ ol.todo li { padding-left: 4px; }
         <button class="primary" type="submit" data-i18n="rsi.save">Save idea</button>
       </form>
     </details>
+    <details class="card" id="rsi-discovery" style="margin-bottom:10px"><summary data-i18n="rsi.discovery.title">Research discovery (opt-in)</summary>
+      <p class="hint" data-i18n="rsi.discovery.hint"></p>
+      <p id="rsi-discovery-status" class="muted" aria-live="polite"></p>
+      <form id="rsi-discovery-form" style="margin-top:10px">
+        <label class="muted" style="display:flex;flex-direction:row;gap:6px;align-items:center"><input type="checkbox" name="enabled" style="width:auto"><span data-i18n="rsi.discovery.enabled">Turn on discovery</span></label>
+        <label><span data-i18n="rsi.discovery.topics">Search topics (one per line, up to 5)</span><textarea name="topics" rows="3" maxlength="320"></textarea></label>
+        <label><span data-i18n="rsi.discovery.signals">Problems you want solved (one per line, up to 8)</span><textarea name="signals" rows="4" maxlength="1700"></textarea></label>
+        <div class="grid2"><label><span data-i18n="rsi.discovery.interval">Check every</span><select name="interval_hours"><option value="24" data-i18n="rsi.discovery.daily">Day</option><option value="168" data-i18n="rsi.discovery.weekly">Week</option><option value="336" data-i18n="rsi.discovery.fortnightly">Two weeks</option><option value="720" data-i18n="rsi.discovery.monthly">30 days</option></select></label>
+          <label><span data-i18n="rsi.discovery.maxNew">New proposals per run (1-10)</span><input name="max_new_per_run" type="number" min="1" max="10" value="5"></label></div>
+        <p class="muted" data-i18n="rsi.discovery.privacy"></p>
+        <div class="row"><button class="primary" type="submit" data-i18n="rsi.discovery.save">Save discovery settings</button>
+          <button type="button" id="rsi-discovery-run" data-i18n="rsi.discovery.runNow">Run now</button>
+          <button type="button" id="rsi-discovery-pause" data-i18n="rsi.discovery.pause">Pause</button>
+          <button type="button" id="rsi-discovery-resume" data-i18n="rsi.discovery.resume" hidden>Resume</button></div>
+      </form>
+      <ol id="rsi-discovery-runs" class="muted" style="font-size:13px"></ol>
+    </details>
     <div id="rsi-ideas" class="cards" aria-live="polite"></div>
   </section>
 
@@ -532,10 +549,12 @@ async function loadRsi() {
   if (!ideas.length) { $('rsi-ideas').innerHTML = '<p class="muted">' + esc(t('rsi.empty')) + '</p>'; return; }
   $('rsi-ideas').innerHTML = ideas.map((idea) => {
     const f = idea.fields, sources = (f.sources || []).map(s => '<b>' + esc(s.title || s.url) + '</b> <a href="' + esc(s.url) + '" target="_blank" rel="noopener noreferrer">' + esc(t('rsi.openSource')) + '</a>' + (s.published_at ? ' · ' + esc(t('rsi.publishedShort')) + ' ' + esc(s.published_at) : '') + (s.accessed_at ? ' · ' + esc(t('rsi.accessed')) + ' ' + esc(s.accessed_at) : '') + (s.confidence ? ' · ' + esc(s.confidence) + ' ' + esc(t('rsi.confidenceShort')) : '') + (s.claim ? '<br>' + esc(s.claim) : '') + (s.limitations ? '<br>' + esc(t('rsi.limitations')) + ': ' + esc(s.limitations) : '')).join('<br>');
-    const history = idea.history.map(h => '<li>' + esc(h.status) + ' · ' + esc(new Date(h.at).toLocaleString(LOCALE)) + (h.note ? ' — ' + esc(h.note) : '') + '</li>').join('');
+    const history = idea.history.map((h, i) => '<li>' + esc(h.status) + ' · ' + esc(new Date(h.at).toLocaleString(LOCALE)) + (i === 0 && idea.origin === 'discovery' ? ' — ' + esc(t('rsi.discovery.historyNote')) : h.note ? ' — ' + esc(h.note) : '') + '</li>').join('');
+    const d = idea.origin === 'discovery' ? idea.discovery : null;
+    const why = d ? '<p class="muted"><span class="pill">' + esc(t('rsi.discovery.badge')) + '</span> ' + esc(t('rsi.discovery.why', { signal: d.signal, terms: d.matched_terms.join(', '), workflow: d.workflow_terms.join(', '), score: d.score })) + '</p>' : '';
     const options = (transitions[idea.status] || []).map(s => '<option value="' + esc(s) + '">' + esc(t('rsi.status.' + s)) + '</option>').join('');
     const evidence = '<div class="grid2"><label>' + esc(t('rsi.baselineVersion')) + '<input data-rsi-field="baseline_version" value="' + esc(f.baseline_version || '') + '"></label><label>' + esc(t('rsi.candidateVersion')) + '<input data-rsi-field="candidate_version" value="' + esc(f.candidate_version || '') + '"></label><label>' + esc(t('rsi.testSetVersion')) + '<input data-rsi-field="test_set_version" value="' + esc(f.test_set_version || '') + '"></label><label>' + esc(t('rsi.reviewer')) + '<input data-rsi-field="reviewer" value="' + esc(f.reviewer || '') + '"></label></div><label>' + esc(t('rsi.results')) + '<textarea data-rsi-field="results">' + esc(f.results || '') + '</textarea></label><label>' + esc(t('rsi.metrics')) + '<textarea data-rsi-field="metrics">' + esc((f.metrics || []).join('\n')) + '</textarea></label><label>' + esc(t('rsi.guardrails')) + '<textarea data-rsi-field="guardrails">' + esc((f.guardrails || []).join('\n')) + '</textarea></label><label>' + esc(t('rsi.rationale')) + '<textarea data-rsi-field="decision_and_reason">' + esc(f.decision_and_reason || '') + '</textarea></label><label>' + esc(t('rsi.rollback')) + '<textarea data-rsi-field="rollback">' + esc(f.rollback || '') + '</textarea></label>';
-    return '<article class="card" data-rsi-id="' + esc(idea.id) + '" data-rsi-revision="' + idea.revision + '"><div class="row" style="justify-content:space-between"><b>' + esc(f.title) + '</b><span class="pill">' + esc(t('rsi.status.' + idea.status)) + '</span></div><p>' + esc(f.user_problem) + '</p>' + (f.hypothesis ? '<p><b>' + esc(t('rsi.hypothesisShort')) + ':</b> ' + esc(f.hypothesis) + '</p>' : '') + (sources ? '<p class="muted">' + sources + '</p>' : '') + '<div class="row muted" style="font-size:13px">' + esc((f.memory_types || []).map(x => t('twinProfiles.memory.' + x)).join(', ') || '—') + ' · ' + esc(t('rsi.updated')) + ' ' + esc(new Date(idea.updated_at).toLocaleString(LOCALE)) + '</div><details style="margin-top:8px"><summary>' + esc(t('rsi.evidenceHistory')) + '</summary>' + evidence + '<ol>' + history + '</ol>' + (options ? '<div class="row"><select data-rsi-next>' + options + '</select><input data-rsi-note maxlength="500" placeholder="' + esc(t('rsi.statusNote')) + '"><button data-rsi-update>' + esc(t('rsi.update')) + '</button></div>' : '') + '</details></article>';
+    return '<article class="card" data-rsi-id="' + esc(idea.id) + '" data-rsi-revision="' + idea.revision + '"><div class="row" style="justify-content:space-between"><b>' + esc(f.title) + '</b><span class="pill">' + esc(t('rsi.status.' + idea.status)) + '</span></div>' + why + '<p>' + esc(f.user_problem) + '</p>' + (f.hypothesis ? '<p><b>' + esc(t('rsi.hypothesisShort')) + ':</b> ' + esc(f.hypothesis) + '</p>' : '') + (sources ? '<p class="muted">' + sources + '</p>' : '') + '<div class="row muted" style="font-size:13px">' + esc((f.memory_types || []).map(x => t('twinProfiles.memory.' + x)).join(', ') || '—') + ' · ' + esc(t('rsi.updated')) + ' ' + esc(new Date(idea.updated_at).toLocaleString(LOCALE)) + '</div><details style="margin-top:8px"><summary>' + esc(t('rsi.evidenceHistory')) + '</summary>' + evidence + '<ol>' + history + '</ol>' + (options ? '<div class="row"><select data-rsi-next>' + options + '</select><input data-rsi-note maxlength="500" placeholder="' + esc(t('rsi.statusNote')) + '"><button data-rsi-update>' + esc(t('rsi.update')) + '</button></div>' : '') + '</details></article>';
   }).join('');
 }
 
@@ -563,6 +582,37 @@ document.addEventListener('click', (e) => {
     await loadRsi(); toast(t('rsi.updatedToast'));
   });
 });
+
+function renderDiscovery(d) {
+  const s = d.settings, form = $('rsi-discovery-form');
+  form.elements.enabled.checked = s.enabled;
+  form.elements.topics.value = s.topics.join('\n');
+  form.elements.signals.value = s.signals.join('\n');
+  form.elements.interval_hours.value = String(s.interval_hours);
+  form.elements.max_new_per_run.value = String(s.max_new_per_run);
+  $('rsi-discovery-pause').hidden = s.paused || !s.enabled;
+  $('rsi-discovery-resume').hidden = !s.paused;
+  $('rsi-discovery-run').disabled = !s.enabled || s.paused || d.running;
+  const state = !s.enabled ? 'off' : s.paused ? 'paused' : d.running ? 'running' : 'on';
+  $('rsi-discovery-status').textContent = t('rsi.discovery.state.' + state) + ' · ' + t('rsi.discovery.sources', { sources: d.sources.map(x => x.label + ' (' + x.host + ')').join(', ') });
+  $('rsi-discovery-runs').innerHTML = d.runs.map(r => '<li>' + esc(new Date(r.started_at).toLocaleString(LOCALE)) + ' · ' + esc(t('rsi.discovery.trigger.' + r.trigger)) + ' · ' + esc(t('rsi.discovery.run.' + r.status)) + ' · ' + esc(t('rsi.discovery.counts', { fetched: r.fetched, entries: r.entries, created: r.created.length, duplicates: r.duplicates, irrelevant: r.dropped.irrelevant, hostile: r.dropped.secret + r.dropped.instruction_like, invalid: r.dropped.invalid, over: r.dropped.over_limit })) + (r.errors.length ? '<br>' + r.errors.map(esc).join('<br>') : '') + '</li>').join('') || '<li>' + esc(t('rsi.discovery.noRuns')) + '</li>';
+}
+async function loadDiscovery() { renderDiscovery((await api('GET', '/api/rsi/discovery')).discovery); }
+const rsiLines = (value) => String(value || '').split(/\r?\n/).map(x => x.trim()).filter(Boolean);
+$('rsi-discovery-form').addEventListener('submit', (e) => act(async () => {
+  e.preventDefault();
+  const f = e.currentTarget.elements;
+  renderDiscovery((await api('POST', '/api/rsi/discovery/settings', { enabled: f.enabled.checked, topics: rsiLines(f.topics.value), signals: rsiLines(f.signals.value), interval_hours: Number(f.interval_hours.value), max_new_per_run: Number(f.max_new_per_run.value) })).discovery);
+  toast(t('rsi.discovery.saved'));
+}));
+$('rsi-discovery-pause').addEventListener('click', () => act(async () => { renderDiscovery((await api('POST', '/api/rsi/discovery/pause')).discovery); toast(t('rsi.discovery.pausedToast')); }));
+$('rsi-discovery-resume').addEventListener('click', () => act(async () => { renderDiscovery((await api('POST', '/api/rsi/discovery/resume')).discovery); toast(t('rsi.discovery.resumedToast')); }));
+$('rsi-discovery-run').addEventListener('click', () => act(async () => {
+  $('rsi-discovery-run').disabled = true;
+  const { run, discovery } = await api('POST', '/api/rsi/discovery/run');
+  renderDiscovery(discovery); await loadRsi();
+  toast(t('rsi.discovery.ranToast', { created: run.created.length }), run.status === 'failed');
+}));
 
 function renderHandoffs(list) {
   if (!list.length) { $('handoffs-list').innerHTML = `<p class="muted">${esc(t('handoffs.empty'))}</p>`; return; }
@@ -837,6 +887,7 @@ async function load() {
   if (hasVault && !onboardingSync) loadHandoffs().catch(() => {});
   $('rsi-panel').hidden = !hasVault || onboardingSync;
   if (hasVault && !onboardingSync) loadRsi().catch(e => { $('rsi-ideas').innerHTML = '<p class="error-box">' + esc(e.message) + '</p>'; });
+  if (hasVault && !onboardingSync) loadDiscovery().catch(e => { $('rsi-discovery-status').textContent = e.message; });
   $('cfgpath').textContent = S.config_path;
   $('n1').className = 'step' + (S.vaults.length ? ' done' : '');
   $('vaults').innerHTML = S.vaults.length ? S.vaults.map((v, i) => `<div class="card"><div class="row" style="justify-content:space-between"><b>${esc(v.name)}</b><span class="pill ${v.exists ? 'on' : ''}">${v.exists ? esc(t('vault.notesCount', { n: v.notes })) : esc(t('vault.missing'))}</span></div><div class="mono muted">${esc(v.path)}</div><div class="row muted" style="font-size:13px">${v.private ? esc(t('vault.privateShort')) + ' · ' : ''}${esc(t('vault.writes'))}: ${esc(v.writes)} · ${esc(t('vault.intake'))}: ${esc(v.flat ? 'root' : v.intake_folder)}${v.decisions.length ? ' · ' + esc(t('vault.decisions')) + ' ' + esc(v.decisions.join('/')) : ''}<button class="link" data-remove="${esc(v.name)}">${esc(t('vault.removeBtn'))}</button></div>

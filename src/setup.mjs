@@ -33,6 +33,7 @@ import { listSessionFilingFolders, suggestedSessionFolder } from './sessions/fol
 import { sessionHookStatus, setSessionHook } from './sessions/hooks.mjs';
 import { twinProfileStatus } from './twin-profiles.mjs';
 import { createRsiLedger } from './rsi-ledger.mjs';
+import { createRsiDiscovery } from './rsi-discovery.mjs';
 
 const UI_STATIC_TYPES = { '.js': 'text/javascript; charset=utf-8', '.css': 'text/css; charset=utf-8', '.json': 'application/json; charset=utf-8' };
 const UI_DIR = path.join(ROOT, 'ui');
@@ -91,6 +92,8 @@ export async function startSetup(opts = {}) {
   const clientOpts = () => ({ home, os, env, launch: launchSpec(env), useCli: opts.useCli });
   const sessions = sessionsService(env); // src/host.mjs: cross-session reads over src/sessions/* (importAll, session_list/read semantics)
   const rsiLedger = createRsiLedger({ home: appHome(env) });
+  // Opt-in research discovery: off until the user enables it; runs only while this process is open.
+  const rsiDiscovery = createRsiDiscovery({ home: appHome(env), ledger: rsiLedger, fetchImpl: opts.discoveryFetch, lookup: opts.discoveryLookup });
   const html = await readFile(path.join(ROOT, 'ui', 'index.html'), 'utf8');
   let port = opts.port ?? 0;
   // When started from the app (no terminal), exit after idleMinutes without requests. Closing
@@ -188,6 +191,18 @@ export async function startSetup(opts = {}) {
     snapshotWatcher = startSnapshotWatcher(ctx, cfg, env, { onResult: (r) => saveSnapshotStatus(snapshotStateFile, r).catch(() => {}) });
     await snapshotWatcher.ready;
   }
+  // One cheap timer checks whether a scheduled discovery run is due. It never keeps the app alive:
+  // closing Setup (or its idle timeout) stops discovery until BrainLink is opened again.
+  let discoveryTickRunning = false;
+  const discoveryTimer = setInterval(async () => {
+    if (discoveryTickRunning) return;
+    discoveryTickRunning = true;
+    try { if (await rsiDiscovery.due()) await rsiDiscovery.run({ trigger: 'schedule' }); }
+    catch { /* run() records its own receipt; settings errors are shown in Setup */ }
+    finally { discoveryTickRunning = false; }
+  }, opts.discoveryTickMs ?? 15 * 60e3);
+  discoveryTimer.unref?.();
+
   refreshSnapshotWatcher(await loadConfig(file)).catch(() => {});
   refreshBackupTimer(await loadConfig(file));
 
@@ -329,6 +344,11 @@ export async function startSetup(opts = {}) {
     'POST /api/rsi/ideas/check': async (b) => ({ similar: await rsiLedger.similar(b) }),
     'POST /api/rsi/ideas': async (b) => ({ idea: await rsiLedger.create(b) }),
     'POST /api/rsi/ideas/update': async (b) => ({ idea: await rsiLedger.update(b) }),
+    'GET /api/rsi/discovery': async () => ({ discovery: await rsiDiscovery.status() }),
+    'POST /api/rsi/discovery/settings': async (b) => ({ discovery: await rsiDiscovery.configure(b) }),
+    'POST /api/rsi/discovery/pause': async () => ({ discovery: await rsiDiscovery.pause() }),
+    'POST /api/rsi/discovery/resume': async () => ({ discovery: await rsiDiscovery.resume() }),
+    'POST /api/rsi/discovery/run': async () => ({ run: await rsiDiscovery.run({ trigger: 'manual' }), discovery: await rsiDiscovery.status() }),
     'POST /api/pick-folder': async () => { const p = await pick(); return p === undefined ? { path: null, unavailable: true } : { path: p }; },
     'POST /api/quick': (b) => quickStart(b),
     'POST /api/graph': async (b) => {
@@ -730,7 +750,7 @@ export async function startSetup(opts = {}) {
     }
     try { json(res, 200, await route(body)); } catch (e) { json(res, 400, { error: String(e.message || e) }); }
   });
-  server.once('close', () => { snapshotWatcher?.stop(); if (backupTimer) { clearTimeout(backupTimer); clearInterval(backupTimer); } });
+  server.once('close', () => { snapshotWatcher?.stop(); clearInterval(discoveryTimer); if (backupTimer) { clearTimeout(backupTimer); clearInterval(backupTimer); } });
   await new Promise((resolve, reject) => { server.once('error', reject); server.listen(port, '127.0.0.1', resolve); });
   port = server.address().port;
   touch();
