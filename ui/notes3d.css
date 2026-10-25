@@ -15,6 +15,8 @@
 .notes3d-edit[hidden] { display: none; }
 .notes3d-tags { display: flex; flex-wrap: wrap; gap: 4px; }
 .notes3d-body { font-size: 14px; line-height: 1.55; }
+.notes3d-editor { width: 100%; min-height: 240px; resize: vertical; box-sizing: border-box; color: var(--text); background: var(--bg); border: 1px solid var(--line); border-radius: 8px; padding: 10px; font: 13px/1.5 var(--mono); }
+.notes3d-editor-actions[hidden] { display: none; }
 .notes3d-body h3, .notes3d-body h4, .notes3d-body h5, .notes3d-body h6 { margin: 10px 0 4px; }
 .notes3d-body p { margin: 6px 0; }
 .notes3d-body pre { background: var(--bg); border: 1px solid var(--line); border-radius: 8px; padding: 8px; overflow: auto; font-size: 12px; }

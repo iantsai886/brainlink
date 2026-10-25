@@ -117,9 +117,25 @@ test('/api/graph3d and /api/graph3d/note: same exclusion guarantee over HTTP', a
     const note = await api('/api/graph3d/note', { vault: 'Main', path: 'Beta.md' });
     assert.match(note.body, /Backlinked from Alpha/);
     assert.ok(note.backlinks.some((b) => b.title === 'Alpha'));
+    assert.equal(note.writable, true);
+    const savedBody = '# Beta\n\nEdited from the graph.\n';
+    const saved = await api('/api/graph3d/note/save', { vault: 'Main', path: 'Beta.md', etag: note.etag, body: savedBody });
+    assert.equal(saved.ok, true, JSON.stringify(saved));
+    const savedRaw = await (await import('node:fs/promises')).readFile(path.join(vaultPath, 'Beta.md'), 'utf8');
+    assert.equal(savedRaw, savedBody, 'saving a note without frontmatter writes the edited Markdown body');
+    const stale = await api('/api/graph3d/note/save', { vault: 'Main', path: 'Beta.md', etag: note.etag, body: 'stale overwrite' });
+    assert.match(stale.error || stale.message || '', /changed since it was opened/i);
 
     const refused = await api('/api/graph3d/note', { vault: 'Main', path: 'Hidden Note.md' });
     assert.ok(refused.error || refused.message, 'a private note must error, not return its content');
+    const privateSave = await api('/api/graph3d/note/save', { vault: 'Main', path: 'Hidden Note.md', etag: 'x', body: 'must not write' });
+    assert.ok(privateSave.error || privateSave.message, 'private notes must not be editable');
+    await (await import('node:fs/promises')).writeFile(path.join(vaultPath, 'Frontmatter.md'), '---\ntitle: Kept title\ntags: [one, two]\n---\nOld body\n');
+    const withHeader = await api('/api/graph3d/note', { vault: 'Main', path: 'Frontmatter.md' });
+    const headerSave = await api('/api/graph3d/note/save', { vault: 'Main', path: 'Frontmatter.md', etag: withHeader.etag, body: 'New body\n' });
+    assert.equal(headerSave.ok, true, JSON.stringify(headerSave));
+    const headerRaw = await (await import('node:fs/promises')).readFile(path.join(vaultPath, 'Frontmatter.md'), 'utf8');
+    assert.equal(headerRaw, '---\ntitle: Kept title\ntags: [one, two]\n---\nNew body\n', 'editing the body preserves exact frontmatter bytes');
   } finally { s.server.close(); }
 });
 

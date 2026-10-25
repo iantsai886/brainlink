@@ -1,15 +1,15 @@
 // Setup UI backend: a local-only web app (127.0.0.1, random session token) that picks the
 // vault folder, applies a rule pack and connects AI clients.
 import { createServer } from 'node:http';
-import { readFile, stat, lstat, cp, mkdir, writeFile } from 'node:fs/promises';
-import { randomBytes, timingSafeEqual } from 'node:crypto';
+import { readFile, stat, lstat, cp, mkdir, writeFile, rename } from 'node:fs/promises';
+import { randomBytes, timingSafeEqual, createHash } from 'node:crypto';
 import { execFile } from 'node:child_process';
 import { homedir } from 'node:os';
 import path from 'node:path';
 import { loadConfig, saveConfig, configPath, normalize, LOCALES, appHome } from './config.mjs';
 import { PACKS, buildPack, scaffold, mergePack } from './packs.mjs';
 import { CLIENTS, detect, connectClient, disconnectClient, test } from './connectors.mjs';
-import { createContext, search, searchWithVerdict, readNote, ensureDefaultIgnore, readExcludedFolders, writeExcludedFolders, DEFAULT_EXCLUDED_FOLDERS, SUGGESTED_EXCLUDED_FOLDERS } from './core.mjs';
+import { createContext, search, searchWithVerdict, readNote, ensureDefaultIgnore, readExcludedFolders, writeExcludedFolders, DEFAULT_EXCLUDED_FOLDERS, SUGGESTED_EXCLUDED_FOLDERS, safeJoin, vaultRoot } from './core.mjs';
 import { ROOT, launchSpec, readActivity, refreshMap, logActivity } from './runtime.mjs';
 import { detectEmbedder } from './embed.mjs';
 import { vaultHealth } from './insights.mjs';
@@ -600,7 +600,32 @@ export async function startSetup(opts = {}) {
       const cfg = await loadConfig(file);
       const ctx = createContext(cfg, { env: { ...env, BRAINLINK_SEMANTIC: '0' } });
       if (!b.vault || !ctx.enabled.includes(b.vault)) throw new Error('Unknown vault.');
-      return noteDetail3D(ctx, b.vault, String(b.path || ''));
+      const detail = await noteDetail3D(ctx, b.vault, String(b.path || ''));
+      const raw = await readFile(safeJoin(vaultRoot(ctx, b.vault), detail.path), 'utf8');
+      return { ...detail, etag: createHash('sha256').update(raw).digest('hex'), writable: !ctx.readOnly && ctx.byName.get(b.vault).writes === 'on' };
+    },
+    'POST /api/graph3d/note/save': async (b) => {
+      const cfg = await loadConfig(file);
+      const ctx = createContext(cfg, { env: { ...env, BRAINLINK_SEMANTIC: '0' } });
+      if (!b.vault || !ctx.enabled.includes(b.vault)) throw new Error('Unknown vault.');
+      const vault = ctx.byName.get(b.vault);
+      if (ctx.readOnly || vault.writes !== 'on') throw new Error('This vault does not allow direct edits.');
+      const rel = String(b.path || '');
+      const current = await readNote(ctx, b.vault, rel); // privacy, ignore, index and path checks run before write
+      const index = await loadVault(ctx, b.vault);
+      const noteIndex = index.byRel.get(current.path);
+      if (noteIndex === undefined || index.notes[noteIndex].generated) throw new Error('Generated notes cannot be edited here.');
+      if (typeof b.body !== 'string' || Buffer.byteLength(b.body, 'utf8') > 90000) throw new Error('Note body is missing or too large.');
+      const full = safeJoin(vaultRoot(ctx, b.vault), current.path);
+      const raw = await readFile(full, 'utf8');
+      const etag = createHash('sha256').update(raw).digest('hex');
+      if (typeof b.etag !== 'string' || b.etag !== etag) throw new Error('This note changed since it was opened. Reload it before saving.');
+      const header = /^(\uFEFF?---\r?\n[\s\S]*?\r?\n---\r?\n)/.exec(raw)?.[1] || '';
+      const next = header + b.body;
+      const tmp = `${full}.brainlink-${randomBytes(6).toString('hex')}.tmp`;
+      try { await writeFile(tmp, next, 'utf8'); await rename(tmp, full); }
+      catch (e) { try { await (await import('node:fs/promises')).unlink(tmp); } catch {} throw e; }
+      return { ok: true, etag: createHash('sha256').update(next).digest('hex') };
     },
     'POST /api/sample': async () => {
       const dest = path.join(home, 'Documents', 'BrainLink Sample Vault');
