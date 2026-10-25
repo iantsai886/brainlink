@@ -46,7 +46,11 @@ node bin/brainlink.mjs eval \
   > /tmp/retrieval-independent-v1.json
 ```
 
-The command can write to a temporary path first so the receipt records a clean source tree; copy the resulting JSON into a versioned report location only after the run.
+The command can write to a temporary path first so the receipt records source-tree state; copy the resulting JSON into `samples/evaluation/reports/retrieval-independent-v1.json` only after the run.
+
+```sh
+cp /tmp/retrieval-independent-v1.json "$PWD/samples/evaluation/reports/retrieval-independent-v1.json"
+```
 
 The fixed baseline returns the lexical top-k results. The candidate applies the label-blind `compact-coverage-v1` rule: keep the highest-ranked result, then keep later results only when lexical coverage is at least 0.35 and the serialized context remains within 350 locally estimated tokens. It does not clip note text or read expected paths/context labels. Both arms use the same fixture questions, vault permissions, top-k, and lexical-only search. The rule is part of the evaluator version and must not be tuned on this frozen test set.
 
