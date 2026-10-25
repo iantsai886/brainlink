@@ -1,6 +1,6 @@
 # BrainLink — Product and Engineering Specification
 
-Status: living specification, updated 2026-10-24. This version supersedes the October 18 plan where they conflict, especially on onboarding, trial/licensing and the product's Personal/Organisation/Client Twin direction. Current code, tests and dated evidence in `docs/IMPLEMENTATION-STATUS.md` determine implementation status.
+Status: living specification, updated 2026-10-25. This version supersedes the October 18 plan where they conflict, especially on onboarding, trial/licensing and the product's Personal/Organisation/Client Twin direction. Current code, tests and dated evidence in `docs/IMPLEMENTATION-STATUS.md` determine implementation status.
 
 ## 1. What it is
 
@@ -53,6 +53,8 @@ BrainLink is the memory, permissions, provenance and handoff layer; AI agents ar
 | Episodic | Session summaries, outcomes, corrections and source links | Find what happened and what changed |
 | Semantic | Durable notes, decisions and linked knowledge | Retrieve concise, cited context |
 | Procedural | Versioned skills, role instructions and repeatable workflows | Reuse validated ways of working |
+
+For an optional raw-source → reviewed linked-knowledge flow, see [Raw-to-Wiki knowledge flow](RAW-WIKI-INGESTION-MODEL.md). This is a design direction, not a claim that automatic ingestion is implemented.
 
 At session close, BrainLink should prepare a reviewed summary, explain its destination, preserve source links, and let the user correct or withdraw a proposal. Destination choice should reuse an exact user-approved project route first; otherwise it may suggest a folder from related notes in the explicitly selected vault and abstain when evidence is ambiguous. Saving remains preview-gated. RSI is a core product capability: BrainLink should continually discover ideas from allowed signals and current, source-backed research; triage and deduplicate them; create testable hypotheses; evaluate against fresh cases; and retain only reviewed, reversible gains. A local append-only RSI idea ledger is implemented in Setup, together with opt-in, pausable discovery from user-selected fixed arXiv and Crossref metadata endpoints that files relevant papers as `discovered` proposals explaining which user problem and memory workflow they relate to (see [RSI research discovery](RSI-DISCOVERY.md)); always-on discovery and sandbox experiment execution are not. It may evaluate placement, links, retrieval quality, continuity, reliability and token/time cost; it must not silently promote uncertain facts, broaden permissions, or change live behavior without validation and rollback. “Recursive gain” requires evidence that the improvement method itself improves later experiments. See [BrainLink RSI operating model](RSI-OPERATING-MODEL.md) for status, autonomy and acceptance gates.
 
