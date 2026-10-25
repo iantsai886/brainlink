@@ -28,10 +28,12 @@ The contributor report states that commit `fa7ae5d` passed nine GitHub Actions j
 
 The combined integration was independently tested on Windows with Node.js 24.18.0 after the backup and lifecycle follow-ups: `npm run test:all` passed 316 core tests (310 passed, six skipped) and 28 UI tests (28 passed), 344 total (338 passed, six skipped). The focused discovery/backup run passed 21 tests; one Windows symlink-privilege test was skipped. Tests used synthetic Atom feed data and fictional local fixtures; no live arXiv request was made.
 
-## Current limits
+## Limits at the time of this contribution review
 
 - Relevance is lexical, the first sentence of each abstract is not independently verified, and only arXiv is supported.
 - Research discovery is scheduled while the local app is running; it is not a separate service or uninterrupted background research system.
 - The pattern-based prompt-injection filter reduces risk but cannot guarantee that every hostile entry is detected. Discovered proposals are never executed automatically.
 - Live feed behavior, native desktop experience, measured product improvement, and production readiness remain unverified.
+
+Current source support has since expanded to user-selected arXiv and Crossref metadata endpoints; see [RSI research discovery](../RSI-DISCOVERY.md) for current behavior and verification boundaries.
 

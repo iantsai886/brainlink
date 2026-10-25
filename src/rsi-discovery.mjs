@@ -1,5 +1,5 @@
-// Opt-in RSI research discovery. Off by default; when the user enables it, BrainLink queries one
-// fixed public research feed (arXiv's Atom API) for the user's topic terms, keeps only entries that
+// Opt-in RSI research discovery. Off by default; when the user enables it, BrainLink queries fixed
+// public research feeds (arXiv Atom and Crossref JSON) for the user's topic terms, keeps only entries that
 // match one of the user's own problem statements and a BrainLink memory/agent workflow, and appends
 // them to the local RSI ledger as `discovered` proposals. It never fetches a caller-supplied URL,
 // never sends problem statements or vault content off the machine, never executes or promotes
@@ -12,11 +12,11 @@ import { randomUUID } from 'node:crypto';
 import { findSecrets } from './core.mjs';
 import { setTimeout as delay } from 'node:timers/promises';
 
-// The only network origin discovery may contact. Adding a source is a reviewed code change.
+// The only network origins and endpoint paths discovery may contact. Adding a source is a reviewed code change.
 export const DISCOVERY_SOURCES = Object.freeze({
-  arxiv: Object.freeze({ id: 'arxiv', label: 'arXiv', host: 'export.arxiv.org', path: '/api/query', entryHosts: ['arxiv.org', 'www.arxiv.org'] }),
+  arxiv: Object.freeze({ id: 'arxiv', label: 'arXiv', host: 'export.arxiv.org', path: '/api/query', format: 'atom', entryHosts: ['arxiv.org', 'www.arxiv.org'] }),
+  crossref: Object.freeze({ id: 'crossref', label: 'Crossref', host: 'api.crossref.org', path: '/works', format: 'json' }),
 });
-const ALLOWED_HOSTS = new Set(Object.values(DISCOVERY_SOURCES).map(s => s.host));
 const MAX_BYTES = 1_000_000;
 const TIMEOUT_MS = 15_000;
 
@@ -120,7 +120,8 @@ function privateAddress(address) {
 // link-local or multicast address is refused.
 export async function fetchFeed(rawUrl, { fetchImpl = fetch, lookup = dnsLookup, timeoutMs = TIMEOUT_MS, maxBytes = MAX_BYTES } = {}) {
   let url; try { url = new URL(rawUrl); } catch { throw new Error('Discovery refused an invalid feed URL.'); }
-  if (url.protocol !== 'https:' || url.username || url.password || url.port || !ALLOWED_HOSTS.has(url.hostname)) throw new Error('Discovery refused a feed outside the built-in HTTPS allowlist.');
+  const source = Object.values(DISCOVERY_SOURCES).find((item) => item.host === url.hostname);
+  if (url.protocol !== 'https:' || url.username || url.password || url.port || !source || url.pathname !== source.path) throw new Error('Discovery refused a feed outside the built-in HTTPS allowlist.');
   const answers = await lookup(url.hostname, { all: true, verbatim: true });
   const addresses = (Array.isArray(answers) ? answers : [answers]).map(a => typeof a === 'string' ? a : a?.address).filter(Boolean);
   if (!addresses.length || addresses.some(privateAddress)) throw new Error('Discovery refused a feed host that resolves to a private or reserved address.');
@@ -129,7 +130,7 @@ export async function fetchFeed(rawUrl, { fetchImpl = fetch, lookup = dnsLookup,
   const timer = setTimeout(() => controller.abort(new DOMException('Feed request timed out.', 'TimeoutError')), timeoutMs);
   try { return await readFeed(await fetchImpl(url.href, {
     method: 'GET', redirect: 'manual', credentials: 'omit',
-    headers: { Accept: 'application/atom+xml, application/xml;q=0.9', 'User-Agent': 'BrainLink-RSI-Discovery' },
+    headers: { Accept: 'application/json, application/atom+xml;q=0.9, application/xml;q=0.8', 'User-Agent': 'BrainLink-RSI-Discovery' },
     signal: controller.signal,
   }), maxBytes); } finally { clearTimeout(timer); }
 }
@@ -138,7 +139,7 @@ async function readFeed(response, maxBytes) {
   if (response.status >= 300 && response.status < 400) throw new Error('Discovery refused a redirect from the feed.');
   if (response.status !== 200) throw new Error(`Feed answered HTTP ${response.status}.`);
   const type = String(response.headers.get('content-type') || '').toLowerCase();
-  if (!/^(?:application\/atom\+xml|application\/xml|text\/xml)\b/.test(type)) throw new Error('Feed returned an unexpected content type.');
+  if (!/^(?:application\/atom\+xml|application\/xml|text\/xml|application\/json)\b/.test(type)) throw new Error('Feed returned an unexpected content type.');
   const declared = Number(response.headers.get('content-length'));
   if (Number.isFinite(declared) && declared > maxBytes) throw new Error('Feed response is larger than the discovery limit.');
   if (!response.body?.getReader) {
@@ -161,6 +162,13 @@ async function readFeed(response, maxBytes) {
 export function feedUrl(sourceId, topic) {
   const source = DISCOVERY_SOURCES[sourceId];
   if (!source) throw new Error('Unknown discovery source.');
+  if (sourceId === 'crossref') {
+    const url = new URL(`https://${source.host}${source.path}`);
+    url.searchParams.set('query.bibliographic', topic);
+    url.searchParams.set('rows', String(MAX_ENTRIES_PER_FEED));
+    url.searchParams.set('select', 'DOI,title,abstract,published,type');
+    return url.href;
+  }
   const params = new URLSearchParams({ search_query: `all:"${topic}"`, sortBy: 'submittedDate', sortOrder: 'descending', max_results: String(MAX_ENTRIES_PER_FEED) });
   return `https://${source.host}${source.path}?${params}`;
 }
@@ -184,6 +192,7 @@ export function parseAtom(xml, sourceId = 'arxiv') {
   if (/<!DOCTYPE|<!ENTITY/i.test(xml)) throw new Error('Feed contains a DTD; refusing to parse it.');
   if (!/<feed\b/i.test(xml)) throw new Error('Feed is not an Atom document.');
   const source = DISCOVERY_SOURCES[sourceId];
+  if (!source || source.format !== 'atom') throw new Error('Unknown Atom discovery source.');
   const entries = [];
   for (const match of xml.matchAll(/<entry\b[^>]*>([\s\S]*?)<\/entry>/gi)) {
     if (entries.length >= MAX_ENTRIES_PER_FEED) break;
@@ -198,6 +207,34 @@ export function parseAtom(xml, sourceId = 'arxiv') {
     entries.push({ url, title: plain(tag(body, 'title'), 240), summary: plain(tag(body, 'summary'), 2000), published_at: /^\d{4}-\d{2}-\d{2}$/.test(published) ? published : 'unknown' });
   }
   return entries;
+}
+
+const crossrefDate = (item) => {
+  const parts = item?.published?.['date-parts']?.[0] || item?.created?.['date-parts']?.[0] || [];
+  if (!Number.isInteger(parts[0]) || parts[0] < 1000 || parts[0] > 9999 || !Number.isInteger(parts[1]) || parts[1] < 1 || parts[1] > 12 || !Number.isInteger(parts[2])) return 'unknown';
+  const daysInMonth = new Date(Date.UTC(parts[0], parts[1], 0)).getUTCDate();
+  if (parts[2] < 1 || parts[2] > daysInMonth) return 'unknown';
+  const month = String(parts[1]).padStart(2, '0');
+  const day = String(parts[2]).padStart(2, '0');
+  return `${parts[0]}-${month}-${day}`;
+};
+
+export function parseCrossref(json) {
+  let data;
+  try { data = typeof json === 'string' ? JSON.parse(json) : json; } catch { throw new Error('Crossref response was not valid JSON.'); }
+  if (!Array.isArray(data?.message?.items)) throw new Error('Crossref response did not contain works.');
+  return data.message.items.slice(0, MAX_ENTRIES_PER_FEED).map((item) => {
+    const doi = typeof item?.DOI === 'string' ? item.DOI.trim() : '';
+    const validDoi = /^10\.\d{4,9}\/[\-._;()/:A-Z0-9]+$/i.test(doi);
+    const title = Array.isArray(item?.title) ? item.title.find(x => typeof x === 'string') || '' : '';
+    const abstract = typeof item?.abstract === 'string' ? item.abstract : '';
+    return {
+      url: validDoi ? `https://doi.org/${encodeURIComponent(doi.toLowerCase())}` : '',
+      title: plain(title, 240),
+      summary: plain(abstract, 2000),
+      published_at: crossrefDate(item),
+    };
+  });
 }
 
 // ---- relevance ----
@@ -252,7 +289,7 @@ function candidateFor(entry, relevance, { runId, sourceId, topic, accessedAt }) 
         url: entry.url, title: entry.title, published_at: entry.published_at, accessed_at: accessedAt,
         claim: `Abstract states (not verified): ${firstSentence(entry.summary)}`.slice(0, 500),
         confidence: 'low',
-        limitations: 'Found automatically from public feed metadata. The abstract was not reviewed by a person, preprints may not be peer reviewed, and nothing here shows the idea improves BrainLink.',
+        limitations: 'Found automatically from public research metadata. The abstract was not reviewed by a person, source metadata may be incomplete or unreviewed, and nothing here shows the idea improves BrainLink.',
       }],
       privacy_scope: 'Public research metadata only. Only the configured topic terms were sent to the source.',
     },
@@ -272,6 +309,7 @@ export function createRsiDiscovery({ home, ledger, fetchImpl, lookup, now = () =
   async function load() {
     let raw; try { raw = JSON.parse(await readFile(file, 'utf8')); } catch (e) { if (e.code === 'ENOENT') raw = {}; else throw new Error('Discovery settings are unreadable; fix or remove the local discovery.json file.'); }
     const settings = { ...DEFAULT_DISCOVERY, ...(raw.settings || {}) };
+    if (!Array.isArray(settings.sources) || !settings.sources.length || settings.sources.some((id) => !Object.hasOwn(DISCOVERY_SOURCES, id))) throw new Error('Discovery settings contain an unknown source; review or reset the local discovery settings.');
     return { settings, runs: Array.isArray(raw.runs) ? raw.runs : [], events: Array.isArray(raw.events) ? raw.events : [] };
   }
   function save(mutator) {
@@ -310,9 +348,10 @@ export function createRsiDiscovery({ home, ledger, fetchImpl, lookup, now = () =
       for (const sourceId of settings.sources) {
         for (const topic of settings.topics) {
           try {
-            const xml = await fetchFeed(feedUrl(sourceId, topic), { fetchImpl, lookup });
+            const payload = await fetchFeed(feedUrl(sourceId, topic), { fetchImpl, lookup });
             receipt.fetched++;
-            for (const entry of parseAtom(xml, sourceId)) {
+            const entries = sourceId === 'crossref' ? parseCrossref(payload) : parseAtom(payload, sourceId);
+            for (const entry of entries) {
               receipt.entries++;
               if (!entry.url || !entry.title || !entry.summary) { receipt.dropped.invalid++; continue; }
               const hostile = hostileReason(entry);

@@ -241,6 +241,7 @@ ol.todo li { padding-left: 4px; }
       <p id="rsi-discovery-status" class="muted" aria-live="polite"></p>
       <form id="rsi-discovery-form" style="margin-top:10px">
         <label class="muted" style="display:flex;flex-direction:row;gap:6px;align-items:center"><input type="checkbox" name="enabled" style="width:auto"><span data-i18n="rsi.discovery.enabled">Turn on discovery</span></label>
+        <fieldset><legend data-i18n="rsi.discovery.sourceLabel">Public research sources</legend><div id="rsi-discovery-sources" class="row"></div></fieldset>
         <label><span data-i18n="rsi.discovery.topics">Search topics (one per line, up to 5)</span><textarea name="topics" rows="3" maxlength="320"></textarea></label>
         <label><span data-i18n="rsi.discovery.signals">Problems you want solved (one per line, up to 8)</span><textarea name="signals" rows="4" maxlength="1700"></textarea></label>
         <div class="grid2"><label><span data-i18n="rsi.discovery.interval">Check every</span><select name="interval_hours"><option value="24" data-i18n="rsi.discovery.daily">Day</option><option value="168" data-i18n="rsi.discovery.weekly">Week</option><option value="336" data-i18n="rsi.discovery.fortnightly">Two weeks</option><option value="720" data-i18n="rsi.discovery.monthly">30 days</option></select></label>
@@ -601,6 +602,7 @@ document.addEventListener('click', (e) => {
 function renderDiscovery(d) {
   const s = d.settings, form = $('rsi-discovery-form');
   form.elements.enabled.checked = s.enabled;
+  $('rsi-discovery-sources').innerHTML = d.sources.map(source => `<label style="display:flex;gap:6px;align-items:center"><input type="checkbox" name="sources" value="${esc(source.id)}" ${s.sources.includes(source.id) ? 'checked' : ''}>${esc(source.label)} <span class="muted">(${esc(source.host)})</span></label>`).join('');
   form.elements.topics.value = s.topics.join('\n');
   form.elements.signals.value = s.signals.join('\n');
   form.elements.interval_hours.value = String(s.interval_hours);
@@ -609,7 +611,7 @@ function renderDiscovery(d) {
   $('rsi-discovery-resume').hidden = !s.paused;
   $('rsi-discovery-run').disabled = !s.enabled || s.paused || d.running;
   const state = !s.enabled ? 'off' : s.paused ? 'paused' : d.running ? 'running' : 'on';
-  $('rsi-discovery-status').textContent = t('rsi.discovery.state.' + state) + ' · ' + t('rsi.discovery.sources', { sources: d.sources.map(x => x.label + ' (' + x.host + ')').join(', ') });
+  $('rsi-discovery-status').textContent = t('rsi.discovery.state.' + state) + ' · ' + t('rsi.discovery.sources', { sources: d.sources.filter(x => s.sources.includes(x.id)).map(x => x.label + ' (' + x.host + ')').join(', ') });
   $('rsi-discovery-runs').innerHTML = d.runs.map(r => '<li>' + esc(new Date(r.started_at).toLocaleString(LOCALE)) + ' · ' + esc(t('rsi.discovery.trigger.' + r.trigger)) + ' · ' + esc(t('rsi.discovery.run.' + r.status)) + ' · ' + esc(t('rsi.discovery.counts', { fetched: r.fetched, entries: r.entries, created: r.created.length, duplicates: r.duplicates, irrelevant: r.dropped.irrelevant, hostile: r.dropped.secret + r.dropped.instruction_like, invalid: r.dropped.invalid, over: r.dropped.over_limit })) + (r.errors.length ? '<br>' + r.errors.map(esc).join('<br>') : '') + '</li>').join('') || '<li>' + esc(t('rsi.discovery.noRuns')) + '</li>';
 }
 async function loadDiscovery() { renderDiscovery((await api('GET', '/api/rsi/discovery')).discovery); }
@@ -617,7 +619,7 @@ const rsiLines = (value) => String(value || '').split(/\r?\n/).map(x => x.trim()
 $('rsi-discovery-form').addEventListener('submit', (e) => act(async () => {
   e.preventDefault();
   const f = e.currentTarget.elements;
-  renderDiscovery((await api('POST', '/api/rsi/discovery/settings', { enabled: f.enabled.checked, topics: rsiLines(f.topics.value), signals: rsiLines(f.signals.value), interval_hours: Number(f.interval_hours.value), max_new_per_run: Number(f.max_new_per_run.value) })).discovery);
+  renderDiscovery((await api('POST', '/api/rsi/discovery/settings', { enabled: f.enabled.checked, sources: [...f.querySelectorAll('input[name="sources"]:checked')].map(x => x.value), topics: rsiLines(f.topics.value), signals: rsiLines(f.signals.value), interval_hours: Number(f.interval_hours.value), max_new_per_run: Number(f.max_new_per_run.value) })).discovery);
   toast(t('rsi.discovery.saved'));
 }));
 $('rsi-discovery-pause').addEventListener('click', () => act(async () => { renderDiscovery((await api('POST', '/api/rsi/discovery/pause')).discovery); toast(t('rsi.discovery.pausedToast')); }));
