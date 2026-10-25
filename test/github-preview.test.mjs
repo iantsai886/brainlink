@@ -132,6 +132,30 @@ test('GitHub push refuses unrelated local commits and never force-pushes', async
   assert.equal(execFileSync('git', [`--git-dir=${bare}`, 'rev-parse', 'main'], { encoding: 'utf8' }).trim(), git(f.repo, 'rev-parse', `${local.commit}^`));
 });
 
+test('GitHub push stops when the tracked remote branch advances after preview', async () => {
+  const f = await fixture(), bare = path.join(f.root, 'remote.git'), other = path.join(f.root, 'other-contributor');
+  await mkdir(bare, { recursive: true });
+  git(bare, 'init', '--bare', '--quiet');
+  git(f.repo, 'config', 'user.name', 'BrainLink Test');
+  git(f.repo, 'config', 'user.email', 'brainlink-test@example.invalid');
+  git(f.repo, 'switch', '-c', 'main');
+  git(f.repo, 'commit', '--allow-empty', '-m', 'fixture baseline');
+  git(f.repo, 'config', `url.${pathToFileURL(bare).href}.insteadOf`, 'https://github.com/example/shared-brain.git');
+  git(f.repo, 'push', '--set-upstream', 'origin', 'main');
+  const local = await commitGitHubSelectedNotes({ ctx: f.ctx, repoPath: f.repo, vaultName: 'Company', paths: ['Public.md'] });
+  await mkdir(other, { recursive: true });
+  git(other, 'clone', '--quiet', '--branch', 'main', bare, '.');
+  git(other, 'config', 'user.name', 'Other Contributor');
+  git(other, 'config', 'user.email', 'other@example.invalid');
+  git(other, 'commit', '--allow-empty', '-m', 'remote contributor update');
+  git(other, 'push', 'origin', 'main');
+  const remoteBefore = execFileSync('git', [`--git-dir=${bare}`, 'rev-parse', 'main'], { encoding: 'utf8' }).trim();
+  await assert.rejects(pushGitHubSelectedNotes({ ctx: f.ctx, repoPath: f.repo, vaultName: 'Company', paths: ['Public.md'], commit: local.commit }), /remote branch changed/);
+  assert.equal(execFileSync('git', [`--git-dir=${bare}`, 'rev-parse', 'main'], { encoding: 'utf8' }).trim(), remoteBefore);
+  assert.equal(git(f.repo, 'rev-parse', 'HEAD'), git(f.repo, 'rev-parse', local.commit));
+  assert.equal(git(f.repo, 'status', '--porcelain'), '');
+});
+
 test('local commit refuses a dirty repository without changing any files', async () => {
   const f = await fixture();
   git(f.repo, 'config', 'user.name', 'BrainLink Test');
