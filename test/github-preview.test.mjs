@@ -4,9 +4,10 @@ import { execFileSync } from 'node:child_process';
 import { mkdtemp, mkdir, readFile, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
+import { pathToFileURL } from 'node:url';
 import { normalize, saveConfig } from '../src/config.mjs';
 import { createContext } from '../src/core.mjs';
-import { listGitHubShareCandidates, previewGitHubRepository, commitGitHubSelectedNotes } from '../src/sync/github-preview.mjs';
+import { listGitHubShareCandidates, previewGitHubRepository, commitGitHubSelectedNotes, pushGitHubSelectedNotes } from '../src/sync/github-preview.mjs';
 import { startSetup } from '../src/setup.mjs';
 
 const tmp = (tag) => mkdtemp(path.join(tmpdir(), `brainlink-gh-preview-${tag}-`));
@@ -92,6 +93,45 @@ test('explicit local commit publishes only selected notes and never pushes', asy
   assert.doesNotMatch(JSON.stringify(result), /SECOND_NOTE_BODY_CANARY_3916|PUBLIC_NOTE_BODY_CANARY_7421/);
 });
 
+test('explicit GitHub push sends only the selected BrainLink commit to its tracked branch', async () => {
+  const f = await fixture(), bare = path.join(f.root, 'remote.git');
+  await mkdir(bare, { recursive: true });
+  git(bare, 'init', '--bare', '--quiet');
+  git(f.repo, 'config', 'user.name', 'BrainLink Test');
+  git(f.repo, 'config', 'user.email', 'brainlink-test@example.invalid');
+  git(f.repo, 'switch', '-c', 'main');
+  git(f.repo, 'commit', '--allow-empty', '-m', 'fixture baseline');
+  // Keep the origin looking like the credential-free GitHub URL under test while redirecting
+  // network operations to an isolated local bare remote; no live GitHub access occurs.
+  git(f.repo, 'config', `url.${pathToFileURL(bare).href}.insteadOf`, 'https://github.com/example/shared-brain.git');
+  git(f.repo, 'push', '--set-upstream', 'origin', 'main');
+  const local = await commitGitHubSelectedNotes({ ctx: f.ctx, repoPath: f.repo, vaultName: 'Company', paths: ['Public.md'] });
+  assert.equal(local.committed, true);
+  const pushed = await pushGitHubSelectedNotes({ ctx: f.ctx, repoPath: f.repo, vaultName: 'Company', paths: ['Public.md'], commit: local.commit });
+  assert.equal(pushed.pushed, true);
+  assert.equal(pushed.branch, 'main');
+  assert.equal(git(f.repo, 'status', '--porcelain'), '');
+  assert.equal(execFileSync('git', [`--git-dir=${bare}`, 'show', 'main:BrainLink/notes/Public.md'], { encoding: 'utf8' }), await readFile(path.join(f.vault, 'Public.md'), 'utf8'));
+  assert.equal(execFileSync('git', [`--git-dir=${bare}`, 'show', '--pretty=format:', '--name-only', 'main'], { encoding: 'utf8' }).trim(), 'BrainLink/notes/Public.md');
+});
+
+test('GitHub push refuses unrelated local commits and never force-pushes', async () => {
+  const f = await fixture(), bare = path.join(f.root, 'remote.git');
+  await mkdir(bare, { recursive: true });
+  git(bare, 'init', '--bare', '--quiet');
+  git(f.repo, 'config', 'user.name', 'BrainLink Test');
+  git(f.repo, 'config', 'user.email', 'brainlink-test@example.invalid');
+  git(f.repo, 'switch', '-c', 'main');
+  git(f.repo, 'commit', '--allow-empty', '-m', 'fixture baseline');
+  git(f.repo, 'config', `url.${pathToFileURL(bare).href}.insteadOf`, 'https://github.com/example/shared-brain.git');
+  git(f.repo, 'push', '--set-upstream', 'origin', 'main');
+  const local = await commitGitHubSelectedNotes({ ctx: f.ctx, repoPath: f.repo, vaultName: 'Company', paths: ['Public.md'] });
+  git(f.repo, 'commit', '--allow-empty', '-m', 'unrelated local work');
+  await assert.rejects(pushGitHubSelectedNotes({ ctx: f.ctx, repoPath: f.repo, vaultName: 'Company', paths: ['Public.md'], commit: local.commit }), /HEAD no longer matches/);
+  assert.equal(git(f.repo, 'status', '--porcelain'), '');
+  assert.equal(execFileSync('git', [`--git-dir=${bare}`, 'rev-parse', 'main'], { encoding: 'utf8' }).trim(), git(f.repo, 'rev-parse', `${local.commit}^`));
+});
+
 test('local commit refuses a dirty repository without changing any files', async () => {
   const f = await fixture();
   git(f.repo, 'config', 'user.name', 'BrainLink Test');
@@ -139,6 +179,7 @@ test('Setup GitHub preview endpoints require the local token; commit endpoint is
     assert.doesNotMatch(JSON.stringify(body), /PUBLIC_NOTE_BODY_CANARY_7421/);
     assert.equal(git(f.repo, 'status', '--porcelain'), '');
     assert.equal((await post('/api/github/commit-selected', { repository: f.repo, vault: 'Company', paths: ['Public.md'] }, 'wrong')).status, 401);
+    assert.equal((await post('/api/github/push-selected', { repository: f.repo, vault: 'Company', paths: ['Public.md'], commit: 'deadbee' }, 'wrong')).status, 401);
     git(f.repo, 'config', 'user.name', 'BrainLink Test');
     git(f.repo, 'config', 'user.email', 'brainlink-test@example.invalid');
     git(f.repo, 'commit', '--allow-empty', '-m', 'fixture baseline');

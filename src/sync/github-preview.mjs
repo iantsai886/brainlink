@@ -22,9 +22,9 @@ async function git(repo, args) {
   }
 }
 
-async function gitRaw(repo, args, env = process.env) {
+async function gitRaw(repo, args, env = process.env, timeout = 15000) {
   try {
-    const { stdout } = await run('git', ['-C', repo, ...args], { windowsHide: true, timeout: 15000, maxBuffer: 1024 * 1024, env });
+    const { stdout } = await run('git', ['-C', repo, ...args], { windowsHide: true, timeout, maxBuffer: 1024 * 1024, env });
     return stdout;
   } catch {
     throw new Error('Git could not complete the requested local operation. Check the repository and Git identity, then retry.');
@@ -201,4 +201,49 @@ export async function commitGitHubSelectedNotes({ ctx, repoPath, vaultName, path
   } finally {
     if (hooksDir) await rm(hooksDir, { recursive: true, force: true }).catch(() => {});
   }
+}
+
+// Push exactly the single BrainLink note commit just created, and only when its parent
+// is still the fetched origin branch tip. This prevents accidentally publishing any
+// unrelated local commits. The operation is explicit, never force-pushes, and uses Git's
+// configured credential helper. A concurrent remote update fails safely and requires review.
+export async function pushGitHubSelectedNotes({ ctx, repoPath, vaultName, paths, commit }) {
+  if (!Array.isArray(paths) || !paths.length || paths.length > MAX_SELECTED_NOTES || paths.some((p) => !safeNotePath(p)) || new Set(paths).size !== paths.length) {
+    throw new Error(`Select 1–${MAX_SELECTED_NOTES} distinct Markdown paths from the visible notes list.`);
+  }
+  if (typeof commit !== 'string' || !/^[a-f0-9]{7,40}$/.test(commit)) throw new Error('The local commit receipt is invalid; create a fresh preview and commit.');
+  const vault = ctx.byName.get(vaultName);
+  if (!vault || !ctx.enabled.includes(vaultName)) throw new Error('Choose an enabled vault.');
+  if (vault.private) throw new Error('Private vaults are not eligible for GitHub sharing.');
+  const index = await loadVault(ctx, vaultName);
+  const byPath = new Map(index.notes.filter((note) => !note.private && !note.generated).map((note) => [note.rel, note]));
+  if (paths.some((p) => !byPath.has(p))) throw new Error('One or more selected notes are unavailable for sharing in this vault.');
+  const notes = paths.map((p) => byPath.get(p));
+  if (notes.some((note) => findSecrets(note.raw).length)) throw new Error('A selected note needs a privacy review before it can be shared.');
+
+  const root = await repositoryRoot(repoPath);
+  if (await git(root, ['status', '--porcelain=v1', '--untracked-files=all'])) throw new Error('The repository changed after the local commit. Review its state and create a fresh preview.');
+  const head = await git(root, ['rev-parse', 'HEAD']);
+  if (head !== await git(root, ['rev-parse', commit])) throw new Error('The local HEAD no longer matches this BrainLink commit receipt.');
+  const upstream = await git(root, ['rev-parse', '--abbrev-ref', '--symbolic-full-name', '@{upstream}']);
+  const match = /^origin\/(.+)$/.exec(upstream);
+  if (!match) throw new Error('Configure this branch to track its matching origin branch before pushing.');
+  const branch = match[1];
+  if (branch.startsWith('-') || branch.includes('..') || branch.endsWith('/') || branch.includes('//') || /[\s~^:?*\[\\]/.test(branch)) throw new Error('The tracked origin branch name is not safe to push.');
+  await gitRaw(root, ['fetch', '--no-tags', 'origin', branch], process.env, 120000);
+  const parent = await git(root, ['rev-parse', `${head}^`]);
+  const remoteTip = await git(root, ['rev-parse', `refs/remotes/origin/${branch}`]);
+  if (parent !== remoteTip) throw new Error('The remote branch changed or this commit includes earlier local work. Nothing was pushed; review and reconcile the branch first.');
+  const changed = (await git(root, ['diff-tree', '--no-commit-id', '--name-only', '-r', head])).split(/\r?\n/).filter(Boolean).sort();
+  const expected = paths.map((p) => `${NOTES_ROOT}/${p}`).sort();
+  if (changed.length !== expected.length || changed.some((p, i) => p !== expected[i])) throw new Error('This commit includes files outside the selected notes. Nothing was pushed.');
+  for (const note of notes) {
+    const relative = `${NOTES_ROOT}/${note.rel}`;
+    await rejectSymlinkPath(root, relative);
+    const content = await readFile(path.resolve(root, ...relative.split('/')), 'utf8').catch(() => null);
+    if (content !== note.raw) throw new Error('A selected note differs from the committed content. Refresh the preview before pushing.');
+    if (findSecrets(content).length) throw new Error('A selected note failed the final privacy scan. Nothing was pushed.');
+  }
+  await gitRaw(root, ['push', '--porcelain', 'origin', `HEAD:refs/heads/${branch}`], process.env, 120000);
+  return { provider: 'github', pushed: true, commit: head.slice(0, 12), branch, files: paths.map((p) => ({ path: p, action: 'pushed' })), notice: 'The selected note commit was pushed to the tracked GitHub branch. No force-push was used.' };
 }

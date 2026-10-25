@@ -310,7 +310,7 @@ ol.todo li { padding-left: 4px; }
         <label><span data-i18n="github.vault"></span><select id="github-vault"></select></label>
         <label><span data-i18n="github.repository"></span><input id="github-repository" class="mono" data-i18n-placeholder="github.repositoryPlaceholder"></label>
       </div>
-      <div class="row" style="margin-top:10px"><button id="github-load" data-i18n="github.load"></button><button class="primary" id="github-preview" data-i18n="github.preview" disabled></button><button id="github-commit" data-i18n="github.commit" disabled></button></div>
+      <div class="row" style="margin-top:10px"><button id="github-load" data-i18n="github.load"></button><button class="primary" id="github-preview" data-i18n="github.preview" disabled></button><button id="github-commit" data-i18n="github.commit" disabled></button><button id="github-push" data-i18n="github.push" disabled hidden></button></div>
       <div id="github-candidates" style="margin-top:10px"></div>
       <p id="github-status" class="muted" role="status"></p>
       <div id="github-result" class="notice" hidden></div>
@@ -1043,6 +1043,7 @@ $('sync-save').onclick = () => act(async () => {
   toast(provider === 'local' ? t('sync.localToast') : t('sync.providerToast', { folder: r.sync.folder }));
 });
 let githubCandidates = [];
+let githubPendingPush = null;
 function githubSelection() {
   return [...document.querySelectorAll('[data-github-path]:checked')].map((el) => el.value);
 }
@@ -1050,6 +1051,7 @@ function renderGitHubCandidates() {
   $('github-candidates').innerHTML = githubCandidates.length ? githubCandidates.map((n, i) => `<label class="muted" style="display:flex;flex-direction:row;gap:8px;align-items:center;margin:6px 0"><input type="checkbox" data-github-path value="${esc(n.path)}" checked style="width:auto"><span>${esc(n.title)} <span class="mono">· ${esc(n.path)}</span></span></label>`).join('') : '';
   $('github-preview').disabled = !githubCandidates.length;
   $('github-commit').disabled = true;
+  githubPendingPush = null; $('github-push').hidden = true; $('github-push').disabled = true;
 }
 $('github-load').onclick = async () => {
   $('github-status').textContent = t('github.loading'); $('github-result').hidden = true;
@@ -1076,12 +1078,25 @@ $('github-commit').onclick = async () => {
   try {
     const r = await api('POST', '/api/github/commit-selected', { vault: $('github-vault').value, repository: $('github-repository').value.trim(), paths });
     $('github-status').textContent = r.committed ? t('github.committed', { commit: r.commit }) : t('github.nothingToCommit');
+    githubPendingPush = r.committed ? { commit: r.commit, paths } : null;
+    $('github-push').hidden = !githubPendingPush; $('github-push').disabled = !githubPendingPush;
     $('github-result').hidden = true;
   } catch (e) { $('github-status').textContent = e.message; $('github-commit').disabled = false; }
 };
-document.addEventListener('input', (e) => { if (e.target.id === 'github-repository') $('github-commit').disabled = true; });
+$('github-push').onclick = async () => {
+  if (!githubPendingPush) return;
+  const paths = githubPendingPush.paths;
+  if (!confirm(t('github.confirmPush', { count: paths.length, paths: paths.join('\n') }))) return;
+  $('github-status').textContent = t('github.pushing'); $('github-push').disabled = true;
+  try {
+    const r = await api('POST', '/api/github/push-selected', { vault: $('github-vault').value, repository: $('github-repository').value.trim(), paths, commit: githubPendingPush.commit });
+    $('github-status').textContent = t('github.pushed', { commit: r.commit, branch: r.branch });
+    githubPendingPush = null; $('github-push').hidden = true;
+  } catch (e) { $('github-status').textContent = e.message; $('github-push').disabled = false; }
+};
+document.addEventListener('input', (e) => { if (e.target.id === 'github-repository') { $('github-commit').disabled = true; $('github-push').hidden = true; githubPendingPush = null; } });
 document.addEventListener('change', (e) => {
-  if (e.target.matches('[data-github-path]')) { $('github-preview').disabled = !githubSelection().length; $('github-commit').disabled = true; }
+  if (e.target.matches('[data-github-path]')) { $('github-preview').disabled = !githubSelection().length; $('github-commit').disabled = true; $('github-push').hidden = true; githubPendingPush = null; }
   if (e.target.id === 'github-vault') { githubCandidates = []; renderGitHubCandidates(); $('github-status').textContent = ''; $('github-result').hidden = true; }
 });
 $('backup-pick').onclick = async () => {

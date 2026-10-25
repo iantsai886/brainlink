@@ -18,7 +18,7 @@ import { resolveNoteWikilinks } from './links.mjs';
 import { VERSION, createMcp } from './server.mjs';
 import { findObsidianVaults, nestedVaults } from './obsidian.mjs';
 import { syncSettings, chooseSync, suggestFolders, PROVIDERS, PROVIDER_LABELS } from './sync/settings.mjs';
-import { listGitHubShareCandidates, previewGitHubRepository, commitGitHubSelectedNotes } from './sync/github-preview.mjs';
+import { listGitHubShareCandidates, previewGitHubRepository, commitGitHubSelectedNotes, pushGitHubSelectedNotes } from './sync/github-preview.mjs';
 import { sessionsService } from './host.mjs';
 import { addAgent, renameAgent, removeAgent, revokeAgent, markConnected, findAgentByToken, publicAgent, localAgentSnippet, remoteAgentSnippet } from './mcp-agents.mjs';
 import { buildGraph3D, noteDetail3D } from './graph3d.mjs';
@@ -423,6 +423,11 @@ export async function startSetup(opts = {}) {
         const cfg = await loadConfig(file);
         const ctx = createContext(cfg, { env: { ...env, BRAINLINK_SEMANTIC: '0' } });
         return commitGitHubSelectedNotes({ ctx, repoPath: String(b.repository || ''), vaultName: String(b.vault || ''), paths: b.paths });
+      },
+      'POST /api/github/push-selected': async (b) => {
+        const cfg = await loadConfig(file);
+        const ctx = createContext(cfg, { env: { ...env, BRAINLINK_SEMANTIC: '0' } });
+        return pushGitHubSelectedNotes({ ctx, repoPath: String(b.repository || ''), vaultName: String(b.vault || ''), paths: b.paths, commit: String(b.commit || '') });
       },
     'POST /api/agent': async (b) => {
       const cfg = await loadConfig(file);
