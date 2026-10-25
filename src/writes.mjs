@@ -220,6 +220,7 @@ function validateGitCheckpoint(value) {
 
 function gitCheckpointFromMeta(meta) {
   if (meta.git_checkpoint_schema !== '1') return null;
+  if (!['true', 'false'].includes(meta.git_dirty) || !/^(0|[1-9]\d{0,4})$/.test(meta.git_ahead || '')) return null;
   return validateGitCheckpoint({ repo: meta.git_repo, branch: meta.git_branch, head: meta.git_head, dirty: meta.git_dirty === 'true', ahead: Number(meta.git_ahead) }).value;
 }
 

@@ -80,6 +80,12 @@ test('fictional Claude-to-Codex handoff previews, filters private sources, conti
     assert.equal(returned.value[0].ack_of, sent.value.path);
     const source = await readFile(path.join(mailbox, path.basename(returned.value[0].path)), 'utf8');
     assert.doesNotMatch(source, /ZQXPRIVATE_HANDOFF_CANARY/);
+    const changedCheckpoint = note.replace('git_ahead: 2', 'git_ahead: nope');
+    assert.notEqual(changedCheckpoint, note);
+    await writeFile(path.join(mailbox, path.basename(sent.value.path)), changedCheckpoint);
+    const malformed = await call(codex, 'list_handoffs', { to: 'Codex' });
+    const malformedItem = malformed.value.find(item => item.path === sent.value.path);
+    assert.equal(malformedItem.git_checkpoint, undefined);
   } finally { await rm(root, { recursive: true, force: true }); }
 });
 
