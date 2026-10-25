@@ -34,6 +34,7 @@ import { listSessionFilingFolders, suggestedSessionFolder } from './sessions/fol
 import { sessionHookStatus, setSessionHook } from './sessions/hooks.mjs';
 import { twinProfileStatus } from './twin-profiles.mjs';
 import { createRsiLedger } from './rsi-ledger.mjs';
+import { createRsiExperiments } from './rsi-experiments.mjs';
 import { createRsiDiscovery } from './rsi-discovery.mjs';
 
 const UI_STATIC_TYPES = { '.js': 'text/javascript; charset=utf-8', '.css': 'text/css; charset=utf-8', '.json': 'application/json; charset=utf-8' };
@@ -95,6 +96,7 @@ export async function startSetup(opts = {}) {
   const clientOpts = () => ({ home, os, env, launch: launchSpec(env), useCli: opts.useCli });
   const sessions = sessionsService(env); // src/host.mjs: cross-session reads over src/sessions/* (importAll, session_list/read semantics)
   const rsiLedger = createRsiLedger({ home: appHome(env) });
+  const rsiExperiments = createRsiExperiments({ env });
   // Opt-in research discovery: off until the user enables it; runs only while this process is open.
   const rsiDiscovery = createRsiDiscovery({ home: appHome(env), ledger: rsiLedger, fetchImpl: opts.discoveryFetch, lookup: opts.discoveryLookup });
   const initialDiscoveryStatus = await rsiDiscovery.status().catch(() => null);
@@ -361,6 +363,18 @@ export async function startSetup(opts = {}) {
   const routes = {
     'GET /api/state': () => state(),
     'GET /api/rsi': async () => ({ ideas: await rsiLedger.list() }),
+    'GET /api/rsi/experiments': async () => ({ suites: rsiExperiments.suites() }),
+    'POST /api/rsi/experiments/run': async (b) => {
+      const ideas = await rsiLedger.list();
+      const idea = ideas.find((item) => item.id === b.idea_id);
+      if (!idea) throw new Error('RSI idea not found.');
+      if (idea.status !== 'testing') throw new Error('Move this RSI idea to testing before running an experiment.');
+      const suite = rsiExperiments.suites().find((item) => item.id === b.suite);
+      if (!suite) throw new Error('Choose one of the built-in fictional evaluation suites.');
+      if (idea.fields.candidate_version !== suite.candidate_version) throw new Error(`This test is for candidate ${suite.candidate_version}; update the RSI idea candidate version first.`);
+      const receipt = await rsiExperiments.run(b.suite);
+      return { idea: await rsiLedger.recordExperiment({ id: idea.id, expected_revision: idea.revision, receipt }) };
+    },
     'POST /api/rsi/ideas/check': async (b) => ({ similar: await rsiLedger.similar(b) }),
     'POST /api/rsi/ideas': async (b) => ({ idea: await rsiLedger.create(b) }),
     'POST /api/rsi/ideas/update': async (b) => ({ idea: await rsiLedger.update(b) }),

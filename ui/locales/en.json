@@ -544,5 +544,11 @@
   "rsi.discovery.saved": "Discovery settings saved.",
   "rsi.discovery.pausedToast": "Discovery paused.",
   "rsi.discovery.resumedToast": "Discovery resumed.",
-  "rsi.discovery.ranToast": "Discovery finished: {created} new proposals to review."
+  "rsi.discovery.ranToast": "Discovery finished: {created} new proposals to review.",
+  "rsi.experiment.suite1": "Retrieval quality test set",
+  "rsi.experiment.suite2": "Independent quality and efficiency test set",
+  "rsi.experiment.run": "Run evaluation",
+  "rsi.experiment.note": "Uses built-in fictional notes only. Saves summary results for review and never changes live retrieval.",
+  "rsi.experiment.history": "Evaluation records",
+  "rsi.experiment.done": "Evaluation saved for review."
 }

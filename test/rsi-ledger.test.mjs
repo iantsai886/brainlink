@@ -40,6 +40,34 @@ test('RSI acceptance requires recorded experiment evidence, reviewer and rollbac
   assert.equal(rolledBack.status, 'rolled_back');
 });
 
+test('RSI experiment receipts are aggregate-only, append-only, and require a fresh testing revision', async () => {
+  const ledger = createRsiLedger({ home: await temp('experiment-receipt') });
+  let idea = await ledger.create(validIdea);
+  for (const status of ['triaged', 'proposed']) idea = await ledger.update({ id: idea.id, expected_revision: idea.revision, status });
+  idea = await ledger.update({ id: idea.id, expected_revision: idea.revision, status: 'testing', fields: { candidate_version: 'per-case-rephrasing-v1' } });
+  const receipt = {
+    schema: 1, run_id: 'BL-RSI-RUN-20261025-12345678', suite: 'retrieval-rsi-v1',
+    started_at: '2026-10-25T00:00:00.000Z', completed_at: '2026-10-25T00:00:01.000Z',
+    fixture_sha256: 'a'.repeat(64), evaluator_version: 'retrieval-eval-v2', software_version: '1.2.8', candidate_version: 'per-case-rephrasing-v1',
+    candidate_policy: 'fixed fictional evaluation', sample_count: 21, decision: 'eligible_for_review',
+    primary_metric: { name: 'hit_at_k_rate', baseline: 0.8, candidate: 0.9 },
+    secondary_metric: { name: 'mean_reciprocal_rank', baseline: 0.7, candidate: 0.8 },
+    guardrails: { baseline_privacy_violations: 0, candidate_privacy_violations: 0 },
+    estimated_context_tokens: { baseline: 500, candidate: 450 }, limitations: ['Fictional data only.'],
+  };
+  receipt.run_id = 'BL-RSI-RUN-20261025-abcdef12';
+  await assert.rejects(ledger.recordExperiment({ id: idea.id, expected_revision: idea.revision - 1, receipt }), /changed/);
+  const recorded = await ledger.recordExperiment({ id: idea.id, expected_revision: idea.revision, receipt });
+  assert.equal(recorded.experiments.length, 1);
+  assert.equal(recorded.experiments[0].run_id, receipt.run_id);
+  await assert.rejects(ledger.recordExperiment({ id: idea.id, expected_revision: recorded.revision, receipt: { ...receipt, query: 'private query' } }), /invalid/i);
+  const secondRun = await ledger.recordExperiment({ id: idea.id, expected_revision: recorded.revision, receipt: { ...receipt, run_id: 'BL-RSI-RUN-20261025-fedcba98' } });
+  assert.equal(secondRun.experiments.length, 2);
+  const raw = await readFile(ledger.file, 'utf8');
+  assert.doesNotMatch(raw, /private query|query|snippet|vault_path/i);
+  assert.equal(raw.trim().split(/\r?\n/).length, 6);
+});
+
 test('RSI ledger rejects secret-bearing text and non-public source URLs', async () => {
   const ledger = createRsiLedger({ home: await temp('reject') });
   await assert.rejects(ledger.create({ ...validIdea, user_problem: 'API key: sk-test-123456789012345678901234' }), /secret/i);
@@ -109,5 +137,19 @@ test('Setup exposes the RSI ledger only through authenticated local APIs', async
     assert.equal(listed.ideas.length, 1);
     const bad = await post('/api/rsi/ideas/update', { id: created.idea.id, expected_revision: 1, status: 'accepted' }).then(r => r.json());
     assert.match(bad.error, /cannot move/);
+    assert.equal((await post('/api/rsi/experiments/run', { idea_id: created.idea.id, suite: 'retrieval-rsi-v1' }, 'wrong-token')).status, 401);
+    const earlyRun = await post('/api/rsi/experiments/run', { idea_id: created.idea.id, suite: 'retrieval-rsi-v1' }).then(r => r.json());
+    assert.match(earlyRun.error, /before running/);
+    let idea = created.idea;
+    for (const status of ['triaged', 'proposed']) idea = (await post('/api/rsi/ideas/update', { id: idea.id, expected_revision: idea.revision, status }).then(r => r.json())).idea;
+    idea = (await post('/api/rsi/ideas/update', { id: idea.id, expected_revision: idea.revision, status: 'testing', fields: { candidate_version: 'per-case-rephrasing-v1' } }).then(r => r.json())).idea;
+    const run = await post('/api/rsi/experiments/run', { idea_id: idea.id, suite: 'retrieval-rsi-v1' }).then(r => r.json());
+    assert.equal(run.error, undefined, JSON.stringify(run));
+    assert.equal(run.idea.experiments.length, 1);
+    assert.equal(run.idea.experiments[0].suite, 'retrieval-rsi-v1');
+    assert.equal(run.idea.experiments[0].candidate_version, idea.fields.candidate_version);
+    assert.doesNotMatch(JSON.stringify(run), /RSI_PRIVATE_CANARY_9D7|Acquisition Budget\.md|Northwind Coffee\.md/);
+    const unknownSuite = await post('/api/rsi/experiments/run', { idea_id: idea.id, suite: '../user-vault' }).then(r => r.json());
+    assert.match(unknownSuite.error, /built-in fictional/);
   } finally { app.server.close(); }
 });

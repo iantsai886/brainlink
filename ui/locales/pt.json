@@ -544,5 +544,11 @@
   "rsi.discovery.saved": "Configurações de descoberta salvas.",
   "rsi.discovery.pausedToast": "Descoberta pausada.",
   "rsi.discovery.resumedToast": "Descoberta retomada.",
-  "rsi.discovery.ranToast": "Descoberta concluída: {created} novas propostas para revisar."
+  "rsi.discovery.ranToast": "Descoberta concluída: {created} novas propostas para revisar.",
+  "rsi.experiment.suite1": "Conjunto de teste da qualidade da pesquisa",
+  "rsi.experiment.suite2": "Conjunto independente de qualidade e eficiência",
+  "rsi.experiment.run": "Executar avaliação",
+  "rsi.experiment.note": "Usa apenas notas fictícias incluídas. Guarda resultados resumidos para revisão e nunca altera a pesquisa ativa.",
+  "rsi.experiment.history": "Registos de avaliação",
+  "rsi.experiment.done": "Avaliação guardada para revisão."
 }

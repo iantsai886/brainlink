@@ -139,9 +139,10 @@ function project(events) {
   const records = new Map();
   for (const event of events) {
     const row = records.get(event.idea_id);
-    if (event.kind === 'created') records.set(event.idea_id, { id: event.idea_id, status: 'discovered', revision: 1, created_at: event.at, updated_at: event.at, origin: event.origin || 'manual', ...(event.discovery ? { discovery: event.discovery } : {}), fields: event.fields, history: [{ status: 'discovered', at: event.at, note: event.origin === 'discovery' ? 'Found by opt-in discovery' : 'Created' }] });
+    if (event.kind === 'created') records.set(event.idea_id, { id: event.idea_id, status: 'discovered', revision: 1, created_at: event.at, updated_at: event.at, origin: event.origin || 'manual', ...(event.discovery ? { discovery: event.discovery } : {}), fields: event.fields, experiments: [], history: [{ status: 'discovered', at: event.at, note: event.origin === 'discovery' ? 'Found by opt-in discovery' : 'Created' }] });
     else if (row) {
-      if (event.kind === 'updated') row.fields = { ...row.fields, ...event.fields };
+      if (event.fields) row.fields = { ...row.fields, ...event.fields };
+      if (event.kind === 'experiment_run') row.experiments.push(event.receipt);
       if (event.status) { row.status = event.status; row.history.push({ status: event.status, at: event.at, note: event.note || '' }); }
       row.revision++; row.updated_at = event.at;
     }
@@ -248,6 +249,23 @@ export function createRsiLedger({ home, now = () => new Date() }) {
       if (!Object.keys(fields).length && !status) throw new Error('Provide fields or a valid status transition.');
       const at = now().toISOString();
       await append({ kind: status ? 'status' : 'updated', idea_id: id, at, ...(Object.keys(fields).length ? { fields } : {}), ...(status ? { status, note: safeNote } : {}) });
+      return project(await readEvents(file)).find(x => x.id === id);
+    }),
+    recordExperiment: ({ id, expected_revision, receipt }) => locked(async () => {
+      if (typeof id !== 'string' || !/^BL-RSI-\d{8}-[a-f0-9-]{8,36}$/.test(id)) throw new Error('Invalid RSI idea id.');
+      const row = project(await readEvents(file)).find(x => x.id === id);
+      if (!row) throw new Error('RSI idea not found.');
+      if (!Number.isInteger(expected_revision) || expected_revision !== row.revision) throw new Error('RSI idea changed; reload it before recording an experiment.');
+      if (row.status !== 'testing') throw new Error('Only an RSI idea in testing status can run an experiment.');
+      const allowed = ['schema', 'run_id', 'suite', 'started_at', 'completed_at', 'fixture_sha256', 'evaluator_version', 'software_version', 'candidate_version', 'candidate_policy', 'sample_count', 'decision', 'primary_metric', 'secondary_metric', 'guardrails', 'estimated_context_tokens', 'limitations'];
+      if (!receipt || typeof receipt !== 'object' || Array.isArray(receipt) || Object.keys(receipt).some(key => !allowed.includes(key)) || allowed.some(key => !(key in receipt)) || receipt.schema !== 1 || !/^BL-RSI-RUN-\d{8}-[a-f0-9-]{8,36}$/.test(receipt.run_id || '') || !['retrieval-rsi-v1', 'retrieval-independent-v1'].includes(receipt.suite) || !/^\d{4}-\d\d-\d\dT/.test(receipt.started_at || '') || !/^\d{4}-\d\d-\d\dT/.test(receipt.completed_at || '') || !/^[a-f0-9]{64}$/.test(receipt.fixture_sha256 || '') || receipt.evaluator_version !== 'retrieval-eval-v2' || typeof receipt.software_version !== 'string' || receipt.software_version.length > 64 || typeof receipt.candidate_version !== 'string' || !['per-case-rephrasing-v1', 'compact-coverage-v1'].includes(receipt.candidate_version) || typeof receipt.candidate_policy !== 'string' || receipt.candidate_policy.length > 160 || !Number.isInteger(receipt.sample_count) || receipt.sample_count < 1 || receipt.sample_count > 500 || !['eligible_for_review', 'needs_more_cases', 'no_demonstrated_gain', 'quality_regression', 'blocked_privacy', 'no_demonstrated_efficiency_gain'].includes(receipt.decision)) throw new Error('Experiment receipt is invalid.');
+      const metricValid = (metric) => metric && typeof metric === 'object' && Object.keys(metric).length === 3 && typeof metric.name === 'string' && metric.name.length <= 48 && [metric.baseline, metric.candidate].every(value => typeof value === 'number' && Number.isFinite(value) && value >= 0 && value <= 1);
+      if (!metricValid(receipt.primary_metric) || !metricValid(receipt.secondary_metric) || !receipt.guardrails || Object.keys(receipt.guardrails).length !== 2 || !Number.isInteger(receipt.guardrails.baseline_privacy_violations) || !Number.isInteger(receipt.guardrails.candidate_privacy_violations) || receipt.guardrails.baseline_privacy_violations < 0 || receipt.guardrails.candidate_privacy_violations < 0 || !receipt.estimated_context_tokens || Object.keys(receipt.estimated_context_tokens).length !== 2 || !Number.isInteger(receipt.estimated_context_tokens.baseline) || !Number.isInteger(receipt.estimated_context_tokens.candidate) || !Array.isArray(receipt.limitations) || receipt.limitations.length > 8 || receipt.limitations.some(value => typeof value !== 'string' || value.length > 200)) throw new Error('Experiment receipt metrics are invalid.');
+      if (row.fields.candidate_version !== receipt.candidate_version) throw new Error('Experiment suite does not match the candidate version in this RSI idea.');
+      const text = JSON.stringify([receipt.software_version, receipt.candidate_version, receipt.candidate_policy, receipt.primary_metric?.name, receipt.secondary_metric?.name, ...receipt.limitations]);
+      if (text.length > 8000 || findSecrets(text).length) throw new Error('Experiment receipt contains disallowed fields or sensitive content.');
+      const at = now().toISOString();
+      await append({ kind: 'experiment_run', idea_id: id, at, receipt });
       return project(await readEvents(file)).find(x => x.id === id);
     }),
     file,
