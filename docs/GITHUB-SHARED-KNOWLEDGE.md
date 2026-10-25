@@ -45,6 +45,8 @@ The implemented slices verify candidate filtering, secret refusal, credential-fr
 
 ## Implementation slices
 
+Current branch addition: users can explicitly save selected remote conflicts as deterministic copies under `BrainLink Conflicts/`. The action rechecks current remote and local conflict state, rejects non-conflicts, preserves local files, and is idempotent. Local full-suite receipts and current UI-inspection limits are recorded in [IMPLEMENTATION-STATUS.md](IMPLEMENTATION-STATUS.md). In-place merging, automatic synchronization, profile-bound repository assignments, live GitHub account acceptance, and cross-device/cross-client retrieval remain open.
+
 1. Done: safe local-repository validation, authenticated candidate/preview endpoints, localized Setup UI, separately confirmed local commits, and explicit selected-commit push with remote ancestry/path validation.
 2. Validate UI behavior, accessibility, localized privacy messaging, and the GitHub credential-helper flow using a user-controlled test repository.
 3. Add an explicit conflict-resolution workflow that retains both versions and requires the user to choose or merge; then connect repository choices to Personal/Organisation/Client profile scopes.

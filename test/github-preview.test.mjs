@@ -7,7 +7,7 @@ import path from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { normalize, saveConfig } from '../src/config.mjs';
 import { createContext, search } from '../src/core.mjs';
-import { listGitHubShareCandidates, previewGitHubRepository, commitGitHubSelectedNotes, pushGitHubSelectedNotes, listGitHubPullCandidates, importGitHubSelectedNotes } from '../src/sync/github-preview.mjs';
+import { listGitHubShareCandidates, previewGitHubRepository, commitGitHubSelectedNotes, pushGitHubSelectedNotes, listGitHubPullCandidates, importGitHubSelectedNotes, saveGitHubConflictCopies } from '../src/sync/github-preview.mjs';
 import { startSetup } from '../src/setup.mjs';
 
 const tmp = (tag) => mkdtemp(path.join(tmpdir(), `brainlink-gh-preview-${tag}-`));
@@ -203,6 +203,48 @@ test('remote pull preserves conflicting local notes and imports no part of a con
   await assert.rejects(importGitHubSelectedNotes({ ctx: f.ctx, repoPath: f.repo, vaultName: 'Company', paths: ['Conflict.md', 'New.md'] }), /No notes were imported/);
   assert.equal(await readFile(path.join(f.vault, 'Conflict.md'), 'utf8'), 'Local version must stay\n');
   assert.equal(await readFile(path.join(f.vault, 'New.md'), 'utf8').then(() => true, () => false), false);
+  const saved = await saveGitHubConflictCopies({ ctx: f.ctx, repoPath: f.repo, vaultName: 'Company', paths: ['Conflict.md'] });
+  assert.equal(saved.local_notes_overwritten, false);
+  assert.equal(saved.saved[0].action, 'saved');
+  assert.match(saved.saved[0].copy, /^BrainLink Conflicts\/Conflict\.remote-[a-f0-9]{12}\.md$/);
+  assert.equal(await readFile(path.join(f.vault, 'Conflict.md'), 'utf8'), 'Local version must stay\n');
+  assert.equal(await readFile(path.join(f.vault, ...saved.saved[0].copy.split('/')), 'utf8'), 'Remote version\n');
+  const again = await saveGitHubConflictCopies({ ctx: f.ctx, repoPath: f.repo, vaultName: 'Company', paths: ['Conflict.md'] });
+  assert.equal(again.saved[0].action, 'unchanged');
+  await assert.rejects(saveGitHubConflictCopies({ ctx: f.ctx, repoPath: f.repo, vaultName: 'Company', paths: ['New.md'] }), /only current remote notes that conflict/);
+  assert.equal(await readFile(path.join(f.vault, 'New.md').replaceAll('\\', '/'), 'utf8').then(() => true, () => false), false);
+});
+
+test('authenticated Setup saves a remote conflict copy without overwriting local content', async () => {
+  const f = await fixture(), bare = path.join(f.root, 'remote.git'), home = path.join(f.root, 'app-home');
+  await mkdir(bare, { recursive: true }); await mkdir(home, { recursive: true });
+  await mkdir(path.join(f.repo, 'BrainLink', 'notes'), { recursive: true });
+  await writeFile(path.join(f.repo, 'BrainLink', 'notes', 'Conflict.md'), 'Remote approved process\n');
+  await writeFile(path.join(f.vault, 'Conflict.md'), 'Local edited process\n');
+  git(bare, 'init', '--bare', '--quiet');
+  git(f.repo, 'config', 'user.name', 'BrainLink Test');
+  git(f.repo, 'config', 'user.email', 'brainlink-test@example.invalid');
+  git(f.repo, 'switch', '-c', 'main');
+  git(f.repo, 'add', '--', 'BrainLink/notes/Conflict.md');
+  git(f.repo, 'commit', '-m', 'remote conflict fixture');
+  git(f.repo, 'config', `url.${pathToFileURL(bare).href}.insteadOf`, 'https://github.com/example/shared-brain.git');
+  git(f.repo, 'push', '--set-upstream', 'origin', 'main');
+  const env = { BRAINLINK_HOME: home, HOME: home, BRAINLINK_SEMANTIC: '0' };
+  await saveConfig(f.cfg, path.join(home, 'config.json'));
+  const app = await startSetup({ env, home, os: 'linux', port: 0, useCli: false });
+  try {
+    const response = await fetch(`http://127.0.0.1:${app.port}/api/github/save-conflict-copies`, {
+      method: 'POST', headers: { 'Content-Type': 'application/json', 'X-BrainLink-Token': app.token },
+      body: JSON.stringify({ repository: f.repo, vault: 'Company', paths: ['Conflict.md'] }),
+    });
+    const result = await response.json();
+    assert.equal(response.status, 200);
+    assert.equal(result.local_notes_overwritten, false);
+    assert.equal(result.saved[0].action, 'saved');
+    assert.equal(await readFile(path.join(f.vault, 'Conflict.md'), 'utf8'), 'Local edited process\n');
+    assert.equal(await readFile(path.join(f.vault, ...result.saved[0].copy.split('/')), 'utf8'), 'Remote approved process\n');
+    assert.doesNotMatch(JSON.stringify(result), /Remote approved process|Local edited process/);
+  } finally { app.server.close(); }
 });
 
 test('local commit refuses a dirty repository without changing any files', async () => {
@@ -255,6 +297,7 @@ test('Setup GitHub preview endpoints require the local token; commit endpoint is
     assert.equal((await post('/api/github/push-selected', { repository: f.repo, vault: 'Company', paths: ['Public.md'], commit: 'deadbee' }, 'wrong')).status, 401);
     assert.equal((await post('/api/github/pull-candidates', { repository: f.repo, vault: 'Company' }, 'wrong')).status, 401);
     assert.equal((await post('/api/github/import-selected', { repository: f.repo, vault: 'Company', paths: ['Remote.md'] }, 'wrong')).status, 401);
+    assert.equal((await post('/api/github/save-conflict-copies', { repository: f.repo, vault: 'Company', paths: ['Remote.md'] }, 'wrong')).status, 401);
     git(f.repo, 'config', 'user.name', 'BrainLink Test');
     git(f.repo, 'config', 'user.email', 'brainlink-test@example.invalid');
     git(f.repo, 'commit', '--allow-empty', '-m', 'fixture baseline');

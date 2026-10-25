@@ -2,6 +2,7 @@
 // Repository changes and vault writes remain separate, explicit actions with privacy checks.
 import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
+import { createHash } from 'node:crypto';
 import { lstat, readFile, realpath, mkdir, writeFile, rm, mkdtemp } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
@@ -110,6 +111,20 @@ async function rejectSymlinkPath(root, rel) {
     catch (error) { if (error.code === 'ENOENT') return; throw error; }
     if (info.isSymbolicLink()) throw new Error('The repository contains a symbolic link in the selected notes area.');
     if (cursor !== path.join(root, ...rel.split('/')) && !info.isDirectory()) throw new Error('The repository notes path is not a directory.');
+  }
+}
+
+async function ensureSafeParentDirectories(root, rel) {
+  const parts = rel.split('/').slice(0, -1);
+  let cursor = root;
+  for (const part of parts) {
+    cursor = path.join(cursor, part);
+    try { await mkdir(cursor); }
+    catch (error) { if (error.code !== 'EEXIST') throw error; }
+    const info = await lstat(cursor);
+    if (info.isSymbolicLink() || !info.isDirectory()) throw new Error('A selected vault folder is not a safe directory.');
+    const resolved = await realpath(cursor);
+    if (!within(root, resolved)) throw new Error('A selected vault folder resolves outside the vault.');
   }
 }
 
@@ -223,6 +238,54 @@ export async function importGitHubSelectedNotes({ ctx, repoPath, vaultName, path
     throw new Error('Could not safely import the selected remote notes. No selected files were intentionally overwritten; retry after checking the vault.');
   }
   return { provider: 'github', imported: toAdd.map((x) => x.note.path), unchanged: selected.filter((x) => x.state.action === 'unchanged').map((x) => x.note.path), conflicts: [], branch: current.branch };
+}
+
+// Preserve both sides of a remote/local divergence without silently choosing a winner.
+// The selected remote version is saved beside a clearly named copy; the local file is untouched.
+export async function saveGitHubConflictCopies({ ctx, repoPath, vaultName, paths }) {
+  if (!Array.isArray(paths) || !paths.length || paths.length > MAX_SELECTED_NOTES || paths.some((p) => !safeNotePath(p)) || new Set(paths).size !== paths.length) {
+    throw new Error(`Select 1–${MAX_SELECTED_NOTES} distinct Markdown conflict paths.`);
+  }
+  const current = await eligibleRemoteNotes({ ctx, repoPath, vaultName });
+  const remote = new Map(current.notes.map((note) => [note.path, note]));
+  const state = new Map(current.files.map((file) => [file.path, file]));
+  if (paths.some((p) => !remote.has(p) || state.get(p)?.action !== 'conflict')) {
+    throw new Error('Select only current remote notes that conflict with local content. No conflict copies were saved.');
+  }
+
+  const planned = paths.map((notePath) => {
+    const note = remote.get(notePath);
+    const digest = createHash('sha256').update(note.raw, 'utf8').digest('hex').slice(0, 12);
+    const parsed = path.posix.parse(notePath);
+    const copyPath = path.posix.join('BrainLink Conflicts', parsed.dir, `${parsed.name}.remote-${digest}${parsed.ext}`);
+    return { note, copyPath };
+  });
+  const created = [];
+  const saved = [];
+  try {
+    for (const { note, copyPath } of planned) {
+      const target = path.resolve(current.localRoot, ...copyPath.split('/'));
+      if (!within(current.localRoot, target)) throw new Error('A conflict copy path is outside the selected vault.');
+      await rejectSymlinkPath(current.localRoot, copyPath);
+      let existing;
+      try { existing = await readFile(target, 'utf8'); }
+      catch (error) { if (error.code !== 'ENOENT') throw new Error('Could not safely inspect a conflict-copy destination.'); }
+      if (existing != null) {
+        if (existing !== note.raw) throw new Error('A conflict-copy destination already contains different content. No local notes were changed.');
+        saved.push({ source: note.path, copy: copyPath, action: 'unchanged' });
+        continue;
+      }
+      await ensureSafeParentDirectories(current.localRoot, copyPath);
+      await rejectSymlinkPath(current.localRoot, copyPath);
+      await writeFile(target, note.raw, { encoding: 'utf8', flag: 'wx', mode: 0o600 });
+      created.push(target);
+      saved.push({ source: note.path, copy: copyPath, action: 'saved' });
+    }
+  } catch {
+    for (const target of created.reverse()) await rm(target, { force: true }).catch(() => {});
+    throw new Error('Could not safely save the selected remote conflict copies. Local notes were preserved; retry after checking the vault.');
+  }
+  return { provider: 'github', saved, branch: current.branch, local_notes_overwritten: false };
 }
 
 // Explicitly publishes selected notes to a local checkout and records one local commit.
