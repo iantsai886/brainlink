@@ -364,6 +364,22 @@ test('every install is fully unlocked: every vault enabled, writes and agents on
   assert.ok(names.includes('vault_search') && names.includes('propose_note') && names.includes('agent_connect'));
 });
 
+test('vault_search defaults to compact output without dropping sources, citation context or freshness cues', async () => {
+  const { cfg } = await fixture();
+  const searchTool = createMcp(ctxOf(cfg)).tools.find((tool) => tool.name === 'vault_search');
+  const args = { vault: 'Acme Studio', query: 'launch package', limit: 8 };
+  const compact = await searchTool.run(args);
+  const full = await searchTool.run({ ...args, detail: 'full' });
+  const contextFields = ['path', 'title', 'date', 'status', 'historical', 'superseded_by', 'match', 'heading', 'snippet'];
+  assert.equal(compact.status, full.status);
+  assert.equal(compact.coverage, full.coverage);
+  assert.equal(compact.note, full.note);
+  assert.deepEqual(compact.results, full.results.map((result) => Object.fromEntries(contextFields.filter((key) => Object.hasOwn(result, key)).map((key) => [key, result[key]]))));
+  assert.ok(compact.results.length > 0);
+  assert.ok(JSON.stringify(compact).length < JSON.stringify(full).length, 'compact output removes ranking metadata while preserving every result');
+  for (const result of compact.results) for (const key of ['score', 'graph_boost', 'coverage', 'collection', 'tags']) assert.equal(Object.hasOwn(result, key), false, key);
+});
+
 // ---- writes ----
 
 test('propose_note: preview, write, never overwrite, attribution in the vault schema', async () => {

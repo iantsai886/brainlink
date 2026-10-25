@@ -8,8 +8,10 @@ import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { normalize, saveConfig } from '../src/config.mjs';
 import { createContext, loadVault, searchWithVerdict } from '../src/core.mjs';
+import { createMcp } from '../src/server.mjs';
 import { VectorStore, fillVectors } from '../src/embed.mjs';
 import { evaluateRetrieval, validateRetrievalFixture } from '../src/retrieval-eval.mjs';
+import { estTokens } from '../src/sessions/tokens.mjs';
 const execFileAsync = promisify(execFile);
 
 test('retrieval experiment is scoped, privacy-safe, token-measured and never self-promotes on too few cases', async () => {
@@ -105,6 +107,27 @@ test('independent frozen retrieval set reports quality, abstention, context, lat
   assert.equal(reordered.baseline.source_correctness.source_recall, report.baseline.source_correctness.source_recall, 'source recall is invariant to answerable/unanswerable case ordering');
   assert.equal(reordered.candidate.source_correctness.source_recall, report.candidate.source_correctness.source_recall, 'candidate source recall is invariant to case ordering');
   await assert.rejects(evaluateRetrieval(ctx, { ...fixture, cases: [{ ...fixture.cases[0], answerable: false }] }), /empty expected array/);
+});
+
+test('compact vault_search preserves every source and snippet across the independent set while reducing response size', async () => {
+  const fixture = JSON.parse(await readFile(path.resolve('samples/evaluation/retrieval-independent-v1.json'), 'utf8'));
+  const ctx = createContext(normalize({ vaults: [{ name: fixture.vault, path: path.resolve('samples/evaluation/independent-vault') }] }), { env: { BRAINLINK_SEMANTIC: '0' } });
+  const tool = createMcp(ctx).tools.find((item) => item.name === 'vault_search');
+  const contextFields = ['path', 'title', 'date', 'status', 'historical', 'superseded_by', 'match', 'heading', 'snippet'];
+  let fullTokens = 0, compactTokens = 0;
+  for (const c of fixture.cases) {
+    const args = { vault: fixture.vault, query: c.query, limit: fixture.topK };
+    const compact = await tool.run(args);
+    const full = await tool.run({ ...args, detail: 'full' });
+    assert.equal(compact.status, full.status, c.id);
+    assert.equal(compact.coverage, full.coverage, c.id);
+    assert.deepEqual(compact.results, full.results.map((result) => Object.fromEntries(contextFields.filter((key) => Object.hasOwn(result, key)).map((key) => [key, result[key]]))), c.id);
+    if (c.answerable) for (const expected of c.expected) assert.ok(compact.results.some((result) => result.path === expected), `${c.id} retains ${expected}`);
+    for (const forbidden of c.forbidden || []) assert.ok(!compact.results.some((result) => result.path === forbidden), `${c.id} excludes ${forbidden}`);
+    fullTokens += estTokens(JSON.stringify(full));
+    compactTokens += estTokens(JSON.stringify(compact));
+  }
+  assert.ok(compactTokens < fullTokens);
 });
 
 test('independent retrieval CLI accepts an explicit fictional vault and emits an exact-byte reproducibility receipt', async () => {
