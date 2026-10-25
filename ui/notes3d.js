@@ -72,42 +72,6 @@
     return out.join('\n');
   }
 
-  // ---- P1c: permanent, truncated, theme-aware node labels (the old nodeLabel above is only a
-  // hover tooltip) ----
-  const LABEL_MAX_CHARS = 22;
-  function truncateLabel(title) {
-    const t = String(title || '').trim();
-    return t.length > LABEL_MAX_CHARS ? `${t.slice(0, LABEL_MAX_CHARS - 1)}…` : t;
-  }
-  // Canvas-texture sprite, not SpriteText (nothing but 3d-force-graph's own bundled three.js is
-  // vendored). Text is stroked in the background color before the ink-color fill so the title
-  // reads clearly over any node color, in both dark and light mode (ink/bg follow the same CSS
-  // variables every other themed element on this page uses).
-  function makeLabelSprite(text, inkColor, bgColor) {
-    const canvas = document.createElement('canvas');
-    const ctx = canvas.getContext('2d');
-    const font = '700 40px -apple-system, system-ui, sans-serif';
-    ctx.font = font;
-    const padX = 14;
-    canvas.width = Math.ceil(ctx.measureText(text).width) + padX * 2;
-    canvas.height = 56;
-    ctx.font = font; // resizing the canvas resets context state
-    ctx.textBaseline = 'middle';
-    ctx.lineJoin = 'round';
-    ctx.lineWidth = 8;
-    ctx.strokeStyle = bgColor;
-    ctx.strokeText(text, padX, canvas.height / 2);
-    ctx.fillStyle = inkColor;
-    ctx.fillText(text, padX, canvas.height / 2);
-    const texture = new THREE.CanvasTexture(canvas);
-    texture.needsUpdate = true;
-    const sprite = new THREE.Sprite(new THREE.SpriteMaterial({ map: texture, depthTest: false, transparent: true }));
-    const scale = 0.11; // tuned against the default node sizes below so labels sit legibly beside them
-    sprite.scale.set(canvas.width * scale, canvas.height * scale, 1);
-    sprite.position.set(0, 9, 0); // just above the node sphere, not on top of it
-    return sprite;
-  }
-
   // ---- Graph + panel ----
 
   function buildLayout(root) {
@@ -251,14 +215,6 @@
       const ranked = [...counts.entries()].sort((a, b) => b[1] - a[1]).map(([k]) => k);
       const colorOf = (grp) => { const r = ranked.indexOf(grp); return r >= 0 && r < 8 ? css.getPropertyValue(`--${colorVars[r]}`).trim() : css.getPropertyValue('--muted').trim(); };
       const selectedColor = css.getPropertyValue('--accent').trim() || css.getPropertyValue('--ink').trim() || '#fff';
-      // Label every node up to a point; past that, only the most-connected notes keep a permanent
-      // label (same restraint the old 2D map used) so a large vault's map stays readable instead
-      // of turning into unreadable overlapping text.
-      const LABEL_CAP = 60;
-      const labelled = g.nodes.length <= LABEL_CAP ? new Set(g.nodes.map((n) => n.id))
-        : new Set([...g.nodes].sort((a, b) => (b.degree || 0) - (a.degree || 0)).slice(0, LABEL_CAP).map((n) => n.id));
-      const inkColor = css.getPropertyValue('--ink').trim() || '#000';
-      const bgColor = css.getPropertyValue('--bg').trim() || '#fff';
       // nodeLabel is rendered as the hover tooltip's innerHTML (3d-force-graph's documented
       // behavior), so a note title must be escaped the same way any other note-derived text going
       // into innerHTML is (see renderInline/renderMarkdown above) — otherwise a crafted title could
@@ -269,8 +225,6 @@
         .nodeLabel((n) => `${esc(n.title)}${n.type ? `<br><small>${esc(n.type)}</small>` : ''}`)
         .nodeColor((n) => (n.id === selectedId ? selectedColor : colorOf(n.group)))
         .nodeVal((n) => (n.id === selectedId ? 1.6 : 1) + Math.sqrt(n.degree || 0))
-        .nodeThreeObjectExtend(true)
-        .nodeThreeObject((n) => (labelled.has(n.id) ? makeLabelSprite(truncateLabel(n.title), inkColor, bgColor) : null))
         .linkColor((l) => l.kind === 'typed' ? selectedColor : css.getPropertyValue('--muted').trim())
         .linkLabel((l) => l.predicate ? esc(l.predicate) : '')
         .linkOpacity(0.35)
