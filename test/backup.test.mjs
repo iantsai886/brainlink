@@ -102,6 +102,10 @@ test('authenticated Setup enables scheduled backup only after a verified first c
   });
   try {
     assert.equal((await api('/api/backup', { enabled: true, folder: dest, intervalHours: 24 }, 'wrong')).status, 401);
+    await fetch(`http://127.0.0.1:${app.port}/api/rsi/discovery/settings`, {
+      method: 'POST', headers: { 'Content-Type': 'application/json', 'X-BrainLink-Token': app.token },
+      body: JSON.stringify({ topics: ['agent memory'], signals: ['Agents lose context after handoff and repeat retrieval searches.'] }),
+    });
     const response = await api('/api/backup', { enabled: true, folder: dest, intervalHours: 24 });
     assert.equal(response.status, 200);
     const result = await response.json();
@@ -109,7 +113,7 @@ test('authenticated Setup enables scheduled backup only after a verified first c
     assert.equal((await verifyBackup(result.backup.status.folder)).ok, true);
     const state = await fetch(`http://127.0.0.1:${app.port}/api/state`, { headers: { 'X-BrainLink-Token': app.token } }).then((r) => r.json());
     assert.equal(state.backup.enabled, true);
-    assert.equal(state.backup.status.file_count, 1);
+    assert.equal(state.backup.status.file_count, 2, 'backup includes the vault note and RSI discovery settings');
     let secondVerified = false;
     for (let i = 0; i < 120 && !secondVerified; i++) {
       for (const folder of await readdir(dest)) {
@@ -127,6 +131,8 @@ test('authenticated Setup enables scheduled backup only after a verified first c
     const restored = await api('/api/backup/restore', { backupFolder: result.backup.status.folder, destination: restore, confirm: true });
     assert.equal(restored.status, 200);
     assert.match(await readFile(path.join(restore, '1-Personal', 'Private.md'), 'utf8'), /private fixture/);
+    const discoveryCopy = JSON.parse(await readFile(path.join(restore, 'BrainLink', 'rsi', 'discovery.json'), 'utf8'));
+    assert.deepEqual(discoveryCopy.settings.topics, ['agent memory']);
     const off = await api('/api/backup', { enabled: false, folder: dest, intervalHours: 24 });
     const offBody = await off.json();
     assert.equal(offBody.backup?.enabled, false, JSON.stringify(offBody));
