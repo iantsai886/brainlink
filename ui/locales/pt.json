@@ -376,6 +376,7 @@
   "notes3d.linksTo": "Linka para",
   "notes3d.noteNotFound": "Não foi possível encontrar uma nota chamada \"{title}\".",
   "notes3d.close": "Fechar ✕",
+  "notes3d.editInObsidian": "Editar no Obsidian",
   "share.title": "Compartilhar com agentes na nuvem",
   "share.hint": "Dê a uma IA na nuvem (por exemplo, um bot que só lê arquivos) uma cópia somente leitura das suas notas, por meio de uma pasta que ela já consegue alcançar. O BrainLink nunca abre uma conexão de rede por conta própria.",
   "share.loading": "Carregando as configurações de compartilhamento…",

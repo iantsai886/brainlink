@@ -11,6 +11,8 @@
 .notes3d-panel { position: absolute; top: 0; right: 0; bottom: 0; width: min(320px, 70%); background: var(--panel); border-left: 1px solid var(--line); padding: 14px 16px; overflow: auto; display: grid; gap: 8px; align-content: start; }
 .notes3d-panel[hidden] { display: none; }
 .notes3d-panel .notes3d-close { justify-self: end; }
+.notes3d-actions { display: flex; justify-content: space-between; align-items: center; gap: 8px; }
+.notes3d-edit[hidden] { display: none; }
 .notes3d-tags { display: flex; flex-wrap: wrap; gap: 4px; }
 .notes3d-body { font-size: 14px; line-height: 1.55; }
 .notes3d-body h3, .notes3d-body h4, .notes3d-body h5, .notes3d-body h6 { margin: 10px 0 4px; }
