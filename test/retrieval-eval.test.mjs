@@ -1,12 +1,13 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
+import { createHash } from 'node:crypto';
 import { mkdtemp, mkdir, readFile, writeFile } from 'node:fs/promises';
-import { execFile } from 'node:child_process';
+import { execFile, execFileSync } from 'node:child_process';
 import { promisify } from 'node:util';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { normalize, saveConfig } from '../src/config.mjs';
-import { createContext, loadVault } from '../src/core.mjs';
+import { createContext, loadVault, searchWithVerdict } from '../src/core.mjs';
 import { VectorStore, fillVectors } from '../src/embed.mjs';
 import { evaluateRetrieval, validateRetrievalFixture } from '../src/retrieval-eval.mjs';
 const execFileAsync = promisify(execFile);
@@ -61,6 +62,70 @@ test('frozen Acme RSI benchmark keeps its private canary out and is eligible onl
   assert.equal(report.result.mean_estimated_output_tokens, report.baseline.mean_estimated_output_tokens);
   assert.doesNotMatch(JSON.stringify(report), /RSI_PRIVATE_CANARY_9D7|Acquisition Budget\.md|Northwind Coffee\.md/);
 });
+
+test('independent frozen retrieval set reports quality, abstention, context, latency and privacy without disclosing canaries', async () => {
+  const root = await mkdtemp(path.join(tmpdir(), 'bl-independent-eval-'));
+  const fixturePath = path.resolve('samples/evaluation/retrieval-independent-v1.json');
+  const fixtureBytes = await readFile(fixturePath);
+  const fixture = JSON.parse(fixtureBytes.toString('utf8'));
+  const ctx = createContext(normalize({ vaults: [{ name: fixture.vault, path: path.resolve('samples/evaluation/independent-vault') }] }), {
+    env: { BRAINLINK_HOME: path.join(root, 'app'), BRAINLINK_VAULTS: fixture.vault, BRAINLINK_SEMANTIC: '0' },
+  });
+  const report = await evaluateRetrieval(ctx, fixture, { fixtureBytes, receipt: { source_commit: 'fixture-test-commit', environment: { node: 'test-node' } } });
+  const output = JSON.stringify(report);
+  assert.equal(report.schema, 2);
+  assert.equal(report.case_count, 30);
+  assert.equal(report.fixture_sha256, createHashForTest(fixtureBytes));
+  assert.equal(report.evaluator_version, 'retrieval-eval-v2');
+  assert.equal(report.source_commit, 'fixture-test-commit');
+  assert.equal(report.baseline.privacy_violations, 0);
+  assert.equal(report.candidate.privacy_violations, 0);
+  assert.equal(report.candidate_policy.tuned_on_fixture, false);
+  assert.equal(report.candidate_policy.estimated_token_budget, 350);
+  assert.ok(report.baseline.mean_latency_ms >= 0);
+  assert.ok(report.candidate.mean_latency_ms >= 0);
+  assert.ok(report.baseline.context.mean_estimated_tokens > report.candidate.context.mean_estimated_tokens);
+  assert.equal(report.baseline.task_success.total, 30);
+  assert.equal(report.candidate.task_success.total, 30);
+  assert.ok(report.baseline.abstention.expected >= 5);
+  assert.equal(report.baseline.source_correctness.source_recall, 1);
+  assert.equal(report.candidate.source_correctness.source_recall, 0.8);
+  assert.ok(Array.isArray(report.candidate.failures));
+  assert.doesNotMatch(output, /INDEPENDENT_PRIVATE_CANARY_7C91|INDEPENDENT_FOREIGN_PROFILE_CANARY_A04F|INDEPENDENT_EXCLUDED_CANARY_28BD|SL-661|88421|Personal Budget\.md|Private Handoff\.md|Archive Record\.md|Silver Larch/);
+  for (const marker of ['INDEPENDENT_PRIVATE_CANARY_7C91', 'INDEPENDENT_FOREIGN_PROFILE_CANARY_A04F', 'INDEPENDENT_EXCLUDED_CANARY_28BD']) {
+    const found = await searchWithVerdict(ctx, fixture.vault, marker, { semantic: false });
+    assert.doesNotMatch(JSON.stringify(found), new RegExp(marker));
+  }
+  const answerable = fixture.cases.filter((c) => c.answerable), unanswerable = fixture.cases.filter((c) => !c.answerable), interleaved = [];
+  for (let i = 0; i < Math.max(answerable.length, unanswerable.length); i++) {
+    if (answerable[i]) interleaved.push(answerable[i]);
+    if (unanswerable[i]) interleaved.push(unanswerable[i]);
+  }
+  const reordered = await evaluateRetrieval(ctx, { ...fixture, cases: interleaved });
+  assert.equal(reordered.baseline.source_correctness.source_recall, report.baseline.source_correctness.source_recall, 'source recall is invariant to answerable/unanswerable case ordering');
+  assert.equal(reordered.candidate.source_correctness.source_recall, report.candidate.source_correctness.source_recall, 'candidate source recall is invariant to case ordering');
+  await assert.rejects(evaluateRetrieval(ctx, { ...fixture, cases: [{ ...fixture.cases[0], answerable: false }] }), /empty expected array/);
+});
+
+test('independent retrieval CLI accepts an explicit fictional vault and emits an exact-byte reproducibility receipt', async () => {
+  const root = await mkdtemp(path.join(tmpdir(), 'bl-independent-cli-'));
+  const fixturePath = path.resolve('samples/evaluation/retrieval-independent-v1.json');
+  const fixtureBytes = await readFile(fixturePath);
+  const { stdout } = await execFileAsync(process.execPath, [path.resolve('bin/brainlink.mjs'), 'eval', '--fixture', fixturePath, '--vault-root', path.resolve('samples/evaluation/independent-vault')], {
+    cwd: process.cwd(), env: { ...process.env, BRAINLINK_HOME: path.join(root, 'home'), BRAINLINK_SEMANTIC: '0' },
+  });
+  const report = JSON.parse(stdout);
+  assert.equal(report.fixture_sha256, createHashForTest(fixtureBytes));
+  assert.equal(report.evaluator_version, 'retrieval-eval-v2');
+  assert.equal(report.case_count, 30);
+  assert.equal(report.environment.node, process.version);
+  assert.equal(report.source_commit, execFileSync('git', ['rev-parse', 'HEAD'], { encoding: 'utf8' }).trim());
+  assert.equal(report.source_branch, execFileSync('git', ['branch', '--show-current'], { encoding: 'utf8' }).trim());
+});
+
+function createHashForTest(value) {
+  return createHash('sha256').update(value).digest('hex');
+}
 
 test('semantic cache prunes vectors from notes no longer visible in the vault index', async () => {
   const root = await mkdtemp(path.join(tmpdir(), 'bl-vector-prune-'));

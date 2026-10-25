@@ -1,0 +1,3 @@
+# Synthetic cross-scope canaries; they must remain outside the searchable corpus.
+Profiles/
+Excluded/

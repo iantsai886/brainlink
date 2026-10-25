@@ -1,16 +1,17 @@
 #!/usr/bin/env node
 // BrainLink command line. AI clients launch `brainlink serve`; people use `brainlink setup`.
 import path from 'node:path';
+import { execFileSync, spawnSync } from 'node:child_process';
 import { homedir, tmpdir } from 'node:os';
 import { stat, readFile, writeFile, mkdir, cp, mkdtemp } from 'node:fs/promises';
 import { randomBytes } from 'node:crypto';
-import { loadConfig, saveConfig, configPath, appHome, emptyConfig } from '../src/config.mjs';
+import { loadConfig, saveConfig, configPath, appHome, emptyConfig, normalize } from '../src/config.mjs';
 import { markConnected } from '../src/mcp-agents.mjs';
 import { buildPack, scaffold, mergePack, PACKS } from '../src/packs.mjs';
 import { CLIENTS, detect, connectClient, disconnectClient } from '../src/connectors.mjs';
 import { createMcp, serveStdio, serveHttp, VERSION } from '../src/server.mjs';
 import { openContext, launchSpec, logActivity, refreshMap, ROOT } from '../src/runtime.mjs';
-import { warmSemantic } from '../src/core.mjs';
+import { createContext, warmSemantic } from '../src/core.mjs';
 import { brief } from '../src/insights.mjs';
 import { startSetup, openInBrowser } from '../src/setup.mjs';
 import { runSync } from '../src/sync-cli.mjs';
@@ -18,7 +19,7 @@ import { PROVIDER_LABELS } from '../src/sync/settings.mjs';
 import { importAll } from '../src/sessions/index.mjs';
 import { recordSessionEndCue, listSessionEndCues } from '../src/sessions/end-cue.mjs';
 import { setSessionHook } from '../src/sessions/hooks.mjs';
-import { evaluateRetrieval } from '../src/retrieval-eval.mjs';
+import { evaluateRetrieval, RETRIEVAL_EVALUATOR_VERSION } from '../src/retrieval-eval.mjs';
 import { evaluateSessionFiling } from '../src/sessions/filing-eval.mjs';
 
 // `brainlink brief | head` closes the pipe early: exit quietly instead of crashing.
@@ -29,6 +30,12 @@ const flag = (name) => argv.includes(`--${name}`);
 const opt = (name, dflt) => { const i = argv.indexOf(`--${name}`); return i === -1 || argv[i + 1]?.startsWith('--') ? dflt : argv[i + 1] ?? dflt; };
 const out = (s) => process.stdout.write(s + '\n');
 const fail = (s) => { process.stderr.write(`brainlink: ${s}\n`); process.exit(1); };
+const gitClean = (args, cwd) => {
+  const result = spawnSync('git', args, { cwd, stdio: 'ignore' });
+  if (result.error) throw result.error;
+  if (result.status !== 0 && result.status !== 1) throw new Error('git status check failed');
+  return result.status === 0;
+};
 // The Setup/UI URL carries a bearer-style session token (?t=...). The browser gets the real
 // link (openInBrowser below uses the unmasked url); anything printed to the Terminal — which can
 // end up in screen recordings, shared terminals or scrollback — shows only the first few chars.
@@ -55,7 +62,7 @@ const HELP = `BrainLink MCP ${VERSION} — one Markdown brain for every AI
   brainlink clients                    show detected / connected AI apps
   brainlink status                     config, vaults, timezone
   brainlink brief [--vault V] [--days 7]  what changed and what is open
-  brainlink eval --fixture FILE       compare retrieval with a labelled fixture (read-only)
+  brainlink eval --fixture FILE [--vault-root DIR --vault-name NAME]  compare labelled retrieval (read-only)
   brainlink eval-filing --fixture FILE evaluate session folder suggestions (read-only)
   brainlink map                        rebuild each vault's Home map
   brainlink sync                       one sync pass (local by default; set up in Setup)
@@ -188,9 +195,23 @@ async function main() {
     case 'eval': {
       const fixtureFile = opt('fixture');
       if (!fixtureFile) fail('--fixture FILE is required');
-      const fixture = JSON.parse(await readFile(path.resolve(fixtureFile), 'utf8'));
-      const { ctx } = await openContext();
-      out(JSON.stringify(await evaluateRetrieval(ctx, fixture), null, 2));
+      const fixtureBytes = await readFile(path.resolve(fixtureFile));
+      const fixture = JSON.parse(fixtureBytes.toString('utf8'));
+      const vaultRoot = opt('vault-root');
+      const vaultName = opt('vault-name', fixture.vault);
+      const { ctx } = vaultRoot
+        ? { ctx: createContext(normalize({ vaults: [{ name: vaultName, path: path.resolve(vaultRoot) }] }), { env: { ...process.env, BRAINLINK_SEMANTIC: '0' } }) }
+        : await openContext();
+      let sourceCommit = null, sourceBranch = null, workingTreeClean = null, trackedTreeClean = null, untrackedPathsPresent = null;
+      try {
+        sourceCommit = execFileSync('git', ['rev-parse', 'HEAD'], { cwd: ROOT, encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'] }).trim();
+        sourceBranch = execFileSync('git', ['branch', '--show-current'], { cwd: ROOT, encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'] }).trim() || null;
+        trackedTreeClean = gitClean(['diff-index', '--quiet', 'HEAD', '--'], ROOT) && gitClean(['diff', '--cached', '--quiet'], ROOT);
+        untrackedPathsPresent = Boolean(execFileSync('git', ['ls-files', '--others', '--exclude-standard'], { cwd: ROOT, encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'] }).trim());
+        workingTreeClean = trackedTreeClean && !untrackedPathsPresent;
+      } catch {}
+      const receipt = { source_commit: sourceCommit, source_branch: sourceBranch, working_tree_clean: workingTreeClean, tracked_tree_clean: trackedTreeClean, untracked_paths_present: untrackedPathsPresent, environment: { node: process.version, platform: process.platform, arch: process.arch }, package_version: VERSION };
+      out(JSON.stringify(await evaluateRetrieval(ctx, fixture, { fixtureBytes, receipt }), null, 2));
       return;
     }
     case 'eval-filing': {

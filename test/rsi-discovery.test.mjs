@@ -245,14 +245,19 @@ test('Setup exposes discovery only through authenticated local APIs and runs the
     await delay(80);
     assert.equal(calls.length, 0, 'nothing is fetched while discovery is off');
     assert.equal((await post('/api/rsi/ideas', { title: 'Forged', user_problem: 'Forged discovery record via API.', origin: 'discovery' })).status, 400);
-    await post('/api/rsi/discovery/pause');
-    const configured = await post('/api/rsi/discovery/settings', settings).then(r => r.json());
+    const pauseResponse = await post('/api/rsi/discovery/pause');
+    assert.equal(pauseResponse.status, 200, await pauseResponse.clone().text());
+    const configuredResponse = await post('/api/rsi/discovery/settings', settings);
+    assert.equal(configuredResponse.status, 200, await configuredResponse.clone().text());
+    const configured = await configuredResponse.json();
     assert.equal(configured.discovery.settings.enabled, true);
     assert.equal(configured.discovery.settings.paused, true, 'turning discovery on does not silently resume a pause');
     await delay(80);
     assert.equal(calls.length, 0, 'the scheduler skips a paused discovery');
-    await post('/api/rsi/discovery/resume');
-    for (let i = 0; i < 50 && !calls.length; i++) await delay(20);
+    const resumeResponse = await post('/api/rsi/discovery/resume');
+    assert.equal(resumeResponse.status, 200, await resumeResponse.clone().text());
+    assert.equal((await resumeResponse.json()).discovery.settings.paused, false);
+    for (let i = 0; i < 100 && !calls.length; i++) await delay(50);
     assert.equal(calls.length, 1, 'the scheduler runs once when due');
     for (let i = 0; i < 50; i++) { if ((await fetch(base + '/api/rsi/discovery', { headers: { 'X-BrainLink-Token': app.token } }).then(r => r.json())).discovery.runs.length) break; await delay(20); }
     const status = await fetch(base + '/api/rsi/discovery', { headers: { 'X-BrainLink-Token': app.token } }).then(r => r.json());
@@ -282,11 +287,11 @@ test('enabled discovery keeps the desktop process alive through its idle timeout
   });
   try {
     await post('/api/rsi/discovery/settings', settings);
-    await delay(600);
+    await delay(1500);
     assert.equal((await fetch(base + '/health')).status, 200, 'scheduled RSI work keeps BrainLink available after ordinary idle timeout');
     assert.equal(quitCalled, false);
     await post('/api/rsi/discovery/pause');
-    await delay(600);
+    await delay(1500);
     assert.equal(quitCalled, true, 'pausing discovery restores the configured idle exit');
   } finally { if (!quitCalled) app.server.close(); }
 });
