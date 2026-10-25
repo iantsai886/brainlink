@@ -96,12 +96,18 @@ test('authenticated Setup enables scheduled backup only after a verified first c
   await writeFile(path.join(root, 'Private.md'), '---\nprivate: true\n---\nprivate fixture');
   const env = { BRAINLINK_HOME: home, HOME: home, BRAINLINK_SEMANTIC: '0' };
   await saveConfig(normalize({ vaults: [{ name: 'Personal', path: root, private: true }] }), path.join(home, 'config.json'));
-  const app = await startSetup({ env, home, os: 'win32', port: 0, useCli: false, backupIntervalMs: 50, idleMinutes: 0.01 });
+  const app = await startSetup({ env, home, os: 'win32', port: 0, useCli: false, backupIntervalMs: 50, idleMinutes: 0.01,
+    pickRestoreSourceFolder: async () => 'C:\\Fictional\\BrainLink-Backup',
+    pickRestoreDestinationFolder: async () => 'D:\\Fictional\\Recovery' });
   const api = (route, body, token = app.token) => fetch(`http://127.0.0.1:${app.port}${route}`, {
     method: 'POST', headers: { 'Content-Type': 'application/json', 'X-BrainLink-Token': token }, body: JSON.stringify(body || {}),
   });
   try {
     assert.equal((await api('/api/backup', { enabled: true, folder: dest, intervalHours: 24 }, 'wrong')).status, 401);
+    assert.equal((await api('/api/backup/restore/pick-source', {}, 'wrong')).status, 401);
+    assert.equal((await api('/api/backup/restore/pick-destination', {}, 'wrong')).status, 401);
+    assert.deepEqual(await api('/api/backup/restore/pick-source').then((r) => r.json()), { path: 'C:\\Fictional\\BrainLink-Backup' });
+    assert.deepEqual(await api('/api/backup/restore/pick-destination').then((r) => r.json()), { path: 'D:\\Fictional\\Recovery' });
     await fetch(`http://127.0.0.1:${app.port}/api/rsi/discovery/settings`, {
       method: 'POST', headers: { 'Content-Type': 'application/json', 'X-BrainLink-Token': app.token },
       body: JSON.stringify({ topics: ['agent memory'], signals: ['Agents lose context after handoff and repeat retrieval searches.'] }),
@@ -137,6 +143,21 @@ test('authenticated Setup enables scheduled backup only after a verified first c
     const offBody = await off.json();
     assert.equal(offBody.backup?.enabled, false, JSON.stringify(offBody));
   } finally { app.server.close(); }
+});
+
+test('restore UI provides separate localized folder pickers and retains explicit restore confirmation', async () => {
+  const html = await readFile(new URL('../ui/index.html', import.meta.url), 'utf8');
+  for (const id of ['backup-restore-source', 'backup-restore-destination', 'backup-restore-pick-source', 'backup-restore-pick-destination', 'backup-restore']) {
+    assert.equal((html.match(new RegExp(`id="${id}"`, 'g')) || []).length, 1, id);
+  }
+  assert.match(html, /\/api\/backup\/restore\/pick-source/);
+  assert.match(html, /\/api\/backup\/restore\/pick-destination/);
+  assert.match(html, /if \(!confirm\(t\('backup\.restoreConfirm'\)\)\) return/);
+  for (const locale of ['en', 'zh-TW', 'pt']) {
+    const catalog = JSON.parse(await readFile(new URL(`../ui/locales/${locale}.json`, import.meta.url), 'utf8'));
+    assert.ok(catalog['backup.restorePickSource'], `${locale} source picker label`);
+    assert.ok(catalog['backup.restorePickDestination'], `${locale} destination picker label`);
+  }
 });
 
 test('restart retains backup result and catches up when the last run is overdue', async () => {

@@ -90,6 +90,8 @@ export async function startSetup(opts = {}) {
   const pick = opts.pick || (() => pickFolder(os));
   const pickSnapshotFolder = opts.pickSnapshotFolder || (() => pickFolder(os, 'Choose a folder to share a read-only copy with cloud agents'));
   const pickBackupFolder = opts.pickBackupFolder || (() => pickFolder(os, 'Choose a private backup destination'));
+  const pickRestoreSourceFolder = opts.pickRestoreSourceFolder || (() => pickFolder(os, 'Choose a BrainLink backup folder'));
+  const pickRestoreDestinationFolder = opts.pickRestoreDestinationFolder || (() => pickFolder(os, 'Choose an empty restore destination'));
   const clientOpts = () => ({ home, os, env, launch: launchSpec(env), useCli: opts.useCli });
   const sessions = sessionsService(env); // src/host.mjs: cross-session reads over src/sessions/* (importAll, session_list/read semantics)
   const rsiLedger = createRsiLedger({ home: appHome(env) });
@@ -719,6 +721,8 @@ export async function startSetup(opts = {}) {
       return { ok: true };
     },
     'POST /api/backup/pick-folder': async () => { const p = await pickBackupFolder(); return p === undefined ? { path: null, unavailable: true } : { path: p }; },
+    'POST /api/backup/restore/pick-source': async () => { const p = await pickRestoreSourceFolder(); return p === undefined ? { path: null, unavailable: true } : { path: p }; },
+    'POST /api/backup/restore/pick-destination': async () => { const p = await pickRestoreDestinationFolder(); return p === undefined ? { path: null, unavailable: true } : { path: p }; },
     'POST /api/backup': async (b) => {
       const cfg = await loadConfig(file);
       const next = { ...cfg, backup: { enabled: Boolean(b.enabled), folder: b.folder || null, intervalHours: Number(b.intervalHours || 24) } };

@@ -364,8 +364,8 @@ ol.todo li { padding-left: 4px; }
     <p class="hint" data-i18n="startup.hint"></p>
     <details><summary data-i18n="backup.restoreTitle"></summary>
       <p class="hint" data-i18n="backup.restoreHint"></p>
-      <div class="grid2"><label><span data-i18n="backup.restoreSource"></span><input id="backup-restore-source" class="mono"></label>
-      <label><span data-i18n="backup.restoreDestination"></span><input id="backup-restore-destination" class="mono"></label></div>
+      <div class="grid2"><div><label><span data-i18n="backup.restoreSource"></span><input id="backup-restore-source" class="mono"></label><button id="backup-restore-pick-source" data-i18n="backup.restorePickSource"></button></div>
+      <div><label><span data-i18n="backup.restoreDestination"></span><input id="backup-restore-destination" class="mono"></label><button id="backup-restore-pick-destination" data-i18n="backup.restorePickDestination"></button></div></div>
       <div class="row" style="margin-top:10px"><button id="backup-restore" data-i18n="backup.restoreBtn"></button></div>
     </details>
   </section>
@@ -1297,6 +1297,20 @@ $('backup-pick').onclick = async () => {
   try {
     const r = await api('POST', '/api/backup/pick-folder');
     if (r.path) $('backup-folder').value = r.path;
+    else if (r.unavailable) toast(t('backup.pickerUnavailable'), true);
+  } catch (e) { toast(e.message, true); }
+};
+$('backup-restore-pick-source').onclick = async () => {
+  try {
+    const r = await api('POST', '/api/backup/restore/pick-source');
+    if (r.path) $('backup-restore-source').value = r.path;
+    else if (r.unavailable) toast(t('backup.pickerUnavailable'), true);
+  } catch (e) { toast(e.message, true); }
+};
+$('backup-restore-pick-destination').onclick = async () => {
+  try {
+    const r = await api('POST', '/api/backup/restore/pick-destination');
+    if (r.path) $('backup-restore-destination').value = r.path;
     else if (r.unavailable) toast(t('backup.pickerUnavailable'), true);
   } catch (e) { toast(e.message, true); }
 };
