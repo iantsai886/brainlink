@@ -550,5 +550,14 @@
   "rsi.experiment.run": "執行評估",
   "rsi.experiment.note": "只使用內建虛構筆記。保存彙總結果供審查，不會改變實際檢索。",
   "rsi.experiment.history": "評估紀錄",
-  "rsi.experiment.done": "評估結果已保存，等待審查。"
+  "rsi.experiment.done": "評估結果已保存，等待審查。",
+  "rsi.experiment.tokens": "估算 token：{baseline} → {candidate}",
+  "rsi.experiment.metric.hit_at_k_rate": "搜尋成功率",
+  "rsi.experiment.metric.task_success_rate": "任務成功率",
+  "rsi.experiment.decision.eligible_for_review": "可交由人工審查",
+  "rsi.experiment.decision.needs_more_cases": "需要更多測試案例",
+  "rsi.experiment.decision.no_demonstrated_gain": "沒有明確改善",
+  "rsi.experiment.decision.no_demonstrated_efficiency_gain": "沒有明確減少 token",
+  "rsi.experiment.decision.quality_regression": "品質下降",
+  "rsi.experiment.decision.blocked_privacy": "因隱私問題而停止"
 }

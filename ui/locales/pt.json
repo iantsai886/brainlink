@@ -550,5 +550,14 @@
   "rsi.experiment.run": "Executar avaliação",
   "rsi.experiment.note": "Usa apenas notas fictícias incluídas. Guarda resultados resumidos para revisão e nunca altera a pesquisa ativa.",
   "rsi.experiment.history": "Registos de avaliação",
-  "rsi.experiment.done": "Avaliação guardada para revisão."
+  "rsi.experiment.done": "Avaliação guardada para revisão.",
+  "rsi.experiment.tokens": "Tokens estimados: {baseline} → {candidate}",
+  "rsi.experiment.metric.hit_at_k_rate": "Sucesso da pesquisa",
+  "rsi.experiment.metric.task_success_rate": "Sucesso da tarefa",
+  "rsi.experiment.decision.eligible_for_review": "Pronto para revisão humana",
+  "rsi.experiment.decision.needs_more_cases": "Precisa de mais casos de teste",
+  "rsi.experiment.decision.no_demonstrated_gain": "Sem melhoria clara",
+  "rsi.experiment.decision.no_demonstrated_efficiency_gain": "Sem redução clara de tokens",
+  "rsi.experiment.decision.quality_regression": "A qualidade diminuiu",
+  "rsi.experiment.decision.blocked_privacy": "Bloqueado por um problema de privacidade"
 }

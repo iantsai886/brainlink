@@ -550,5 +550,14 @@
   "rsi.experiment.run": "Run evaluation",
   "rsi.experiment.note": "Uses built-in fictional notes only. Saves summary results for review and never changes live retrieval.",
   "rsi.experiment.history": "Evaluation records",
-  "rsi.experiment.done": "Evaluation saved for review."
+  "rsi.experiment.done": "Evaluation saved for review.",
+  "rsi.experiment.tokens": "Estimated tokens: {baseline} → {candidate}",
+  "rsi.experiment.metric.hit_at_k_rate": "Search success",
+  "rsi.experiment.metric.task_success_rate": "Task success",
+  "rsi.experiment.decision.eligible_for_review": "Ready for human review",
+  "rsi.experiment.decision.needs_more_cases": "Needs more test cases",
+  "rsi.experiment.decision.no_demonstrated_gain": "No clear improvement found",
+  "rsi.experiment.decision.no_demonstrated_efficiency_gain": "No token reduction found",
+  "rsi.experiment.decision.quality_regression": "Quality went down",
+  "rsi.experiment.decision.blocked_privacy": "Blocked by a privacy issue"
 }
