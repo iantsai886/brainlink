@@ -17,6 +17,12 @@ The prior full-suite baseline includes the RSI-ledger changes, GitHub selected-c
 
 This is an evidence ledger, not a release-readiness claim. “Implemented and locally tested” does not imply packaged, cross-client validated, or ready for customers.
 
+### Independent retrieval evaluation contribution (2026-10-25)
+
+Created feature branch `eval/independent-retrieval-efficiency` from freshly fetched `fix/private-session-excerpts` HEAD `807619a`. Added a frozen, fictional 30-case set (fixture size 6,217 bytes; SHA-256 `500e0faffedcdf194c535dc3c0b2f44afe2111814f0d6c034420616392cb5490`) and a schema-2 mode in the existing read-only evaluator. On macOS with Node `v26.3.1`, baseline task success was 17/30, top-k all-source correctness was 22/22 answerable cases, source recall 1.000, mean estimated context 497 tokens, and 0 privacy violations. The fixed label-blind compaction candidate scored 15/30, 18/22 all-source cases, source recall 0.800, mean estimated context 219 tokens, and 0 privacy violations. Mean latency is recorded in the machine-readable receipt and varies by run. The evaluator returned `quality_regression`; the 56% lower token estimate is not counted as an improvement because required source/context quality regressed. The task score is a source/context and abstention proxy, not generated-answer quality or provider billing.
+
+Focused evaluator tests passed 7/7; the standalone UI suite passed 28/28. `npm run test:all` was attempted twice and consistently stopped in the core suite at 291 passed, 4 failed, 1 skipped out of 296; the four failures are in existing GitHub conflict-copy/local-commit tests and a Twin session-assignment test. Running those specs at the unchanged baseline commit `807619a` reproduced the same 4 failures (17 passed, 4 failed), confirming they predate this contribution. The full UI suite was run separately and passed. No production behavior, client data, network lookup, provider call, or remote evaluation was used.
+
 ## Memory and continuity
 
 | Area | Current implementation | Evidence and remaining gap |
