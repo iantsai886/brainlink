@@ -350,6 +350,20 @@ ol.todo li { padding-left: 4px; }
     </details>
   </section>
 
+  <section id="s-ingestion">
+    <h2 data-i18n="ingestion.title"></h2>
+    <p class="hint" data-i18n="ingestion.hint"></p>
+    <label class="muted" style="display:flex;flex-direction:row;gap:6px;align-items:center"><input type="checkbox" id="ingestion-enabled" style="width:auto"><span data-i18n="ingestion.enabled"></span></label>
+    <div class="grid2" style="margin-top:10px">
+      <label><span data-i18n="ingestion.vault"></span><select id="ingestion-vault"></select></label>
+      <label><span data-i18n="ingestion.folder"></span><input id="ingestion-folder" class="mono" placeholder="Raw"></label>
+      <label><span data-i18n="ingestion.time"></span><input id="ingestion-time" type="time" value="02:00"></label>
+    </div>
+    <div class="row" style="margin-top:12px"><button class="primary" id="ingestion-save" data-i18n="ingestion.save"></button><button id="ingestion-run" data-i18n="ingestion.run"></button></div>
+    <p id="ingestion-status" class="muted" role="status"></p>
+    <div id="ingestion-queue" class="cards" aria-live="polite"></div>
+  </section>
+
   <section id="s-backup">
     <h2 data-i18n="backup.title"></h2>
     <p class="hint" data-i18n="backup.hint"></p>
@@ -969,6 +983,15 @@ async function load() {
   $('sync-device').value = SY.device || '';
   $('sync-folder').value = SY.folder || '';
   $('backup-enabled').checked = Boolean(S.backup?.enabled);
+  $('ingestion-enabled').checked = Boolean(S.ingestion?.enabled);
+  $('ingestion-vault').innerHTML = S.vaults.filter((v) => !v.private && v.exists).map((v) => `<option value="${esc(v.name)}" ${v.name === S.ingestion?.vault ? 'selected' : ''}>${esc(v.name)}</option>`).join('');
+  $('ingestion-folder').value = S.ingestion?.folder || '';
+  $('ingestion-time').value = S.ingestion?.time || '02:00';
+  $('ingestion-status').textContent = S.ingestion?.status?.at
+    ? (S.ingestion.status.ok ? t('ingestion.lastRun', { count: S.ingestion.status.queued_total, at: new Date(S.ingestion.status.at).toLocaleString(LOCALE), trigger: t('ingestion.trigger.' + S.ingestion.status.trigger) }) : t('ingestion.failed', { error: S.ingestion.status.error || '' }))
+    : t('ingestion.never');
+  if (S.ingestion?.status?.running) $('ingestion-status').textContent = t('ingestion.running');
+  $('ingestion-run').disabled = !S.vaults.some((v) => !v.private && v.exists);
   $('startup-at-login').checked = Boolean(S.startup_at_login);
   $('backup-folder').value = S.backup?.folder || '';
   $('backup-hours').value = String(S.backup?.intervalHours || 24);
@@ -1313,6 +1336,15 @@ $('backup-pick').onclick = async () => {
     else if (r.unavailable) toast(t('backup.pickerUnavailable'), true);
   } catch (e) { toast(e.message, true); }
 };
+$('ingestion-save').onclick = () => act(async () => {
+  const r = await api('POST', '/api/ingestion/settings', { enabled: $('ingestion-enabled').checked, vault: $('ingestion-vault').value, folder: $('ingestion-folder').value, time: $('ingestion-time').value });
+  toast(t(r.ingestion.enabled ? 'ingestion.saved' : 'ingestion.disabled'));
+});
+$('ingestion-run').onclick = () => act(async () => {
+  const r = await api('POST', '/api/ingestion/run', { vault: $('ingestion-vault').value, folder: $('ingestion-folder').value });
+  $('ingestion-queue').innerHTML = r.candidates.length ? r.candidates.map((item) => `<div class="card"><b>${esc(item.title)}</b><span class="mono muted">${esc(item.path)}</span><small class="muted">${esc(item.updated_at)}</small></div>`).join('') : `<p class="muted">${esc(t('ingestion.empty'))}</p>`;
+  toast(t('ingestion.scanDone', { count: r.queued_total }));
+});
 $('backup-restore-pick-source').onclick = async () => {
   try {
     const r = await api('POST', '/api/backup/restore/pick-source');

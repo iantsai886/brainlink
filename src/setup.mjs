@@ -36,6 +36,8 @@ import { twinProfileStatus } from './twin-profiles.mjs';
 import { createRsiLedger } from './rsi-ledger.mjs';
 import { createRsiExperiments } from './rsi-experiments.mjs';
 import { createRsiDiscovery } from './rsi-discovery.mjs';
+import { ingestionQueue } from './ingestion.mjs';
+import { ingestionScheduleDue, localDateAndTime, validateIngestionSchedule } from './ingestion-schedule.mjs';
 
 const UI_STATIC_TYPES = { '.js': 'text/javascript; charset=utf-8', '.css': 'text/css; charset=utf-8', '.json': 'application/json; charset=utf-8' };
 const UI_DIR = path.join(ROOT, 'ui');
@@ -108,10 +110,11 @@ export async function startSetup(opts = {}) {
   // never stop this background process, so idle timeout is the only thing that quits it here.
   let idleTimer = null;
   let backupEnabled = false;
+  let ingestionKeepsAlive = false;
   const quit = () => setTimeout(() => { snapshotWatcher?.stop(); (opts.onQuit ? opts.onQuit() : server.close()); }, 100);
   const touch = () => {
     clearTimeout(idleTimer);
-    if (!opts.idleMinutes || backupEnabled || discoveryKeepsAlive) return;
+    if (!opts.idleMinutes || backupEnabled || discoveryKeepsAlive || ingestionKeepsAlive) return;
     idleTimer = setTimeout(quit, opts.idleMinutes * 60e3);
     idleTimer.unref?.();
   };
@@ -125,6 +128,52 @@ export async function startSetup(opts = {}) {
   let backupRunning = false;
   let backupTickRunning = false;
   let backupStatus = await loadBackupStatus(backupStateFile);
+  const ingestionStateFile = path.join(appHome(env), 'ingestion-state.json');
+  let ingestionStatus = await readFile(ingestionStateFile, 'utf8').then((raw) => JSON.parse(raw)).catch(() => ({ ok: null, at: null, trigger: null, queued_total: 0, scanned: 0, skipped: 0, error: null }));
+  let ingestionRunning = false;
+  async function saveIngestionStatus(status) {
+    ingestionStatus = status;
+    await mkdir(path.dirname(ingestionStateFile), { recursive: true });
+    const temp = `${ingestionStateFile}.${randomBytes(5).toString('hex')}.tmp`;
+    await writeFile(temp, JSON.stringify(status, null, 2) + '\n', { flag: 'wx' });
+    await rename(temp, ingestionStateFile);
+  }
+  async function runIngestion(cfg, { trigger = 'manual', vaultName = cfg.ingestion?.vault, folder = cfg.ingestion?.folder } = {}) {
+    if (ingestionRunning) throw new Error('A source scan is already running.');
+    if (!vaultName || !folder) throw new Error('Choose one vault and one folder to scan.');
+    ingestionRunning = true;
+    try {
+      const ctx = createContext(cfg, { env: { ...env, BRAINLINK_SEMANTIC: '0' }, platform: 'BrainLink Setup' });
+      const queue = await ingestionQueue(ctx, vaultName, folder, { limit: 100 });
+      const status = { ok: true, at: new Date().toISOString(), trigger, vault: vaultName, folder: queue.folder, queued_total: queue.queued_total, scanned: queue.scanned, skipped: queue.skipped, truncated: queue.truncated, error: null };
+      await saveIngestionStatus(status);
+      return { ...status, candidates: queue.candidates };
+    } catch (error) {
+      const status = { ok: false, at: new Date().toISOString(), trigger, vault: vaultName, folder: String(folder), queued_total: 0, scanned: 0, skipped: 0, error: error.message || String(error) };
+      await saveIngestionStatus(status).catch(() => {});
+      throw error;
+    } finally { ingestionRunning = false; }
+  }
+  let ingestionTickRunning = false;
+  const ingestionTimer = setInterval(async () => {
+    if (ingestionTickRunning || ingestionRunning) return;
+    ingestionTickRunning = true;
+    try {
+      const cfg = await loadConfig(file);
+      if (!ingestionScheduleDue(cfg.ingestion, new Date(), cfg.timezone)) return;
+      // Persist the local day before scanning so a failure is reported once, not retried every tick.
+      cfg.ingestion.last_scheduled_date = localDateAndTime(new Date(), cfg.timezone).date;
+      await saveConfig(cfg, file);
+      await runIngestion(cfg, { trigger: 'schedule' });
+    } catch (error) {
+      await saveIngestionStatus({ ok: false, at: new Date().toISOString(), trigger: 'schedule', queued_total: 0, scanned: 0, skipped: 0, error: error.message || String(error) }).catch(() => {});
+    } finally { ingestionTickRunning = false; }
+  }, opts.ingestionTickMs ?? 30_000);
+  ingestionTimer.unref?.();
+  function refreshIngestionSchedule(cfg) {
+    ingestionKeepsAlive = Boolean(cfg.ingestion?.enabled);
+    touch();
+  }
   async function rsiBackupArtifacts() {
     const artifacts = [];
     // Validate the append-only journal before including it in an otherwise verified vault backup.
@@ -225,7 +274,9 @@ export async function startSetup(opts = {}) {
   discoveryTimer.unref?.();
 
   refreshSnapshotWatcher(await loadConfig(file)).catch(() => {});
-  refreshBackupTimer(await loadConfig(file));
+  const initialConfig = await loadConfig(file);
+  refreshBackupTimer(initialConfig);
+  refreshIngestionSchedule(initialConfig);
 
   async function state() {
     const cfg = await loadConfig(file);
@@ -257,6 +308,7 @@ export async function startSetup(opts = {}) {
       sessions_has_private: ((await sessions.list({ include_private: true, limit: 20 }).catch(() => ({ sessions: [] }))).sessions || []).some((x) => x.private),
       snapshot: { ...snapshotSettings(cfg), suggested_folder: suggestSnapshotFolder(home), ...(await loadSnapshotStatus(snapshotStateFile)) },
       backup: { ...cfg.backup, status: backupStatus, running: backupRunning },
+      ingestion: { ...cfg.ingestion, status: ingestionStatus, running: ingestionRunning },
       startup_at_login: ['win32', 'darwin', 'linux'].includes(os) ? await isStartupEnabled(env, home, os) : false,
     };
   }
@@ -425,7 +477,9 @@ export async function startSetup(opts = {}) {
     'POST /api/vault/remove': async (b) => {
       const cfg = await loadConfig(file);
       const next = { ...cfg, vaults: cfg.vaults.filter((v) => v.name !== b.name), agents: cfg.agents.filter((a) => a.vault !== b.name), handoff: cfg.handoff?.vault === b.name ? null : cfg.handoff };
+      if (next.ingestion?.vault === b.name) next.ingestion = { ...next.ingestion, enabled: false };
       await saveConfig(next, file);
+      refreshIngestionSchedule(next);
       // S5: the snapshot watcher was started from whatever vault list existed at launch (or the
       // last /api/snapshot call) and otherwise runs for the life of this process — removing a
       // vault here must stop it from still syncing a now-gone folder until next restart.
@@ -447,7 +501,9 @@ export async function startSetup(opts = {}) {
       const v = cfg.vaults.find((x) => x.name === b.name);
       if (!v) throw new Error(`Unknown vault "${b.name}".`);
       v.private = Boolean(b.private);
+      if (v.private && cfg.ingestion?.vault === v.name) cfg.ingestion = { ...cfg.ingestion, enabled: false };
       await saveConfig(cfg, file);
+      refreshIngestionSchedule(cfg);
       // S5: a vault just marked private must stop being watched/synced into the shared snapshot
       // right away, not only after the app restarts (startSnapshotWatcher already skips private
       // vault roots — see src/snapshot.mjs — but only when it starts watching).
@@ -774,6 +830,23 @@ export async function startSetup(opts = {}) {
       const cfg = await loadConfig(file);
       return runBackup(cfg);
     },
+    'POST /api/ingestion/settings': async (b) => {
+      const cfg = await loadConfig(file);
+      const next = { ...cfg, ingestion: validateIngestionSchedule(b, cfg.ingestion) };
+      if (next.ingestion.enabled) {
+        const ctx = createContext(next, { env: { ...env, BRAINLINK_SEMANTIC: '0' } });
+        await ingestionQueue(ctx, next.ingestion.vault, next.ingestion.folder, { limit: 1 });
+      }
+      await saveConfig(next, file);
+      refreshIngestionSchedule(next);
+      return { ok: true, ingestion: { ...next.ingestion, status: ingestionStatus } };
+    },
+    'POST /api/ingestion/run': async (b) => {
+      const cfg = await loadConfig(file);
+      const vaultName = String(b.vault || cfg.ingestion?.vault || '');
+      const folder = String(b.folder || cfg.ingestion?.folder || '');
+      return runIngestion(cfg, { trigger: 'manual', vaultName, folder });
+    },
     'POST /api/startup': async (b) => ({ ok: true, enabled: await setStartupEnabled(Boolean(b.enabled), { env, home, os }) }),
     'POST /api/backup/restore': async (b) => {
       if (b.confirm !== true) throw new Error('Confirm restoring into an empty folder first.');
@@ -856,7 +929,7 @@ export async function startSetup(opts = {}) {
     }
     try { json(res, 200, await route(body)); } catch (e) { json(res, 400, { error: String(e.message || e) }); }
   });
-  server.once('close', () => { snapshotWatcher?.stop(); clearInterval(discoveryTimer); if (backupTimer) { clearTimeout(backupTimer); clearInterval(backupTimer); } });
+  server.once('close', () => { snapshotWatcher?.stop(); clearInterval(discoveryTimer); clearInterval(ingestionTimer); if (backupTimer) { clearTimeout(backupTimer); clearInterval(backupTimer); } });
   await new Promise((resolve, reject) => { server.once('error', reject); server.listen(port, '127.0.0.1', resolve); });
   port = server.address().port;
   touch();
