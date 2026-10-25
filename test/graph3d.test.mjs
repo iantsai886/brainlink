@@ -183,4 +183,4 @@ test('ui/notes3d.css: the map is larger by default than the old 4:3 box', async 
   const block = css.match(/\.notes3d-wrap\s*\{[^}]*\}/)[0];
   assert.doesNotMatch(block, /aspect-ratio:\s*4\s*\/\s*3/, 'must no longer be the old, smaller 4:3 box');
   assert.match(block, /min-height:\s*\d+px/, 'needs a height floor so it is never cramped, independent of aspect-ratio');
-});\n
+});
