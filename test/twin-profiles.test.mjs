@@ -88,6 +88,8 @@ test('profile-scoped agents see only granted vaults and only supported read tool
   const names = listed.result.tools.map((tool) => tool.name);
   assert.ok(names.includes('vault_search'));
   assert.ok(names.includes('vault_read_note'));
+  assert.ok(names.includes('ingestion_queue'), 'source scanning follows the profile search grant');
+  assert.ok(!names.includes('ingestion_record'), 'filing receipts require a separate propose_note grant');
   assert.deepEqual(names.includes('vault_search') && listed.result.tools.find((tool) => tool.name === 'vault_search').inputSchema.properties.vault.enum, ['Fictional Org']);
   assert.ok(!names.includes('propose_note'));
   assert.ok(!names.includes('session_list'));
@@ -117,6 +119,11 @@ test('profile-scoped agents see only granted vaults and only supported read tool
   const deniedSession = await mcp.handle({ jsonrpc: '2.0', id: 4, method: 'tools/call', params: { name: 'session_list', arguments: {} } });
   assert.equal(deniedSession.result.isError, true);
   assert.match(deniedSession.result.content[0].text, /does not allow read_session/);
+  const filingCfg = structuredClone(cfg);
+  filingCfg.twin_profiles[0].agent_access[0].vaults[0].access = 'propose';
+  filingCfg.twin_profiles[0].agent_access[0].vaults[0].operations.push('propose_note');
+  const filingTools = createMcp(createContext(filingCfg, { env: { BRAINLINK_AGENT_TOKEN: 'fictional-agent-token' } })).tools.map((tool) => tool.name);
+  assert.ok(filingTools.includes('ingestion_record'), 'filing receipts appear only after an explicit propose_note grant');
   const unassigned = createContext(cfg, { env: { BRAINLINK_AGENT_TOKEN: 'unknown-token' } });
   assert.deepEqual(unassigned.enabled, []);
   assert.equal(unassigned.twinScope.mode, 'unassigned');
@@ -300,7 +307,7 @@ test('local Setup assigns an unowned session only to a session-authorized Twin a
   const home = path.join(root, 'home');
   const vaultPath = path.join(root, 'vault');
   await mkdir(vaultPath);
-  const env = { BRAINLINK_HOME: path.join(home, 'app') };
+  const env = { BRAINLINK_HOME: path.join(home, 'app'), HOME: home, USERPROFILE: home };
   const cfg = fixture(vaultPath);
   cfg.twin_profiles[0].allowed_actions.push('read_session');
   cfg.twin_profiles[0].agent_access[0].vaults[0].operations.push('read_session');

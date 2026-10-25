@@ -31,7 +31,9 @@ On Windows with Node.js 24.18.0, `npm run test:all` passed on commit `fd5f69d`: 
 
 ### Raw-to-Wiki reference review (2026-10-25)
 
-Reviewed Ian's supplied 167-second reel transcript and selected stills. The recommendation is to add an optional, scope-first pipeline that preserves original files and prepares reviewable, linked knowledge notes, then refreshes generated maps and writes privacy-safe event receipts. This complements the existing Markdown vault, `BrainLink/Home.md`, session filing, and typed graph. The design is documented in `docs/RAW-WIKI-INGESTION-MODEL.md`; no automatic ingestion pipeline, unattended filing, or token savings are claimed as implemented or measured.
+Reviewed Ian's supplied 167-second reel transcript and selected stills. The first on-demand MCP queue is implemented: it scans one selected non-private folder, checks scope/exclusions/symlinks and bounded frontmatter privacy before body reads, returns new/changed Markdown metadata, and supports content-free local `filed`/`skipped` receipts. Focused ingestion tests cover private, malformed, excluded, generated and changed sources, source-linked filing, stale revisions, local receipt contents, and profile grants. File-drop monitoring, an ingestion screen, unattended filing, and token savings remain unimplemented or unmeasured. See `docs/RAW-WIKI-INGESTION-MODEL.md`.
+
+Full Windows validation for this implementation: Node.js 24.18.0, `npm run test:all`, core 334 tests (328 passed, 0 failed, 6 skipped) and UI 28 tests (28 passed, 0 failed). The skips are platform or Windows symlink-privilege dependent. `git diff --check` passed. This validates the local code path and fictional test data only; it does not verify a live user vault, background monitoring, token savings, cross-client behavior, or release readiness.
 
 ### End-of-session review link (2026-10-25)
 

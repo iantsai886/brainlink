@@ -255,13 +255,8 @@ export async function isExcludedPath(root, rel) {
 // Inspect only a bounded frontmatter prefix before reading/indexing a note body. A malformed
 // or overlong frontmatter is hidden until the owner fixes it; never guess "public" when the
 // privacy marker might be beyond the bounded header.
-async function indexableFromHeader(full, size) {
-  const fd = await open(full, 'r');
-  const buffer = Buffer.alloc(Math.min(size, 65536));
-  let bytesRead;
-  try { ({ bytesRead } = await fd.read(buffer, 0, buffer.length, 0)); }
-  finally { await fd.close(); }
-  const prefix = buffer.subarray(0, bytesRead).toString('utf8').replace(/^\uFEFF/, '');
+export function indexableHeader(prefix, size, bytesRead = Buffer.byteLength(prefix, 'utf8')) {
+  prefix = String(prefix).replace(/^\uFEFF/, '');
   const start = prefix.match(/^(?:[ \t]*\r?\n)*---[^\S\r\n]*\r?\n/);
   if (!start) return /\S/.test(prefix) || bytesRead >= size;
   const tail = prefix.slice(start[0].length);
@@ -270,6 +265,15 @@ async function indexableFromHeader(full, size) {
   const header = tail.slice(0, end.index);
   const { meta } = parseFrontmatter(prefix.slice(0, start[0].length + end.index + end[0].length));
   return !(isPrivateMeta(meta) || fmSaysPrivate(header));
+}
+
+async function indexableFromHeader(full, size) {
+  const fd = await open(full, 'r');
+  const buffer = Buffer.alloc(Math.min(size, 65536));
+  let bytesRead;
+  try { ({ bytesRead } = await fd.read(buffer, 0, buffer.length, 0)); }
+  finally { await fd.close(); }
+  return indexableHeader(buffer.subarray(0, bytesRead).toString('utf8'), size);
 }
 
 // Hash-incremental: unchanged files are not re-chunked on the next call.

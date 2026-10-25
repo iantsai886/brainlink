@@ -21,7 +21,7 @@ brainlink setup | init | connect <client|all> | disconnect <client> | clients | 
 
 - **Auto-linking:** every note an AI writes links the notes it mentions or is about, and `BrainLink/Home.md` links everything, so notes connect even without Obsidian.
 - **Search:** keyword (stemmed, filters, `#tag`, `[[Note]]`, fused rephrasings) plus meaning-based search when Ollama is installed (`ollama pull nomic-embed-text`).
-- **Tools:** `brain_brief`, `vault_recent`, `open_loops`, `vault_health`, `remember`, `append_daily`, `propose_note` templates (meeting, decision, person, project, idea). `session_list`, `session_read`, `session_log` read local AI session history (imported from Claude Code and Codex, or logged directly) — summary-first and private by default; see `docs/SESSION-INDEX.md`.
+- **Tools:** `brain_brief`, `vault_recent`, `open_loops`, `vault_health`, `remember`, `append_daily`, `propose_note` templates (meeting, decision, person, project, idea), and the on-demand `ingestion_queue` / `ingestion_record` Raw-to-Wiki review flow. `session_list`, `session_read`, `session_log` read local AI session history (imported from Claude Code and Codex, or logged directly) — summary-first and private by default; see `docs/SESSION-INDEX.md`.
 - **Shared commands:** notes in `BrainLink/Commands/` become slash commands in every AI.
 
 ## How it is safe

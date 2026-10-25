@@ -16,6 +16,7 @@ import { sessionList, sessionRead, sessionLog } from './sessions/mcp.mjs';
 import { closeSession } from './sessions/close.mjs';
 import { listSessionFilingFolders } from './sessions/folders.mjs';
 import { twinToolAuthorization, twinToolListed, twinToolVaultChoices } from './twin-profiles.mjs';
+import { ingestionQueue, recordIngestion } from './ingestion.mjs';
 
 const require = createRequire(import.meta.url);
 export const VERSION = require('../package.json').version;
@@ -57,6 +58,9 @@ export function createMcp(ctx, { onCall = () => {} } = {}) {
     ctx.twinScope?.mode === 'scoped'
       ? 'SMART: use only the listed tools and enabled vault choices. Respect not_in_brain and never infer content that retrieval did not return.'
       : 'SMART: vault_search accepts rephrasings and translations (queries) — add an English translation for non-English questions; respect status not_in_brain, folder, tag and since/until filters. "What changed / what\'s open?" → brain_brief, vault_recent, open_loops. "Remember …" → remember. Quick thoughts → append_daily. Meetings, decisions, people, projects, ideas → propose_note with a template. Mention existing notes by their exact title; BrainLink links them and adds a Related section automatically.',
+    ...(ctx.twinScope?.mode !== 'scoped' || (twinToolListed(ctx, 'ingestion_queue') && twinToolListed(ctx, 'ingestion_record'))
+      ? ['RAW-TO-WIKI: only when asked to organize new source files, scan one explicitly selected, non-private folder with ingestion_queue. It lists changed Markdown metadata only. Read selected sources through vault_read_note, draft a linked knowledge note with propose_note (preview first), and after saving call ingestion_record with filed; use skipped when the source adds no reusable knowledge. Never scan the whole vault or claim this queue runs automatically.']
+      : []),
     ctx.twinScope?.mode === 'scoped'
       ? `TWIN PROFILE SCOPE: session reads ${scopedSessionRead ? 'are limited to records explicitly owned by this profile' : 'are unavailable'}; session closeout ${scopedSessionClose ? 'is available only as a private, approval-gated summary in a granted vault' : 'is unavailable'}; handoff read/send each require a separate explicit grant.`
       : 'SESSIONS: session_list / session_read cover imported Claude Code and Codex history plus anything logged with session_log (for clients with no readable local history). When the user ends work, choose an explicit vault; call session_filing_folders to see its allowed folders, select a clearly relevant existing folder, and pass it to session_close for preview. If there is no clear fit, omit folder to use the configured intake folder. Never guess a vault or claim an unverified summary is fact. Whether private imported sessions are visible to you is the user\'s own choice in BrainLink Settings.',
@@ -118,6 +122,14 @@ export function createMcp(ctx, { onCall = () => {} } = {}) {
       description: 'Notes created or changed in the last N days (or between since/until), newest first.',
       inputSchema: { type: 'object', properties: { vault: vaultProp, days: { type: 'integer', minimum: 1, maximum: 365, default: 7 }, since: { type: 'string' }, until: { type: 'string' }, folder: { type: 'string' }, limit: { type: 'integer', minimum: 1, maximum: 50, default: 15 } }, required: ['vault'] },
       run: (a) => recentNotes(ctx, a.vault, a) },
+    { name: 'ingestion_queue', title: 'Review new source notes', annotations: RO,
+      description: 'Scan only one explicitly selected folder in a non-private vault. Checks exclusions and bounded frontmatter privacy before reading Markdown bodies. Returns metadata for new or changed sources only; it does not write notes or run in the background.',
+      inputSchema: { type: 'object', properties: { vault: vaultProp, folder: { type: 'string', description: 'An existing, visible folder inside the vault, such as Raw. The vault root is never scanned.' }, limit: { type: 'integer', minimum: 1, maximum: 100, default: 50 } }, required: ['vault', 'folder'] },
+      run: (a) => ingestionQueue(ctx, a.vault, a.folder, { limit: a.limit }) },
+    { name: 'ingestion_record', title: 'Record source review outcome', annotations: WR,
+      description: 'Append a local, content-free receipt after a source was reviewed. For filed, requires a saved, non-private Markdown note outside the Raw folder that links to the source. Does not alter the source or knowledge note.',
+      inputSchema: { type: 'object', properties: { vault: vaultProp, folder: { type: 'string' }, source_id: { type: 'string' }, revision: { type: 'string' }, outcome: { type: 'string', enum: ['filed', 'skipped'] }, knowledge_path: { type: 'string', description: 'Required for filed; the saved linked Markdown knowledge note in this same vault.' } }, required: ['vault', 'folder', 'source_id', 'revision', 'outcome'] },
+      run: (a) => recordIngestion(ctx, a.vault, a.folder, a) },
     { name: 'open_loops', title: 'What is still open', annotations: RO,
       description: 'Unchecked tasks, next actions, unresolved questions and decisions waiting, gathered from the whole vault (captures from the last N days).',
       inputSchema: { type: 'object', properties: { vault: vaultProp, days: { type: 'integer', minimum: 1, maximum: 365, default: 60 }, limit: { type: 'integer', minimum: 1, maximum: 100, default: 40 } }, required: ['vault'] },

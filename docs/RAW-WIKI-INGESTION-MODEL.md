@@ -1,6 +1,6 @@
 # Raw-to-Wiki knowledge flow: reference review
 
-Status: design recommendation, not implemented as an end-to-end automatic ingestion pipeline. Reviewed on 2026-10-25 from Ian's supplied 167-second reel transcript and seven selected stills in `C:\Users\iants\OneDrive\Documents\deepseek-harness\default-workspace\media\`.
+Status: the first on-demand MCP review-queue slice is implemented and locally tested. File-drop automation, a queue screen, AI summarization, and unattended filing are not implemented. Reviewed on 2026-10-25 from Ian's supplied 167-second reel transcript and seven selected stills in `C:\Users\iants\OneDrive\Documents\deepseek-harness\default-workspace\media\`.
 
 ## Main idea
 
@@ -15,8 +15,11 @@ This is a useful product direction for BrainLink. It complements the typed graph
 - Privacy and exclusions are applied before indexing and retrieval. Sessions are private by default; closeout uses review and confirmation.
 - Activity records, backups, and RSI proposals provide pieces of traceability and recovery.
 - Typed graph relations exist when explicitly recorded and verified; automatic entity and relation extraction is not implemented.
+- `ingestion_queue` scans one explicitly selected folder in a non-private vault and returns metadata for new or changed Markdown. It checks exclusions, symlinks, file bounds, and note privacy from a bounded frontmatter read before reading a body. Private, malformed, excluded and BrainLink-generated notes are skipped.
+- `ingestion_record` appends a local receipt for `filed` or `skipped`. A `filed` receipt requires a saved same-vault Markdown note outside the source folder that links to the source. The journal stores opaque IDs, hashes, outcome, time, scope hash and client label; it stores no title, path, note body or prompt.
+- Profile-scoped agents need `search` for queue access and a separate `propose_note` grant to record a filing result.
 
-These points are based on repository documentation and tests. They do not show that every incoming file is automatically processed into a reviewed Wiki.
+These points are based on repository code and local tests. The queue runs only when an AI client is asked to scan a named folder; it does not monitor folders or process every incoming file automatically. The AI client reads selected source notes, writes the proposal through BrainLink's existing preview-and-confirm flow, and records the result afterward.
 
 ## Proposed BrainLink flow
 
@@ -48,6 +51,6 @@ Use fictional Personal, Organisation, and Client data, including planted private
 
 Do not call it a token-saving improvement if token use falls while answer quality, source coverage, or privacy worsens. The supplied reel is a conceptual reference, not evidence that the creator's implementation achieves these outcomes.
 
-## Decision
+## Decision and remaining work
 
-Adopt the Raw-to-Wiki pipeline as a product direction. Build it by extending BrainLink's existing vault, session-filing, graph, map, and RSI systems; do not create a parallel memory store. The next engineering design task is an incremental ingestion queue with scope-first filtering, provenance, reviewable note diffs, and privacy-safe receipts. No implementation or token savings are claimed by this document.
+Adopt the Raw-to-Wiki pipeline as a product direction. The first queue uses BrainLink's existing vault and note-proposal tools; it does not create a parallel memory store. Next, add an optional folder setting and visible review queue, then file-change detection with pause/retry controls. Keep automatic note writing off until privacy, source links, rollback, and token/quality evaluation pass. No token savings or unattended processing are claimed.

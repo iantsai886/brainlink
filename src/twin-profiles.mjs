@@ -42,11 +42,12 @@ const READ_TOOL_ACTION = Object.freeze({
   brainlink_guide: 'read_note',
   vault_search: 'search', vault_recent: 'search', open_loops: 'search', brain_brief: 'search',
   vault_health: 'search', vault_related: 'search', vault_read_note: 'read_note',
+  ingestion_queue: 'search', ingestion_record: 'propose_note',
   session_list: 'read_session', session_read: 'read_session', session_close: 'propose_note',
   list_handoffs: 'handoff_read', send_handoff: 'write_handoff',
   session_filing_folders: 'search', agent_connect: 'read_note', search: 'search', fetch: 'read_note',
 });
-const VAULT_ARGUMENT_TOOLS = new Set(['vault_search', 'vault_recent', 'open_loops', 'brain_brief', 'vault_health', 'vault_read_note', 'vault_related', 'session_filing_folders', 'session_close']);
+const VAULT_ARGUMENT_TOOLS = new Set(['vault_search', 'vault_recent', 'ingestion_queue', 'ingestion_record', 'open_loops', 'brain_brief', 'vault_health', 'vault_read_note', 'vault_related', 'session_filing_folders', 'session_close']);
 const HANDOFF_TOOLS = new Set(['list_handoffs', 'send_handoff']);
 
 function handoffGrant(ctx, action) {

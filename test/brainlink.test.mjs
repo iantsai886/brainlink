@@ -9,7 +9,7 @@ import { fileURLToPath } from 'node:url';
 
 import { normalize, validate, saveConfig } from '../src/config.mjs';
 import { tokens, extractLinks, linkGraph } from '../src/graph.mjs';
-import { createContext, chunkMarkdown, search, readNote, related, zonedNow, findSecrets, DEFAULT_EXCLUDED_FOLDERS, SUGGESTED_EXCLUDED_FOLDERS, ensureDefaultIgnore, readExcludedFolders, writeExcludedFolders, parseFrontmatter, isPrivateMeta, fmSaysPrivate, loadVault } from '../src/core.mjs';
+import { createContext, chunkMarkdown, search, readNote, related, zonedNow, findSecrets, DEFAULT_EXCLUDED_FOLDERS, SUGGESTED_EXCLUDED_FOLDERS, ensureDefaultIgnore, readExcludedFolders, writeExcludedFolders, parseFrontmatter, isPrivateMeta, fmSaysPrivate, loadVault, indexableHeader } from '../src/core.mjs';
 import { findObsidianVaults, nestedVaults } from '../src/obsidian.mjs';
 import { proposeNote, sendHandoff, listHandoffs, frontmatter, resolveIdentity } from '../src/writes.mjs';
 import { connectAgent, closeLoop, resolveAgent, latestCaptures } from '../src/agents.mjs';
@@ -17,6 +17,7 @@ import { createMcp, serveHttp, VERSION } from '../src/server.mjs';
 import { buildPack, scaffold, mergePack } from '../src/packs.mjs';
 import { connectClient, disconnectClient, detect, codexToml } from '../src/connectors.mjs';
 import { startSetup } from '../src/setup.mjs';
+import { ingestionQueue, recordIngestion } from '../src/ingestion.mjs';
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const SAMPLE = path.join(ROOT, 'samples', 'acme-studio');
@@ -152,6 +153,77 @@ test('readNote refuses private notes and notes in an excluded folder, everywhere
   // readNote itself (used directly by /api/note)
   await assert.rejects(readNote(ctx, 'Acme Studio', 'Secret Plan.md'), /private/i);
   await assert.rejects(readNote(ctx, 'Acme Studio', '00 Home/Diary.md'), /private/i);
+});
+
+test('ingestion queue scans only a chosen folder and filters private, excluded, generated and malformed sources', async () => {
+  const { base, company, cfg } = await fixture();
+  const raw = path.join(company, 'Raw');
+  await mkdir(path.join(raw, 'Blocked'), { recursive: true });
+  await writeFile(path.join(raw, '.brainlinkignore'), 'Blocked/\n');
+  await writeFile(path.join(raw, 'Public.md'), '# Public source\n\nReusable project facts.');
+  await writeFile(path.join(raw, 'Private.md'), '---\nprivate: true\n---\n# PRIVATE_CANARY_DO_NOT_READ\nsecret body');
+  await writeFile(path.join(raw, 'Malformed.md'), '---\nprivate: true\n# malformed and unsafe\nPRIVATE_MALFORMED_CANARY');
+  await writeFile(path.join(raw, 'Generated.md'), '---\ngenerated_by: brainlink\n---\n# generated');
+  await writeFile(path.join(raw, 'Blocked', 'Excluded.md'), '# EXCLUDED_CANARY');
+  const env = { BRAINLINK_HOME: path.join(base, 'app') };
+  const queue = await ingestionQueue(ctxOf(cfg, env), 'Acme Studio', 'Raw');
+  assert.deepEqual(queue.candidates.map((x) => x.path), ['Raw/Public.md']);
+  assert.equal(queue.candidates[0].title, 'Public');
+  assert.equal(JSON.stringify(queue).includes('Reusable project facts'), false);
+  assert.equal(JSON.stringify(queue).includes('PRIVATE_CANARY_DO_NOT_READ'), false);
+  assert.equal(JSON.stringify(queue).includes('EXCLUDED_CANARY'), false);
+  assert.equal(JSON.stringify(queue).includes('PRIVATE_MALFORMED_CANARY'), false);
+  assert.ok(indexableHeader('---\nprivate: true\n---\n# private', 30) === false);
+  await assert.rejects(ingestionQueue(ctxOf(cfg, env), 'Acme Studio', '../Raw'), /folder/i);
+  await assert.rejects(ingestionQueue(ctxOf(cfg, env), 'Journal', 'Raw'), /private vault/i);
+});
+
+test('ingestion receipts are local and content-free; changed sources return to the queue', async () => {
+  const { base, company, cfg } = await fixture();
+  const raw = path.join(company, 'Raw');
+  await mkdir(raw);
+  await writeFile(path.join(raw, 'Source.md'), '# Source\n\nFIRST_SOURCE_CANARY');
+  const env = { BRAINLINK_HOME: path.join(base, 'app') };
+  const ctx = ctxOf(cfg, env);
+  const first = await ingestionQueue(ctx, 'Acme Studio', 'Raw');
+  const item = first.candidates[0];
+  assert.ok(item);
+  const recorded = await recordIngestion(ctx, 'Acme Studio', 'Raw', { ...item, outcome: 'skipped' });
+  assert.equal(recorded.recorded, true);
+  assert.equal((await ingestionQueue(ctx, 'Acme Studio', 'Raw')).candidates.length, 0);
+  await writeFile(path.join(raw, 'Source.md'), '# Source\n\nSECOND_SOURCE_CANARY');
+  const changed = await ingestionQueue(ctx, 'Acme Studio', 'Raw');
+  assert.equal(changed.candidates.length, 1);
+  assert.notEqual(changed.candidates[0].revision, item.revision);
+  const [journalName] = await readdir(path.join(env.BRAINLINK_HOME, 'ingestion'));
+  const journal = await readFile(path.join(env.BRAINLINK_HOME, 'ingestion', journalName), 'utf8');
+  assert.equal(journal.includes('FIRST_SOURCE_CANARY'), false);
+  assert.equal(journal.includes('Raw/Source.md'), false);
+});
+
+test('filed ingestion requires a saved linked knowledge note and refuses a stale source revision', async () => {
+  const { base, company, cfg } = await fixture();
+  const raw = path.join(company, 'Raw');
+  const wiki = path.join(company, 'Wiki');
+  await mkdir(raw); await mkdir(wiki);
+  await writeFile(path.join(raw, 'Source.md'), '# Source\n\nFacts to organize.');
+  await writeFile(path.join(wiki, 'Knowledge.md'), '---\ntype: note\nstatus: proposed\nai_platform: ChatGPT Codex\nsession_or_task_id: test\n---\n# Knowledge\n\nSummary from [[Raw/Source]].');
+  const ctx = ctxOf(cfg, { BRAINLINK_HOME: path.join(base, 'app') });
+  const item = (await ingestionQueue(ctx, 'Acme Studio', 'Raw')).candidates[0];
+  await assert.rejects(recordIngestion(ctx, 'Acme Studio', 'Raw', { ...item, outcome: 'filed', knowledge_path: 'Raw/Source.md' }), /outside the selected Raw folder/i);
+  await assert.rejects(recordIngestion(ctx, 'Acme Studio', 'Raw', { ...item, outcome: 'filed', knowledge_path: 'Wiki/Unlinked.md' }), /ENOENT|no such file/i);
+  const result = await recordIngestion(ctx, 'Acme Studio', 'Raw', { ...item, outcome: 'filed', knowledge_path: 'Wiki/Knowledge.md' });
+  assert.equal(result.recorded, true);
+  assert.equal((await ingestionQueue(ctx, 'Acme Studio', 'Raw')).candidates.length, 0);
+  await writeFile(path.join(raw, 'Source.md'), '# Source\n\nChanged after review.');
+  await assert.rejects(recordIngestion(ctx, 'Acme Studio', 'Raw', { ...item, outcome: 'skipped' }), /changed|Refresh/i);
+});
+
+test('ingestion MCP tools are exposed with explicit folder and review instructions', () => {
+  const names = createMcp(ctxOf(normalize({}))).tools.map((t) => t.name);
+  assert.ok(names.includes('ingestion_queue'));
+  assert.ok(names.includes('ingestion_record'));
+  assert.match(createMcp(ctxOf(normalize({}))).instructions, /never scan the whole vault/i);
 });
 
 test('parseFrontmatter: a leading UTF-8 BOM or blank lines before --- still detect private: true', () => {
