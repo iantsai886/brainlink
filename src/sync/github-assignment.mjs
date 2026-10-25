@@ -90,13 +90,10 @@ export function noteInScope(assignment, rel) {
 }
 
 // Resolve the assignment an operation may use. Throws a generic error, never echoing another
-// profile's data. With no profiles configured the legacy, unscoped behavior is preserved.
+// profile's data. GitHub sharing is unavailable until an owner and repository are explicit.
 export function resolveGitHubScope(cfg, { profileId, vaultName }) {
   const profiles = profileList(cfg);
-  if (!profiles.length) {
-    if (profileId) throw new Error('Choose an existing Twin profile.');
-    return { legacy: true, profile: null, assignment: null };
-  }
+  if (!profiles.length) throw new Error('Create a Personal, Organisation, or Client Twin profile and confirm its GitHub repository before sharing notes.');
   if (!profileId || typeof profileId !== 'string') throw new Error('Choose a Twin profile before using GitHub sharing.');
   const profile = profiles.find((item) => item.id === profileId);
   if (!profile) throw new Error('Choose an existing Twin profile.');

@@ -324,6 +324,7 @@ ol.todo li { padding-left: 4px; }
       <summary data-i18n="github.title"></summary>
       <p class="hint" data-i18n="github.hint"></p>
       <p class="notice" data-i18n="github.accessWarning"></p>
+      <p id="github-no-profiles" class="notice" data-i18n="github.noProfiles" hidden></p>
       <label id="github-profile-row" hidden><span data-i18n="github.profile"></span><select id="github-profile"></select></label>
       <div id="github-assignment" hidden>
         <p id="github-assignment-text" class="muted" role="status"></p>
@@ -1126,7 +1127,18 @@ function renderGitHubProfile(shareableVaults) {
   const list = S.github_assignments || [];
   const previous = $('github-profile').value;
   $('github-profile-row').hidden = !list.length;
+  $('github-no-profiles').hidden = list.length > 0;
   $('github-profile').innerHTML = list.map((x) => `<option value="${esc(x.profile_id)}">${esc(x.name)}</option>`).join('');
+  if (!list.length) {
+    githubResetState();
+    $('github-assignment').hidden = true; $('github-assign-form').hidden = true; $('github-assign-clear').hidden = true;
+    $('github-repository-row').hidden = true; $('github-vault').innerHTML = '';
+    $('github-load').disabled = true; $('github-preview').disabled = true; $('github-commit').disabled = true;
+    $('github-push').disabled = true; $('github-pull-check').disabled = true;
+    $('github-pull-import').disabled = true; $('github-pull-conflict-copy').disabled = true;
+    $('github-assign-inspect').disabled = true; $('github-assign-confirm').disabled = true;
+    return;
+  }
   if (list.some((x) => x.profile_id === previous)) $('github-profile').value = previous;
   const a = githubAssignment();
   $('github-assignment').hidden = !a;

@@ -21,7 +21,7 @@ Integration changes from the submitted branch:
 
 - Folder-only scope can be selected, or the owner must explicitly confirm whole-vault scope. The UI does not silently interpret an omitted folder list as whole-vault permission.
 - The existing conflict-copy feature was preserved and routed through the profile assignment authorization. It saves the remote version as a deterministic copy and never overwrites the local note.
-- Configurations with no Twin profiles retain the legacy unscoped behavior for compatibility. This remains a product/security transition decision before customer release.
+- At review time, configurations with no Twin profiles retained legacy unscoped behavior. This policy was superseded on 2026-10-25: no-profile GitHub operations now fail closed until the user confirms a Twin owner and repository assignment. See `docs/GITHUB-SHARED-KNOWLEDGE.md` and the dated update in `docs/IMPLEMENTATION-STATUS.md`.
 - A missing `createHash` import discovered by the combined conflict-copy tests was fixed before integration.
 
 ## Evidence

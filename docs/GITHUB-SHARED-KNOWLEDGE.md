@@ -1,6 +1,6 @@
 # GitHub-backed shared knowledge
 
-Status: partial implementation. Read-only preview, explicit local commit, selected-commit push, add-only import, local-preserving conflict copies, and confirmed profile-scoped repository assignments are implemented. Each configured profile binds a distinct repository identity and clone to one non-private vault, with an optional folder allowlist. Operations resolve and verify that assignment before listing or reading notes. Profiles without an assignment fail closed; configurations with no Twin profiles retain the legacy unscoped flow. Automatic synchronization and updating existing remote notes remain unimplemented. The implementation is locally tested with fictional data only; live GitHub account permissions, cross-device use, and cross-client access remain unverified.
+Status: partial implementation. Read-only preview, explicit local commit, selected-commit push, add-only import, local-preserving conflict copies, and confirmed profile-scoped repository assignments are implemented. Each configured profile binds a distinct repository identity and clone to one non-private vault, with an optional folder allowlist. Operations resolve and verify that assignment before listing or reading notes. Profiles without an assignment fail closed; configurations without any Twin profile also fail closed because BrainLink cannot infer the data owner. Automatic synchronization and updating existing remote notes remain unimplemented. The implementation is locally tested with fictional data only; live GitHub account permissions, cross-device use, and cross-client access remain unverified.
 
 ## Product goal
 
@@ -45,7 +45,7 @@ The implemented slices verify candidate filtering, secret refusal, credential-fr
 
 ## Profile-scoped repositories
 
-Status: partial implementation. Read-only preview, explicit local commit, selected-commit push, add-only import, local-preserving conflict copies, and confirmed profile-scoped repository assignments are implemented. Each configured profile binds a distinct repository identity and clone to one non-private vault, with an optional folder allowlist. Operations resolve and verify that assignment before listing or reading notes. Profiles without an assignment fail closed; configurations with no Twin profiles retain the legacy unscoped flow. Automatic synchronization and updating existing remote notes remain unimplemented. The implementation is locally tested with fictional data only; live GitHub account permissions, cross-device use, and cross-client access remain unverified.
+Status: partial implementation. Read-only preview, explicit local commit, selected-commit push, add-only import, local-preserving conflict copies, and confirmed profile-scoped repository assignments are implemented. Each configured profile binds a distinct repository identity and clone to one non-private vault, with an optional folder allowlist. Operations resolve and verify that assignment before listing or reading notes. Profiles without an assignment fail closed; configurations without any Twin profile also fail closed because BrainLink cannot infer the data owner. Automatic synchronization and updating existing remote notes remain unimplemented. The implementation is locally tested with fictional data only; live GitHub account permissions, cross-device use, and cross-client access remain unverified.
 
 A Twin profile may carry one `github_repository` record in `config.json`:
 
@@ -59,7 +59,7 @@ A Twin profile may carry one `github_repository` record in `config.json`:
 - The user must choose a non-empty vault-relative `folders` allowlist or explicitly confirm `whole_vault: true`. The whole-vault choice includes every eligible note. This is a BrainLink publishing filter, not a GitHub access boundary.
 - Every operation (candidate list, preview, commit, push, remote check, import) names a profile and is authorised before notes are listed or read: profile exists, assignment present and well-formed, vault matches, clone path matches, and the clone's origin still resolves to the assigned `owner/repo`. Anything missing, malformed, stale or mismatched fails closed. Remote notes outside `folders` are skipped before their bodies are read.
 - A BrainLink commit made for a profile carries a `BrainLink-Profile: <id>` trailer; push refuses a receipt whose trailer names a different profile.
-- Existing configs load unchanged; profiles stay unassigned until the user confirms. With no profiles configured at all, the earlier unscoped behavior is kept because no profile boundary exists.
+- Existing configs load unchanged; profiles stay unassigned until the user confirms. A configuration without Twin profiles cannot list, preview, commit, push, or import GitHub notes. The user must create a Personal, Organisation, or Client Twin and explicitly confirm its repository assignment first. Existing vaults and configuration are not modified by this requirement.
 - Direct GitHub access, repository collaborators and history already pushed are outside BrainLink's control; Setup says so.
 
 ## Implementation slices

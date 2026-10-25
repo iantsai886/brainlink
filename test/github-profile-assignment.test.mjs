@@ -226,7 +226,7 @@ test('folder allowlist limits listing, preview, commit and remote import to the 
   assert.equal(await readFile(path.join(f.vaults.org, 'Hidden', 'Remote.md'), 'utf8').then(() => true, () => false), false);
 });
 
-test('legacy configs load unchanged, stay unassigned, and the old unscoped flow only applies when no profiles exist', async () => {
+test('legacy configs load unchanged and fail closed until an owner confirms a Twin profile assignment', async () => {
   const f = await fixture({ assign: false });
   const file = path.join(f.root, 'config.json');
   await saveConfig(f.cfg, file);
@@ -237,11 +237,18 @@ test('legacy configs load unchanged, stay unassigned, and the old unscoped flow 
   // Profiles exist but nothing is confirmed: every operation refuses.
   await assert.rejects(listGitHubShareCandidates(f.ctx, P.org.vault, 'org'), /no confirmed GitHub repository/);
   await assert.rejects(listGitHubShareCandidates(f.ctx, P.org.vault, ''), /Choose a Twin profile/);
-  // No profiles configured at all: the pre-existing unscoped behavior is kept.
+  // No profiles configured means BrainLink cannot classify the data owner. Every operation
+  // must fail before reading notes, opening a repository, or mutating local/remote state.
   const legacy = createContext(normalize({ vaults: [{ name: P.org.vault, path: f.vaults.org }] }), { env: { BRAINLINK_SEMANTIC: '0' } });
-  assert.equal((await listGitHubShareCandidates(legacy, P.org.vault)).length, 2);
-  assert.equal((await previewGitHubRepository({ ctx: legacy, repoPath: f.repos.org, vaultName: P.org.vault, paths: ['Shared/Note.md'] })).files[0].action, 'add');
-  await assert.rejects(listGitHubShareCandidates(legacy, P.org.vault, 'org'), /existing Twin profile/);
+  const noOwner = /Create a Personal, Organisation, or Client Twin profile/;
+  await assert.rejects(listGitHubShareCandidates(legacy, P.org.vault), noOwner);
+  await assert.rejects(previewGitHubRepository({ ctx: legacy, repoPath: f.repos.org, vaultName: P.org.vault, paths: ['Shared/Note.md'] }), noOwner);
+  await assert.rejects(commitGitHubSelectedNotes({ ctx: legacy, repoPath: f.repos.org, vaultName: P.org.vault, paths: ['Shared/Note.md'] }), noOwner);
+  await assert.rejects(pushGitHubSelectedNotes({ ctx: legacy, repoPath: f.repos.org, vaultName: P.org.vault, paths: ['Shared/Note.md'], commit: 'deadbee' }), noOwner);
+  await assert.rejects(listGitHubPullCandidates({ ctx: legacy, repoPath: f.repos.org, vaultName: P.org.vault }), noOwner);
+  await assert.rejects(importGitHubSelectedNotes({ ctx: legacy, repoPath: f.repos.org, vaultName: P.org.vault, paths: ['Shared/Note.md'] }), noOwner);
+  await assert.rejects(saveGitHubConflictCopies({ ctx: legacy, repoPath: f.repos.org, vaultName: P.org.vault, paths: ['Shared/Note.md'] }), noOwner);
+  await assert.rejects(listGitHubShareCandidates(legacy, P.org.vault, 'org'), /Create a Personal, Organisation, or Client Twin profile/);
 });
 
 test('Setup API: assignments need review plus an exact confirmation, are exclusive, and expose no URLs or credentials', async () => {
@@ -320,6 +327,8 @@ test('Setup UI parses and clears selections, receipts and pending confirmations 
   assert.match(html, /githubAssignInput = \(\) => \(\{[\s\S]*whole_vault: \$\('github-assign-whole-vault'\)\.checked/);
   assert.match(html, /githubPendingPush = r\.committed \? \{ commit: r\.commit, paths, profile: githubProfileId\(\) \}/);
   assert.match(html, /githubPendingPush\.profile !== githubProfileId\(\)/);
+  assert.match(html, /id="github-no-profiles" class="notice" data-i18n="github\.noProfiles" hidden/);
+  assert.match(html, /if \(!list\.length\) \{[\s\S]*?\$\('github-load'\)\.disabled = true;[\s\S]*?\$\('github-pull-check'\)\.disabled = true;/);
   for (const route of ['share-candidates', 'preview', 'commit-selected', 'push-selected', 'pull-candidates', 'import-selected']) {
     assert.match(html, new RegExp(`/api/github/${route}'[^\\n]*profile_id: githubProfileId\\(\\)`), `${route} must send the selected profile`);
   }

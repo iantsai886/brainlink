@@ -86,14 +86,11 @@ async function openRepository(repoPath) {
   return { root, identity };
 }
 
-const repositoryRoot = async (repoPath) => (await openRepository(repoPath)).root;
-
 // Single gate for every GitHub operation. It runs before any note is listed, read, previewed,
-// staged, pushed or imported. With profiles configured, the request must name a profile whose
-// confirmed assignment matches the vault, the clone on disk and its origin identity.
+// staged, pushed or imported. The request must name a profile whose confirmed assignment matches
+// the vault, the clone on disk and its origin identity; no-profile setups fail closed.
 async function authorize(ctx, { profileId, vaultName, repoPath }) {
   const scope = resolveGitHubScope(ctx.cfg, { profileId, vaultName });
-  if (scope.legacy) return { ...scope, root: repoPath === undefined ? null : await repositoryRoot(repoPath), profileId: null };
   const stale = () => new Error('The assigned repository is unavailable or no longer matches this profile. Review and confirm the assignment again.');
   if (repoPath && repoPath !== scope.assignment.path) {
     let same = false;
@@ -238,7 +235,7 @@ async function eligibleRemoteNotes({ ctx, repoPath, vaultName, profileId }) {
   if (vault.private) throw new Error('Private vaults are not eligible for GitHub sharing.');
   const root = auth.root;
   const { branch, ref } = await fetchTrackedOrigin(root);
-  const notes = await readSafeRemoteNotes(root, ref, (notePath) => !auth.assignment || noteInScope(auth.assignment, notePath));
+  const notes = await readSafeRemoteNotes(root, ref, (notePath) => noteInScope(auth.assignment, notePath));
   const localRoot = vaultRoot(ctx, vaultName);
   const files = [];
   for (const note of notes) {

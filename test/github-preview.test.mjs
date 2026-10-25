@@ -7,11 +7,28 @@ import path from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { normalize, saveConfig } from '../src/config.mjs';
 import { createContext, search } from '../src/core.mjs';
-import { listGitHubShareCandidates, previewGitHubRepository, commitGitHubSelectedNotes, pushGitHubSelectedNotes, listGitHubPullCandidates, importGitHubSelectedNotes, saveGitHubConflictCopies } from '../src/sync/github-preview.mjs';
+import {
+  listGitHubShareCandidates as listGitHubShareCandidatesRaw,
+  previewGitHubRepository as previewGitHubRepositoryRaw,
+  commitGitHubSelectedNotes as commitGitHubSelectedNotesRaw,
+  pushGitHubSelectedNotes as pushGitHubSelectedNotesRaw,
+  listGitHubPullCandidates as listGitHubPullCandidatesRaw,
+  importGitHubSelectedNotes as importGitHubSelectedNotesRaw,
+  saveGitHubConflictCopies as saveGitHubConflictCopiesRaw,
+} from '../src/sync/github-preview.mjs';
 import { startSetup } from '../src/setup.mjs';
 
 const tmp = (tag) => mkdtemp(path.join(tmpdir(), `brainlink-gh-preview-${tag}-`));
 const git = (cwd, ...args) => execFileSync('git', ['-C', cwd, ...args], { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'], windowsHide: true }).trim();
+const TEST_PROFILE_ID = 'company';
+const listGitHubShareCandidates = (ctx, vault, profileId = TEST_PROFILE_ID) => listGitHubShareCandidatesRaw(ctx, vault, profileId);
+const scoped = (options) => ({ ...options, profileId: options.profileId ?? TEST_PROFILE_ID });
+const previewGitHubRepository = (options) => previewGitHubRepositoryRaw(scoped(options));
+const commitGitHubSelectedNotes = (options) => commitGitHubSelectedNotesRaw(scoped(options));
+const pushGitHubSelectedNotes = (options) => pushGitHubSelectedNotesRaw(scoped(options));
+const listGitHubPullCandidates = (options) => listGitHubPullCandidatesRaw(scoped(options));
+const importGitHubSelectedNotes = (options) => importGitHubSelectedNotesRaw(scoped(options));
+const saveGitHubConflictCopies = (options) => saveGitHubConflictCopiesRaw(scoped(options));
 
 async function fixture() {
   const root = await tmp('fixture');
@@ -26,7 +43,17 @@ async function fixture() {
   await writeFile(path.join(vault, 'Secrets', 'Credential.md'), '---\ntitle: Credential\n---\nghp_012345678901234567890123456789012345\n');
   git(repo, 'init', '--quiet');
   git(repo, 'remote', 'add', 'origin', 'https://github.com/example/shared-brain.git');
-  const cfg = normalize({ vaults: [{ name: 'Company', path: vault }] });
+  const cfg = normalize({
+    vaults: [{ name: 'Company', path: vault }],
+    twin_profiles: [{
+      id: TEST_PROFILE_ID, name: 'Fictional Company Twin', mode: 'organisation', owner: 'fictional-test-owner',
+      vaults: [{ name: 'Company', access: 'propose' }],
+      source_policy: { private_default: true, provenance_required: true, session_capture: 'summary-proposal' },
+      memory_policy: { working: true, semantic: true, procedural: true, episodic: true },
+      allowed_actions: ['search', 'read_note'], agent_access: [],
+      github_repository: { remote: 'example/shared-brain', path: repo, vault: 'Company', whole_vault: true, confirmed_at: '2026-10-25T00:00:00.000Z' },
+    }],
+  });
   const ctx = createContext(cfg, { env: { BRAINLINK_SEMANTIC: '0' } });
   return { root, vault, repo, cfg, ctx };
 }
@@ -62,12 +89,12 @@ test('GitHub preview rejects credential-bearing/non-GitHub remotes and flags dir
   const f = await fixture();
   git(f.repo, 'remote', 'set-url', 'origin', 'https://user:ghp_fakecredential@github.com/example/shared-brain.git');
   await assert.rejects(previewGitHubRepository({ ctx: f.ctx, repoPath: f.repo, vaultName: 'Company', paths: ['Public.md'] }), (error) => {
-    assert.match(error.message, /GitHub URL without embedded credentials/);
+    assert.match(error.message, /assigned repository is unavailable or no longer matches/);
     assert.doesNotMatch(error.message, /ghp_fakecredential/);
     return true;
   });
   git(f.repo, 'remote', 'set-url', 'origin', 'https://example.com/shared-brain.git');
-  await assert.rejects(previewGitHubRepository({ ctx: f.ctx, repoPath: f.repo, vaultName: 'Company', paths: ['Public.md'] }), /GitHub URL/);
+  await assert.rejects(previewGitHubRepository({ ctx: f.ctx, repoPath: f.repo, vaultName: 'Company', paths: ['Public.md'] }), /assigned repository is unavailable or no longer matches/);
   git(f.repo, 'remote', 'set-url', 'origin', 'https://github.com/example/shared-brain.git');
   await mkdir(path.join(f.repo, 'BrainLink', 'notes'), { recursive: true });
   await writeFile(path.join(f.repo, 'BrainLink', 'notes', 'Public.md'), 'local uncommitted edit');
@@ -235,7 +262,7 @@ test('authenticated Setup saves a remote conflict copy without overwriting local
   try {
     const response = await fetch(`http://127.0.0.1:${app.port}/api/github/save-conflict-copies`, {
       method: 'POST', headers: { 'Content-Type': 'application/json', 'X-BrainLink-Token': app.token },
-      body: JSON.stringify({ repository: f.repo, vault: 'Company', paths: ['Conflict.md'] }),
+      body: JSON.stringify({ profile_id: TEST_PROFILE_ID, repository: f.repo, vault: 'Company', paths: ['Conflict.md'] }),
     });
     const result = await response.json();
     assert.equal(response.status, 200);
@@ -279,7 +306,7 @@ test('Setup GitHub preview endpoints require the local token; commit endpoint is
   await saveConfig(f.cfg, path.join(home, 'config.json'));
   const app = await startSetup({ env, home, os: 'linux', port: 0, useCli: false });
   const post = (route, body, token = app.token) => fetch(`http://127.0.0.1:${app.port}${route}`, {
-    method: 'POST', headers: { 'Content-Type': 'application/json', 'X-BrainLink-Token': token }, body: JSON.stringify(body),
+    method: 'POST', headers: { 'Content-Type': 'application/json', 'X-BrainLink-Token': token }, body: JSON.stringify({ profile_id: TEST_PROFILE_ID, ...body }),
   });
   try {
     assert.equal((await post('/api/github/share-candidates', { vault: 'Company' }, 'wrong')).status, 401);

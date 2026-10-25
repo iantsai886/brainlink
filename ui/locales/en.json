@@ -244,6 +244,7 @@
   "sync.providerToast": "Sync: now syncing via {folder}.",
   "github.title": "GitHub shared knowledge · review before publishing",
   "github.hint": "Preview selected visible notes against an existing local GitHub clone. A local commit and GitHub push each require a separate confirmation.",
+  "github.noProfiles": "GitHub sharing is locked until you create a Personal, Organisation, or Client Twin profile. This keeps each shared repository tied to one data owner.",
   "github.accessWarning": "GitHub access applies to the whole repository, not individual folders. Keep Personal, Organisation, and each Client in separate repositories. Agents with direct GitHub access can bypass BrainLink permissions.",
   "github.vault": "Share from vault",
   "github.profile": "Twin profile",

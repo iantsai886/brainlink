@@ -244,6 +244,7 @@
   "sync.providerToast": "Sincronização: agora via {folder}.",
   "github.title": "Conhecimento partilhado no GitHub · rever antes de publicar",
   "github.hint": "Pré-visualize notas visíveis selecionadas num clone local existente do GitHub. A confirmação local e o envio ao GitHub exigem confirmações separadas.",
+  "github.noProfiles": "O compartilhamento pelo GitHub fica bloqueado até criar um perfil Twin Pessoal, Organizacional ou de Cliente. Assim, cada repositório compartilhado fica ligado a um único responsável pelos dados.",
   "github.accessWarning": "O acesso ao GitHub aplica-se ao repositório inteiro, não a pastas individuais. Mantenha repositórios separados para o âmbito pessoal, organizacional e de cada cliente. Agentes com acesso direto ao GitHub podem contornar as permissões do BrainLink.",
   "github.vault": "Caderno de origem",
   "github.profile": "Perfil Twin",

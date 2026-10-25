@@ -24,7 +24,7 @@ Git fetch/push/import mechanics, privacy filtering, secret scanning, symlink/dir
 
 ## Policy choices to confirm
 
-1. With **no** `twin_profiles` configured the existing unscoped behavior is kept (no profile boundary exists to violate). Once any profile exists, every GitHub operation requires an explicit profile and assignment.
+1. At the time of this baseline, no-profile configs still used the old unscoped behavior. **Superseded 2026-10-25:** all GitHub operations now fail closed until a Personal, Organisation, or Client Twin profile has a user-confirmed repository assignment, because BrainLink cannot infer data ownership from an unclassified vault.
 2. A vault declared by more than one profile cannot be assigned to a repository (ambiguous owner).
 
 ## Test receipt
