@@ -1,25 +1,23 @@
-# Handoff to Claude 101 (src/sync/)
+# Sync implementation handoff
 
-No changes were made under `src/sync/`. `src/host.mjs` wraps your four pure exports from
-`src/sync/settings.mjs` — `syncSettings`, `suggestFolders`, `validateSync`, `chooseSync` — with
-`config.json` load/save to build the `get/suggestFolders/validate/save` shape
-`ui/app/README.md` asks for (`services.settings`). This wrapper lives in `src/host.mjs`, not in
-your file, per the ownership split — but it is now the thing the real UI's Settings tab calls in
-production (`brainlink ui` / `brainlink demo`), so a signature change to any of those four exports
-needs to stay compatible with that wrapper (`settingsService()` in `src/host.mjs`).
+Status snapshot: 2026-10-25. This note describes the current sync boundaries; `docs/IMPLEMENTATION-STATUS.md` is the evidence ledger.
 
-Open item worth knowing about: the real vault's content sync is still local-only end to end.
-`src/store/folder-store.mjs` (the real `BrainStore` now backing the UI and, once wired, the MCP
-server) never talks to `src/sync/engine.mjs` — picking a Drive/iCloud/Dropbox folder in Settings
-updates `config.json` only. Actually moving note files into that folder still needs wiring from
-`engine.mjs` to the folder store's vault paths; this matches what `docs/progress.md` already
-flags and `brainlink sync`'s CLI output already says ("notes: pending the store integration").
+## Local folder sync
 
-GitHub is not a current sync provider. The request to use a GitHub-hosted Second Brain for shared
-AI access and change tracking is captured in [`GITHUB-SHARED-KNOWLEDGE.md`](GITHUB-SHARED-KNOWLEDGE.md).
-An authenticated local Setup API now validates an existing GitHub clone and previews selected
-visible notes without returning bodies or changing the checkout. It does not contact GitHub,
-configure a provider, fetch, stage, commit, push or synchronize content. The proposal keeps
-personal, organisation and client data in separately scoped repositories by default, uses
-explicit allowlists, and requires privacy checks before any future stage/commit/push. Do not infer
-GitHub sync support from this preview endpoint, the current folder-sync settings, or the sync engine.
+`src/host.mjs` wraps the pure exports in `src/sync/settings.mjs` — `syncSettings`, `suggestFolders`, `validateSync`, and `chooseSync` — with `config.json` load/save for the Settings UI. Keep the wrapper signature compatible with `settingsService()` in `src/host.mjs`.
+
+The configured Drive/iCloud/Dropbox folder is still a settings-only path: the real `BrainStore` in `src/store/folder-store.mjs` is not yet wired to `src/sync/engine.mjs` for actual vault file movement. The CLI currently reports that note sync is pending store integration. Do not infer end-to-end local-folder sync from the Settings control.
+
+## GitHub shared knowledge
+
+The authenticated Setup API in `src/sync/github-preview.mjs` now supports:
+
+- Listing eligible local vault notes, with private/generated/secret-bearing notes excluded.
+- Body-free local-clone preview and an explicitly confirmed commit of selected notes only.
+- A separate, explicitly confirmed push of that exact single commit. It fetches the tracked `origin` branch, verifies ancestry and selected paths/content, refuses dirty or unrelated work, uses Git's configured credential helper, and never force-pushes.
+- A remote-note check that fetches the tracked branch, lists only public Markdown notes after privacy/secret filtering, and classifies each as new, unchanged, or conflict.
+- An explicitly confirmed import of selected new notes into the chosen non-private vault. Existing content is never overwritten; if any selected path conflicts, the batch is rejected without importing other selected files.
+
+Remote pull currently imports new files only. Updating an existing shared note, conflict resolution UI, persistent per-profile repository/allowlist configuration, automatic sync, cross-device acceptance, live GitHub account authentication, and customer deployment are not verified. The isolated tests use a local bare Git remote and do not stand in for live GitHub acceptance.
+
+GitHub collaborator permissions apply to the repository, not BrainLink folders. Keep Personal, Organisation, and each Client scope in separate repositories by default. Continue to use BrainLink's profile grants for agent access; direct GitHub access is a separate grant and can bypass BrainLink filtering.

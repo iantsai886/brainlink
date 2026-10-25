@@ -7,7 +7,7 @@ import path from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { normalize, saveConfig } from '../src/config.mjs';
 import { createContext } from '../src/core.mjs';
-import { listGitHubShareCandidates, previewGitHubRepository, commitGitHubSelectedNotes, pushGitHubSelectedNotes } from '../src/sync/github-preview.mjs';
+import { listGitHubShareCandidates, previewGitHubRepository, commitGitHubSelectedNotes, pushGitHubSelectedNotes, listGitHubPullCandidates, importGitHubSelectedNotes } from '../src/sync/github-preview.mjs';
 import { startSetup } from '../src/setup.mjs';
 
 const tmp = (tag) => mkdtemp(path.join(tmpdir(), `brainlink-gh-preview-${tag}-`));
@@ -156,6 +156,54 @@ test('GitHub push stops when the tracked remote branch advances after preview', 
   assert.equal(git(f.repo, 'status', '--porcelain'), '');
 });
 
+test('remote pull lists safe notes, imports only selected new files and filters private/secret notes', async () => {
+  const f = await fixture(), bare = path.join(f.root, 'remote.git');
+  await mkdir(bare, { recursive: true });
+  await mkdir(path.join(f.repo, 'BrainLink', 'notes'), { recursive: true });
+  await writeFile(path.join(f.repo, 'BrainLink', 'notes', 'Remote.md'), '---\ntitle: Shared process\n---\nA public, source-backed workflow shared between authorized agents.\n');
+  await writeFile(path.join(f.repo, 'BrainLink', 'notes', 'Private.md'), '---\nprivate: true\n---\nPRIVATE_REMOTE_CANARY_1182\n');
+  await writeFile(path.join(f.repo, 'BrainLink', 'notes', 'Credential.md'), 'API key ghp_012345678901234567890123456789012345\n');
+  git(bare, 'init', '--bare', '--quiet');
+  git(f.repo, 'config', 'user.name', 'BrainLink Test');
+  git(f.repo, 'config', 'user.email', 'brainlink-test@example.invalid');
+  git(f.repo, 'switch', '-c', 'main');
+  git(f.repo, 'add', '--', 'BrainLink/notes');
+  git(f.repo, 'commit', '-m', 'shared knowledge baseline');
+  git(f.repo, 'config', `url.${pathToFileURL(bare).href}.insteadOf`, 'https://github.com/example/shared-brain.git');
+  git(f.repo, 'push', '--set-upstream', 'origin', 'main');
+
+  const preview = await listGitHubPullCandidates({ ctx: f.ctx, repoPath: f.repo, vaultName: 'Company' });
+  assert.equal(preview.branch, 'main');
+  assert.deepEqual(preview.files, [{ path: 'Remote.md', title: 'Shared process', action: 'add' }]);
+  assert.doesNotMatch(JSON.stringify(preview), /PRIVATE_REMOTE_CANARY_1182|ghp_/);
+  const imported = await importGitHubSelectedNotes({ ctx: f.ctx, repoPath: f.repo, vaultName: 'Company', paths: ['Remote.md'] });
+  assert.deepEqual(imported.imported, ['Remote.md']);
+  assert.equal(await readFile(path.join(f.vault, 'Remote.md'), 'utf8'), await readFile(path.join(f.repo, 'BrainLink', 'notes', 'Remote.md'), 'utf8'));
+  assert.equal(await readFile(path.join(f.vault, 'Private.md'), 'utf8'), '---\nprivate: true\n---\nPRIVATE_NOTE_BODY_CANARY_8164\n');
+});
+
+test('remote pull preserves conflicting local notes and imports no part of a conflicting batch', async () => {
+  const f = await fixture(), bare = path.join(f.root, 'remote.git');
+  await mkdir(bare, { recursive: true });
+  await mkdir(path.join(f.repo, 'BrainLink', 'notes'), { recursive: true });
+  await writeFile(path.join(f.repo, 'BrainLink', 'notes', 'Conflict.md'), 'Remote version\n');
+  await writeFile(path.join(f.repo, 'BrainLink', 'notes', 'New.md'), 'New public note\n');
+  git(bare, 'init', '--bare', '--quiet');
+  git(f.repo, 'config', 'user.name', 'BrainLink Test');
+  git(f.repo, 'config', 'user.email', 'brainlink-test@example.invalid');
+  git(f.repo, 'switch', '-c', 'main');
+  git(f.repo, 'add', '--', 'BrainLink/notes');
+  git(f.repo, 'commit', '-m', 'shared notes');
+  git(f.repo, 'config', `url.${pathToFileURL(bare).href}.insteadOf`, 'https://github.com/example/shared-brain.git');
+  git(f.repo, 'push', '--set-upstream', 'origin', 'main');
+  await writeFile(path.join(f.vault, 'Conflict.md'), 'Local version must stay\n');
+  const preview = await listGitHubPullCandidates({ ctx: f.ctx, repoPath: f.repo, vaultName: 'Company' });
+  assert.deepEqual(preview.files.map((x) => [x.path, x.action]), [['Conflict.md', 'conflict'], ['New.md', 'add']]);
+  await assert.rejects(importGitHubSelectedNotes({ ctx: f.ctx, repoPath: f.repo, vaultName: 'Company', paths: ['Conflict.md', 'New.md'] }), /No notes were imported/);
+  assert.equal(await readFile(path.join(f.vault, 'Conflict.md'), 'utf8'), 'Local version must stay\n');
+  assert.equal(await readFile(path.join(f.vault, 'New.md'), 'utf8').then(() => true, () => false), false);
+});
+
 test('local commit refuses a dirty repository without changing any files', async () => {
   const f = await fixture();
   git(f.repo, 'config', 'user.name', 'BrainLink Test');
@@ -204,6 +252,8 @@ test('Setup GitHub preview endpoints require the local token; commit endpoint is
     assert.equal(git(f.repo, 'status', '--porcelain'), '');
     assert.equal((await post('/api/github/commit-selected', { repository: f.repo, vault: 'Company', paths: ['Public.md'] }, 'wrong')).status, 401);
     assert.equal((await post('/api/github/push-selected', { repository: f.repo, vault: 'Company', paths: ['Public.md'], commit: 'deadbee' }, 'wrong')).status, 401);
+    assert.equal((await post('/api/github/pull-candidates', { repository: f.repo, vault: 'Company' }, 'wrong')).status, 401);
+    assert.equal((await post('/api/github/import-selected', { repository: f.repo, vault: 'Company', paths: ['Remote.md'] }, 'wrong')).status, 401);
     git(f.repo, 'config', 'user.name', 'BrainLink Test');
     git(f.repo, 'config', 'user.email', 'brainlink-test@example.invalid');
     git(f.repo, 'commit', '--allow-empty', '-m', 'fixture baseline');

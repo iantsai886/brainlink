@@ -5,11 +5,12 @@ import { promisify } from 'node:util';
 import { lstat, readFile, realpath, mkdir, writeFile, rm, mkdtemp } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
-import { findSecrets, loadVault } from '../core.mjs';
+import { findSecrets, loadVault, vaultRoot, parseFrontmatter, isPrivateMeta, fmSaysPrivate } from '../core.mjs';
 
 const run = promisify(execFile);
 const NOTES_ROOT = 'BrainLink/notes';
 const MAX_SELECTED_NOTES = 100;
+const MAX_REMOTE_NOTE_BYTES = 1024 * 1024;
 const within = (root, child) => child === root || child.startsWith(root + path.sep);
 
 async function git(repo, args) {
@@ -44,6 +45,43 @@ function isGitHubRemote(remote) {
   } catch { return false; }
 }
 
+async function fetchTrackedOrigin(root) {
+  if (await git(root, ['status', '--porcelain=v1', '--untracked-files=all'])) throw new Error('The local repository has changes. Commit or safely set them aside before checking GitHub.');
+  const upstream = await git(root, ['rev-parse', '--abbrev-ref', '--symbolic-full-name', '@{upstream}']);
+  const match = /^origin\/(.+)$/.exec(upstream);
+  if (!match) throw new Error('Configure this branch to track its matching origin branch before using GitHub sharing.');
+  const branch = match[1];
+  if (branch.startsWith('-') || branch.includes('..') || branch.endsWith('/') || branch.includes('//') || /[\s~^:?*\[\\]/.test(branch)) throw new Error('The tracked origin branch name is not safe.');
+  await gitRaw(root, ['fetch', '--no-tags', 'origin', branch], process.env, 120000);
+  return { branch, ref: `refs/remotes/origin/${branch}` };
+}
+
+async function readSafeRemoteNotes(root, ref) {
+  const tree = await gitRaw(root, ['ls-tree', '-rlz', '--full-tree', ref, '--', NOTES_ROOT]);
+  const entries = tree.split('\0').filter(Boolean);
+  if (entries.length > 2000) throw new Error('The shared notes repository is too large to inspect safely in one request.');
+  const result = [];
+  for (const entry of entries) {
+    const tab = entry.indexOf('\t');
+    if (tab < 0) continue;
+    const header = /^(\d{6}) (blob|tree|commit) ([0-9a-f]+)(?: +(\d+))?$/.exec(entry.slice(0, tab));
+    if (!header) continue;
+    const [, mode, type, oid, sizeText] = header;
+    const relative = entry.slice(tab + 1);
+    if (type !== 'blob' || mode !== '100644' || !relative.startsWith(`${NOTES_ROOT}/`)) continue;
+    const notePath = relative.slice(NOTES_ROOT.length + 1);
+    if (!safeNotePath(notePath) || !notePath.toLowerCase().endsWith('.md')) continue;
+    const bytes = Number(sizeText);
+    if (!Number.isSafeInteger(bytes) || bytes < 0 || bytes > MAX_REMOTE_NOTE_BYTES) continue;
+    const raw = await gitRaw(root, ['show', `${oid}`]);
+    if (Buffer.byteLength(raw, 'utf8') !== bytes) continue;
+    const { meta, frontmatter } = parseFrontmatter(raw);
+    if (isPrivateMeta(meta) || fmSaysPrivate(frontmatter) || meta.generated_by === 'brainlink' || /^BrainLink\/Commands\//i.test(notePath) || findSecrets(raw).length) continue;
+    result.push({ path: notePath, title: String(meta.title || path.posix.basename(notePath, '.md')).slice(0, 160), raw });
+  }
+  return result;
+}
+
 async function repositoryRoot(repoPath) {
   if (typeof repoPath !== 'string' || !path.isAbsolute(repoPath)) throw new Error('Choose an absolute path to an existing local GitHub repository clone.');
   let chosen;
@@ -58,7 +96,7 @@ async function repositoryRoot(repoPath) {
 }
 
 function safeNotePath(value) {
-  if (typeof value !== 'string' || value.length > 500 || !value.endsWith('.md') || /[\\:\0\r\n]/.test(value)) return false;
+  if (typeof value !== 'string' || value.length > 500 || !value.endsWith('.md') || /[\\:\x00-\x1f]/.test(value)) return false;
   const parts = value.split('/');
   return parts.length > 0 && parts.every((p) => p && p !== '.' && p !== '..' && !p.startsWith('.'));
 }
@@ -125,6 +163,66 @@ export async function previewGitHubRepository({ ctx, repoPath, vaultName, paths 
     files, counts,
     notice: 'Read-only preview. No Git files, credentials, configuration, or remote repository were changed or contacted.',
   };
+}
+
+async function eligibleRemoteNotes({ ctx, repoPath, vaultName }) {
+  const vault = ctx.byName.get(vaultName);
+  if (!vault || !ctx.enabled.includes(vaultName)) throw new Error('Choose an enabled vault.');
+  if (vault.private) throw new Error('Private vaults are not eligible for GitHub sharing.');
+  const root = await repositoryRoot(repoPath);
+  const { branch, ref } = await fetchTrackedOrigin(root);
+  const notes = await readSafeRemoteNotes(root, ref);
+  const localRoot = vaultRoot(ctx, vaultName);
+  const files = [];
+  for (const note of notes) {
+    const target = path.resolve(localRoot, ...note.path.split('/'));
+    if (!within(localRoot, target)) continue;
+    await rejectSymlinkPath(localRoot, note.path);
+    let current;
+    try { current = await readFile(target, 'utf8'); }
+    catch (error) { if (error.code !== 'ENOENT') throw new Error('Could not safely inspect a selected local note.'); }
+    files.push({ path: note.path, title: note.title, action: current == null ? 'add' : current === note.raw ? 'unchanged' : 'conflict' });
+  }
+  return { root, localRoot, branch, ref, notes, files };
+}
+
+// Reviewable remote-to-vault flow. It imports only selected, public Markdown notes that do
+// not already exist; divergent local notes are reported as conflicts and are never overwritten.
+export async function listGitHubPullCandidates(options) {
+  const { branch, files } = await eligibleRemoteNotes(options);
+  return { provider: 'github', branch, files, notice: 'Remote notes were fetched and privacy-filtered. Preview metadata only; no vault files were changed.' };
+}
+
+export async function importGitHubSelectedNotes({ ctx, repoPath, vaultName, paths }) {
+  if (!Array.isArray(paths) || !paths.length || paths.length > MAX_SELECTED_NOTES || paths.some((p) => !safeNotePath(p)) || new Set(paths).size !== paths.length) {
+    throw new Error(`Select 1–${MAX_SELECTED_NOTES} distinct Markdown paths from the visible remote notes list.`);
+  }
+  const current = await eligibleRemoteNotes({ ctx, repoPath, vaultName });
+  const remote = new Map(current.notes.map((note) => [note.path, note]));
+  const fileState = new Map(current.files.map((file) => [file.path, file]));
+  if (paths.some((p) => !remote.has(p))) throw new Error('One or more selected remote notes are unavailable or failed privacy checks.');
+  const selected = paths.map((p) => ({ note: remote.get(p), state: fileState.get(p) }));
+  const conflicts = selected.filter((x) => x.state.action === 'conflict');
+  if (conflicts.length) throw new Error(`No notes were imported because ${conflicts.length} selected path(s) conflict with local content. Resolve conflicts manually, then retry.`);
+  const toAdd = selected.filter((x) => x.state.action === 'add');
+  if (!toAdd.length) return { provider: 'github', imported: [], unchanged: selected.map((x) => x.note.path), conflicts: [], branch: current.branch };
+
+  const written = [];
+  try {
+    for (const { note } of toAdd) {
+      const target = path.resolve(current.localRoot, ...note.path.split('/'));
+      if (!within(current.localRoot, target)) throw new Error('A selected remote note is outside the vault.');
+      await rejectSymlinkPath(current.localRoot, note.path);
+      await mkdir(path.dirname(target), { recursive: true });
+      await rejectSymlinkPath(current.localRoot, note.path);
+      await writeFile(target, note.raw, { encoding: 'utf8', flag: 'wx', mode: 0o600 });
+      written.push(target);
+    }
+  } catch {
+    for (const target of written.reverse()) await rm(target, { force: true }).catch(() => {});
+    throw new Error('Could not safely import the selected remote notes. No selected files were intentionally overwritten; retry after checking the vault.');
+  }
+  return { provider: 'github', imported: toAdd.map((x) => x.note.path), unchanged: selected.filter((x) => x.state.action === 'unchanged').map((x) => x.note.path), conflicts: [], branch: current.branch };
 }
 
 // Explicitly publishes selected notes to a local checkout and records one local commit.
