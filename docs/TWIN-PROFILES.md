@@ -4,7 +4,7 @@ Status: validated profile declarations and runtime scoping for explicitly assign
 
 ## Contract
 
-The optional `twin_profiles` array in `config.json` records a Twin identity and intended boundaries. Its optional `github_repository` field binds the profile to one absolute local clone path. Setup validates the GitHub origin, rejects assignments that reuse a local clone or remote repository across profiles, and resolves sharing/import operations from the saved assignment while checking the requested vault against the profile's declared list. This boundary applies only to BrainLink's authenticated local Setup GitHub workflow; it cannot constrain AI clients granted direct GitHub access outside BrainLink.
+The optional `twin_profiles` array in `config.json` records a Twin identity and intended boundaries. Its optional `github_repository` object binds the profile to a GitHub owner/repository identity, one absolute local clone path, one non-private vault, an optional folder allowlist, and a user-confirmation timestamp. Setup validates the origin and prevents repository, clone, or vault reuse across profiles. Every sharing/import operation resolves the saved assignment before reading note candidates and verifies that the clone still has the assigned origin. This boundary applies only to BrainLink's authenticated local Setup GitHub workflow; it cannot constrain AI clients granted direct GitHub access outside BrainLink.
 
 - `id`, `name`, `mode` (`personal`, `organisation`, or `client`), and an owner label;
 - `vaults`: configured vault names and the declared access level (`read`, `propose`, `write`);
@@ -48,6 +48,10 @@ Example values are synthetic. They illustrate the declaration shape, not effecti
   }]
 }
 ```
+
+## GitHub repository assignment
+
+A profile may declare one confirmed `github_repository` (remote identity, local clone, vault, optional folders). GitHub sharing for that profile works only with that assignment and fails closed otherwise; repositories, clones and vaults are exclusive to one profile. Details: [GITHUB-SHARED-KNOWLEDGE.md](GITHUB-SHARED-KNOWLEDGE.md#profile-scoped-repositories). This does not extend named-agent scoping to other data surfaces.
 
 ## Security and next gate
 

@@ -31,14 +31,6 @@ test('Twin profile declarations validate references and prevent permission escal
   await mkdir(vaultPath);
   const cfg = fixture(vaultPath);
   assert.deepEqual(validate(cfg), []);
-  cfg.twin_profiles[0].github_repository = path.join(root, 'org-clone');
-  assert.deepEqual(validate(cfg), []);
-  const relativeRepository = structuredClone(cfg);
-  relativeRepository.twin_profiles[0].github_repository = 'relative/repo';
-  assert.match(validate(relativeRepository).join('; '), /github_repository must be an absolute local repository path/);
-  const duplicateRepository = structuredClone(cfg);
-  duplicateRepository.twin_profiles.push({ ...structuredClone(cfg.twin_profiles[0]), id: 'second_profile', mode: 'personal' });
-  assert.match(validate(duplicateRepository).join('; '), /cannot share one local GitHub repository path/);
   const unknownVault = structuredClone(cfg);
   unknownVault.twin_profiles[0].vaults[0].name = 'Other';
   assert.match(validate(unknownVault).join('; '), /unknown vault/);

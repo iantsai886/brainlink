@@ -7,7 +7,7 @@ import path from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { normalize, saveConfig } from '../src/config.mjs';
 import { createContext, search } from '../src/core.mjs';
-import { listGitHubShareCandidates, previewGitHubRepository, commitGitHubSelectedNotes, pushGitHubSelectedNotes, listGitHubPullCandidates, importGitHubSelectedNotes, saveGitHubConflictCopies, assignGitHubRepositoryToProfile, resolveGitHubProfileRepository } from '../src/sync/github-preview.mjs';
+import { listGitHubShareCandidates, previewGitHubRepository, commitGitHubSelectedNotes, pushGitHubSelectedNotes, listGitHubPullCandidates, importGitHubSelectedNotes, saveGitHubConflictCopies } from '../src/sync/github-preview.mjs';
 import { startSetup } from '../src/setup.mjs';
 
 const tmp = (tag) => mkdtemp(path.join(tmpdir(), `brainlink-gh-preview-${tag}-`));
@@ -306,53 +306,5 @@ test('Setup GitHub preview endpoints require the local token; commit endpoint is
     assert.equal(committedResponse.status, 200);
     assert.equal(committed.committed, true);
     assert.equal(git(f.repo, 'status', '--porcelain'), '');
-  } finally { app.server.close(); }
-});
-
-test('Twin profiles bind distinct GitHub repositories and share only their declared vaults', async () => {
-  const f = await fixture(), personalVault = path.join(f.root, 'Personal');
-  await mkdir(personalVault, { recursive: true });
-  await writeFile(path.join(personalVault, 'Personal.md'), 'PERSONAL_PROFILE_NOTE_111\n');
-  const cfg = structuredClone(f.cfg);
-  cfg.vaults.push({ name: 'Personal', path: personalVault, private: false, schema: 'standard', writes: 'on' });
-  const profile = (id, mode, owner, vault) => ({
-    id, name: `${id} Twin`, mode, owner, vaults: [{ name: vault, access: 'write' }],
-    source_policy: { private_default: true, provenance_required: true, session_capture: 'summary-proposal' },
-    memory_policy: { working: true, semantic: true, procedural: true, episodic: true },
-    allowed_actions: ['search', 'read_note'], agent_access: [],
-  });
-  cfg.twin_profiles = [profile('organisation', 'organisation', 'company-owner', 'Company'), profile('personal', 'personal', 'personal-owner', 'Personal')];
-  const orgRepo = path.join(f.root, 'org-clone'), duplicateOrgRepo = path.join(f.root, 'org-clone-copy'), personalRepo = path.join(f.root, 'personal-clone');
-  for (const [repo, remote] of [[orgRepo, 'https://github.com/example/org-brain.git'], [duplicateOrgRepo, 'https://github.com/example/org-brain.git'], [personalRepo, 'https://github.com/example/personal-brain.git']]) {
-    await mkdir(repo, { recursive: true }); git(repo, 'init', '--quiet'); git(repo, 'remote', 'add', 'origin', remote);
-  }
-  const orgAssignment = await assignGitHubRepositoryToProfile(cfg, 'organisation', orgRepo);
-  assert.equal(orgAssignment.repository, 'example/org-brain');
-  await assert.rejects(assignGitHubRepositoryToProfile(cfg, 'personal', duplicateOrgRepo), /already assigned to profile/);
-  await assignGitHubRepositoryToProfile(cfg, 'personal', personalRepo);
-  const resolved = await resolveGitHubProfileRepository(cfg, { profileId: 'organisation', vaultName: 'Company', legacyRepoPath: personalRepo });
-  assert.equal(resolved.repository_path, orgRepo);
-  await assert.rejects(resolveGitHubProfileRepository(cfg, { profileId: 'organisation', vaultName: 'Personal', legacyRepoPath: personalRepo }), /outside the selected Twin profile/);
-  await assert.rejects(resolveGitHubProfileRepository(cfg, { profileId: 'unknown', vaultName: 'Company', legacyRepoPath: orgRepo }), /not configured/);
-
-  const home = path.join(f.root, 'profile-app'); await mkdir(home, { recursive: true });
-  const env = { BRAINLINK_HOME: home, HOME: home, BRAINLINK_SEMANTIC: '0' };
-  await saveConfig(cfg, path.join(home, 'config.json'));
-  const app = await startSetup({ env, home, os: 'linux', port: 0, useCli: false });
-  const post = (route, body, token = app.token) => fetch(`http://127.0.0.1:${app.port}${route}`, {
-    method: 'POST', headers: { 'Content-Type': 'application/json', 'X-BrainLink-Token': token }, body: JSON.stringify(body),
-  });
-  try {
-    const denied = await post('/api/github/share-candidates', { profile_id: 'organisation', vault: 'Personal', repository: personalRepo });
-    assert.equal(denied.status, 400);
-    const allowed = await post('/api/github/share-candidates', { profile_id: 'organisation', vault: 'Company', repository: personalRepo });
-    const result = await allowed.json();
-    assert.equal(allowed.status, 200);
-    assert.equal(result.profile_id, 'organisation');
-    assert.deepEqual(result.notes.map((item) => item.path), ['Public.md']);
-    const changed = await post('/api/github/profile-repository', { profile_id: 'organisation', repository: duplicateOrgRepo });
-    const changedResult = await changed.json();
-    assert.equal(changed.status, 200);
-    assert.equal(changedResult.repository_path, duplicateOrgRepo);
   } finally { app.server.close(); }
 });

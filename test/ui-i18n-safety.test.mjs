@@ -66,6 +66,7 @@ test('every en key used by Agents, Share, GitHub preview, and sync provider labe
   for (const m of html.matchAll(/data-i18n(?:-placeholder)?="(agents\.[a-zA-Z0-9_.]+|share\.[a-zA-Z0-9_.]+|github\.[a-zA-Z0-9_.]+)"/g)) keys.add(m[1]);
   for (const m of html.matchAll(/t\(\s*['"](github\.[a-zA-Z0-9_.]+)['"]/g)) if (!m[1].endsWith('.')) keys.add(m[1]);
   for (const action of ['add', 'update', 'unchanged', 'blocked_local_change']) keys.add(`github.action.${action}`);
+  for (const status of ['unassigned', 'stale', 'invalid']) keys.add(`github.assignment.${status}`);
   // The provider <select> options are built as t('sync.provider.' + p) for p in PROVIDERS
   // (src/sync/settings.mjs), not a literal key t() can be grepped for.
   if (/t\(\s*['"]sync\.provider\.['"]\s*\+\s*\w+\)/.test(html)) {

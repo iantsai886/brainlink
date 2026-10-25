@@ -18,7 +18,8 @@ import { resolveNoteWikilinks } from './links.mjs';
 import { VERSION, createMcp } from './server.mjs';
 import { findObsidianVaults, nestedVaults } from './obsidian.mjs';
 import { syncSettings, chooseSync, suggestFolders, PROVIDERS, PROVIDER_LABELS } from './sync/settings.mjs';
-import { listGitHubShareCandidates, previewGitHubRepository, commitGitHubSelectedNotes, pushGitHubSelectedNotes, listGitHubPullCandidates, importGitHubSelectedNotes, saveGitHubConflictCopies, assignGitHubRepositoryToProfile, resolveGitHubProfileRepository } from './sync/github-preview.mjs';
+import { listGitHubShareCandidates, previewGitHubRepository, commitGitHubSelectedNotes, pushGitHubSelectedNotes, listGitHubPullCandidates, importGitHubSelectedNotes, saveGitHubConflictCopies, inspectGitHubAssignment, githubAssignmentStatus } from './sync/github-preview.mjs';
+import { githubAssignmentProjection } from './sync/github-assignment.mjs';
 import { sessionsService } from './host.mjs';
 import { addAgent, renameAgent, removeAgent, revokeAgent, markConnected, findAgentByToken, publicAgent, localAgentSnippet, remoteAgentSnippet } from './mcp-agents.mjs';
 import { buildGraph3D, noteDetail3D } from './graph3d.mjs';
@@ -205,6 +206,7 @@ export async function startSetup(opts = {}) {
       default_excluded_folders: DEFAULT_EXCLUDED_FOLDERS, suggested_excluded_folders: SUGGESTED_EXCLUDED_FOLDERS,
       vaults, agents: cfg.agents, ai_agents: cfg.ai_agents.map(publicAgent), handoff: cfg.handoff, timezone: cfg.timezone,
       twin_profiles: twinProfileStatus(cfg),
+      github_assignments: await githubAssignmentStatus(cfg),
       packs: Object.entries(PACKS).map(([id, p]) => ({ id, title: p.title, description: p.description })),
       clients: await detect(clientOpts()),
       http: { port: cfg.http.port, token_set: Boolean(cfg.http.token) },
@@ -408,55 +410,65 @@ export async function startSetup(opts = {}) {
       await saveConfig(next, file);
       return { ok: true, sync: syncSettings(next) };
     },
+    'POST /api/github/assignment/inspect': async (b) => {
+      const cfg = await loadConfig(file);
+      return inspectGitHubAssignment(cfg, b);
+    },
+    'POST /api/github/assignment/set': async (b) => {
+      const cfg = await loadConfig(file);
+      const inspected = await inspectGitHubAssignment(cfg, b);
+      if (inspected.blocked.length) throw new Error(inspected.blocked[0]);
+      // The user must repeat the exact repository identity they reviewed; nothing is inferred.
+      if (b.confirm_remote !== inspected.remote) throw new Error('Confirm the exact owner/repository shown in the review.');
+      const profile = cfg.twin_profiles.find((item) => item.id === inspected.profile_id);
+      profile.github_repository = { remote: inspected.remote, path: inspected.path, vault: inspected.vault, ...(inspected.folders.length ? { folders: inspected.folders } : {}), whole_vault: inspected.whole_vault, confirmed_at: new Date().toISOString() };
+      await saveConfig(cfg, file);
+      return { ok: true, assignments: githubAssignmentProjection(cfg) };
+    },
+    'POST /api/github/assignment/clear': async (b) => {
+      const cfg = await loadConfig(file);
+      const profile = cfg.twin_profiles.find((item) => item.id === String(b.profile_id || ''));
+      if (!profile) throw new Error('Choose an existing Twin profile.');
+      delete profile.github_repository;
+      await saveConfig(cfg, file);
+      return { ok: true, assignments: githubAssignmentProjection(cfg) };
+    },
     'POST /api/github/share-candidates': async (b) => {
       const cfg = await loadConfig(file);
       const vaultName = String(b.vault || '');
-      const repo = await resolveGitHubProfileRepository(cfg, { profileId: String(b.profile_id || ''), vaultName, legacyRepoPath: String(b.repository || '') });
       const ctx = createContext(cfg, { env: { ...env, BRAINLINK_SEMANTIC: '0' } });
-      return { vault: vaultName, profile_id: repo.profile_id, notes: await listGitHubShareCandidates(ctx, vaultName) };
+      return { vault: vaultName, notes: await listGitHubShareCandidates(ctx, vaultName, String(b.profile_id || '')) };
     },
     'POST /api/github/preview': async (b) => {
       const cfg = await loadConfig(file);
-      const repo = await resolveGitHubProfileRepository(cfg, { profileId: String(b.profile_id || ''), vaultName: String(b.vault || ''), legacyRepoPath: String(b.repository || '') });
       const ctx = createContext(cfg, { env: { ...env, BRAINLINK_SEMANTIC: '0' } });
-      return previewGitHubRepository({ ctx, repoPath: repo.repository_path, vaultName: String(b.vault || ''), paths: b.paths });
+      return previewGitHubRepository({ ctx, repoPath: String(b.repository || ''), vaultName: String(b.vault || ''), paths: b.paths, profileId: String(b.profile_id || '') });
     },
       'POST /api/github/commit-selected': async (b) => {
         const cfg = await loadConfig(file);
-        const repo = await resolveGitHubProfileRepository(cfg, { profileId: String(b.profile_id || ''), vaultName: String(b.vault || ''), legacyRepoPath: String(b.repository || '') });
         const ctx = createContext(cfg, { env: { ...env, BRAINLINK_SEMANTIC: '0' } });
-        return commitGitHubSelectedNotes({ ctx, repoPath: repo.repository_path, vaultName: String(b.vault || ''), paths: b.paths });
+        return commitGitHubSelectedNotes({ ctx, repoPath: String(b.repository || ''), vaultName: String(b.vault || ''), paths: b.paths, profileId: String(b.profile_id || '') });
       },
       'POST /api/github/push-selected': async (b) => {
         const cfg = await loadConfig(file);
-        const repo = await resolveGitHubProfileRepository(cfg, { profileId: String(b.profile_id || ''), vaultName: String(b.vault || ''), legacyRepoPath: String(b.repository || '') });
         const ctx = createContext(cfg, { env: { ...env, BRAINLINK_SEMANTIC: '0' } });
-        return pushGitHubSelectedNotes({ ctx, repoPath: repo.repository_path, vaultName: String(b.vault || ''), paths: b.paths, commit: String(b.commit || '') });
+        return pushGitHubSelectedNotes({ ctx, repoPath: String(b.repository || ''), vaultName: String(b.vault || ''), paths: b.paths, commit: String(b.commit || ''), profileId: String(b.profile_id || '') });
       },
       'POST /api/github/pull-candidates': async (b) => {
         const cfg = await loadConfig(file);
-        const repo = await resolveGitHubProfileRepository(cfg, { profileId: String(b.profile_id || ''), vaultName: String(b.vault || ''), legacyRepoPath: String(b.repository || '') });
         const ctx = createContext(cfg, { env: { ...env, BRAINLINK_SEMANTIC: '0' } });
-        return listGitHubPullCandidates({ ctx, repoPath: repo.repository_path, vaultName: String(b.vault || '') });
+        return listGitHubPullCandidates({ ctx, repoPath: String(b.repository || ''), vaultName: String(b.vault || ''), profileId: String(b.profile_id || '') });
       },
       'POST /api/github/import-selected': async (b) => {
         const cfg = await loadConfig(file);
-        const repo = await resolveGitHubProfileRepository(cfg, { profileId: String(b.profile_id || ''), vaultName: String(b.vault || ''), legacyRepoPath: String(b.repository || '') });
         const ctx = createContext(cfg, { env: { ...env, BRAINLINK_SEMANTIC: '0' } });
-        return importGitHubSelectedNotes({ ctx, repoPath: repo.repository_path, vaultName: String(b.vault || ''), paths: b.paths });
+        return importGitHubSelectedNotes({ ctx, repoPath: String(b.repository || ''), vaultName: String(b.vault || ''), paths: b.paths, profileId: String(b.profile_id || '') });
       },
-      'POST /api/github/save-conflict-copies': async (b) => {
-        const cfg = await loadConfig(file);
-        const repo = await resolveGitHubProfileRepository(cfg, { profileId: String(b.profile_id || ''), vaultName: String(b.vault || ''), legacyRepoPath: String(b.repository || '') });
-        const ctx = createContext(cfg, { env: { ...env, BRAINLINK_SEMANTIC: '0' } });
-        return saveGitHubConflictCopies({ ctx, repoPath: repo.repository_path, vaultName: String(b.vault || ''), paths: b.paths });
-      },
-      'POST /api/github/profile-repository': async (b) => {
-        const cfg = await loadConfig(file);
-        const result = await assignGitHubRepositoryToProfile(cfg, String(b.profile_id || ''), String(b.repository || ''));
-        await saveConfig(cfg, file);
-        return { ok: true, ...result };
-      },
+    'POST /api/github/save-conflict-copies': async (b) => {
+      const cfg = await loadConfig(file);
+      const ctx = createContext(cfg, { env: { ...env, BRAINLINK_SEMANTIC: '0' } });
+      return saveGitHubConflictCopies({ ctx, repoPath: String(b.repository || ''), vaultName: String(b.vault || ''), paths: b.paths, profileId: String(b.profile_id || '') });
+    },
     'POST /api/agent': async (b) => {
       const cfg = await loadConfig(file);
       const a = cfg.agents.find((x) => x.name === b.name);

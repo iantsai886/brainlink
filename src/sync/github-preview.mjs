@@ -1,16 +1,18 @@
 // User-reviewed GitHub shared-note preview, selected commit/push, and add-only import operations.
 // Repository changes and vault writes remain separate, explicit actions with privacy checks.
 import { execFile } from 'node:child_process';
-import { promisify } from 'node:util';
 import { createHash } from 'node:crypto';
+import { promisify } from 'node:util';
 import { lstat, readFile, realpath, mkdir, writeFile, rm, mkdtemp } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { findSecrets, loadVault, vaultRoot, parseFrontmatter, isPrivateMeta, fmSaysPrivate } from '../core.mjs';
+import { githubRemoteIdentity, noteInScope, resolveGitHubScope, safeFolderPrefix, githubAssignmentProjection, profileList } from './github-assignment.mjs';
 
 const run = promisify(execFile);
 const NOTES_ROOT = 'BrainLink/notes';
 const MAX_SELECTED_NOTES = 100;
+const PROFILE_TRAILER = 'BrainLink-Profile';
 const MAX_REMOTE_NOTE_BYTES = 1024 * 1024;
 const within = (root, child) => child === root || child.startsWith(root + path.sep);
 
@@ -33,19 +35,6 @@ async function gitRaw(repo, args, env = process.env, timeout = 15000) {
   }
 }
 
-function isGitHubRemote(remote) {
-  if (!remote || /[\r\n]/.test(remote)) return false;
-  const scp = /^git@github\.com:([A-Za-z0-9_.-]+)\/([A-Za-z0-9_.-]+?)(?:\.git)?$/.exec(remote);
-  if (scp) return true;
-  try {
-    const u = new URL(remote);
-    if (u.hostname.toLowerCase() !== 'github.com' || u.username || u.password || u.search || u.hash || (u.port && u.port !== '443')) return false;
-    if (!['https:', 'ssh:'].includes(u.protocol)) return false;
-    if (u.protocol === 'ssh:' && u.username !== 'git') return false;
-    return /^\/[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+(?:\.git)?$/.test(u.pathname);
-  } catch { return false; }
-}
-
 async function fetchTrackedOrigin(root) {
   if (await git(root, ['status', '--porcelain=v1', '--untracked-files=all'])) throw new Error('The local repository has changes. Commit or safely set them aside before checking GitHub.');
   const upstream = await git(root, ['rev-parse', '--abbrev-ref', '--symbolic-full-name', '@{upstream}']);
@@ -57,7 +46,7 @@ async function fetchTrackedOrigin(root) {
   return { branch, ref: `refs/remotes/origin/${branch}` };
 }
 
-async function readSafeRemoteNotes(root, ref) {
+async function readSafeRemoteNotes(root, ref, inScope = () => true) {
   const tree = await gitRaw(root, ['ls-tree', '-rlz', '--full-tree', ref, '--', NOTES_ROOT]);
   const entries = tree.split('\0').filter(Boolean);
   if (entries.length > 2000) throw new Error('The shared notes repository is too large to inspect safely in one request.');
@@ -71,7 +60,7 @@ async function readSafeRemoteNotes(root, ref) {
     const relative = entry.slice(tab + 1);
     if (type !== 'blob' || mode !== '100644' || !relative.startsWith(`${NOTES_ROOT}/`)) continue;
     const notePath = relative.slice(NOTES_ROOT.length + 1);
-    if (!safeNotePath(notePath) || !notePath.toLowerCase().endsWith('.md')) continue;
+    if (!safeNotePath(notePath) || !notePath.toLowerCase().endsWith('.md') || !inScope(notePath)) continue;
     const bytes = Number(sizeText);
     if (!Number.isSafeInteger(bytes) || bytes < 0 || bytes > MAX_REMOTE_NOTE_BYTES) continue;
     const raw = await gitRaw(root, ['show', `${oid}`]);
@@ -83,7 +72,7 @@ async function readSafeRemoteNotes(root, ref) {
   return result;
 }
 
-async function repositoryRoot(repoPath) {
+async function openRepository(repoPath) {
   if (typeof repoPath !== 'string' || !path.isAbsolute(repoPath)) throw new Error('Choose an absolute path to an existing local GitHub repository clone.');
   let chosen;
   try { chosen = await realpath(repoPath); } catch { throw new Error('The selected repository folder is unavailable.'); }
@@ -92,60 +81,69 @@ async function repositoryRoot(repoPath) {
   try { root = await realpath(rootText); } catch { throw new Error('The selected folder is not a readable Git repository.'); }
   if (path.resolve(chosen) !== path.resolve(root)) throw new Error('Choose the repository root folder, not a subfolder.');
   const remote = await git(root, ['config', '--local', '--get', 'remote.origin.url']);
-  if (!isGitHubRemote(remote)) throw new Error('The repository origin must be a GitHub URL without embedded credentials.');
-  return root;
+  const identity = githubRemoteIdentity(remote);
+  if (!identity) throw new Error('The repository origin must be a GitHub URL without embedded credentials.');
+  return { root, identity };
 }
 
-function remoteRepositoryIdentity(remote) {
-  const scp = /^git@github\.com:([A-Za-z0-9_.-]+)\/([A-Za-z0-9_.-]+?)(?:\.git)?$/.exec(remote || '');
-  if (scp) return `${scp[1]}/${scp[2]}`.toLowerCase();
-  try {
-    const url = new URL(remote);
-    const parts = url.pathname.replace(/\.git$/i, '').split('/').filter(Boolean);
-    return parts.length === 2 ? `${parts[0]}/${parts[1]}`.toLowerCase() : null;
-  } catch { return null; }
-}
+const repositoryRoot = async (repoPath) => (await openRepository(repoPath)).root;
 
-export async function inspectGitHubRepositoryPath(repoPath) {
-  const root = await repositoryRoot(repoPath);
-  const remote = await git(root, ['config', '--local', '--get', 'remote.origin.url']);
-  const identity = remoteRepositoryIdentity(remote);
-  if (!identity) throw new Error('Could not identify this GitHub repository safely.');
-  return { path: root, identity };
-}
-
-async function assertProfileRepositoryUnique(cfg, profileId, candidate) {
-  for (const profile of cfg.twin_profiles || []) {
-    if (profile.id === profileId || !profile.github_repository) continue;
-    let existing;
-    try { existing = await inspectGitHubRepositoryPath(profile.github_repository); }
-    catch { throw new Error(`The GitHub repository assignment for profile "${profile.id}" cannot be verified. Repair or clear it before continuing.`); }
-    if (path.resolve(existing.path).toLowerCase() === path.resolve(candidate.path).toLowerCase() || existing.identity === candidate.identity) {
-      throw new Error(`The GitHub repository is already assigned to profile "${profile.id}". Each profile needs its own repository.`);
-    }
+// Single gate for every GitHub operation. It runs before any note is listed, read, previewed,
+// staged, pushed or imported. With profiles configured, the request must name a profile whose
+// confirmed assignment matches the vault, the clone on disk and its origin identity.
+async function authorize(ctx, { profileId, vaultName, repoPath }) {
+  const scope = resolveGitHubScope(ctx.cfg, { profileId, vaultName });
+  if (scope.legacy) return { ...scope, root: repoPath === undefined ? null : await repositoryRoot(repoPath), profileId: null };
+  const stale = () => new Error('The assigned repository is unavailable or no longer matches this profile. Review and confirm the assignment again.');
+  if (repoPath && repoPath !== scope.assignment.path) {
+    let same = false;
+    try { same = (await realpath(repoPath)) === (await realpath(scope.assignment.path)); } catch { /* fall through */ }
+    if (!same) throw new Error('This repository is not the one assigned to the selected profile.');
   }
+  let opened;
+  try { opened = await openRepository(scope.assignment.path); } catch { throw stale(); }
+  if (opened.identity !== scope.assignment.remote) throw stale();
+  return { ...scope, root: opened.root, profileId: scope.profile.id };
 }
 
-export async function assignGitHubRepositoryToProfile(cfg, profileId, repoPath) {
-  const profile = (cfg.twin_profiles || []).find((item) => item.id === profileId);
-  if (!profile) throw new Error('Choose a configured Twin profile before assigning a GitHub repository.');
-  const repository = await inspectGitHubRepositoryPath(repoPath);
-  await assertProfileRepositoryUnique(cfg, profileId, repository);
-  profile.github_repository = repository.path;
-  return { profile_id: profile.id, repository_path: repository.path, repository: repository.identity };
+const scopedNotes = (auth, notes) => (auth.assignment ? notes.filter((note) => noteInScope(auth.assignment, note.rel)) : notes);
+
+export { openRepository };
+
+// Read-only review shown before the user confirms an assignment. Nothing is written or fetched.
+export async function inspectGitHubAssignment(cfg, input) {
+  const profile = profileList(cfg).find((item) => item.id === String(input.profile_id || ''));
+  if (!profile) throw new Error('Choose an existing Twin profile.');
+  const vaultName = String(input.vault || '');
+  const raw = Array.isArray(input.folders) ? input.folders : String(input.folders || '').split('\n');
+  const folders = [...new Set(raw.map((f) => String(f).trim().replace(/\/+$/, '')).filter(Boolean))];
+  if (folders.length > 50 || folders.some((f) => !safeFolderPrefix(f))) throw new Error('Folders must be short vault-relative folder names.');
+  const { root, identity } = await openRepository(String(input.repository || ''));
+  const blocked = [];
+  const vault = cfg.vaults.find((v) => v.name === vaultName);
+  if (!(profile.vaults || []).some((v) => v.name === vaultName) || !vault) blocked.push('Choose one of this profile\'s vaults.');
+  else if (vault.private) blocked.push('Private vaults cannot be published to GitHub.');
+  else if (profileList(cfg).some((other) => other !== profile && (other.vaults || []).some((v) => v.name === vaultName))) blocked.push('This vault is also declared by another profile; its owner is ambiguous.');
+  const others = profileList(cfg).filter((other) => other !== profile && other.github_repository);
+  if (others.some((other) => other.github_repository.remote === identity)) blocked.push('This GitHub repository is already assigned to another profile.');
+  if (others.some((other) => path.resolve(other.github_repository.path).toLowerCase() === root.toLowerCase())) blocked.push('This local clone is already assigned to another profile.');
+  let branch = null;
+  try { branch = await git(root, ['rev-parse', '--abbrev-ref', '--symbolic-full-name', '@{upstream}']); } catch { /* no tracking branch yet */ }
+  const wholeVault = input.whole_vault === true;
+  if (wholeVault && folders.length) blocked.push('Choose either the whole vault or specific folders, not both.');
+  if (!wholeVault && !folders.length) blocked.push('Choose specific folders or explicitly confirm sharing the whole vault.');
+  return { profile_id: profile.id, profile_name: profile.name, mode: profile.mode, vault: vaultName, remote: identity, path: root, folders, whole_vault: wholeVault, branch, replaces: profile.github_repository?.remote || null, blocked };
 }
 
-export async function resolveGitHubProfileRepository(cfg, { profileId, vaultName, legacyRepoPath }) {
-  const profiles = Array.isArray(cfg.twin_profiles) ? cfg.twin_profiles : [];
-  if (!profiles.length) return { profile_id: null, repository_path: legacyRepoPath };
-  if (typeof profileId !== 'string' || !profileId) throw new Error('Choose the Twin profile for this GitHub operation.');
-  const profile = profiles.find((item) => item.id === profileId);
-  if (!profile) throw new Error('The selected Twin profile is not configured.');
-  if (!profile.vaults?.some((item) => item.name === vaultName)) throw new Error(`Vault "${vaultName}" is outside the selected Twin profile.`);
-  if (!profile.github_repository) throw new Error('Assign a separate GitHub repository to this Twin profile in Setup first.');
-  const repository = await inspectGitHubRepositoryPath(profile.github_repository);
-  await assertProfileRepositoryUnique(cfg, profile.id, repository);
-  return { profile_id: profile.id, repository_path: repository.path, repository: repository.identity };
+// Projection for the Setup UI, including whether each assigned clone still matches on disk.
+export async function githubAssignmentStatus(cfg) {
+  return Promise.all(githubAssignmentProjection(cfg).map(async (item) => {
+    if (item.status !== 'assigned') return item;
+    try {
+      const { identity } = await openRepository(item.assignment.path);
+      return identity === item.assignment.remote ? item : { ...item, status: 'stale' };
+    } catch { return { ...item, status: 'stale' }; }
+  }));
 }
 
 function safeNotePath(value) {
@@ -167,9 +165,8 @@ async function rejectSymlinkPath(root, rel) {
 }
 
 async function ensureSafeParentDirectories(root, rel) {
-  const parts = rel.split('/').slice(0, -1);
   let cursor = root;
-  for (const part of parts) {
+  for (const part of rel.split('/').slice(0, -1)) {
     cursor = path.join(cursor, part);
     try { await mkdir(cursor); }
     catch (error) { if (error.code !== 'EEXIST') throw error; }
@@ -180,33 +177,35 @@ async function ensureSafeParentDirectories(root, rel) {
   }
 }
 
-export async function listGitHubShareCandidates(ctx, vaultName) {
+export async function listGitHubShareCandidates(ctx, vaultName, profileId) {
+  const auth = await authorize(ctx, { profileId, vaultName });
   const vault = ctx.byName.get(vaultName);
   if (!vault || !ctx.enabled.includes(vaultName)) throw new Error('Choose an enabled vault.');
   if (vault.private) throw new Error('Private vaults are not eligible for GitHub sharing.');
   const index = await loadVault(ctx, vaultName);
-  return index.notes
+  return scopedNotes(auth, index.notes)
     .filter((note) => !note.private && !note.generated && !findSecrets(note.raw).length)
     .map(({ rel, title }) => ({ path: rel, title }))
     .sort((a, b) => a.path.localeCompare(b.path));
 }
 
-export async function previewGitHubRepository({ ctx, repoPath, vaultName, paths }) {
+export async function previewGitHubRepository({ ctx, repoPath, vaultName, paths, profileId }) {
   if (!Array.isArray(paths) || !paths.length || paths.length > MAX_SELECTED_NOTES || paths.some((p) => !safeNotePath(p)) || new Set(paths).size !== paths.length) {
     throw new Error(`Select 1–${MAX_SELECTED_NOTES} distinct Markdown paths from the visible notes list.`);
   }
+  const auth = await authorize(ctx, { profileId, vaultName, repoPath });
   const vault = ctx.byName.get(vaultName);
   if (!vault || !ctx.enabled.includes(vaultName)) throw new Error('Choose an enabled vault.');
   if (vault.private) throw new Error('Private vaults are not eligible for GitHub sharing.');
   const index = await loadVault(ctx, vaultName);
-  const byPath = new Map(index.notes.filter((note) => !note.private && !note.generated).map((note) => [note.rel, note]));
+  const byPath = new Map(scopedNotes(auth, index.notes).filter((note) => !note.private && !note.generated).map((note) => [note.rel, note]));
   if (paths.some((p) => !byPath.has(p))) throw new Error('One or more selected notes are unavailable for sharing in this vault.');
 
   // Secret scanning happens before any candidate is described as publishable.
   const notes = paths.map((p) => byPath.get(p));
   if (notes.some((note) => findSecrets(note.raw).length)) throw new Error('A selected note needs a privacy review before it can be shared.');
 
-  const root = await repositoryRoot(repoPath);
+  const root = auth.root;
   const files = [];
   for (const note of notes) {
     const relative = `${NOTES_ROOT}/${note.rel}`;
@@ -232,13 +231,14 @@ export async function previewGitHubRepository({ ctx, repoPath, vaultName, paths 
   };
 }
 
-async function eligibleRemoteNotes({ ctx, repoPath, vaultName }) {
+async function eligibleRemoteNotes({ ctx, repoPath, vaultName, profileId }) {
+  const auth = await authorize(ctx, { profileId, vaultName, repoPath });
   const vault = ctx.byName.get(vaultName);
   if (!vault || !ctx.enabled.includes(vaultName)) throw new Error('Choose an enabled vault.');
   if (vault.private) throw new Error('Private vaults are not eligible for GitHub sharing.');
-  const root = await repositoryRoot(repoPath);
+  const root = auth.root;
   const { branch, ref } = await fetchTrackedOrigin(root);
-  const notes = await readSafeRemoteNotes(root, ref);
+  const notes = await readSafeRemoteNotes(root, ref, (notePath) => !auth.assignment || noteInScope(auth.assignment, notePath));
   const localRoot = vaultRoot(ctx, vaultName);
   const files = [];
   for (const note of notes) {
@@ -260,11 +260,11 @@ export async function listGitHubPullCandidates(options) {
   return { provider: 'github', branch, files, notice: 'Remote notes were fetched and privacy-filtered. Preview metadata only; no vault files were changed.' };
 }
 
-export async function importGitHubSelectedNotes({ ctx, repoPath, vaultName, paths }) {
+export async function importGitHubSelectedNotes({ ctx, repoPath, vaultName, paths, profileId }) {
   if (!Array.isArray(paths) || !paths.length || paths.length > MAX_SELECTED_NOTES || paths.some((p) => !safeNotePath(p)) || new Set(paths).size !== paths.length) {
     throw new Error(`Select 1–${MAX_SELECTED_NOTES} distinct Markdown paths from the visible remote notes list.`);
   }
-  const current = await eligibleRemoteNotes({ ctx, repoPath, vaultName });
+  const current = await eligibleRemoteNotes({ ctx, repoPath, vaultName, profileId });
   const remote = new Map(current.notes.map((note) => [note.path, note]));
   const fileState = new Map(current.files.map((file) => [file.path, file]));
   if (paths.some((p) => !remote.has(p))) throw new Error('One or more selected remote notes are unavailable or failed privacy checks.');
@@ -292,50 +292,41 @@ export async function importGitHubSelectedNotes({ ctx, repoPath, vaultName, path
   return { provider: 'github', imported: toAdd.map((x) => x.note.path), unchanged: selected.filter((x) => x.state.action === 'unchanged').map((x) => x.note.path), conflicts: [], branch: current.branch };
 }
 
-// Preserve both sides of a remote/local divergence without silently choosing a winner.
-// The selected remote version is saved beside a clearly named copy; the local file is untouched.
-export async function saveGitHubConflictCopies({ ctx, repoPath, vaultName, paths }) {
+// Save a deterministic remote copy when the local and remote versions differ.
+export async function saveGitHubConflictCopies({ ctx, repoPath, vaultName, paths, profileId }) {
   if (!Array.isArray(paths) || !paths.length || paths.length > MAX_SELECTED_NOTES || paths.some((p) => !safeNotePath(p)) || new Set(paths).size !== paths.length) {
     throw new Error(`Select 1–${MAX_SELECTED_NOTES} distinct Markdown conflict paths.`);
   }
-  const current = await eligibleRemoteNotes({ ctx, repoPath, vaultName });
+  const current = await eligibleRemoteNotes({ ctx, repoPath, vaultName, profileId });
   const remote = new Map(current.notes.map((note) => [note.path, note]));
   const state = new Map(current.files.map((file) => [file.path, file]));
-  if (paths.some((p) => !remote.has(p) || state.get(p)?.action !== 'conflict')) {
-    throw new Error('Select only current remote notes that conflict with local content. No conflict copies were saved.');
-  }
-
+  if (paths.some((p) => !remote.has(p) || state.get(p)?.action !== 'conflict')) throw new Error('Select only current remote notes that conflict with local content. No conflict copies were saved.');
   const planned = paths.map((notePath) => {
-    const note = remote.get(notePath);
-    const digest = createHash('sha256').update(note.raw, 'utf8').digest('hex').slice(0, 12);
+    const note = remote.get(notePath), digest = createHash('sha256').update(note.raw, 'utf8').digest('hex').slice(0, 12);
     const parsed = path.posix.parse(notePath);
-    const copyPath = path.posix.join('BrainLink Conflicts', parsed.dir, `${parsed.name}.remote-${digest}${parsed.ext}`);
-    return { note, copyPath };
+    return { note, copyPath: path.posix.join('BrainLink Conflicts', parsed.dir, `${parsed.name}.remote-${digest}${parsed.ext}`) };
   });
-  const created = [];
-  const saved = [];
+  const created = [], saved = [];
   try {
     for (const { note, copyPath } of planned) {
       const target = path.resolve(current.localRoot, ...copyPath.split('/'));
-      if (!within(current.localRoot, target)) throw new Error('A conflict copy path is outside the selected vault.');
+      if (!within(current.localRoot, target)) throw new Error('Conflict copy path escaped the vault.');
       await rejectSymlinkPath(current.localRoot, copyPath);
       let existing;
       try { existing = await readFile(target, 'utf8'); }
-      catch (error) { if (error.code !== 'ENOENT') throw new Error('Could not safely inspect a conflict-copy destination.'); }
+      catch (error) { if (error.code !== 'ENOENT') throw new Error('Could not inspect conflict-copy destination.'); }
       if (existing != null) {
-        if (existing !== note.raw) throw new Error('A conflict-copy destination already contains different content. No local notes were changed.');
-        saved.push({ source: note.path, copy: copyPath, action: 'unchanged' });
-        continue;
+        if (existing !== note.raw) throw new Error('Conflict-copy destination has different content.');
+        saved.push({ source: note.path, copy: copyPath, action: 'unchanged' }); continue;
       }
       await ensureSafeParentDirectories(current.localRoot, copyPath);
       await rejectSymlinkPath(current.localRoot, copyPath);
       await writeFile(target, note.raw, { encoding: 'utf8', flag: 'wx', mode: 0o600 });
-      created.push(target);
-      saved.push({ source: note.path, copy: copyPath, action: 'saved' });
+      created.push(target); saved.push({ source: note.path, copy: copyPath, action: 'saved' });
     }
   } catch {
     for (const target of created.reverse()) await rm(target, { force: true }).catch(() => {});
-    throw new Error('Could not safely save the selected remote conflict copies. Local notes were preserved; retry after checking the vault.');
+    throw new Error('Could not safely save selected remote conflict copies. Local notes were preserved; check the vault and retry.');
   }
   return { provider: 'github', saved, branch: current.branch, local_notes_overwritten: false };
 }
@@ -343,20 +334,21 @@ export async function saveGitHubConflictCopies({ ctx, repoPath, vaultName, paths
 // Explicitly publishes selected notes to a local checkout and records one local commit.
 // It requires a completely clean checkout so rollback cannot disturb unrelated user work.
 // It never fetches or pushes; callers must obtain the user's explicit confirmation first.
-export async function commitGitHubSelectedNotes({ ctx, repoPath, vaultName, paths }) {
+export async function commitGitHubSelectedNotes({ ctx, repoPath, vaultName, paths, profileId }) {
   if (!Array.isArray(paths) || !paths.length || paths.length > MAX_SELECTED_NOTES || paths.some((p) => !safeNotePath(p)) || new Set(paths).size !== paths.length) {
     throw new Error(`Select 1–${MAX_SELECTED_NOTES} distinct Markdown paths from the visible notes list.`);
   }
+  const auth = await authorize(ctx, { profileId, vaultName, repoPath });
   const vault = ctx.byName.get(vaultName);
   if (!vault || !ctx.enabled.includes(vaultName)) throw new Error('Choose an enabled vault.');
   if (vault.private) throw new Error('Private vaults are not eligible for GitHub sharing.');
   const index = await loadVault(ctx, vaultName);
-  const byPath = new Map(index.notes.filter((note) => !note.private && !note.generated).map((note) => [note.rel, note]));
+  const byPath = new Map(scopedNotes(auth, index.notes).filter((note) => !note.private && !note.generated).map((note) => [note.rel, note]));
   if (paths.some((p) => !byPath.has(p))) throw new Error('One or more selected notes are unavailable for sharing in this vault.');
   const notes = paths.map((p) => byPath.get(p));
   if (notes.some((note) => findSecrets(note.raw).length)) throw new Error('A selected note needs a privacy review before it can be shared.');
 
-  const root = await repositoryRoot(repoPath);
+  const root = auth.root;
   if (await git(root, ['status', '--porcelain=v1', '--untracked-files=all'])) {
     throw new Error('The local repository has changes. Commit or safely set them aside before publishing selected notes.');
   }
@@ -397,7 +389,7 @@ export async function commitGitHubSelectedNotes({ ctx, repoPath, vaultName, path
     const expected = changed.map((r) => r.relative.replaceAll('\\', '/')).sort();
     if (staged.length !== expected.length || staged.some((p, i) => p !== expected[i])) throw new Error('Git staged an unexpected file set; publication was cancelled.');
     hooksDir = await mkdtemp(path.join(tmpdir(), 'brainlink-empty-hooks-'));
-    await gitRaw(root, ['-c', `core.hooksPath=${hooksDir}`, 'commit', '-m', 'BrainLink: update selected shared notes']);
+    await gitRaw(root, ['-c', `core.hooksPath=${hooksDir}`, 'commit', '-m', 'BrainLink: update selected shared notes', ...(auth.profileId ? ['-m', `${PROFILE_TRAILER}: ${auth.profileId}`] : [])]);
     commitCreated = true;
     const sha = (await git(root, ['rev-parse', '--short', 'HEAD'])).trim();
     return { provider: 'github', vault: vaultName, committed: true, commit: sha, files: records.map(({ note, action }) => ({ path: note.rel, action })), notice: 'Local commit created. No fetch or push was performed.' };
@@ -420,24 +412,30 @@ export async function commitGitHubSelectedNotes({ ctx, repoPath, vaultName, path
 // is still the fetched origin branch tip. This prevents accidentally publishing any
 // unrelated local commits. The operation is explicit, never force-pushes, and uses Git's
 // configured credential helper. A concurrent remote update fails safely and requires review.
-export async function pushGitHubSelectedNotes({ ctx, repoPath, vaultName, paths, commit }) {
+export async function pushGitHubSelectedNotes({ ctx, repoPath, vaultName, paths, commit, profileId }) {
   if (!Array.isArray(paths) || !paths.length || paths.length > MAX_SELECTED_NOTES || paths.some((p) => !safeNotePath(p)) || new Set(paths).size !== paths.length) {
     throw new Error(`Select 1–${MAX_SELECTED_NOTES} distinct Markdown paths from the visible notes list.`);
   }
   if (typeof commit !== 'string' || !/^[a-f0-9]{7,40}$/.test(commit)) throw new Error('The local commit receipt is invalid; create a fresh preview and commit.');
+  const auth = await authorize(ctx, { profileId, vaultName, repoPath });
   const vault = ctx.byName.get(vaultName);
   if (!vault || !ctx.enabled.includes(vaultName)) throw new Error('Choose an enabled vault.');
   if (vault.private) throw new Error('Private vaults are not eligible for GitHub sharing.');
   const index = await loadVault(ctx, vaultName);
-  const byPath = new Map(index.notes.filter((note) => !note.private && !note.generated).map((note) => [note.rel, note]));
+  const byPath = new Map(scopedNotes(auth, index.notes).filter((note) => !note.private && !note.generated).map((note) => [note.rel, note]));
   if (paths.some((p) => !byPath.has(p))) throw new Error('One or more selected notes are unavailable for sharing in this vault.');
   const notes = paths.map((p) => byPath.get(p));
   if (notes.some((note) => findSecrets(note.raw).length)) throw new Error('A selected note needs a privacy review before it can be shared.');
 
-  const root = await repositoryRoot(repoPath);
+  const root = auth.root;
   if (await git(root, ['status', '--porcelain=v1', '--untracked-files=all'])) throw new Error('The repository changed after the local commit. Review its state and create a fresh preview.');
   const head = await git(root, ['rev-parse', 'HEAD']);
   if (head !== await git(root, ['rev-parse', commit])) throw new Error('The local HEAD no longer matches this BrainLink commit receipt.');
+  if (auth.profileId) {
+    // The receipt must have been created for this exact profile; one profile's commit can never be pushed as another's.
+    const trailer = (await gitRaw(root, ['log', '-1', '--format=%B', head])).split(/\r?\n/).reverse().find((line) => line.startsWith(`${PROFILE_TRAILER}: `));
+    if (trailer !== `${PROFILE_TRAILER}: ${auth.profileId}`) throw new Error('This commit receipt belongs to a different profile. Create a fresh preview and commit.');
+  }
   const upstream = await git(root, ['rev-parse', '--abbrev-ref', '--symbolic-full-name', '@{upstream}']);
   const match = /^origin\/(.+)$/.exec(upstream);
   if (!match) throw new Error('Configure this branch to track its matching origin branch before pushing.');
