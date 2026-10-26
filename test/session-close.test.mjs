@@ -1,8 +1,10 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtemp, mkdir, readdir, readFile } from 'node:fs/promises';
+import { mkdtemp, mkdir, readdir, readFile, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
+import { spawn } from 'node:child_process';
+import { pathToFileURL } from 'node:url';
 import { normalize, CONFIG_SCHEMA_VERSION } from '../src/config.mjs';
 import { createContext, readNote } from '../src/core.mjs';
 import { createMcp } from '../src/server.mjs';
@@ -141,4 +143,60 @@ test('concurrent closes for one task ID preserve the first outcome and reject th
   const saved = await store.readSession(results.find((result) => result.session_saved).session_id, {});
   assert.match(saved.session.summary, /First outcome/);
   assert.doesNotMatch(saved.session.summary, /Conflicting second outcome/);
+});
+
+test('separate BrainLink processes serialize closeout and preserve one original outcome', async () => {
+  const root = await mkdtemp(path.join(tmpdir(), 'bl-close-cross-process-'));
+  const vault = path.join(root, 'vault');
+  await mkdir(path.join(vault, 'Inbox'), { recursive: true });
+  const imports = {
+    config: pathToFileURL(path.resolve('src/config.mjs')).href,
+    core: pathToFileURL(path.resolve('src/core.mjs')).href,
+    store: pathToFileURL(path.resolve('src/sessions/store.mjs')).href,
+    close: pathToFileURL(path.resolve('src/sessions/close.mjs')).href,
+  };
+  const script = `
+    import { normalize } from ${JSON.stringify(imports.config)};
+    import { createContext } from ${JSON.stringify(imports.core)};
+    import { createSessionStore } from ${JSON.stringify(imports.store)};
+    import { closeSession } from ${JSON.stringify(imports.close)};
+    const root = process.env.BL_TEST_ROOT;
+    const env = { BRAINLINK_HOME: root + '/app', HOME: root, BRAINLINK_AI_PLATFORM: 'Codex', BRAINLINK_SEMANTIC: '0' };
+    const ctx = createContext(normalize({ vaults: [{ name: 'Company', path: root + '/vault' }] }), { env });
+    const store = await createSessionStore({ dir: root + '/app/sessions' });
+    const result = await closeSession(ctx, store, { vault: 'Company', title: 'Cross process', goal: 'Check lock', outcome: process.env.BL_TEST_OUTCOME, session_or_task_id: process.env.BL_TEST_TASK_ID, confirm: true });
+    process.stdout.write(JSON.stringify(result));
+  `;
+  const run = (outcome, taskId = 'cross-process-same-task') => new Promise((resolve, reject) => {
+    const child = spawn(process.execPath, ['--input-type=module', '-e', script], { env: { ...process.env, BL_TEST_ROOT: root, BL_TEST_OUTCOME: outcome, BL_TEST_TASK_ID: taskId }, stdio: ['ignore', 'pipe', 'pipe'] });
+    let stdout = '', stderr = '';
+    child.stdout.setEncoding('utf8').on('data', (chunk) => { stdout += chunk; });
+    child.stderr.setEncoding('utf8').on('data', (chunk) => { stderr += chunk; });
+    child.on('error', reject);
+    child.on('close', (code) => code === 0 ? resolve(JSON.parse(stdout)) : reject(new Error(`child exited ${code}: ${stderr}`)));
+  });
+  try {
+    const results = await Promise.all([run('First process outcome'), run('Second process outcome')]);
+    assert.equal(results.filter((result) => result.session_saved === true).length, 1);
+    assert.equal(results.filter((result) => result.errors?.some((error) => /already closed/.test(error))).length, 1);
+    const independent = await Promise.all([
+      run('Independent process outcome A', 'cross-process-task-a'),
+      run('Independent process outcome B', 'cross-process-task-b'),
+    ]);
+    assert.ok(independent.every((result) => result.session_saved === true));
+    const store = await openSessionStore({ BRAINLINK_HOME: path.join(root, 'app') });
+    const sessions = await store.listSessions();
+    assert.equal(sessions.length, 3, 'unrelated writes from separate processes must not replace each other');
+    const saved = await store.readSession(results.find((result) => result.session_saved).session_id, {});
+    assert.ok(['First process outcome', 'Second process outcome'].some((outcome) => saved.session.summary.includes(outcome)));
+    assert.notEqual(saved.session.summary.includes('First process outcome'), saved.session.summary.includes('Second process outcome'));
+    const files = await readdir(path.join(vault, 'Inbox'));
+    assert.equal(files.length, 3);
+    const note = await readFile(path.join(vault, 'Inbox', files.find((file) => file.includes(saved.session.id.slice(-6)))), 'utf8');
+    assert.ok(['First process outcome', 'Second process outcome'].some((outcome) => note.includes(outcome)));
+    for (const outcome of ['Independent process outcome A', 'Independent process outcome B']) {
+      const found = await Promise.all(files.map((file) => readFile(path.join(vault, 'Inbox', file), 'utf8')));
+      assert.ok(found.some((body) => body.includes(outcome)));
+    }
+  } finally { await rm(root, { recursive: true, force: true }); }
 });

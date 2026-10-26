@@ -54,9 +54,9 @@ export async function closeSession(ctx, store, args, now = new Date(), { fileSum
   const profileTag = profileId ? `profile-${createHash('sha256').update(profileId).digest('hex').slice(0, 12)}-` : '';
   const client = `brainlink-${profileTag}close-${clientIdFor(id.ai_platform)}`;
   const sessionId = 's_' + createHash('sha256').update(`${client}:${sourceId}`).digest('hex').slice(0, 16);
-  return withCloseLock(sessionId, async () => {
+  const close = async (sessionStore = store) => {
     try {
-      await store.readSession(sessionId, {});
+      await sessionStore.readSession(sessionId, {});
       return { ok: false, errors: ['This task ID was already closed. Review the existing private session; do not overwrite its outcome.'], session_id: sessionId };
     } catch (error) { if (error.code !== 'E_NOT_FOUND') throw error; }
     const session = { id: sessionId, client, profile_id: profileId, title: `${args.title} (${sessionId.slice(-6)})`, project: args.project || '', summary, updated_at: now.toISOString(), private: true };
@@ -65,7 +65,7 @@ export async function closeSession(ctx, store, args, now = new Date(), { fileSum
     const draft = await fileSummary(ctx, session, args.vault, false, identity, folder);
     if (!draft.ok || !args.confirm) return { ...draft, session_id: sessionId, session_saved: false };
 
-    const stored = await store.putSession({ client, source_id: sourceId, profile_id: profileId, project: session.project, title: session.title,
+    const stored = await sessionStore.putSession({ client, source_id: sourceId, profile_id: profileId, project: session.project, title: session.title,
       summary, started_at: now.toISOString(), note_refs: [], private: true, messages: [] }, profileId ? { profile_id: profileId } : {});
     let note;
     try {
@@ -96,5 +96,8 @@ export async function closeSession(ctx, store, args, now = new Date(), { fileSum
       };
     }
     return { ...note, session_id: stored.id, session_saved: true };
-  });
+  };
+  return typeof store.withExclusive === 'function'
+    ? store.withExclusive(close)
+    : withCloseLock(sessionId, () => close(store));
 }
