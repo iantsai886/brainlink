@@ -1489,17 +1489,27 @@ export async function startSetup(opts = {}) {
       const ctx = localContext(cfg, { ...env, BRAINLINK_SEMANTIC: '0' });
       if (!cfg.handoff || !ctx.enabled.includes(cfg.handoff.vault)) return { enabled: false, receipts: [] };
       const list = await listHandoffs(ctx, { limit: b.limit || 30 });
-      // listHandoffs is newest-first, so the first update for a target is its current state.
-      // Updates are append-only mailbox notes; the original request is never rewritten.
-      const latestUpdateByTarget = new Map();
-      for (const update of list) if (update.ack_of && !latestUpdateByTarget.has(update.ack_of)) latestUpdateByTarget.set(update.ack_of, update);
+      // Replies are append-only. If multiple agents update a request at the same
+      // timestamp, do not choose one arbitrarily and present it as authoritative.
+      const updatesByTarget = new Map();
+      for (const update of list) if (update.ack_of) {
+        const updates = updatesByTarget.get(update.ack_of) || [];
+        updates.push(update);
+        updatesByTarget.set(update.ack_of, updates);
+      }
       const receipts = list.filter((x) => !x.ack_of).map((x) => {
-        const update = latestUpdateByTarget.get(x.path);
+        const updates = updatesByTarget.get(x.path) || [];
+        const latestTime = updates.reduce((latest, item) => Math.max(latest, Date.parse(item.sent_at) || 0), 0);
+        const latestUpdates = updates.filter((item) => (Date.parse(item.sent_at) || 0) === latestTime);
+        const updateConflict = latestUpdates.length > 1;
+        const update = updateConflict ? null : latestUpdates[0];
         const legacyStatus = { ACK: 'ACKNOWLEDGED', DONE: 'COMPLETED', COMPLETE: 'COMPLETED' }[String(update?.status || '').toUpperCase()];
         return {
           from: x.from, to: x.to, subject: x.subject, sent_at: x.sent_at, status: x.status, priority: x.priority,
-          picked_up: Boolean(update), picked_up_by: update ? update.from : null, picked_up_at: update ? update.sent_at : null,
-          update_status: update ? (legacyStatus || update.status || 'ACKNOWLEDGED') : null, update_subject: update ? update.subject : null,
+          picked_up: updates.length > 0, picked_up_by: update ? update.from : null, picked_up_at: latestUpdates[0]?.sent_at || null,
+          update_conflict: updateConflict,
+          update_status: updateConflict ? 'CONCURRENT_UPDATES' : update ? (legacyStatus || update.status || 'ACKNOWLEDGED') : null,
+          update_subject: updateConflict ? `${latestUpdates.length} updates need review` : update ? update.subject : null,
         };
       });
       return { enabled: true, receipts };

@@ -182,6 +182,8 @@
   "handoffs.status.BLOCKED": "Blocked",
   "handoffs.status.COMPLETED": "Completed",
   "handoffs.status.CANCELLED": "Cancelled",
+  "handoffs.status.CONCURRENT_UPDATES": "Multiple updates need review",
+  "handoffs.conflictHint": "Open the mailbox to compare both updates.",
   "settings.summary": "Settings",
   "settings.config": "Config:",
   "vault.step1Title": "Your vault",

@@ -855,6 +855,8 @@ test('P0: POST /api/handoffs shows a clear receipt (who sent, who picked up, whe
       `---\ntype: handoff\nstatus: IN_PROGRESS\nai_platform: "Grok"\nwritten_at: 2026-10-18T10:30:00+08:00\nto: "Claude"\npriority: P1\nsubject: "Pricing page started"\nack_of: "Acme/Chief of Staff Office/Handoffs/2026-10-18-0930-from-claude-to-grok-check-pricing-page.md"\n---\n# Pricing page started\n`);
     await writeFile(path.join(dir, '2026-10-18-1130-from-grok-to-claude-pricing-page-done.md'),
       `---\ntype: handoff\nstatus: COMPLETED\nai_platform: "Grok"\nwritten_at: 2026-10-18T11:30:00+08:00\nto: "Claude"\npriority: P1\nsubject: "Pricing page done"\nack_of: "Acme/Chief of Staff Office/Handoffs/2026-10-18-0930-from-claude-to-grok-check-pricing-page.md"\n---\n# Pricing page done\n`);
+    await writeFile(path.join(dir, '2026-10-18-1130-from-codex-to-claude-pricing-page-blocked.md'),
+      `---\ntype: handoff\nstatus: BLOCKED\nai_platform: "Codex"\nwritten_at: 2026-10-18T11:30:00+08:00\nto: "Claude"\npriority: P1\nsubject: "Pricing page blocked"\nack_of: "Acme/Chief of Staff Office/Handoffs/2026-10-18-0930-from-claude-to-grok-check-pricing-page.md"\n---\n# Pricing page blocked\n`);
     // B: handed off by Claude to Codex, no reply yet.
     await writeFile(path.join(dir, '2026-10-19-0900-from-claude-to-codex-deploy-the-fix.md'),
       '---\ntype: handoff\nstatus: REQUEST\nai_platform: "Claude"\nwritten_at: 2026-10-19T09:00:00+08:00\nto: "Codex"\npriority: P1\nsubject: "Deploy the fix"\n---\n# Deploy the fix\n');
@@ -873,10 +875,11 @@ test('P0: POST /api/handoffs shows a clear receipt (who sent, who picked up, whe
     assert.equal(picked.from, 'claude');
     assert.equal(picked.to, 'grok');
     assert.equal(picked.picked_up, true);
-    assert.equal(picked.picked_up_by, 'grok');
+    assert.equal(picked.picked_up_by, null, 'simultaneous updates must not select an arbitrary agent');
     assert.match(picked.picked_up_at, /^2026-10-18T11:30/);
-    assert.equal(picked.update_status, 'COMPLETED');
-    assert.equal(picked.update_subject, 'Pricing page done');
+    assert.equal(picked.update_conflict, true);
+    assert.equal(picked.update_status, 'CONCURRENT_UPDATES');
+    assert.equal(picked.update_subject, '2 updates need review');
     assert.match(picked.sent_at, /^2026-10-18T09:30/);
 
     const pending = r.receipts.find((x) => x.subject === 'Deploy the fix');

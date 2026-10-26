@@ -182,6 +182,8 @@
   "handoffs.status.BLOCKED": "Bloqueado",
   "handoffs.status.COMPLETED": "Concluído",
   "handoffs.status.CANCELLED": "Cancelado",
+  "handoffs.status.CONCURRENT_UPDATES": "Várias atualizações precisam de revisão",
+  "handoffs.conflictHint": "Abra a caixa de entrada para comparar as atualizações.",
   "settings.summary": "Definições",
   "settings.config": "Configuração:",
   "vault.step1Title": "O seu caderno de notas",

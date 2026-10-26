@@ -845,7 +845,7 @@ function renderHandoffs(list) {
       </div>
       <div style="font-size:14px">${esc(h.subject)}</div>
       ${h.update_subject ? `<div class="muted" style="font-size:13px">${esc(h.update_subject)}</div>` : ''}
-      <div class="muted" style="font-size:13px">${esc(t('handoffs.sentAt', { when: h.sent_at ? new Date(h.sent_at).toLocaleString(LOCALE) : '' }))}${h.picked_up ? ' · ' + esc(t('handoffs.pickedUpBy', { who: clientLabel(h.picked_up_by), when: h.picked_up_at ? new Date(h.picked_up_at).toLocaleString(LOCALE) : '' })) : ''}</div>
+      <div class="muted" style="font-size:13px">${esc(t('handoffs.sentAt', { when: h.sent_at ? new Date(h.sent_at).toLocaleString(LOCALE) : '' }))}${h.update_conflict ? ` · ${esc(t('handoffs.conflictHint'))}` : h.picked_up ? ' · ' + esc(t('handoffs.pickedUpBy', { who: clientLabel(h.picked_up_by), when: h.picked_up_at ? new Date(h.picked_up_at).toLocaleString(LOCALE) : '' })) : ''}</div>
     </div>`).join('');
 }
 function renderSyncSuggestions(provider, suggested) {
