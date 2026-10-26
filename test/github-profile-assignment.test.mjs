@@ -332,7 +332,7 @@ test('Setup UI parses and clears selections, receipts and pending confirmations 
   assert.match(html, /renderGitHubCandidates\(\) \{[\s\S]*?githubPendingPush = null; \$\('github-push'\)\.hidden = true/);
   assert.match(html, /e\.target\.id === 'github-profile'\) \{ \$\('github-repository'\)\.value = ''; \$\('github-assign-folders'\)\.value = ''; \$\('github-assign-whole-vault'\)\.checked = false; githubResetState\(\)/);
   assert.match(html, /githubAssignInput = \(\) => \(\{[\s\S]*whole_vault: \$\('github-assign-whole-vault'\)\.checked/);
-  assert.match(html, /githubPendingPush = r\.committed \? \{ commit: r\.commit, paths, profile: githubProfileId\(\) \}/);
+  assert.match(html, /githubPendingPush = r\.committed \? \{ commit: r\.commit, paths: r\.committed_paths \|\| paths, profile: githubProfileId\(\) \}/);
   assert.match(html, /githubPendingPush\.profile !== githubProfileId\(\)/);
   assert.match(html, /id="github-no-profiles" class="notice" data-i18n="github\.noProfiles" hidden/);
   assert.match(html, /if \(!list\.length\) \{[\s\S]*?\$\('github-load'\)\.disabled = true;[\s\S]*?\$\('github-pull-check'\)\.disabled = true;/);

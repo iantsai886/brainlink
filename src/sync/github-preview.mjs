@@ -442,12 +442,14 @@ export async function commitGitHubSelectedNotes({ ctx, repoPath, vaultName, path
     await gitRaw(root, ['add', '--', ...changed.map((r) => r.relative)]);
     const staged = (await gitRaw(root, ['diff', '--cached', '--name-only', '-z'])).split('\0').filter(Boolean).sort();
     const expected = changed.map((r) => r.relative.replaceAll('\\', '/')).sort();
-    if (staged.length !== expected.length || staged.some((p, i) => p !== expected[i])) throw new Error('Git staged an unexpected file set; publication was cancelled.');
+    if (staged.some((p) => !expected.includes(p))) throw new Error('Git staged an unexpected file set; publication was cancelled.');
+    const committedPaths = staged.map((relative) => relative.slice(`${NOTES_ROOT}/`.length));
+    if (!committedPaths.length) return { provider: 'github', vault: vaultName, committed: false, commit: null, committed_paths: [], files: records.map(({ note, action }) => ({ path: note.rel, action })), notice: 'Git found no normalized content changes in the selected notes. No commit was created or pushed.' };
     hooksDir = await mkdtemp(path.join(tmpdir(), 'brainlink-empty-hooks-'));
     await gitRaw(root, ['-c', `core.hooksPath=${hooksDir}`, 'commit', '-m', 'BrainLink: update selected shared notes', ...(auth.profileId ? ['-m', `${PROFILE_TRAILER}: ${auth.profileId}`] : [])]);
     commitCreated = true;
     const sha = (await git(root, ['rev-parse', '--short', 'HEAD'])).trim();
-    return { provider: 'github', vault: vaultName, committed: true, commit: sha, files: records.map(({ note, action }) => ({ path: note.rel, action })), notice: 'Local commit created. No fetch or push was performed.' };
+    return { provider: 'github', vault: vaultName, committed: true, commit: sha, committed_paths: committedPaths, files: records.map(({ note, action }) => ({ path: note.rel, action })), notice: 'Local commit created. No fetch or push was performed.' };
   } catch (error) {
     // Restore only the files this operation wrote; the initial clean-tree gate prevents collateral damage.
     if (!commitCreated) {

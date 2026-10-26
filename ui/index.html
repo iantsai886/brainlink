@@ -1593,7 +1593,7 @@ $('github-commit').onclick = async () => {
   try {
     const r = await api('POST', '/api/github/commit-selected', { vault: $('github-vault').value, repository: githubRepoValue(), profile_id: githubProfileId(), paths });
     $('github-status').textContent = r.committed ? t('github.committed', { commit: r.commit }) : t('github.nothingToCommit');
-    githubPendingPush = r.committed ? { commit: r.commit, paths, profile: githubProfileId() } : null;
+    githubPendingPush = r.committed ? { commit: r.commit, paths: r.committed_paths || paths, profile: githubProfileId() } : null;
     $('github-push').hidden = !githubPendingPush; $('github-push').disabled = !githubPendingPush;
     $('github-result').hidden = true;
   } catch (e) { $('github-status').textContent = e.message; $('github-commit').disabled = false; }

@@ -59,12 +59,13 @@ export async function runGitHubAutoSync({ ctx, profile, state = {}, operations, 
         await requireOptIn();
         const commit = await operations.commit({ ctx, repoPath: assignment.path, vaultName: assignment.vault, profileId: profile.id, paths: changed });
         if (commit.committed) {
-          receipts[profile.id] = { ...(receipts[profile.id] || {}), pending: { commit: commit.commit, paths: changed } };
+          const committedPaths = Array.isArray(commit.committed_paths) ? commit.committed_paths : changed;
+          receipts[profile.id] = { ...(receipts[profile.id] || {}), pending: { commit: commit.commit, paths: committedPaths } };
           report.pending = commit.commit;
           await operations.saveState(receipts);
           await requireOptIn();
-          const pushed = await operations.push({ ctx, repoPath: assignment.path, vaultName: assignment.vault, profileId: profile.id, paths: changed, commit: commit.commit });
-          report.pushed += pushed.files?.length || changed.length;
+          const pushed = await operations.push({ ctx, repoPath: assignment.path, vaultName: assignment.vault, profileId: profile.id, paths: committedPaths, commit: commit.commit });
+          report.pushed += pushed.files?.length || committedPaths.length;
           delete receipts[profile.id].pending;
           if (!receipts[profile.id].cursorPath) delete receipts[profile.id];
           report.pending = null;
