@@ -6,7 +6,7 @@ import path from 'node:path';
 import { normalize } from '../src/config.mjs';
 import { createContext, loadVault } from '../src/core.mjs';
 import { buildGraph3D, noteDetail3D } from '../src/graph3d.mjs';
-import { deriveTypedRelations, discoverTypedRelationshipCandidates, appendTypedRelationProposal, approveTypedRelation } from '../src/typed-graph.mjs';
+import { deriveTypedRelations, discoverTypedRelationshipCandidates, appendTypedRelationProposal, approveTypedRelation, rejectTypedRelation } from '../src/typed-graph.mjs';
 import { proposeNote } from '../src/writes.mjs';
 import { createMcp } from '../src/server.mjs';
 
@@ -45,6 +45,16 @@ test('typed relationships resolve by stable ID and appear in graph links and not
     { direction: 'outgoing', predicate: 'owned_by', target: 'Product Team' },
   ]);
   assert.equal(detail.relationships[0].evidence, 'Operations handbook, section 2');
+});
+
+test('rejecting a proposed relationship preserves source evidence and does not verify the edge', () => {
+  const raw = `---\ntype: workflow\nid: workflow.collect\nscope: organisation\nstatus: proposed\nrelations:\n  - predicate: runs\n    target: team.product\n    review: proposed\n    source: "Operations handbook section 2"\n    confidence: 0.8\n---\n# Collect questions\n`;
+  const rejected = rejectTypedRelation(raw, 0);
+  assert.match(rejected, /^status: proposed$/m, 'rejecting a link does not promote its record');
+  assert.match(rejected, /^    review: rejected$/m);
+  assert.match(rejected, /^    source: "Operations handbook section 2"$/m);
+  assert.deepEqual(deriveTypedRelations([{ rel: 'Workflow.md', raw: rejected }]), []);
+  assert.throws(() => rejectTypedRelation(rejected, 0), /no longer awaiting review/i);
 });
 
 test('typed graph relationship suggestions are saved as proposed and become edges only after explicit review', async () => {

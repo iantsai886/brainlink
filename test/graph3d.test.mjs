@@ -195,6 +195,38 @@ test('typed relationship review requires a current note revision and adds only t
   } finally { s.server.close(); }
 });
 
+test('typed relationship rejection is revision-checked, keeps evidence, and removes the item from review', async () => {
+  const home = await tmp('graph3d-reject-home');
+  const vaultPath = path.join(home, 'vault');
+  await mkdir(vaultPath, { recursive: true });
+  const env = { BRAINLINK_HOME: path.join(home, 'app'), BRAINLINK_SEMANTIC: '0' };
+  const s = await startSetup({ env, home, os: 'linux', port: 0, useCli: false });
+  const base = `http://127.0.0.1:${s.port}`;
+  const api = (p, body) => fetch(base + p, { method: 'POST', headers: { 'X-BrainLink-Token': s.token, 'Content-Type': 'application/json' }, body: JSON.stringify(body || {}) }).then((r) => r.json());
+  try {
+    assert.equal((await api('/api/vault', { path: vaultPath, name: 'Main', pack: 'simple', scaffold: false })).ok, true);
+    await new Promise((resolve) => setTimeout(resolve, 350));
+    const fs = await import('node:fs/promises');
+    await fs.writeFile(path.join(vaultPath, 'Team.md'), '---\ntype: team\nid: team.product\nscope: organisation\nstatus: current\n---\n# Product team\n');
+    const source = '---\ntype: workflow\nid: workflow.collect\nscope: organisation\nstatus: proposed\nrelations:\n  - predicate: runs\n    target: team.product\n    review: proposed\n    source: "Operations handbook section 2"\n    confidence: 0.9\n---\n# Collect questions\n';
+    await fs.writeFile(path.join(vaultPath, 'Workflow.md'), source);
+    const detail = await api('/api/graph3d/note', { vault: 'Main', path: 'Workflow.md' });
+    const baseRequest = { vault: 'Main', path: 'Workflow.md', relation_index: 0 };
+    const stale = await api('/api/graph3d/relationship/reject', { ...baseRequest, etag: 'stale' });
+    assert.match(stale.error, /changed since it was opened/i);
+    const rejected = await api('/api/graph3d/relationship/reject', { ...baseRequest, etag: detail.etag });
+    assert.equal(rejected.ok, true, JSON.stringify(rejected));
+    const saved = await fs.readFile(path.join(vaultPath, 'Workflow.md'), 'utf8');
+    assert.match(saved, /^    review: rejected$/m);
+    assert.match(saved, /^    source: "Operations handbook section 2"$/m);
+    assert.match(saved, /^status: proposed$/m, 'rejecting one edge does not promote the record');
+    assert.equal((await api('/api/graph3d/reviews', {})).total, 0);
+    assert.equal((await api('/api/graph3d', {})).links.some((link) => link.predicate === 'runs'), false);
+    const repeated = await api('/api/graph3d/relationship/reject', { ...baseRequest, etag: rejected.etag });
+    assert.match(repeated.error, /no longer an eligible suggestion/i);
+  } finally { s.server.close(); }
+});
+
 test('graph review queue returns bounded public proposals and excludes private notes and vaults', async () => {
   const home = await tmp('graph3d-review-queue');
   const main = path.join(home, 'main');
@@ -298,11 +330,15 @@ test('graph UI exposes a confirmation-gated action for reviewing a suggested rel
   const src = await readFile(new URL('../ui/notes3d.js', import.meta.url), 'utf8');
   assert.match(src, /data-review-relation/);
   assert.match(src, /window\.confirm\(tr\('notes3d\.approveConfirm'\)\)/);
+  assert.match(src, /window\.confirm\(tr\('notes3d\.rejectConfirm'\)\)/);
   assert.match(src, /api\('\/api\/graph3d\/relationship\/approve'/);
+  assert.match(src, /api\('\/api\/graph3d\/relationship\/reject'/);
+  assert.match(src, /data-reject-queued/);
   assert.match(src, /api\('\/api\/graph3d\/relationship\/propose'/);
   assert.match(src, /notes3d\.saveSuggestionConfirm/);
   assert.match(src, /api\('\/api\/graph3d\/reviews'/, 'the graph loads a central review queue');
   assert.match(src, /data-approve-queued/, 'queued proposals can be approved from the central review list');
+  assert.match(src, /data-reject-queued/, 'queued proposals can be rejected from the central review list');
   assert.match(src, /data-review-load-more/, 'the bounded review queue can load its next page');
   assert.match(src, /api\('\/api\/graph3d\/note',[\s\S]*?api\('\/api\/graph3d\/relationship\/approve'/, 'approval fetches a fresh note revision before writing');
 });

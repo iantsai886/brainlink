@@ -169,14 +169,17 @@ function pathTitle(rel) { return String(rel || '').split(/[\\/]/).pop()?.replace
 
 // Change only the selected review marker and (when needed) the source record's status.
 // The caller must first revalidate the target and compare a content hash.
-export function approveTypedRelation(raw, relationIndex) {
+function resolveTypedRelation(raw, relationIndex, decision) {
   if (!Number.isInteger(relationIndex) || relationIndex < 0) throw new Error('Invalid relationship selection.');
+  if (!['verified', 'rejected'].includes(decision)) throw new Error('Invalid relationship decision.');
   const match = String(raw || '').match(/^(\uFEFF?---[^\S\r\n]*\r?\n)([\s\S]*?)(\r?\n---[^\S\r\n]*(?:\r?\n|$))/);
   if (!match) throw new Error('This note has no valid frontmatter.');
   const lines = match[2].split(/\r?\n/);
-  const statusLine = lines.findIndex((line) => /^status:\s*["']?(?:proposed|current)["']?\s*$/.test(line));
-  if (statusLine < 0) throw new Error('This record is not a reviewable typed entity.');
-  if (/^status:\s*["']?proposed["']?\s*$/.test(lines[statusLine])) lines[statusLine] = 'status: current';
+  if (decision === 'verified') {
+    const statusLine = lines.findIndex((line) => /^status:\s*["']?(?:proposed|current)["']?\s*$/.test(line));
+    if (statusLine < 0) throw new Error('This record is not a reviewable typed entity.');
+    if (/^status:\s*["']?proposed["']?\s*$/.test(lines[statusLine])) lines[statusLine] = 'status: current';
+  }
   const section = lines.findIndex((line) => /^relations:\s*$/.test(line));
   if (section < 0) throw new Error('This note has no relationship suggestions.');
   const starts = [];
@@ -189,9 +192,14 @@ export function approveTypedRelation(raw, relationIndex) {
   const stop = end < 0 ? lines.length : end;
   const reviewLine = lines.findIndex((line, i) => i > start && i < stop && /^\s{4}review:\s*["']?proposed["']?\s*$/.test(line));
   if (reviewLine < 0) throw new Error('This relationship is no longer awaiting review.');
-  lines[reviewLine] = '    review: verified';
+  lines[reviewLine] = `    review: ${decision}`;
   return `${match[1]}${lines.join(raw.includes('\r\n') ? '\r\n' : '\n')}${match[3]}${String(raw).slice(match[0].length)}`;
 }
+
+// Approval makes the proposed record current; rejection only records the decision and keeps
+// the source, target, and evidence so the user can inspect or correct it later.
+export function approveTypedRelation(raw, relationIndex) { return resolveTypedRelation(raw, relationIndex, 'verified'); }
+export function rejectTypedRelation(raw, relationIndex) { return resolveTypedRelation(raw, relationIndex, 'rejected'); }
 
 export function appendTypedRelationProposal(raw, proposal) {
   if (!PREDICATES.has(proposal?.predicate) || !ID.test(String(proposal?.target_id || '')) ||

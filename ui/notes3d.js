@@ -148,7 +148,7 @@
         if (detail.backlinks.length) parts.push(`<div class="muted" style="font-size:12px;margin-top:10px">Linked from</div><div class="row">${detail.backlinks.map((n) => chip(n, 'backlink')).join('')}</div>`);
         if (detail.outlinks.length) parts.push(`<div class="muted" style="font-size:12px;margin-top:10px">Links to</div><div class="row">${detail.outlinks.map((n) => chip(n, 'link')).join('')}</div>`);
         if (detail.relationships?.length) parts.push(`<div class="muted" style="font-size:12px;margin-top:10px">Typed relationships</div>${detail.relationships.map((r) => `<div style="margin:5px 0"><div><b>${esc(r.predicate)}</b> · ${esc(r.direction)}</div><div class="row">${chip(r.note, 'related record')}</div><small class="muted">${esc(r.evidence)} · confidence ${esc(r.confidence)}</small></div>`).join('')}`);
-        if (detail.proposed_relationships?.length) parts.push(`<div class="muted" style="font-size:12px;margin-top:12px"><b>${esc(tr('notes3d.proposedRelationships'))}</b></div><p class="muted">${esc(tr('notes3d.proposedHint'))}</p>${detail.proposed_relationships.map((r) => `<div class="card" style="margin:6px 0"><div><b>${esc(r.predicate)}</b></div><div class="row">${chip(r.note, tr('notes3d.suggestedTarget'))}</div><small class="muted">${esc(r.evidence)} · ${esc(tr('notes3d.confidence', { confidence: r.confidence }))}</small>${detail.writable ? `<div style="margin-top:8px"><button type="button" class="chip" data-review-relation="${esc(r.relation_index)}">${esc(tr('notes3d.approveRelationship'))}</button></div>` : ''}</div>`).join('')}`);
+        if (detail.proposed_relationships?.length) parts.push(`<div class="muted" style="font-size:12px;margin-top:12px"><b>${esc(tr('notes3d.proposedRelationships'))}</b></div><p class="muted">${esc(tr('notes3d.proposedHint'))}</p>${detail.proposed_relationships.map((r) => `<div class="card" style="margin:6px 0"><div><b>${esc(r.predicate)}</b></div><div class="row">${chip(r.note, tr('notes3d.suggestedTarget'))}</div><small class="muted">${esc(r.evidence)} · ${esc(tr('notes3d.confidence', { confidence: r.confidence }))}</small>${detail.writable ? `<div class="row" style="margin-top:8px"><button type="button" class="chip" data-review-relation="${esc(r.relation_index)}">${esc(tr('notes3d.approveRelationship'))}</button><button type="button" class="chip" data-reject-relation="${esc(r.relation_index)}">${esc(tr('notes3d.rejectRelationship'))}</button></div>` : ''}</div>`).join('')}`);
         if (detail.discovered_relationships?.length) parts.push(`<div class="muted" style="font-size:12px;margin-top:12px"><b>${esc(tr('notes3d.discoveredRelationships'))}</b></div><p class="muted">${esc(tr('notes3d.discoveredHint'))}</p>${detail.discovered_relationships.map((r) => `<div class="card" style="margin:6px 0"><div><b>${esc(r.predicate)}</b></div><div class="row">${chip(r.note, tr('notes3d.suggestedTarget'))}</div><small class="muted">${esc(r.evidence)} · ${esc(tr('notes3d.patternOnly'))}</small>${detail.writable ? `<div style="margin-top:8px"><button type="button" class="chip" data-save-suggestion="${esc(r.target_id)}" data-predicate="${esc(r.predicate)}" data-evidence="${esc(r.evidence)}">${esc(tr('notes3d.saveSuggestion'))}</button></div>` : ''}</div>`).join('')}`);
         document.getElementById('notes3d-links').innerHTML = parts.join('');
       }).catch((e) => { if (selectedId === node.id) document.getElementById('notes3d-body').innerHTML = `<p class="error-box">Could not open this note: ${esc(e.message)}</p>`; });
@@ -204,7 +204,7 @@
           <b>${esc(item.title)}</b><span class="mono muted">${esc(item.vault)} · ${esc(item.path)}</span>
           <div>${esc(item.predicate)} → ${esc(item.target.title)}</div>
           <small class="muted">${esc(item.evidence)} · ${esc(tr('notes3d.confidence', { confidence: item.confidence }))}</small>
-          ${item.can_review ? `<button type="button" class="chip" data-approve-queued="${i}">${esc(tr('notes3d.approveRelationship'))}</button>` : `<small class="muted">${esc(tr('notes3d.reviewReadOnly'))}</small>`}
+          ${item.can_review ? `<div class="row"><button type="button" class="chip" data-approve-queued="${i}">${esc(tr('notes3d.approveRelationship'))}</button><button type="button" class="chip" data-reject-queued="${i}">${esc(tr('notes3d.rejectRelationship'))}</button></div>` : `<small class="muted">${esc(tr('notes3d.reviewReadOnly'))}</small>`}
         </article>`).join('') + (result.limited ? `<button type="button" class="chip" data-review-load-more>${esc(tr('notes3d.reviewLoadMore'))}</button>` : '');
       } catch (error) {
         status.textContent = tr('notes3d.reviewFailed', { error: error.message });
@@ -265,6 +265,15 @@
           .catch((err) => { review.disabled = false; toast(err.message, true); });
         return;
       }
+      const reject = e.target.closest('[data-reject-relation]');
+      if (reject) {
+        if (!currentDetail || !window.confirm(tr('notes3d.rejectConfirm'))) return;
+        reject.disabled = true;
+        api('/api/graph3d/relationship/reject', { vault: currentDetail.vault, path: currentDetail.path, etag: currentDetail.etag, relation_index: Number(reject.dataset.rejectRelation) })
+          .then(() => { toast(tr('notes3d.rejectedToast')); return refreshGraph(); })
+          .catch((err) => { reject.disabled = false; toast(err.message, true); });
+        return;
+      }
       const queuedReview = e.target.closest('[data-approve-queued]');
       if (queuedReview) {
         const item = document.getElementById('notes3d-review-list')._pendingReviews?.[Number(queuedReview.dataset.approveQueued)];
@@ -274,6 +283,17 @@
           .then((detail) => api('/api/graph3d/relationship/approve', { vault: item.vault, path: item.path, etag: detail.etag, relation_index: item.relation_index }))
           .then(() => { toast(tr('notes3d.approvedToast')); return refreshGraph(); })
           .catch((err) => { queuedReview.disabled = false; toast(err.message, true); loadReviewQueue(); });
+        return;
+      }
+      const queuedReject = e.target.closest('[data-reject-queued]');
+      if (queuedReject) {
+        const item = document.getElementById('notes3d-review-list')._pendingReviews?.[Number(queuedReject.dataset.rejectQueued)];
+        if (!item || !window.confirm(tr('notes3d.rejectConfirm'))) return;
+        queuedReject.disabled = true;
+        api('/api/graph3d/note', { vault: item.vault, path: item.path })
+          .then((detail) => api('/api/graph3d/relationship/reject', { vault: item.vault, path: item.path, etag: detail.etag, relation_index: item.relation_index }))
+          .then(() => { toast(tr('notes3d.rejectedToast')); return refreshGraph(); })
+          .catch((err) => { queuedReject.disabled = false; toast(err.message, true); loadReviewQueue(); });
         return;
       }
       const suggestion = e.target.closest('[data-save-suggestion]');

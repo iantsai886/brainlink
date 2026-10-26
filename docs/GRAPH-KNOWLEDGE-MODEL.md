@@ -1,6 +1,6 @@
 # Typed knowledge graph: BrainLink design review
 
-Status: typed relationship candidates can now be included in an attributed `propose_note` call. BrainLink stores typed records as `status: proposed` and all candidate edges as `review: proposed`, regardless of caller-supplied status, so they remain outside graph retrieval until a person reviews and verifies the Markdown. A local Setup review queue lists bounded proposals from enabled non-private vaults, shows source evidence and target, and rechecks the source revision at approval. AI-assisted extraction accuracy, an ontology editor, live-client workflow, and token savings are not yet proven.
+Status: typed relationship candidates can now be included in an attributed `propose_note` call. BrainLink stores typed records as `status: proposed` and all candidate edges as `review: proposed`, regardless of caller-supplied status, so they remain outside graph retrieval until a person reviews them. A local Setup review queue lists bounded proposals from enabled non-private vaults, shows source evidence and target, and rechecks the source revision before approval or rejection. Rejection records `review: rejected` while preserving the source, target, and evidence; rejected suggestions leave the queue and never enter graph retrieval. AI-assisted extraction accuracy, an ontology editor, live-client workflow, and token savings are not yet proven.
 
 ## Executive conclusion
 
@@ -99,7 +99,7 @@ Minimum acceptance gates:
 
 - Every returned edge resolves to authorized source and target records; unknown targets and predicates abstain visibly.
 - Synthetic Personal, Organisation, and Client canaries never cross scopes in search, graph expansion, excerpts, handoffs, or logs.
-- Users can inspect, correct, reject, and roll back generated relationships.
+- Users can inspect, correct, approve, and reject generated relationships; rejection preserves Markdown evidence. Rollback of already verified relationships still requires editing the source note.
 - Broken and stale relations are detected without auto-deleting original notes or source evidence.
 - Typed graph retrieval improves answer success or reduces tokens at equal success on a frozen evaluation set; publish sample size, baseline, failures, and limits.
 
