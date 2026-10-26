@@ -64,6 +64,10 @@ test('Twin setup creates profiles from local UI choices and escapes every profil
   assert.match(html, /id="twin-profiles-panel"/);
   assert.match(html, /id="twin-profiles"/);
   assert.match(html, /id="twin-create"/);
+  assert.match(html, /data-twin-edit=/);
+  assert.match(html, /POST', '\/api\/twins\/update'/);
+  assert.match(html, /twinProfiles\.confirmUpdate/);
+  assert.match(html, /twinProfiles\.identityHint/);
   assert.match(html, /data-twin-vault/);
   assert.match(html, /data-twin-agent/);
   assert.match(html, /data-twin-memory/);
@@ -442,6 +446,55 @@ test('Setup creates a validated Twin from explicit vault, agent, action and memo
     assert.match(unsupported.body.error, /supported permission/);
     const saved = JSON.parse(await readFile(path.join(env.BRAINLINK_HOME, 'config.json'), 'utf8'));
     assert.equal(saved.twin_profiles.length, 2, 'rejected requests do not alter the stored profiles');
+    assert.deepEqual(validate(saved), []);
+  } finally { setup.server.close(); }
+});
+
+test('Setup edits a Twin without changing its identity or source policy and refuses private scope', async () => {
+  const root = await mkdtemp(path.join(tmpdir(), 'brainlink-twin-update-'));
+  const home = path.join(root, 'home');
+  const vaultPath = path.join(root, 'vault');
+  await mkdir(vaultPath);
+  const env = { BRAINLINK_HOME: path.join(home, 'app') };
+  const cfg = fixture(vaultPath);
+  cfg.ai_agents.push({ id: 'agent_unassigned', name: 'Fictional Unassigned Agent', kind: 'local', tokenHash: hashToken('fictional-unassigned-token'), connected: false, revoked: false });
+  cfg.vaults.push({ name: 'Fictional Private', path: path.join(root, 'private'), private: true });
+  await mkdir(cfg.vaults[1].path);
+  await saveConfig(cfg, path.join(env.BRAINLINK_HOME, 'config.json'));
+  const setup = await startSetup({ env, home, os: 'linux', port: 0, useCli: false });
+  const base = `http://127.0.0.1:${setup.port}`;
+  const api = async (body, authenticated = true) => {
+    const response = await fetch(`${base}/api/twins/update`, { method: 'POST', headers: { ...(authenticated ? { 'X-BrainLink-Token': setup.token } : {}), 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
+    return { status: response.status, body: await response.json() };
+  };
+  try {
+    const request = {
+      profile_id: 'org_twin_1', name: 'Fictional Organisation Twin Revised', mode: 'organisation', owner: 'fictional-owner',
+      vaults: [{ name: 'Fictional Org', access: 'read' }],
+      agent_access: [{ agent_id: 'agent_unassigned', operations: ['search', 'read_note'] }],
+      memory_policy: { working: false, semantic: true, procedural: true, episodic: false },
+    };
+    assert.equal((await api(request, false)).status, 401);
+    const updated = await api(request);
+    assert.equal(updated.status, 200, updated.body.error);
+    assert.equal(updated.body.profile.id, 'org_twin_1');
+    assert.equal(updated.body.profile.name, request.name);
+    assert.deepEqual(updated.body.profile.memory_policy, request.memory_policy);
+    assert.equal(updated.body.profile.agents[0].id, 'agent_unassigned');
+    const savedBeforeRefusal = await readFile(path.join(env.BRAINLINK_HOME, 'config.json'), 'utf8');
+    const changedOwner = await api({ ...request, owner: 'different-owner' });
+    assert.equal(changedOwner.status, 400);
+    assert.match(changedOwner.body.error, /type and owner cannot be changed/);
+    const changedMode = await api({ ...request, mode: 'client' });
+    assert.equal(changedMode.status, 400);
+    assert.match(changedMode.body.error, /type and owner cannot be changed/);
+    assert.equal(await readFile(path.join(env.BRAINLINK_HOME, 'config.json'), 'utf8'), savedBeforeRefusal);
+    const privateVault = await api({ ...request, name: 'Must Not Save', vaults: [{ name: 'Fictional Private', access: 'read' }] });
+    assert.equal(privateVault.status, 400);
+    assert.match(privateVault.body.error, /non-private vaults/);
+    assert.equal(await readFile(path.join(env.BRAINLINK_HOME, 'config.json'), 'utf8'), savedBeforeRefusal);
+    const saved = JSON.parse(savedBeforeRefusal);
+    assert.deepEqual(saved.twin_profiles[0].source_policy, cfg.twin_profiles[0].source_policy);
     assert.deepEqual(validate(saved), []);
   } finally { setup.server.close(); }
 });

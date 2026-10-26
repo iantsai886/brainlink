@@ -658,6 +658,52 @@ export async function startSetup(opts = {}) {
       await saveConfig(next, file);
       return { ok: true, profile: twinProfileStatus(next).profiles.find((item) => item.id === profile.id) };
     },
+    'POST /api/twins/update': async (b) => {
+      const cfg = await loadConfig(file);
+      const profile = cfg.twin_profiles.find((item) => item.id === String(b.profile_id || ''));
+      if (!profile) throw new Error('Choose an existing Twin profile.');
+      const name = String(b.name || '').trim();
+      const owner = String(b.owner || '').trim();
+      const mode = String(b.mode || '');
+      if (!name || name.length > 120 || !owner || owner.length > 160 || !['personal', 'organisation', 'client'].includes(mode)) throw new Error('Enter a profile name and owner, then choose Personal, Organisation or Client.');
+      if (mode !== profile.mode || owner !== profile.owner) throw new Error('A Twin’s type and owner cannot be changed after creation because stored sessions and handoffs belong to that identity.');
+      const vaults = Array.isArray(b.vaults) ? b.vaults : [];
+      if (!vaults.length || vaults.length > 50) throw new Error('Choose at least one available non-private vault.');
+      const profileVaults = [];
+      for (const item of vaults) {
+        const vault = cfg.vaults.find((entry) => entry.name === item?.name);
+        if (!vault || vault.private || !['read', 'propose'].includes(item?.access)) throw new Error('Twin profiles can use only available non-private vaults, with read or propose access.');
+        profileVaults.push({ name: vault.name, access: item.access });
+      }
+      if (new Set(profileVaults.map((item) => item.name)).size !== profileVaults.length) throw new Error('Choose each vault only once.');
+      const assignmentVault = profile.github_repository?.vault;
+      if (assignmentVault && !profileVaults.some((item) => item.name === assignmentVault)) throw new Error('Clear this profile’s GitHub assignment before removing its assigned vault.');
+      const allowedOperations = new Set(['search', 'read_note', 'read_session', 'propose_note']);
+      const rawAgents = Array.isArray(b.agent_access) ? b.agent_access : [];
+      const agentIds = new Set();
+      const agentAccess = rawAgents.map((entry) => {
+        const agent = cfg.ai_agents.find((item) => item.id === entry?.agent_id && !item.revoked);
+        const operations = Array.isArray(entry?.operations) ? [...new Set(entry.operations)] : [];
+        if (!agent || agentIds.has(agent.id) || !operations.length || operations.some((operation) => !allowedOperations.has(operation))) throw new Error('Choose active AI agents and at least one supported permission for each.');
+        if (operations.includes('propose_note') && profileVaults.some((vault) => vault.access !== 'propose')) throw new Error('Choose propose access for every profile vault before granting an AI permission to propose notes.');
+        agentIds.add(agent.id);
+        const access = operations.includes('propose_note') ? 'propose' : 'read';
+        return { agent_id: agent.id, vaults: profileVaults.map(({ name }) => ({ name, access, operations })) };
+      });
+      const memory = b.memory_policy || {};
+      profile.name = name;
+      profile.owner = owner;
+      profile.mode = mode;
+      profile.vaults = profileVaults;
+      profile.memory_policy = Object.fromEntries(['working', 'semantic', 'procedural', 'episodic'].map((key) => [key, memory[key] === true]));
+      profile.agent_access = agentAccess;
+      profile.allowed_actions = [...new Set(agentAccess.flatMap((entry) => entry.vaults.flatMap((vault) => vault.operations)))];
+      const next = normalize(cfg);
+      const errors = validate(next);
+      if (errors.length) throw new Error(`This Twin could not be saved: ${errors[0]}`);
+      await saveConfig(next, file);
+      return { ok: true, profile: twinProfileStatus(next).profiles.find((item) => item.id === profile.id) };
+    },
     'POST /api/github/share-candidates': async (b) => {
       const cfg = await loadConfig(file);
       const vaultName = String(b.vault || '');
