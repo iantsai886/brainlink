@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { execFileSync } from 'node:child_process';
-import { mkdtemp, mkdir, readFile, writeFile } from 'node:fs/promises';
+import { mkdtemp, mkdir, readFile, writeFile, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { pathToFileURL } from 'node:url';
@@ -208,6 +208,49 @@ test('remote pull lists safe notes, imports only selected new files and filters 
   assert.equal(await readFile(path.join(f.vault, 'Remote.md'), 'utf8'), await readFile(path.join(f.repo, 'BrainLink', 'notes', 'Remote.md'), 'utf8'));
   assert.equal((await search(f.ctx, 'Company', 'source-backed workflow shared between authorized agents'))[0].path, 'Remote.md');
   assert.equal(await readFile(path.join(f.vault, 'Private.md'), 'utf8'), '---\nprivate: true\n---\nPRIVATE_NOTE_BODY_CANARY_8164\n');
+});
+
+test('remote pull updates only a note with an unchanged BrainLink import receipt and forward Git history', async () => {
+  const f = await fixture(), bare = path.join(f.root, 'remote.git');
+  await mkdir(bare, { recursive: true });
+  const original = 'Shared approved process v1\n', update = 'Shared approved process v2\n';
+  await mkdir(path.join(f.repo, 'BrainLink', 'notes'), { recursive: true });
+  const remoteNote = path.join(f.repo, 'BrainLink', 'notes', 'Public.md');
+  await writeFile(remoteNote, original);
+  git(bare, 'init', '--bare', '--quiet');
+  git(f.repo, 'config', 'user.name', 'BrainLink Test'); git(f.repo, 'config', 'user.email', 'brainlink-test@example.invalid');
+  git(f.repo, 'switch', '-c', 'main'); git(f.repo, 'add', '--', 'BrainLink/notes/Public.md'); git(f.repo, 'commit', '-m', 'shared note v1');
+  git(f.repo, 'config', `url.${pathToFileURL(bare).href}.insteadOf`, 'https://github.com/example/shared-brain.git'); git(f.repo, 'push', '--set-upstream', 'origin', 'main');
+  await rm(path.join(f.vault, 'Public.md'));
+  const first = await importGitHubSelectedNotes({ ctx: f.ctx, repoPath: f.repo, vaultName: 'Company', paths: ['Public.md'] });
+  assert.deepEqual(first.imported, ['Public.md']);
+  const receiptText = await readFile(path.join(f.root, 'github-pull-receipts.json'), 'utf8');
+  assert.doesNotMatch(receiptText, /Shared approved process/);
+
+  await writeFile(remoteNote, update); git(f.repo, 'add', '--', 'BrainLink/notes/Public.md'); git(f.repo, 'commit', '-m', 'shared note v2'); git(f.repo, 'push', 'origin', 'main');
+  const preview = await listGitHubPullCandidates({ ctx: f.ctx, repoPath: f.repo, vaultName: 'Company' });
+  assert.equal(preview.files.find((x) => x.path === 'Public.md').action, 'update');
+  const applied = await importGitHubSelectedNotes({ ctx: f.ctx, repoPath: f.repo, vaultName: 'Company', paths: ['Public.md'] });
+  assert.deepEqual(applied.updated, ['Public.md']);
+  assert.equal(await readFile(path.join(f.vault, 'Public.md'), 'utf8'), update);
+
+  const localEdit = 'Local edit must survive\n';
+  await writeFile(path.join(f.vault, 'Public.md'), localEdit);
+  await writeFile(remoteNote, 'Shared approved process v3\n'); git(f.repo, 'add', '--', 'BrainLink/notes/Public.md'); git(f.repo, 'commit', '-m', 'shared note v3'); git(f.repo, 'push', 'origin', 'main');
+  const conflict = await listGitHubPullCandidates({ ctx: f.ctx, repoPath: f.repo, vaultName: 'Company' });
+  assert.equal(conflict.files.find((x) => x.path === 'Public.md').action, 'conflict');
+  assert.equal(await readFile(path.join(f.vault, 'Public.md'), 'utf8'), localEdit);
+
+  await writeFile(path.join(f.vault, 'Public.md'), update);
+  git(f.repo, 'switch', '--orphan', 'rewritten-main');
+  await mkdir(path.dirname(remoteNote), { recursive: true });
+  await writeFile(remoteNote, 'Rewritten history must not authorize update\n');
+  git(f.repo, 'add', '--', 'BrainLink/notes/Public.md'); git(f.repo, 'commit', '-m', 'rewritten shared history');
+  git(f.repo, 'push', '--force', 'origin', 'rewritten-main:main');
+  git(f.repo, 'branch', '--set-upstream-to=origin/main', 'rewritten-main');
+  const rewritten = await listGitHubPullCandidates({ ctx: f.ctx, repoPath: f.repo, vaultName: 'Company' });
+  assert.equal(rewritten.files.find((x) => x.path === 'Public.md').action, 'conflict');
+  assert.equal(await readFile(path.join(f.vault, 'Public.md'), 'utf8'), update);
 });
 
 test('remote pull preserves conflicting local notes and imports no part of a conflicting batch', async () => {

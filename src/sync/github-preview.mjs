@@ -3,7 +3,7 @@
 import { execFile } from 'node:child_process';
 import { createHash } from 'node:crypto';
 import { promisify } from 'node:util';
-import { lstat, readFile, realpath, mkdir, writeFile, rm, mkdtemp } from 'node:fs/promises';
+import { lstat, readFile, realpath, mkdir, writeFile, rm, mkdtemp, rename } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { findSecrets, loadVault, vaultRoot, parseFrontmatter, isPrivateMeta, fmSaysPrivate } from '../core.mjs';
@@ -44,6 +44,20 @@ async function fetchTrackedOrigin(root) {
   if (branch.startsWith('-') || branch.includes('..') || branch.endsWith('/') || branch.includes('//') || /[\s~^:?*\[\\]/.test(branch)) throw new Error('The tracked origin branch name is not safe.');
   await gitRaw(root, ['fetch', '--no-tags', 'origin', branch], process.env, 120000);
   return { branch, ref: `refs/remotes/origin/${branch}` };
+}
+
+async function loadPullReceipts(file) {
+  try {
+    const value = JSON.parse(await readFile(file, 'utf8'));
+    return value && typeof value === 'object' && !Array.isArray(value) ? value : {};
+  } catch { return {}; }
+}
+
+async function savePullReceipts(file, receipts) {
+  await mkdir(path.dirname(file), { recursive: true });
+  const temp = `${file}.${process.pid}-${Date.now()}-${Math.random().toString(16).slice(2)}.tmp`;
+  try { await writeFile(temp, `${JSON.stringify(receipts, null, 2)}\n`, { encoding: 'utf8', flag: 'wx', mode: 0o600 }); await rename(temp, file); }
+  catch (error) { await rm(temp, { force: true }).catch(() => {}); throw error; }
 }
 
 async function readSafeRemoteNotes(root, ref, inScope = () => true) {
@@ -236,6 +250,8 @@ async function eligibleRemoteNotes({ ctx, repoPath, vaultName, profileId }) {
   const root = auth.root;
   const { branch, ref } = await fetchTrackedOrigin(root);
   const notes = await readSafeRemoteNotes(root, ref, (notePath) => noteInScope(auth.assignment, notePath));
+  const receiptPath = path.join(ctx.dataDir, 'github-pull-receipts.json');
+  const receipts = await loadPullReceipts(receiptPath);
   const localRoot = vaultRoot(ctx, vaultName);
   const files = [];
   for (const note of notes) {
@@ -245,13 +261,19 @@ async function eligibleRemoteNotes({ ctx, repoPath, vaultName, profileId }) {
     let current;
     try { current = await readFile(target, 'utf8'); }
     catch (error) { if (error.code !== 'ENOENT') throw new Error('Could not safely inspect a selected local note.'); }
-    files.push({ path: note.path, title: note.title, action: current == null ? 'add' : current === note.raw ? 'unchanged' : 'conflict' });
+    let action = current == null ? 'add' : current === note.raw ? 'unchanged' : 'conflict';
+    const key = `${auth.profileId}:${vaultName}:${note.path}`;
+    const receipt = receipts[key];
+    if (current != null && action === 'conflict' && receipt?.remote === auth.assignment.remote && receipt?.branch === branch && receipt?.content_hash === createHash('sha256').update(current).digest('hex') && /^[a-f0-9]{40}$/.test(receipt.commit || '')) {
+      try { if (await git(root, ['merge-base', receipt.commit, ref]) === receipt.commit) action = 'update'; } catch { /* rewritten or missing history stays a conflict */ }
+    }
+    files.push({ path: note.path, title: note.title, action });
   }
-  return { root, localRoot, branch, ref, notes, files };
+  return { root, localRoot, branch, ref, notes, files, receipts, receiptPath, profileId: auth.profileId, vaultName, remote: auth.assignment.remote };
 }
 
-// Reviewable remote-to-vault flow. It imports only selected, public Markdown notes that do
-// not already exist; divergent local notes are reported as conflicts and are never overwritten.
+// New notes are add-only. Previously imported copies may be updated only when their local hash
+// still matches BrainLink's receipt and the remote history descends from the recorded commit.
 export async function listGitHubPullCandidates(options) {
   const { branch, files } = await eligibleRemoteNotes(options);
   return { provider: 'github', branch, files, notice: 'Remote notes were fetched and privacy-filtered. Preview metadata only; no vault files were changed.' };
@@ -269,24 +291,60 @@ export async function importGitHubSelectedNotes({ ctx, repoPath, vaultName, path
   const conflicts = selected.filter((x) => x.state.action === 'conflict');
   if (conflicts.length) throw new Error(`No notes were imported because ${conflicts.length} selected path(s) conflict with local content. Resolve conflicts manually, then retry.`);
   const toAdd = selected.filter((x) => x.state.action === 'add');
-  if (!toAdd.length) return { provider: 'github', imported: [], unchanged: selected.map((x) => x.note.path), conflicts: [], branch: current.branch };
+  const toUpdate = selected.filter((x) => x.state.action === 'update');
+  if (selected.some((x) => !['add', 'update', 'unchanged'].includes(x.state.action))) throw new Error('A selected remote note changed after preview. Check remote notes again.');
+  if (!toAdd.length && !toUpdate.length) return { provider: 'github', imported: [], updated: [], unchanged: selected.map((x) => x.note.path), conflicts: [], branch: current.branch };
 
-  const written = [];
+  const applied = [];
+  const nextReceipts = { ...current.receipts };
   try {
-    for (const { note } of toAdd) {
+    for (const { note } of [...toAdd, ...toUpdate]) {
       const target = path.resolve(current.localRoot, ...note.path.split('/'));
       if (!within(current.localRoot, target)) throw new Error('A selected remote note is outside the vault.');
       await rejectSymlinkPath(current.localRoot, note.path);
       await mkdir(path.dirname(target), { recursive: true });
       await rejectSymlinkPath(current.localRoot, note.path);
-      await writeFile(target, note.raw, { encoding: 'utf8', flag: 'wx', mode: 0o600 });
-      written.push(target);
+      const prior = await readFile(target, 'utf8').catch((error) => { if (error.code === 'ENOENT') return null; throw error; });
+      if (toAdd.some((x) => x.note.path === note.path)) {
+        if (prior !== null) throw new Error('A selected new note appeared after review.');
+        await writeFile(target, note.raw, { encoding: 'utf8', flag: 'wx', mode: 0o600 });
+        applied.push({ target, previous: null, next: note.raw });
+      } else {
+        const key = `${current.profileId}:${current.vaultName}:${note.path}`;
+        const receipt = current.receipts[key];
+        if (prior == null || !receipt || receipt.remote !== current.remote || receipt.branch !== current.branch || receipt.content_hash !== createHash('sha256').update(prior).digest('hex')) throw new Error('A selected local note changed after review.');
+        const ancestry = await git(current.root, ['merge-base', receipt.commit, current.ref]);
+        if (ancestry !== receipt.commit) throw new Error('Remote history changed after review.');
+        const temp = `${target}.brainlink-${process.pid}-${Date.now()}.tmp`;
+        await writeFile(temp, note.raw, { encoding: 'utf8', flag: 'wx', mode: 0o600 });
+        const latest = await readFile(target, 'utf8');
+        if (latest !== prior) { await rm(temp, { force: true }); throw new Error('A selected local note changed after review.'); }
+        await rename(temp, target);
+        applied.push({ target, previous: prior, next: note.raw });
+      }
+      nextReceipts[`${current.profileId}:${current.vaultName}:${note.path}`] = {
+        remote: current.remote, branch: current.branch,
+        commit: (await git(current.root, ['rev-parse', current.ref])).toLowerCase(),
+        content_hash: createHash('sha256').update(note.raw).digest('hex'),
+      };
     }
+    await savePullReceipts(current.receiptPath, nextReceipts);
   } catch {
-    for (const target of written.reverse()) await rm(target, { force: true }).catch(() => {});
-    throw new Error('Could not safely import the selected remote notes. No selected files were intentionally overwritten; retry after checking the vault.');
+    for (const entry of applied.reverse()) {
+      try {
+        const latest = await readFile(entry.target, 'utf8');
+        if (latest !== entry.next) continue;
+        if (entry.previous === null) await rm(entry.target, { force: true });
+        else {
+          const temp = `${entry.target}.rollback-${process.pid}-${Date.now()}`;
+          await writeFile(temp, entry.previous, { encoding: 'utf8', flag: 'wx', mode: 0o600 });
+          await rename(temp, entry.target);
+        }
+      } catch { /* preserve any concurrent user edit */ }
+    }
+    throw new Error('Could not safely apply the selected remote notes. Concurrent local edits were preserved where detected; check the vault and retry.');
   }
-  return { provider: 'github', imported: toAdd.map((x) => x.note.path), unchanged: selected.filter((x) => x.state.action === 'unchanged').map((x) => x.note.path), conflicts: [], branch: current.branch };
+  return { provider: 'github', imported: toAdd.map((x) => x.note.path), updated: toUpdate.map((x) => x.note.path), unchanged: selected.filter((x) => x.state.action === 'unchanged').map((x) => x.note.path), conflicts: [], branch: current.branch };
 }
 
 // Save a deterministic remote copy when the local and remote versions differ.
