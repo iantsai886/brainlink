@@ -686,6 +686,7 @@
   "rsi.observe.group.sessions": "工作階段",
   "rsi.observe.group.filing": "整理與歸檔",
   "rsi.observe.group.handoff": "AI 交接",
+  "rsi.observe.group.recovery": "備份與還原",
   "rsi.observe.signal.insufficient_data": "資料不足",
   "rsi.observe.signal.stable": "沒有明顯失敗訊號",
   "rsi.observe.signal.review_failures": "建議檢查失敗紀錄",

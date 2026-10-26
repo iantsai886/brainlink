@@ -112,6 +112,10 @@ test('Setup offers authenticated manual scans and runs an enabled daily scan in 
     assert.equal(manualResult.trigger, 'manual');
     assert.equal(manualResult.queued_total, 1);
     assert.equal(manualResult.candidates[0].path, 'Raw/Source.md');
+    const scanEvents = (await readFile(path.join(appHome, 'activity.log'), 'utf8')).trim().split(/\r?\n/).map(JSON.parse).filter((entry) => entry.tool === 'source_scan');
+    assert.ok(scanEvents.length >= 2, 'scheduled and manual scans are observed');
+    assert.ok(scanEvents.every((entry) => typeof entry.ok === 'boolean' && !('vault' in entry) && !('folder' in entry) && !('path' in entry)));
+    assert.doesNotMatch(JSON.stringify(scanEvents), /Fictional Team|Raw\/Source\.md/);
     const multi = await post('/api/ingestion/run', { targets: [{ vault: 'Fictional Team', folder: 'Raw' }, { vault: 'Fictional Project', folder: 'Incoming' }] });
     const multiResult = await multi.json();
     assert.equal(multiResult.queued_total, 2);

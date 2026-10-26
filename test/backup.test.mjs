@@ -293,6 +293,10 @@ test('authenticated Setup enables scheduled backup only after a verified first c
     const restored = await api('/api/backup/restore', { backupFolder: result.backup.status.folder, destination: restore, confirm: true, recoveryKey });
     assert.equal(restored.status, 200);
     assert.match(await readFile(path.join(restore, '1-Personal', 'Private.md'), 'utf8'), /private fixture/);
+    const activity = (await readFile(path.join(home, 'activity.log'), 'utf8')).trim().split(/\r?\n/).map(JSON.parse);
+    assert.ok(activity.some((entry) => entry.tool === 'backup' && entry.ok === true));
+    assert.ok(activity.some((entry) => entry.tool === 'backup_restore' && entry.ok === true));
+    assert.doesNotMatch(JSON.stringify(activity.filter((entry) => ['backup', 'backup_restore'].includes(entry.tool))), /Private\.md|api-destination|api-restore|recoveryKey/);
     const discoveryCopy = JSON.parse(await readFile(path.join(restore, 'BrainLink', 'rsi', 'discovery.json'), 'utf8'));
     assert.deepEqual(discoveryCopy.settings.topics, ['agent memory']);
     const off = await api('/api/backup', { enabled: false, folder: dest, intervalHours: 24 });

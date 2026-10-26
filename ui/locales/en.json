@@ -686,6 +686,7 @@
   "rsi.observe.group.sessions": "Sessions",
   "rsi.observe.group.filing": "Filing and organization",
   "rsi.observe.group.handoff": "AI handoffs",
+  "rsi.observe.group.recovery": "Backup and restore",
   "rsi.observe.signal.insufficient_data": "Not enough data",
   "rsi.observe.signal.stable": "No large failure signal",
   "rsi.observe.signal.review_failures": "Review failures",

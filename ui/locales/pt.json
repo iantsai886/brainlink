@@ -686,6 +686,7 @@
   "rsi.observe.group.sessions": "Sessões",
   "rsi.observe.group.filing": "Organização e arquivamento",
   "rsi.observe.group.handoff": "Transferências entre IAs",
+  "rsi.observe.group.recovery": "Backup e restauração",
   "rsi.observe.signal.insufficient_data": "Dados insuficientes",
   "rsi.observe.signal.stable": "Nenhum sinal grande de falhas",
   "rsi.observe.signal.review_failures": "Revisar falhas",

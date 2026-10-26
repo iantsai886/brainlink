@@ -379,10 +379,12 @@ export async function startSetup(opts = {}) {
       const failures = folders.filter((entry) => !entry.ok);
       const status = { ok: failures.length === 0, at: new Date().toISOString(), trigger, vault: selected.length === 1 ? selected[0].vault : null, folder: selected.length === 1 ? selected[0].folder : null, targets: folders, queued_total, scanned, skipped, truncated, error: failures.length ? failures.map((entry) => `${entry.vault}: ${entry.error}`).join('; ').slice(0, 500) : null };
       await saveIngestionStatus(status);
+      await logActivity(env, { tool: 'source_scan', ok: status.ok });
       return { ...status, candidates, limited: queued_total > candidates.length };
     } catch (error) {
       const status = { ok: false, at: new Date().toISOString(), trigger, vault: null, folder: null, queued_total: 0, scanned: 0, skipped: 0, error: error.message || String(error) };
       await saveIngestionStatus(status).catch(() => {});
+      await logActivity(env, { tool: 'source_scan', ok: false });
       throw error;
     } finally { ingestionRunning = false; }
   }
@@ -472,10 +474,12 @@ export async function startSetup(opts = {}) {
       catch { retention = { retained_count: null, removed_count: 0, warning: 'The new backup is verified, but old copies could not be cleaned up.' }; }
       backupStatus = { ok: true, ...result, trigger, encrypted: Boolean(encryptionKey), ...retention, at: new Date().toISOString() };
       await saveBackupStatus(backupStateFile, backupStatus);
+      await logActivity(env, { tool: 'backup', ok: true });
       return backupStatus;
     } catch (error) {
       backupStatus = { ok: false, trigger, error: error.message || String(error), at: new Date().toISOString() };
       await saveBackupStatus(backupStateFile, backupStatus).catch(() => {});
+      await logActivity(env, { tool: 'backup', ok: false });
       throw error;
     } finally { backupRunning = false; }
   }
@@ -1608,7 +1612,14 @@ export async function startSetup(opts = {}) {
     'POST /api/backup/restore': async (b) => {
       if (b.confirm !== true) throw new Error('Confirm restoring into an empty folder first.');
       const recoveryKey = b.recoveryKey ? String(b.recoveryKey) : await requireBackupKey(env).catch(() => null);
-      return { ok: true, ...(await restoreBackupToEmpty(String(b.backupFolder || ''), String(b.destination || ''), recoveryKey)) };
+      try {
+        const restored = await restoreBackupToEmpty(String(b.backupFolder || ''), String(b.destination || ''), recoveryKey);
+        await logActivity(env, { tool: 'backup_restore', ok: true });
+        return { ok: true, ...restored };
+      } catch (error) {
+        await logActivity(env, { tool: 'backup_restore', ok: false });
+        throw error;
+      }
     },
     'POST /api/test': async (b) => {
       const cfg = normalize(await loadConfig(file));

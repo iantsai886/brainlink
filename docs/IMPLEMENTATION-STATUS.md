@@ -338,3 +338,7 @@ Added a manual local report comparing tool-call success/failure counts across th
 ### RSI finding-to-proposal review flow (2026-10-27)
 
 Each actionable local observer finding now has a button that opens the existing RSI proposal form with the finding counts, a clear problem statement, a test hypothesis, and the relevant memory type selected. The person remains responsible for reviewing and submitting the proposal. No log details or agent labels are copied into the draft. Focused RSI tests passed 11/11; UI tests passed 29/29; full Windows `npm run test:all` passed: core 409 (403 passed, 0 failed, 6 platform/privilege skips) and UI 29/29. This connects local observation to human-reviewed proposal intake; it does not test whether the proposed change improves BrainLink or proves recursive gain.
+
+### RSI source-scan and recovery signals (2026-10-27)
+
+The content-free activity log now records the outcome of source scans, backups, and restores using only the operation name and a success flag. RSI groups these into filing and recovery signals alongside retrieval, sessions, and handoffs. Tests verify the log entries contain no vault names, folders, paths, or note text, and that aggregate reports omit planted path/vault canaries. Full Windows `npm run test:all`: core 409 tests (403 passed, 0 failed, 6 platform/privilege skips), UI 29/29. This improves visibility into recovery reliability but does not validate real external drives, detect the cause of a failure, or prove recursive improvement.
