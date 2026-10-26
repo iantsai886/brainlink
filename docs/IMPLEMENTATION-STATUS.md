@@ -13,6 +13,8 @@ Added an authenticated RSI export endpoint and a localized Setup button that dow
 
 Rechecked handoff and Twin access on commit `5982f26`: `node --import ./test/_preload.mjs --test test/cross-client-handoff.test.mjs test/skills.test.mjs test/twin-profiles.test.mjs` passed 21/21. This proves the fictional local MCP transfer, filtering, portable skill files and profile grants. Codex CLI `0.164.0-alpha.11.1` is installed; `claude auth status` reports `loggedIn: false`, so a real Claude model handoff cannot be run in this environment. Cross-client live acceptance remains unverified.
 
+Backup status now tells the user the local time and whether the last attempt was manual, scheduled or during setup; old records with missing timestamps or trigger metadata get a translated fallback. The backup suite passed 16/16 runnable tests (1 Windows symlink-privilege skip), including localized receipt checks and a real fictional scheduled backup/restore API flow.
+
 ## Current working-tree update (2026-10-25)
 
 Google Antigravity one-click MCP setup was added at its documented global path (`~/.gemini/config/mcp_config.json`). Focused connector tests passed 16/16, including config merge, backup, disconnect preservation, and avoiding false detection from Gemini folders. Locale tests passed 2/2. The current Windows core suite passed 325/325 runnable tests (six platform-dependent checks skipped); the separate UI suite passed 28/28. No installed Antigravity app was available for live pickup verification.

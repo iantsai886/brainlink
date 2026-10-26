@@ -307,6 +307,8 @@ test('authenticated Setup enables scheduled backup only after a verified first c
 
 test('restore UI provides verified history, localized pickers and explicit restore confirmation', async () => {
   const html = await readFile(new URL('../ui/index.html', import.meta.url), 'utf8');
+  assert.match(html, /const backupWhen = Number\.isFinite\(backupAt\)/, 'backup receipt handles old records without a valid timestamp');
+  assert.match(html, /backup\.trigger\.' \+ backupTrigger/, 'backup receipt explains whether it was manual or scheduled');
   for (const id of ['backup-schedule-mode', 'backup-interval-wrap', 'backup-hours', 'backup-time-wrap', 'backup-time', 'backup-history-refresh', 'backup-history', 'backup-history-status', 'backup-restore-source', 'backup-restore-destination', 'backup-restore-pick-source', 'backup-restore-pick-destination', 'backup-restore']) {
     assert.equal((html.match(new RegExp(`id="${id}"`, 'g')) || []).length, 1, id);
   }
@@ -334,6 +336,10 @@ test('restore UI provides verified history, localized pickers and explicit resto
     assert.ok(catalog['backup.scheduleInterval'], `${locale} interval option`);
     assert.ok(catalog['backup.scheduleDaily'], `${locale} daily option`);
     assert.ok(catalog['backup.time'], `${locale} daily local time label`);
+    assert.ok(catalog['backup.lastVerified'].includes('{when}') && catalog['backup.lastVerified'].includes('{trigger}'), `${locale} verified receipt includes time and trigger`);
+    assert.ok(catalog['backup.failed'].includes('{when}') && catalog['backup.failed'].includes('{trigger}'), `${locale} failure receipt includes time and trigger`);
+    assert.ok(catalog['backup.unknownTime']);
+    for (const trigger of ['manual', 'schedule', 'setup', 'unknown']) assert.ok(catalog[`backup.trigger.${trigger}`], `${locale} ${trigger} trigger`);
     for (const key of ['backup.historyRefresh', 'backup.historyEmpty', 'backup.historyFiles', 'backup.historyEncrypted', 'backup.historyFound', 'backup.historyMore', 'backup.historyNone']) assert.ok(catalog[key], `${locale} ${key}`);
   }
 });

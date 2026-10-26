@@ -1284,9 +1284,12 @@ async function load() {
   $('backup-keep').value = String(S.backup?.keepCount ?? 0);
   $('backup-encrypted').checked = Boolean(S.backup?.encrypted);
   $('backup-key-confirm-wrap').hidden = Boolean(S.backup?.encrypted) || !$('backup-encrypted').checked;
+  const backupTrigger = S.backup?.status && ['manual', 'schedule', 'setup'].includes(S.backup.status.trigger) ? S.backup.status.trigger : 'unknown';
+  const backupAt = Date.parse(S.backup?.status?.at || '');
+  const backupWhen = Number.isFinite(backupAt) ? new Date(backupAt).toLocaleString(LOCALE) : t('backup.unknownTime');
   $('backup-status').textContent = S.backup?.status ? (S.backup.status.ok
-    ? `${t('backup.lastVerified', { count: S.backup.status.file_count, folder: S.backup.status.folder })}${S.backup.status.removed_count ? ` ${t('backup.pruned', { count: S.backup.status.removed_count })}` : ''}${S.backup.status.warning ? ` ${S.backup.status.warning}` : ''}`
-    : t('backup.failed', { error: S.backup.status.error })) : t('backup.notRun');
+    ? `${t('backup.lastVerified', { when: backupWhen, trigger: t('backup.trigger.' + backupTrigger), count: S.backup.status.file_count, folder: S.backup.status.folder })}${S.backup.status.removed_count ? ` ${t('backup.pruned', { count: S.backup.status.removed_count })}` : ''}${S.backup.status.warning ? ` ${S.backup.status.warning}` : ''}`
+    : t('backup.failed', { when: backupWhen, trigger: t('backup.trigger.' + backupTrigger), error: S.backup.status.error })) : t('backup.notRun');
   if (S.backup?.status?.ok && !$('backup-restore-source').value) $('backup-restore-source').value = S.backup.status.folder;
   $('sync-folder-row').hidden = SY.provider === 'local';
   renderSyncSuggestions(SY.provider, SY.suggested_folders);
