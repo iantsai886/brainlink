@@ -16,7 +16,7 @@ const TRANSITIONS = {
   proposed: new Set(['testing', 'rejected', 'deferred']),
   testing: new Set(['review', 'rejected', 'deferred']),
   review: new Set(['accepted', 'rejected', 'testing', 'deferred']),
-  accepted: new Set(['rolled_back']), rejected: new Set(), deferred: new Set(['triaged', 'rejected']), rolled_back: new Set(['testing', 'rejected']),
+  accepted: new Set(), rejected: new Set(), deferred: new Set(['triaged', 'rejected']), rolled_back: new Set(['testing', 'rejected']),
 };
 const FIELDS = ['title', 'user_problem', 'hypothesis', 'memory_types', 'sources', 'baseline_version', 'candidate_version', 'promotion_commit_sha', 'test_set_version', 'metrics', 'guardrails', 'privacy_scope', 'cost_cap', 'results', 'reviewer', 'decision_and_reason', 'rollback'];
 const MAX_TEXT = 1200;
@@ -143,11 +143,12 @@ function project(events) {
   const records = new Map();
   for (const event of events) {
     const row = records.get(event.idea_id);
-    if (event.kind === 'created') records.set(event.idea_id, { id: event.idea_id, status: 'discovered', revision: 1, created_at: event.at, updated_at: event.at, origin: event.origin || 'manual', ...(event.discovery ? { discovery: event.discovery } : {}), fields: event.fields, experiments: [], monitoring: [], history: [{ status: 'discovered', at: event.at, note: event.origin === 'discovery' ? 'Found by opt-in discovery' : 'Created' }] });
+    if (event.kind === 'created') records.set(event.idea_id, { id: event.idea_id, status: 'discovered', revision: 1, created_at: event.at, updated_at: event.at, origin: event.origin || 'manual', ...(event.discovery ? { discovery: event.discovery } : {}), fields: event.fields, experiments: [], monitoring: [], rollbacks: [], history: [{ status: 'discovered', at: event.at, note: event.origin === 'discovery' ? 'Found by opt-in discovery' : 'Created' }] });
     else if (row) {
       if (event.fields) row.fields = { ...row.fields, ...event.fields };
       if (event.kind === 'experiment_run') row.experiments.push(event.receipt);
       if (event.kind === 'monitoring') row.monitoring.push(event.receipt);
+      if (event.kind === 'rollback') row.rollbacks.push(event.receipt);
       if (event.status) { row.status = event.status; row.history.push({ status: event.status, at: event.at, note: event.note || '' }); }
       row.revision++; row.updated_at = event.at;
     }
@@ -244,6 +245,7 @@ export function createRsiLedger({ home, now = () => new Date() }) {
       if (!row) throw new Error('RSI idea not found.');
       if (!Number.isInteger(expected_revision) || expected_revision !== row.revision) throw new Error('RSI idea changed; reload it before updating.');
       const fields = changes ? validatePayload(changes, { partial: true }) : {};
+      if (status === 'rolled_back') throw new Error('Use the reviewed rollback receipt after the revert has been made and checked.');
       if (status !== undefined && (!STATUSES.has(status) || !TRANSITIONS[row.status]?.has(status))) throw new Error(`Status cannot move from ${row.status} to ${status}.`);
       const merged = { ...row.fields, ...fields };
       if (status === 'accepted' && ['baseline_version', 'candidate_version', 'promotion_commit_sha', 'test_set_version', 'results', 'reviewer', 'decision_and_reason', 'rollback'].some(key => !clean(merged[key]))) throw new Error('Acceptance requires baseline and candidate versions, a promotion commit SHA, test set, measured results, reviewer, decision rationale, and rollback instructions.');
@@ -309,6 +311,29 @@ export function createRsiLedger({ home, now = () => new Date() }) {
       const text = JSON.stringify(scanReceipt);
       if (text.length > 8000 || findSecrets(text).length || /<(?:script|iframe)\b/i.test(text)) throw new Error('Monitoring evidence contains disallowed or sensitive text.');
       await append({ kind: 'monitoring', idea_id: id, at: receipt.recorded_at, receipt });
+      return project(await readEvents(file)).find(x => x.id === id);
+    }),
+    // This records a rollback after a person has reverted and checked the code. It never edits Git.
+    recordRollback: ({ id, expected_revision, rollback }) => locked(async () => {
+      if (typeof id !== 'string' || !/^BL-RSI-\d{8}-[a-f0-9-]{8,36}$/.test(id)) throw new Error('Invalid RSI idea id.');
+      const row = project(await readEvents(file)).find(x => x.id === id);
+      if (!row) throw new Error('RSI idea not found.');
+      if (!Number.isInteger(expected_revision) || expected_revision !== row.revision) throw new Error('RSI idea changed; reload it before recording rollback.');
+      if (row.status !== 'accepted') throw new Error('Only an accepted RSI change can be marked rolled back.');
+      const input = rollback;
+      const keys = ['restored_commit_sha', 'restored_version', 'reason', 'reviewer', 'evidence_ref'];
+      if (!input || typeof input !== 'object' || Array.isArray(input) || Object.keys(input).some(key => !keys.includes(key)) || keys.slice(0, 4).some(key => !(key in input))) throw new Error('Rollback evidence has missing or unsupported fields.');
+      const restoredSha = clean(input.restored_commit_sha, 40).toLowerCase();
+      const promotedSha = String(row.fields.promotion_commit_sha || '').toLowerCase();
+      if (!/^[a-f0-9]{40}$/.test(restoredSha) || restoredSha === promotedSha) throw new Error('Enter a full commit SHA for the restored version; it must differ from the accepted commit.');
+      const restoredVersion = clean(input.restored_version, 160), reason = clean(input.reason, 500), reviewer = clean(input.reviewer, 160), evidenceRef = clean(input.evidence_ref, 500);
+      if (!restoredVersion || !reason || !reviewer) throw new Error('Rollback needs the restored version, reason, and reviewer.');
+      const scanned = JSON.stringify({ restoredVersion, reason, reviewer, evidenceRef });
+      if (findSecrets(scanned).length) throw new Error('Potential secret detected in rollback evidence.');
+      if (/<(?:script|iframe)\b/i.test(scanned)) throw new Error('HTML markup is not allowed in rollback evidence.');
+      const at = now().toISOString();
+      const receipt = { schema: 1, rollback_id: `BL-RSI-ROLL-${at.slice(0, 10).replaceAll('-', '')}-${randomUUID().slice(0, 8)}`, rolled_back_at: at, promoted_commit_sha: promotedSha, restored_commit_sha: restoredSha, restored_version: restoredVersion, reason, reviewer, evidence_ref: evidenceRef };
+      await append({ kind: 'rollback', idea_id: id, at, status: 'rolled_back', note: reason, receipt });
       return project(await readEvents(file)).find(x => x.id === id);
     }),
     file,

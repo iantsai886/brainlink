@@ -56,9 +56,16 @@ test('RSI acceptance requires recorded evidence, reviewer, promotion commit and 
   assert.equal(monitored.monitoring[0].decision, 'stable');
   assert.match(monitored.monitoring[0].monitoring_id, /^BL-RSI-MON-\d{8}-[a-f0-9-]{8,36}$/);
   await assert.rejects(ledger.recordMonitoring({ id: idea.id, expected_revision: accepted.revision, monitoring }), /changed/);
-  await assert.rejects(ledger.update({ id: idea.id, expected_revision: monitored.revision, status: 'rolled_back' }), /why/);
-  const rolledBack = await ledger.update({ id: idea.id, expected_revision: monitored.revision, status: 'rolled_back', note: 'Regression in a fresh test set.' });
+  const rollback = { restored_commit_sha: 'b'.repeat(40), restored_version: '1.2.8', reason: 'Regression in a fresh test set.', reviewer: 'Independent reviewer', evidence_ref: 'https://example.org/rollback/receipt-1' };
+  await assert.rejects(ledger.update({ id: idea.id, expected_revision: monitored.revision, status: 'rolled_back' }), /rollback receipt/);
+  await assert.rejects(ledger.recordRollback({ id: idea.id, expected_revision: monitored.revision, rollback: { ...rollback, restored_commit_sha: 'a'.repeat(40) } }), /must differ/);
+  await assert.rejects(ledger.recordRollback({ id: idea.id, expected_revision: monitored.revision - 1, rollback }), /changed/);
+  await assert.rejects(ledger.recordRollback({ id: idea.id, expected_revision: monitored.revision, rollback: { ...rollback, reviewer: '' } }), /reviewer/);
+  const rolledBack = await ledger.recordRollback({ id: idea.id, expected_revision: monitored.revision, rollback });
   assert.equal(rolledBack.status, 'rolled_back');
+  assert.equal(rolledBack.rollbacks.length, 1);
+  assert.equal(rolledBack.rollbacks[0].promoted_commit_sha, 'a'.repeat(40));
+  assert.equal(rolledBack.rollbacks[0].restored_commit_sha, 'b'.repeat(40));
 });
 
 test('RSI experiment receipts are aggregate-only, append-only, and require a fresh testing revision', async () => {
@@ -144,6 +151,8 @@ test('RSI Setup panel has unique ids and one render/submit path', async () => {
   assert.equal((html.match(/id="rsi-idea-form"/g) || []).length, 1);
   assert.match(html, /data-rsi-field="promotion_commit_sha"/);
   assert.match(html, /data-rsi-monitor-submit/);
+  assert.match(html, /data-rsi-rollback-submit/);
+  assert.match(html, /\/api\/rsi\/ideas\/rollback/);
   assert.match(html, /id="rsi-observe-run"/);
   assert.match(html, /\/api\/rsi\/observations\/analyze/);
   assert.match(html, /data-rsi-observe-draft/);
@@ -152,7 +161,7 @@ test('RSI Setup panel has unique ids and one render/submit path', async () => {
     const catalog = JSON.parse(await readFile(new URL(`../ui/locales/${locale}.json`, import.meta.url), 'utf8'));
     assert.ok(catalog['rsi.promotionCommit'], `${locale} promotion commit label`);
     assert.ok(catalog['rsi.promotionCommitHint'], `${locale} promotion commit limitation`);
-    for (const key of ['rsi.observe.title', 'rsi.observe.hint', 'rsi.observe.run', 'rsi.observe.window', 'rsi.observe.stats', 'rsi.observe.noRate', 'rsi.observe.findings', 'rsi.observe.noFindings', 'rsi.observe.generated', 'rsi.observe.group.retrieval', 'rsi.observe.group.sessions', 'rsi.observe.group.filing', 'rsi.observe.group.handoff', 'rsi.observe.group.recovery', 'rsi.observe.signal.insufficient_data', 'rsi.observe.signal.stable', 'rsi.observe.signal.review_failures', 'rsi.observe.signal.review_increase', 'rsi.observe.draft', 'rsi.observe.draft.title', 'rsi.observe.draft.problem', 'rsi.observe.draft.hypothesis']) assert.ok(catalog[key], `${locale} ${key}`);
+    for (const key of ['rsi.rollback.title', 'rsi.rollback.hint', 'rsi.rollback.restoredVersion', 'rsi.rollback.commit', 'rsi.rollback.reviewer', 'rsi.rollback.evidence', 'rsi.rollback.reason', 'rsi.rollback.record', 'rsi.rollback.confirm', 'rsi.rollback.saved', 'rsi.rollback.history', 'rsi.observe.title', 'rsi.observe.hint', 'rsi.observe.run', 'rsi.observe.window', 'rsi.observe.stats', 'rsi.observe.noRate', 'rsi.observe.findings', 'rsi.observe.noFindings', 'rsi.observe.generated', 'rsi.observe.group.retrieval', 'rsi.observe.group.sessions', 'rsi.observe.group.filing', 'rsi.observe.group.handoff', 'rsi.observe.group.recovery', 'rsi.observe.signal.insufficient_data', 'rsi.observe.signal.stable', 'rsi.observe.signal.review_failures', 'rsi.observe.signal.review_increase', 'rsi.observe.draft', 'rsi.observe.draft.title', 'rsi.observe.draft.problem', 'rsi.observe.draft.hypothesis']) assert.ok(catalog[key], `${locale} ${key}`);
     for (const key of ['rsi.monitor.title', 'rsi.monitor.hint', 'rsi.monitor.start', 'rsi.monitor.end', 'rsi.monitor.testSet', 'rsi.monitor.samples', 'rsi.monitor.decision.stable', 'rsi.monitor.decision.regression', 'rsi.monitor.decision.inconclusive', 'rsi.monitor.guardrail.pass', 'rsi.monitor.guardrail.fail', 'rsi.monitor.guardrail.unknown', 'rsi.monitor.metricName', 'rsi.monitor.baseline', 'rsi.monitor.observed', 'rsi.monitor.reviewer', 'rsi.monitor.guardrails', 'rsi.monitor.results', 'rsi.monitor.evidenceRef', 'rsi.monitor.save', 'rsi.monitor.saved', 'rsi.monitor.history']) assert.ok(catalog[key], `${locale} ${key}`);
   }
   assert.equal((html.match(/async function loadRsi\(\)/g) || []).length, 1);
@@ -210,5 +219,11 @@ test('Setup exposes the RSI ledger only through authenticated local APIs', async
     assert.equal(monitor.idea.monitoring.length, 1);
     assert.equal(monitor.idea.status, 'accepted', 'the service records evidence but does not roll back automatically');
     assert.doesNotMatch(JSON.stringify(monitor), /RSI_PRIVATE_CANARY_9D7|Acquisition Budget\.md|Northwind Coffee\.md/);
+    const rollback = { restored_commit_sha: 'd'.repeat(40), restored_version: '1.2.8', reason: 'Regression confirmed on fictional cases.', reviewer: 'Reviewer', evidence_ref: '' };
+    assert.equal((await post('/api/rsi/ideas/rollback', { id: idea.id, expected_revision: monitor.idea.revision, rollback }, 'wrong-token')).status, 401);
+    const rolledBack = await post('/api/rsi/ideas/rollback', { id: idea.id, expected_revision: monitor.idea.revision, rollback }).then(r => r.json());
+    assert.equal(rolledBack.error, undefined, JSON.stringify(rolledBack));
+    assert.equal(rolledBack.idea.status, 'rolled_back');
+    assert.equal(rolledBack.idea.rollbacks.length, 1);
   } finally { app.server.close(); }
 });

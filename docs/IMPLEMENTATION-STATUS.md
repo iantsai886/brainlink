@@ -1,6 +1,6 @@
 # BrainLink implementation status
 
-Status snapshot: 2026-10-27 (Asia/Taipei), updated after commit `2dcf744`
+Status snapshot: 2026-10-27 (Asia/Taipei), updated from commit `724ca1d`
 GitHub repository: `iantsai886/brainlink`
 Branch: `integration/brainlink-retrieval-evaluation` (integrates profile-scoped GitHub, RSI discovery, and independent retrieval evaluation)
 Code baseline: development target `1.2.8`, with `package.json` as the canonical version source. The `v1.2.7` tag belongs to the separate `wip/v1.2.7` release line; this branch continues from the full-source `main` history and does not move or recreate that tag.
@@ -344,3 +344,7 @@ Each actionable local observer finding now has a button that opens the existing 
 ### RSI source-scan and recovery signals (2026-10-27)
 
 The content-free activity log now records the outcome of source scans, backups, and restores using only the operation name and a success flag. RSI groups these into filing and recovery signals alongside retrieval, sessions, and handoffs. Tests verify the log entries contain no vault names, folders, paths, or note text, and that aggregate reports omit planted path/vault canaries. Full Windows `npm run test:all`: core 409 tests (403 passed, 0 failed, 6 platform/privilege skips), UI 29/29. This improves visibility into recovery reliability but does not validate real external drives, detect the cause of a failure, or prove recursive improvement.
+
+### Human-reviewed RSI rollback receipts (2026-10-27)
+
+The local RSI ledger now requires a dedicated receipt to mark an accepted idea as rolled back. After a person reverts and checks the code, the receipt links the accepted promotion SHA to a different restored commit SHA and records the restored version, reason, reviewer and optional evidence reference. SHA format and stale-revision checks are enforced; the ledger remains append-only. It cannot make the Git revert, confirm either SHA exists, or verify CI. Generic status updates can no longer bypass the receipt flow. On Windows with Node.js 24.22.1, full `npm run test:all` passed: core 409 tests (403 passed, 0 failed, 6 platform/privilege skips), UI 29/29. The focused RSI run passed 9/9; JavaScript syntax, locale JSON, and `git diff --check` passed. Cross-platform hosted checks for this new commit are pending.
