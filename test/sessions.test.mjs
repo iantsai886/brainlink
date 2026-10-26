@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtemp, writeFile, mkdir } from 'node:fs/promises';
+import { mkdtemp, writeFile, mkdir, readFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -81,6 +81,16 @@ test('session store: explicit Twin assignment is one-way, private, and survives 
   assert.equal(persisted.session.private, true);
   assert.equal(persisted.messages[0].text, 'Synthetic message.');
   await assert.rejects(store.readSession(session.id, { profile_id: 'org_twin' }), (error) => error.code === 'E_NOT_FOUND');
+});
+
+test('session store fails closed on a corrupt journal and preserves the original bytes', async () => {
+  const dir = await tmp('sessions-corrupt');
+  const file = path.join(dir, 'sessions.jsonl');
+  const corrupted = '{"session":{"client":"codex"},"messages":[]}\n{not-valid-json}\n';
+  await writeFile(file, corrupted, 'utf8');
+  const store = await createSessionStore({ dir });
+  await assert.rejects(store.listSessions(), SyntaxError);
+  assert.equal(await readFile(file, 'utf8'), corrupted, 'opening a damaged journal must never treat it as empty or replace it');
 });
 
 test('session refresher throttles routine transcript scans but can force a fresh import', async () => {
