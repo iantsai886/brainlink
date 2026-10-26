@@ -4,7 +4,7 @@
 // apply the same rules. A missing, malformed, or shared assignment fails closed.
 import path from 'node:path';
 
-export const GITHUB_ASSIGNMENT_KEYS = ['remote', 'path', 'vault', 'folders', 'whole_vault', 'confirmed_at'];
+export const GITHUB_ASSIGNMENT_KEYS = ['remote', 'path', 'vault', 'folders', 'whole_vault', 'confirmed_at', 'automatic_sync'];
 const REMOTE_ID = /^[a-z0-9_.-]{1,100}\/[a-z0-9_.-]{1,100}$/;
 const MAX_FOLDERS = 50;
 
@@ -54,6 +54,11 @@ export function assignmentErrors(cfg, profile) {
   const hasFolders = Array.isArray(a.folders) && a.folders.length > 0;
   if (typeof a.whole_vault !== 'boolean' || (hasFolders && a.whole_vault) || (!hasFolders && !a.whole_vault)) errors.push(bad('must explicitly confirm the whole vault or select one or more folders'));
   if (typeof a.confirmed_at !== 'string' || Number.isNaN(Date.parse(a.confirmed_at))) errors.push(bad('needs a confirmed_at timestamp from the user confirmation'));
+  if (a.automatic_sync !== undefined) {
+    const s = a.automatic_sync;
+    if (!s || typeof s !== 'object' || Array.isArray(s) || Object.keys(s).some((key) => !['enabled', 'intervalHours', 'confirmed_at'].includes(key)) || typeof s.enabled !== 'boolean' || ![1, 6, 12, 24].includes(s.intervalHours)) errors.push(bad('automatic_sync must have an enabled flag and an interval of 1, 6, 12, or 24 hours'));
+    if (s?.enabled && !Number.isFinite(Date.parse(s.confirmed_at || ''))) errors.push(bad('enabled automatic_sync needs a user confirmation timestamp'));
+  }
   return errors;
 }
 
@@ -111,7 +116,7 @@ export function githubAssignmentProjection(cfg) {
     return {
       profile_id: profile.id, name: profile.name, mode: profile.mode,
       vaults: (profile.vaults || []).map((v) => v.name),
-      assignment: a ? { remote: a.remote, path: a.path, vault: a.vault, folders: [...(a.folders || [])], whole_vault: a.whole_vault === true, confirmed_at: a.confirmed_at } : null,
+      assignment: a ? { remote: a.remote, path: a.path, vault: a.vault, folders: [...(a.folders || [])], whole_vault: a.whole_vault === true, confirmed_at: a.confirmed_at, automatic_sync: { enabled: a.automatic_sync?.enabled === true, intervalHours: [1, 6, 12, 24].includes(a.automatic_sync?.intervalHours) ? a.automatic_sync.intervalHours : 6 } } : null,
       status: a ? (assignmentErrors(cfg, profile).length ? 'invalid' : 'assigned') : 'unassigned',
     };
   });

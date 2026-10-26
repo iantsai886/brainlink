@@ -24,6 +24,7 @@ import { backupScheduleDue, normalizeBackupSchedule } from './backup-schedule.mj
 import { runSync } from './sync-cli.mjs';
 import { listGitHubShareCandidates, previewGitHubRepository, commitGitHubSelectedNotes, pushGitHubSelectedNotes, listGitHubPullCandidates, importGitHubSelectedNotes, saveGitHubConflictCopies, inspectGitHubAssignment, githubAssignmentStatus } from './sync/github-preview.mjs';
 import { githubAssignmentProjection } from './sync/github-assignment.mjs';
+import { runGitHubAutoSync } from './sync/github-auto-sync.mjs';
 import { sessionsService } from './host.mjs';
 import { addAgent, renameAgent, removeAgent, revokeAgent, markConnected, findAgentByToken, publicAgent, localAgentSnippet, remoteAgentSnippet, generateAgentToken, hashToken } from './mcp-agents.mjs';
 import { buildGraph3D, noteDetail3D } from './graph3d.mjs';
@@ -201,10 +202,11 @@ export async function startSetup(opts = {}) {
   let ingestionKeepsAlive = false;
   let briefKeepsAlive = false;
   let syncKeepsAlive = false;
+  let githubAutoKeepsAlive = false;
   const quit = () => setTimeout(() => { snapshotWatcher?.stop(); (opts.onQuit ? opts.onQuit() : server.close()); }, 100);
   const touch = () => {
     clearTimeout(idleTimer);
-    if (!opts.idleMinutes || backupEnabled || discoveryKeepsAlive || ingestionKeepsAlive || briefKeepsAlive || syncKeepsAlive) return;
+    if (!opts.idleMinutes || backupEnabled || discoveryKeepsAlive || ingestionKeepsAlive || briefKeepsAlive || syncKeepsAlive || githubAutoKeepsAlive) return;
     idleTimer = setTimeout(quit, opts.idleMinutes * 60e3);
     idleTimer.unref?.();
   };
@@ -214,12 +216,87 @@ export async function startSetup(opts = {}) {
   const snapshotStateFile = path.join(appHome(env), 'snapshot-state.json');
   const backupStateFile = path.join(appHome(env), 'backup-state.json');
   const syncStatusFile = path.join(appHome(env), 'sync-status.json');
+  const githubAutoStateFile = path.join(appHome(env), 'github-auto-sync-state.json');
+  const githubAutoStatusFile = path.join(appHome(env), 'github-auto-sync-status.json');
   let snapshotWatcher = null;
   let backupTimer = null;
   let syncTimer = null;
   let syncRunning = false;
   let syncTickRunning = false;
   let syncStatus = await readFile(syncStatusFile, 'utf8').then((raw) => JSON.parse(raw)).catch(() => null);
+  let githubAutoState = await readFile(githubAutoStateFile, 'utf8').then((raw) => JSON.parse(raw)).catch(() => ({}));
+  let githubAutoStatus = await readFile(githubAutoStatusFile, 'utf8').then((raw) => JSON.parse(raw)).catch(() => ({}));
+  let githubAutoRunning = false;
+  let githubAutoTickRunning = false;
+  async function saveGitHubAutoState(value) {
+    githubAutoState = value;
+    await mkdir(path.dirname(githubAutoStateFile), { recursive: true });
+    const temp = `${githubAutoStateFile}.${randomBytes(5).toString('hex')}.tmp`;
+    await writeFile(temp, JSON.stringify(value, null, 2) + '\n', { flag: 'wx', mode: 0o600 });
+    await rename(temp, githubAutoStateFile);
+  }
+  async function saveGitHubAutoStatus(value) {
+    githubAutoStatus = value;
+    await mkdir(path.dirname(githubAutoStatusFile), { recursive: true });
+    const temp = `${githubAutoStatusFile}.${randomBytes(5).toString('hex')}.tmp`;
+    await writeFile(temp, JSON.stringify(value, null, 2) + '\n', { flag: 'wx', mode: 0o600 });
+    await rename(temp, githubAutoStatusFile);
+  }
+  const interruptedSyncs = Object.entries(githubAutoStatus).filter(([, status]) => status?.running);
+  if (interruptedSyncs.length) {
+    const recovered = { ...githubAutoStatus };
+    for (const [id, status] of interruptedSyncs) recovered[id] = { ...status, at: new Date(Date.now() - 24 * 3600e3).toISOString(), running: false, ok: false, error: 'BrainLink restarted during the previous sync. Retry is available; any saved pending commit is preserved.' };
+    await saveGitHubAutoStatus(recovered).catch(() => {});
+  }
+  async function runGitHubAutoProfile(cfg, profile, trigger) {
+    if (githubAutoRunning) throw new Error('A GitHub sync is already running.');
+    githubAutoRunning = true;
+    const ctx = localContext(cfg, { ...env, BRAINLINK_SEMANTIC: '0' });
+    const operations = {
+      pullCandidates: listGitHubPullCandidates,
+      import: importGitHubSelectedNotes,
+      shareCandidates: listGitHubShareCandidates,
+      preview: previewGitHubRepository,
+      commit: commitGitHubSelectedNotes,
+      push: pushGitHubSelectedNotes,
+      saveState: saveGitHubAutoState,
+    };
+    try {
+      const previous = githubAutoStatus[profile.id];
+      await saveGitHubAutoStatus({ ...githubAutoStatus, [profile.id]: { ...previous, profile_id: profile.id, remote: profile.github_repository.remote, vault: profile.github_repository.vault, at: new Date().toISOString(), trigger, running: true, ok: null, error: null } });
+      const isEnabled = async (expected) => {
+        const latest = await loadConfig(file);
+        const current = latest.twin_profiles.find((item) => item.id === expected.id)?.github_repository;
+        return current?.automatic_sync?.enabled === true && JSON.stringify(current) === JSON.stringify(expected.github_repository);
+      };
+      const result = await runGitHubAutoSync({ ctx, profile, state: githubAutoState, operations, trigger, isEnabled });
+      await saveGitHubAutoState(result.state);
+      const status = { ...result.report, running: false };
+      await saveGitHubAutoStatus({ ...githubAutoStatus, [profile.id]: status });
+      return status;
+    } finally { githubAutoRunning = false; }
+  }
+  function refreshGitHubAutoSchedule(cfg) {
+    githubAutoKeepsAlive = cfg.twin_profiles.some((profile) => profile.github_repository?.automatic_sync?.enabled === true);
+    touch();
+  }
+  const githubAutoTimer = setInterval(async () => {
+    if (githubAutoTickRunning || githubAutoRunning) return;
+    githubAutoTickRunning = true;
+    try {
+      const cfg = await loadConfig(file);
+      refreshGitHubAutoSchedule(cfg);
+      for (const profile of cfg.twin_profiles.filter((item) => item.github_repository?.automatic_sync?.enabled === true)) {
+        const prior = githubAutoStatus[profile.id];
+        const interval = profile.github_repository.automatic_sync.intervalHours * 3600e3;
+        const last = Date.parse(prior?.at || '');
+        if (Number.isFinite(last) && Date.now() - last < interval) continue;
+        await runGitHubAutoProfile(cfg, profile, 'schedule').catch(() => {});
+      }
+    } catch { /* failures are shown in the saved run status */ }
+    finally { githubAutoTickRunning = false; }
+  }, opts.githubAutoTickMs ?? 60_000);
+  githubAutoTimer.unref?.();
   let backupRunning = false;
   let backupTickRunning = false;
   let backupStatus = await loadBackupStatus(backupStateFile);
@@ -563,6 +640,7 @@ export async function startSetup(opts = {}) {
   refreshIngestionSchedule(initialConfig);
   refreshBriefSchedule(initialConfig);
   refreshSyncSchedule(initialConfig);
+  refreshGitHubAutoSchedule(initialConfig);
   const eventClients = new Set();
   let vaultWatcher = null;
   const refreshVaultWatcher = (cfg) => {
@@ -588,6 +666,7 @@ export async function startSetup(opts = {}) {
       vaults, agents: cfg.agents, ai_agents: cfg.ai_agents.map(publicAgent), handoff: cfg.handoff, timezone: cfg.timezone,
       twin_profiles: twinProfileStatus(cfg),
       github_assignments: await githubAssignmentStatus(cfg),
+      github_auto_sync: githubAutoStatus,
       packs: Object.entries(PACKS).map(([id, p]) => ({ id, title: p.title, description: p.description })),
       clients: await detect(clientOpts()),
       http: { port: cfg.http.port, token_set: Boolean(cfg.http.token) },
@@ -944,6 +1023,7 @@ export async function startSetup(opts = {}) {
       const profile = cfg.twin_profiles.find((item) => item.id === inspected.profile_id);
       profile.github_repository = { remote: inspected.remote, path: inspected.path, vault: inspected.vault, ...(inspected.folders.length ? { folders: inspected.folders } : {}), whole_vault: inspected.whole_vault, confirmed_at: new Date().toISOString() };
       await saveConfig(cfg, file);
+      refreshGitHubAutoSchedule(cfg);
       return { ok: true, assignments: githubAssignmentProjection(cfg) };
     },
     'POST /api/github/assignment/clear': async (b) => {
@@ -952,7 +1032,27 @@ export async function startSetup(opts = {}) {
       if (!profile) throw new Error('Choose an existing Twin profile.');
       delete profile.github_repository;
       await saveConfig(cfg, file);
+      refreshGitHubAutoSchedule(cfg);
       return { ok: true, assignments: githubAssignmentProjection(cfg) };
+    },
+    'POST /api/github/automatic-sync': async (b) => {
+      const cfg = await loadConfig(file);
+      const profile = cfg.twin_profiles.find((item) => item.id === String(b.profile_id || ''));
+      if (!profile?.github_repository) throw new Error('Assign and confirm a GitHub repository for this Twin first.');
+      const enabled = b.enabled === true;
+      const intervalHours = Number(b.intervalHours);
+      if (![1, 6, 12, 24].includes(intervalHours)) throw new Error('Choose a 1, 6, 12 or 24 hour interval.');
+      if (enabled && (b.confirm !== true || b.confirm_profile_id !== profile.id)) throw new Error('Confirm automatic publishing for the selected Twin and repository.');
+      profile.github_repository.automatic_sync = { enabled, intervalHours, ...(enabled ? { confirmed_at: new Date().toISOString() } : {}) };
+      await saveConfig(cfg, file);
+      refreshGitHubAutoSchedule(cfg);
+      return { ok: true, assignment: githubAssignmentProjection(cfg).find((item) => item.profile_id === profile.id), status: githubAutoStatus[profile.id] || null };
+    },
+    'POST /api/github/automatic-sync/run': async (b) => {
+      const cfg = await loadConfig(file);
+      const profile = cfg.twin_profiles.find((item) => item.id === String(b.profile_id || ''));
+      if (!profile?.github_repository?.automatic_sync?.enabled) throw new Error('Turn on automatic GitHub sync for this Twin before running it.');
+      return runGitHubAutoProfile(cfg, profile, 'manual');
     },
     'POST /api/twins/create': async (b) => {
       const cfg = await loadConfig(file);
@@ -1583,7 +1683,7 @@ export async function startSetup(opts = {}) {
     }
     try { json(res, 200, await route(body)); } catch (e) { json(res, 400, { error: String(e.message || e) }); }
   });
-  server.once('close', () => { snapshotWatcher?.stop(); vaultWatcher?.stop(); for (const client of eventClients) client.end(); eventClients.clear(); clearInterval(discoveryTimer); clearInterval(ingestionTimer); if (backupTimer) { clearTimeout(backupTimer); clearInterval(backupTimer); } if (syncTimer) { clearTimeout(syncTimer); clearInterval(syncTimer); } });
+  server.once('close', () => { snapshotWatcher?.stop(); vaultWatcher?.stop(); for (const client of eventClients) client.end(); eventClients.clear(); clearInterval(discoveryTimer); clearInterval(ingestionTimer); clearInterval(githubAutoTimer); if (backupTimer) { clearTimeout(backupTimer); clearInterval(backupTimer); } if (syncTimer) { clearTimeout(syncTimer); clearInterval(syncTimer); } });
   await new Promise((resolve, reject) => { server.once('error', reject); server.listen(port, '127.0.0.1', resolve); });
   port = server.address().port;
   touch();

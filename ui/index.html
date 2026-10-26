@@ -359,6 +359,13 @@ ol.todo li { padding-left: 4px; }
       <label id="github-profile-row" hidden><span data-i18n="github.profile"></span><select id="github-profile"></select></label>
       <div id="github-assignment" hidden>
         <p id="github-assignment-text" class="muted" role="status"></p>
+        <p class="hint" data-i18n="github.autoHint"></p>
+        <div class="grid2">
+          <label><span data-i18n="github.autoInterval"></span><select id="github-auto-interval"><option value="1">1</option><option value="6">6</option><option value="12">12</option><option value="24">24</option></select></label>
+          <label><span><input type="checkbox" id="github-auto-enabled" style="width:auto"> <span data-i18n="github.autoEnabled"></span></span></label>
+        </div>
+        <div class="row"><button id="github-auto-save" data-i18n="github.autoSave"></button><button id="github-auto-run" data-i18n="github.autoRun"></button></div>
+        <p id="github-auto-status" class="muted" role="status"></p>
         <div class="row"><button id="github-assign-clear" data-i18n="github.assignClear" hidden></button></div>
       </div>
       <div class="grid2">
@@ -1498,11 +1505,26 @@ function renderGitHubProfile(shareableVaults) {
   $('github-vault').innerHTML = shareableVaults.filter((v) => names.includes(v.name)).map((v) => `<option value="${esc(v.name)}">${esc(v.name)}</option>`).join('');
   const scope = ready && !a.assignment.whole_vault ? a.assignment.folders.join(', ') : t('github.wholeVault');
   $('github-assignment-text').textContent = ready ? t('github.assigned', { remote: a.assignment.remote, vault: a.assignment.vault, scope }) : t('github.assignment.' + a.status, { remote: a.assignment?.remote || '' });
+  const auto = a.assignment?.automatic_sync || { enabled: false, intervalHours: 6 };
+  $('github-auto-enabled').checked = auto.enabled;
+  $('github-auto-enabled').disabled = !ready;
+  $('github-auto-interval').value = String(auto.intervalHours || 6);
+  $('github-auto-interval').disabled = !ready;
+  $('github-auto-save').disabled = !ready;
+  $('github-auto-run').disabled = !ready || !auto.enabled;
+  renderGitHubAutoStatus();
   $('github-assign-form').hidden = ready;
   $('github-repository-row').hidden = ready;
   $('github-assign-clear').hidden = !a.assignment;
   $('github-load').disabled = !ready || !$('github-vault').value;
   $('github-pull-check').disabled = !ready;
+}
+function renderGitHubAutoStatus() {
+  const status = S.github_auto_sync?.[githubProfileId()];
+  if (status?.running) { $('github-auto-status').textContent = t('github.autoRunning'); return; }
+  if (!status?.at) { $('github-auto-status').textContent = $('github-auto-enabled').checked ? '' : t('github.autoOff'); return; }
+  const result = status.ok ? (status.error || t('github.autoSuccess')) : t('github.autoFailure', { error: status.error || 'Review the repository and retry.' });
+  $('github-auto-status').textContent = t('github.autoStatus', { at: new Date(status.at).toLocaleString(LOCALE), pulled: status.pulled || 0, pushed: status.pushed || 0, conflicts: status.conflicts || 0, result });
 }
 let githubPendingPush = null;
 let githubPullCandidates = [];
@@ -1587,6 +1609,32 @@ $('github-push').onclick = async () => {
     $('github-status').textContent = t('github.pushed', { commit: r.commit, branch: r.branch });
     githubPendingPush = null; $('github-push').hidden = true;
   } catch (e) { $('github-status').textContent = e.message; $('github-push').disabled = false; }
+};
+$('github-auto-save').onclick = async () => {
+  const assignment = githubAssignment()?.assignment;
+  const enabled = $('github-auto-enabled').checked;
+  if (!assignment) return;
+  if (enabled && !window.confirm(t('github.autoConfirm', { name: githubAssignment().name, remote: assignment.remote }))) {
+    $('github-auto-enabled').checked = false;
+    return;
+  }
+  try {
+    const result = await api('POST', '/api/github/automatic-sync', { profile_id: githubProfileId(), enabled, intervalHours: Number($('github-auto-interval').value), confirm: enabled, confirm_profile_id: enabled ? githubProfileId() : null });
+    const row = (S.github_assignments || []).find((item) => item.profile_id === githubProfileId());
+    if (row && result.assignment) row.assignment = result.assignment.assignment;
+    $('github-auto-run').disabled = !enabled;
+    $('github-auto-status').textContent = enabled ? t('github.autoSaved') : t('github.autoOff');
+    await load();
+  } catch (e) { $('github-auto-status').textContent = e.message; }
+};
+$('github-auto-run').onclick = async () => {
+  $('github-auto-run').disabled = true; $('github-auto-status').textContent = t('github.autoRunning');
+  try {
+    const status = await api('POST', '/api/github/automatic-sync/run', { profile_id: githubProfileId() });
+    S.github_auto_sync = { ...(S.github_auto_sync || {}), [githubProfileId()]: status };
+    renderGitHubAutoStatus();
+  } catch (e) { $('github-auto-status').textContent = e.message; }
+  finally { $('github-auto-run').disabled = !$('github-auto-enabled').checked; }
 };
 $('github-pull-check').onclick = async () => {
   $('github-status').textContent = t('github.pullChecking'); $('github-pull-import').disabled = true; $('github-pull-conflict-copy').disabled = true;
@@ -1844,7 +1892,7 @@ boot();
 setInterval(async () => {
   if (document.visibilityState !== 'visible') return;
   if (!$('sessions-panel').hidden) loadSessionEndCues();
-  try { const s = await api('GET', '/api/state'); S.activity = s.activity; $('activity').innerHTML = s.activity.length ? s.activity.map((e) => `<tr><td>${esc(new Date(e.at).toLocaleString(LOCALE))}</td><td>${esc(e.platform)}</td><td class="mono">${esc(e.tool)}</td><td>${e.ok ? (e.written ? esc(t('test.written')) : esc(t('test.ok'))) : esc(t('test.refused'))}</td></tr>`).join('') : `<tr><td colspan="4" class="muted">${esc(t('ready.noCalls'))}</td></tr>`; $('n4').className = 'step' + (s.activity.length ? ' done' : ''); } catch {}
+  try { const s = await api('GET', '/api/state'); S.activity = s.activity; S.github_auto_sync = s.github_auto_sync; renderGitHubAutoStatus(); $('activity').innerHTML = s.activity.length ? s.activity.map((e) => `<tr><td>${esc(new Date(e.at).toLocaleString(LOCALE))}</td><td>${esc(e.platform)}</td><td class="mono">${esc(e.tool)}</td><td>${e.ok ? (e.written ? esc(t('test.written')) : esc(t('test.ok'))) : esc(t('test.refused'))}</td></tr>`).join('') : `<tr><td colspan="4" class="muted">${esc(t('ready.noCalls'))}</td></tr>`; $('n4').className = 'step' + (s.activity.length ? ' done' : ''); } catch {}
 }, 5000);
 </script>
 <script src="agents.js"></script>

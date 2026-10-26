@@ -289,6 +289,13 @@ test('Setup API: assignments need review plus an exact confirmation, are exclusi
     const candidates = await post('/api/github/share-candidates', { vault: P.org.vault, profile_id: 'org' });
     assert.equal(candidates.status, 200);
     assert.deepEqual(candidates.body.notes.map((n) => n.path), ['Shared/Note.md']);
+    assert.notEqual((await post('/api/github/automatic-sync', { profile_id: 'org', enabled: true, intervalHours: 6 })).status, 200, 'automatic publication needs a separate explicit opt-in');
+    const enabledAuto = await post('/api/github/automatic-sync', { profile_id: 'org', enabled: true, intervalHours: 6, confirm: true, confirm_profile_id: 'org' });
+    assert.equal(enabledAuto.status, 200);
+    assert.equal(JSON.parse(await readFile(file, 'utf8')).twin_profiles[1].github_repository.automatic_sync.enabled, true);
+    assert.notEqual((await post('/api/github/automatic-sync', { profile_id: 'org', enabled: true, intervalHours: 2, confirm: true, confirm_profile_id: 'org' })).status, 200, 'unsupported intervals are refused');
+    assert.equal((await post('/api/github/automatic-sync', { profile_id: 'org', enabled: false, intervalHours: 6 })).status, 200);
+    assert.equal(JSON.parse(await readFile(file, 'utf8')).twin_profiles[1].github_repository.automatic_sync.enabled, false);
     assert.notEqual((await post('/api/github/save-conflict-copies', { profile_id: 'client_a', vault: P.org.vault, repository: f.repos.org, paths: ['Shared/Note.md'] })).status, 200);
     // Another profile cannot take over the same clone/repository, nor use this one's vault.
     const takeover = await post('/api/github/assignment/inspect', { profile_id: 'client_a', vault: P.client_a.vault, repository: f.repos.org });
