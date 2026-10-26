@@ -5,7 +5,8 @@ import { writeFile, appendFile, readdir, readFile, stat, open, mkdir, realpath }
 import path from 'node:path';
 import { TEMPLATES, renderTemplate } from './templates.mjs';
 import { suggestLinks, relatedSection, safeUpdateMap } from './links.mjs';
-import { vault, vaultRoot, safeJoin, findSecrets, zonedNow, parseFrontmatter, isExcludedPath, isPrivateMeta, fmSaysPrivate, readNote } from './core.mjs';
+import { vault, vaultRoot, safeJoin, findSecrets, zonedNow, parseFrontmatter, isExcludedPath, isPrivateMeta, fmSaysPrivate, readNote, loadVault } from './core.mjs';
+import { typedEntityMetadataMap } from './typed-graph.mjs';
 
 export const slug = (s) => String(s || '').toLowerCase().replace(/[^a-z0-9㐀-鿿]+/g, '-').replace(/^-|-$/g, '') || 'unknown';
 
@@ -21,12 +22,21 @@ export function resolveIdentity(ctx, a = {}) {
 
 const q = (s) => JSON.stringify(String(s ?? ''));
 export const madeBy = (id) => `**Made by ${id.ai_platform} (${id.agent_or_role}).**`;
+const TYPED_ENTITY_TYPES = new Set(['person', 'team', 'workflow', 'dataset', 'artifact', 'project', 'policy', 'concept']);
+const TYPED_PREDICATES = new Set(['owned_by', 'runs', 'consumes', 'produces', 'depends_on', 'part_of', 'assigned_to', 'informed_by']);
+const TYPED_ID = /^[a-z][a-z0-9._:-]{1,127}$/;
 
 export function frontmatter(ctx, vaultName, id, f, now = new Date()) {
   const v = vault(ctx, vaultName);
   const ts = zonedNow(ctx.tz, now);
   const tags = `[${(f.tags || []).map((t) => String(t).replace(/[^\w㐀-鿿-]/g, '')).filter(Boolean).join(', ')}]`;
   const extra = Object.entries(v.extra_fields || {}).map(([k, val]) => `${k}: ${q(val)}`);
+  const typed = TYPED_ENTITY_TYPES.has(f.type) && f.entity_id && f.entity_scope;
+  const typedFields = typed ? [`id: ${f.entity_id}`, `scope: ${f.entity_scope}`,
+    ...(f.relations?.length ? ['relations:', ...f.relations.flatMap((r) => [
+      '  - predicate: ' + r.predicate, `    target: ${r.target}`, '    review: proposed',
+      `    source: ${q(r.source)}`, `    confidence: ${r.confidence}`,
+    ])] : [])] : [];
   if (v.schema === 'provenance') {
     const date = ts.slice(0, 10);
     return ['---', `type: ${f.type || 'log'}`, `status: ${f.status || 'proposed'}`, `tags: ${tags}`, ...extra,
@@ -34,11 +44,12 @@ export function frontmatter(ctx, vaultName, id, f, now = new Date()) {
       `created_by_platform: ${slug(id.ai_platform)}`, `created_by_agent: ${slug(id.agent_or_role)}`, `created_session_or_task_id: ${q(id.session_or_task_id)}`, `created_date: ${date}`,
       `last_material_revision_by_platform: ${slug(id.ai_platform)}`, `last_material_revision_by_agent: ${slug(id.agent_or_role)}`,
       `last_material_revision_session_or_task_id: ${q(id.session_or_task_id)}`, `last_material_revision_date: ${date}`,
+      ...typedFields,
       `provenance_confidence: ${['verified', 'reported', 'inferred'].includes(f.confidence) ? f.confidence : 'unknown'}`, `source: ${q(f.source)}`, '---'].join('\n');
   }
   return ['---', `type: ${f.type || 'note'}`, `status: ${f.status || 'proposed'}`, `ai_platform: ${q(id.ai_platform)}`, `agent_or_role: ${q(id.agent_or_role)}`,
     ...(f.private ? ['private: true'] : []),
-    `session_or_task_id: ${q(id.session_or_task_id)}`, `written_at: ${ts}`, `source: ${q(f.source)}`, `confidence: ${q(f.confidence || 'proposed')}`, `tags: ${tags}`, ...extra, '---'].join('\n');
+    `session_or_task_id: ${q(id.session_or_task_id)}`, `written_at: ${ts}`, `source: ${q(f.source)}`, `confidence: ${q(f.confidence || 'proposed')}`, `tags: ${tags}`, ...extra, ...typedFields, '---'].join('\n');
 }
 
 export function checkCommon(ctx, vaultName, a, id) {
@@ -70,6 +81,19 @@ export async function proposeNote(ctx, a, now = new Date()) {
   const tpl = a.template ? TEMPLATES[a.template] : null;
   if (a.template && !tpl) errors.push(`template must be one of ${Object.keys(TEMPLATES).join(', ')}`);
   if (!tpl && (!a.body || !String(a.body).trim())) errors.push('body is required');
+  const typed = TYPED_ENTITY_TYPES.has(a.type);
+  if (typed) {
+    if (!TYPED_ID.test(String(a.entity_id || ''))) errors.push('typed entity records require entity_id using lowercase letters, numbers, dot, underscore, colon or hyphen');
+    if (!['personal', 'organisation', 'client'].includes(a.entity_scope)) errors.push('typed entity records require entity_scope: personal, organisation, or client');
+    if (ctx.twinScope?.mode === 'scoped' && a.entity_scope !== ctx.twinScope.mode) errors.push('typed entity scope must match the active Twin profile');
+    if (a.relations !== undefined && (!Array.isArray(a.relations) || a.relations.length > 20)) errors.push('relations must be a list of at most 20 proposed relationships');
+    else for (const relation of a.relations || []) {
+      if (!relation || typeof relation !== 'object' || !TYPED_PREDICATES.has(relation.predicate)) errors.push('each relationship needs a supported predicate');
+      if (!TYPED_ID.test(String(relation?.target || ''))) errors.push('each relationship target must be a valid entity ID in this vault');
+      if (typeof relation?.source !== 'string' || !relation.source.trim() || relation.source.length > 300) errors.push('each relationship needs a source excerpt or citation of at most 300 characters');
+      if (typeof relation?.confidence !== 'number' || !Number.isFinite(relation.confidence) || relation.confidence < 0 || relation.confidence > 1) errors.push('each relationship confidence must be a number from 0 to 1');
+    }
+  } else if (a.entity_id !== undefined || a.entity_scope !== undefined || a.relations !== undefined) errors.push('typed entity fields require a supported entity type');
   let folder = String(a.folder || '').replace(/^\/+|\/+$/g, '');
   if (v.flat && folder) errors.push(`${vaultName} is a flat vault: omit folder`);
   // A template files into its own folder when the vault has one (Meetings, People, ...).
@@ -84,12 +108,22 @@ export async function proposeNote(ctx, a, now = new Date()) {
     if (!a.decision) errors.push(`decision is required for ${v.intake_folder} (${decisions.join(', ')})`);
     else if (!decisions.includes(String(a.decision).toUpperCase())) errors.push(`decision must be one of ${decisions.join(', ')}`);
   }
+  if (typed && Array.isArray(a.relations) && a.relations.length && !errors.length) {
+    // Resolve proposed endpoints only from the already privacy-filtered, single-vault index.
+    // A private, excluded, duplicate, stale, or cross-scope target gets the same generic refusal.
+    const index = await loadVault(ctx, vaultName);
+    const visible = new Set([...typedEntityMetadataMap(index.notes).values()].map((record) => `${record.entity_id}|${record.scope}`));
+    if ((a.relations || []).some((relation) => !visible.has(`${relation.target}|${a.entity_scope}`))) {
+      errors.push('each relationship target must be a unique, current, visible typed record with the same scope in this vault');
+    }
+  }
   if (errors.length) return { ok: false, errors };
 
   const date = zonedNow(ctx.tz, now).slice(0, 10);
   const name = `${date} — ${title}.md`;
   const rel = folder ? `${folder}/${name}` : name;
-  const fm = frontmatter(ctx, vaultName, id, { ...a, type: a.type || tpl?.type || (intake ? 'intake' : undefined) }, now);
+  const fm = frontmatter(ctx, vaultName, id, { ...a, type: a.type || tpl?.type || (intake ? 'intake' : undefined),
+    status: typed ? 'proposed' : a.status, relations: typed ? a.relations : undefined }, now);
   const decision = needsDecision ? `## Decision\n\n**${String(a.decision).toUpperCase()}**\n\n` : '';
   const body = tpl ? renderTemplate(a.template, a.fields || {}, a.body) : String(a.body).trim();
   const links = a.auto_link === false ? [] : await suggestLinks(ctx, vaultName, `${title}\n${body}`, { limit: 5 }).catch(() => []);

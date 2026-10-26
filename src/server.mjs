@@ -54,8 +54,8 @@ export function createMcp(ctx, { onCall = () => {} } = {}) {
       ? 'This connection is READ-ONLY.'
       : 'WRITE: never overwrite. Every write needs your identity (ai_platform, agent_or_role, session_or_task_id) and returns a preview unless confirm=true; show the preview to the user before confirming unless their own phrase (e.g. a close-loop phrase) already authorised it. Never store credentials, tokens or account numbers. Keep each vault\'s material in that vault.',
     ctx.twinScope?.mode === 'scoped'
-      ? 'SMART: use only the listed tools and enabled vault choices. Respect not_in_brain and never infer content that retrieval did not return.'
-      : 'SMART: vault_search accepts rephrasings and translations (queries) — add an English translation for non-English questions; respect status not_in_brain, folder, tag and since/until filters. "What changed / what\'s open?" → brain_brief, vault_recent, open_loops. "Remember …" → remember. Quick thoughts → append_daily. Meetings, decisions, people, projects, ideas → propose_note with a template. Mention existing notes by their exact title; BrainLink links them and adds a Related section automatically.',
+      ? 'SMART: use only the listed tools and enabled vault choices. Respect not_in_brain and never infer content that retrieval did not return. TYPED GRAPH: when a source clearly supports a workflow/entity relationship, propose it through propose_note using a same-vault visible entity ID and this Twin scope; BrainLink always stores new typed records as status=proposed and relationships as review=proposed. Never call a candidate verified or graph-visible until a person reviews it.'
+      : 'SMART: vault_search accepts rephrasings and translations (queries) — add an English translation for non-English questions; respect status not_in_brain, folder, tag and since/until filters. "What changed / what\'s open?" → brain_brief, vault_recent, open_loops. "Remember …" → remember. Quick thoughts → append_daily. Meetings, decisions, people, projects, ideas → propose_note with a template. Mention existing notes by their exact title; BrainLink links them and adds a Related section automatically. TYPED GRAPH: when a source clearly supports a workflow/entity relationship, propose it through propose_note using a same-vault visible entity ID and a short evidence excerpt; BrainLink always stores new typed records as status=proposed and relationships as review=proposed. Never call a candidate verified or graph-visible until a person reviews it.',
     ...(ctx.twinScope?.mode !== 'scoped' || (twinToolListed(ctx, 'ingestion_queue') && twinToolListed(ctx, 'ingestion_record'))
       ? ['RAW-TO-WIKI: only when asked to organize new source files, scan one explicitly selected, non-private folder with ingestion_queue. It lists changed Markdown metadata only. Read selected sources through vault_read_note, draft a linked knowledge note with propose_note (preview first), and after saving call ingestion_record with filed; use skipped when the source adds no reusable knowledge. Never scan the whole vault or claim this queue runs automatically.']
       : []),
@@ -210,14 +210,23 @@ export function createMcp(ctx, { onCall = () => {} } = {}) {
       inputSchema: { type: 'object', properties: { vault: vaultProp, text: { type: 'string' }, source: { type: 'string' }, ...idProps }, required: ['text'] },
       run: (a) => appendDaily(ctx, a) },
     { name: 'propose_note', title: 'Create a new attributed note', annotations: WR,
-      description: 'New note with the vault\'s attribution, linked automatically to related notes. Use a template for meetings, decisions, people, projects and ideas. Never overwrites.',
+      description: 'New note with the vault\'s attribution, linked automatically to related notes. Use a template for meetings, decisions, people, projects and ideas. Optional typed entity and evidence-backed relationship suggestions are always stored proposed and require human review before entering the graph. Never overwrites.',
       inputSchema: { type: 'object', properties: {
         vault: vaultProp, folder: { type: 'string', description: 'Existing folder; omit for the intake folder (or the template\'s folder when it exists).' }, title: { type: 'string' }, body: { type: 'string', description: 'Markdown. Optional when a template is used.' },
         template: { type: 'string', enum: Object.keys(TEMPLATES), description: Object.entries(TEMPLATES).map(([k, t]) => `${k}: ${Object.keys(t.fields).join(', ')}`).join(' | ') },
         fields: { type: 'object', description: 'Template fields (see template).' },
         auto_link: { type: 'boolean', default: true, description: 'Add a Related section linking notes this one mentions or is about.' },
         decision: { type: 'string', description: 'Required when the vault defines intake decisions (see brainlink_guide).' }, source: { type: 'string' }, confidence: { type: 'string' },
-        type: { type: 'string' }, status: { type: 'string' }, tags: strs, ...idProps }, required: ['title', 'body', 'source'] },
+        type: { type: 'string', enum: ['note', 'meeting', 'decision', 'person', 'team', 'workflow', 'dataset', 'artifact', 'project', 'policy', 'concept'] },
+        entity_id: { type: 'string', description: 'For a typed entity, a stable ID such as workflow.collect-questions.' },
+        entity_scope: { type: 'string', enum: ['personal', 'organisation', 'client'], description: 'Must match the active Twin profile when one is in use.' },
+        relations: { type: 'array', description: 'Evidence-backed relationship suggestions. BrainLink always stores these as review=proposed; a person must review and verify them before they become graph edges.', maxItems: 20, items: { type: 'object', properties: {
+          predicate: { type: 'string', enum: ['owned_by', 'runs', 'consumes', 'produces', 'depends_on', 'part_of', 'assigned_to', 'informed_by'] },
+          target: { type: 'string', description: 'Stable ID of another typed note in this same vault and scope.' },
+          source: { type: 'string', description: 'Short exact source excerpt or citation, up to 300 characters.' },
+          confidence: { type: 'number', minimum: 0, maximum: 1 },
+        }, required: ['predicate', 'target', 'source', 'confidence'], additionalProperties: false } },
+        status: { type: 'string' }, tags: strs, ...idProps }, required: ['title', 'body', 'source'] },
       run: (a) => proposeNote(ctx, a) },
     ...(hasHandoff ? [
       { name: 'send_handoff', title: 'Message another AI', annotations: WR,

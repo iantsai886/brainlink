@@ -1,12 +1,14 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtemp, mkdir, writeFile } from 'node:fs/promises';
+import { mkdtemp, mkdir, writeFile, readFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { normalize } from '../src/config.mjs';
 import { createContext, loadVault } from '../src/core.mjs';
 import { buildGraph3D, noteDetail3D } from '../src/graph3d.mjs';
 import { deriveTypedRelations } from '../src/typed-graph.mjs';
+import { proposeNote } from '../src/writes.mjs';
+import { createMcp } from '../src/server.mjs';
 
 const temp = (name) => mkdtemp(path.join(tmpdir(), `brainlink-typed-graph-${name}-`));
 const entity = ({ type, id, scope = 'organisation', body = '', relations = '', extra = '' }) => `---\ntype: ${type}\nid: ${id}\nscope: ${scope}\nstatus: current\n${extra}${relations ? `relations:\n${relations}` : ''}---\n# ${id}\n${body}`;
@@ -28,6 +30,9 @@ test('typed relationships resolve by stable ID and appear in graph links and not
     body: 'A workflow that collects questions.'
   }));
   const ctx = await context([{ name: 'Company', path: dir }]);
+  const toolSchema = createMcp(ctx).tools.find((tool) => tool.name === 'propose_note').inputSchema.properties;
+  assert.ok(toolSchema.relations.items.properties.predicate.enum.includes('owned_by'));
+  assert.match(toolSchema.relations.description, /review=proposed/);
   const graph = await buildGraph3D(ctx, 'Company');
   const workflow = graph.nodes.find((n) => n.entity_id === 'workflow.collect-questions');
   const team = graph.nodes.find((n) => n.entity_id === 'team.product');
@@ -40,6 +45,67 @@ test('typed relationships resolve by stable ID and appear in graph links and not
     { direction: 'outgoing', predicate: 'owned_by', target: 'Product Team' },
   ]);
   assert.equal(detail.relationships[0].evidence, 'Operations handbook, section 2');
+});
+
+test('typed graph relationship suggestions are saved as proposed and become edges only after explicit review', async () => {
+  const dir = await temp('relationship-proposal');
+  await mkdir(path.join(dir, 'Inbox'), { recursive: true });
+  await writeFile(path.join(dir, 'Product Team.md'), entity({ type: 'team', id: 'team.product', body: 'The product team.' }));
+  const ctx = await context([{ name: 'Company', path: dir }]);
+  const result = await proposeNote(ctx, {
+    vault: 'Company', folder: 'Inbox', title: 'Collect questions', type: 'workflow',
+    status: 'current', entity_id: 'workflow.collect-questions', entity_scope: 'organisation',
+    body: 'Collects incoming support questions.', source: 'Operations handbook', confirm: true,
+    ai_platform: 'ChatGPT', agent_or_role: 'test', session_or_task_id: 'typed-graph-test',
+    relations: [{ predicate: 'owned_by', target: 'team.product', source: '"The product team owns question collection"', confidence: 0.92 }],
+  }, new Date('2026-10-26T12:00:00Z'));
+  assert.equal(result.written, true, JSON.stringify(result));
+  const notePath = path.join(dir, 'Inbox/2026-10-26 — Collect questions.md');
+  let saved = await readFile(notePath, 'utf8');
+  assert.match(saved, /^status: proposed$/m, 'caller cannot make a generated entity current at creation');
+  assert.match(saved, /^id: workflow\.collect-questions$/m);
+  assert.match(saved, /^scope: organisation$/m);
+  assert.match(saved, /^    review: proposed$/m, 'suggested edges are never marked verified by the AI');
+  assert.match(saved, /^    source: "\\"The product team owns question collection\\""$/m);
+  const unreviewed = await buildGraph3D(ctx, 'Company');
+  assert.ok(!unreviewed.links.some((link) => link.predicate === 'owned_by'));
+
+  saved = saved.replace(/^status: proposed$/m, 'status: current').replace(/^    review: proposed$/m, '    review: verified');
+  await writeFile(notePath, saved);
+  const reviewedCtx = await context([{ name: 'Company', path: dir }]);
+  const reviewed = await buildGraph3D(reviewedCtx, 'Company');
+  assert.ok(reviewed.links.some((link) => link.predicate === 'owned_by'), 'explicitly reviewed relation enters the typed graph');
+});
+
+test('typed relationship proposals reject invalid IDs, predicates, evidence and cross-profile scopes', async () => {
+  const dir = await temp('relationship-validation');
+  await mkdir(path.join(dir, 'Inbox'), { recursive: true });
+  const ctx = await context([{ name: 'Company', path: dir }]);
+  const base = { vault: 'Company', folder: 'Inbox', title: 'Workflow', type: 'workflow', entity_id: 'workflow.test', entity_scope: 'organisation', body: 'Do work.', source: 'test', confirm: true };
+  const invalid = await proposeNote(ctx, { ...base, relations: [{ predicate: 'invented', target: 'x', source: '', confidence: 2 }] });
+  assert.equal(invalid.ok, false);
+  assert.ok(invalid.errors.length >= 4);
+  ctx.twinScope = { mode: 'scoped', profile_id: 'client-1' , grants: [] };
+  const mismatch = await proposeNote(ctx, base);
+  assert.equal(mismatch.ok, false);
+  assert.match(mismatch.errors.join(' '), /match the active Twin profile/);
+});
+
+test('typed relationship proposals cannot reveal private or cross-scope target IDs', async () => {
+  const dir = await temp('relationship-private-target');
+  await mkdir(path.join(dir, 'Inbox'), { recursive: true });
+  const privateId = 'dataset.private-canary';
+  await writeFile(path.join(dir, 'Private Dataset.md'), `---\nprivate: true\ntype: dataset\nid: ${privateId}\nscope: organisation\nstatus: current\n---\n# Private Dataset\nsecret\n`);
+  const ctx = await context([{ name: 'Company', path: dir }]);
+  const result = await proposeNote(ctx, {
+    vault: 'Company', folder: 'Inbox', title: 'Public workflow', type: 'workflow', entity_id: 'workflow.public',
+    entity_scope: 'organisation', body: 'A public workflow.', source: 'public source',
+    ai_platform: 'ChatGPT', agent_or_role: 'test', session_or_task_id: 'privacy-test',
+    relations: [{ predicate: 'consumes', target: privateId, source: 'public text', confidence: 0.9 }],
+  });
+  assert.equal(result.ok, false);
+  assert.match(result.errors.join(' '), /unique, current, visible typed record/);
+  assert.doesNotMatch(JSON.stringify(result), new RegExp(privateId));
 });
 
 test('only verified, allowlisted predicates with evidence, confidence and same-scope targets become edges', async () => {
