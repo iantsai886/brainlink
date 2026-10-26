@@ -74,9 +74,12 @@ jobs:
         run: |
           $version = (Get-Content package.json | ConvertFrom-Json).version
           $installer = Join-Path $PWD "dist/BrainLink-Setup-$version.exe"
+          $userPathBefore = [Environment]::GetEnvironmentVariable('Path', 'User')
           $installCode = Start-Process -FilePath $installer -ArgumentList '/VERYSILENT','/SUPPRESSMSGBOXES','/NORESTART' -Wait -PassThru
           if ($installCode.ExitCode -ne 0) { throw "Installer failed with $($installCode.ExitCode)" }
           $installRoot = Join-Path $env:LOCALAPPDATA 'Programs/BrainLink'
+          $installedPath = [Environment]::GetEnvironmentVariable('Path', 'User')
+          if (-not (($installedPath -split ';') -contains (Join-Path $installRoot 'bin'))) { throw 'Installer did not add the BrainLink command to the user PATH' }
           $env:APPDATA = Join-Path $env:RUNNER_TEMP 'brainlink-win-smoke-profile'
           $vault = Join-Path $env:RUNNER_TEMP 'brainlink-win-smoke-vault'
           New-Item -ItemType Directory -Force $vault | Out-Null
@@ -90,6 +93,8 @@ jobs:
           if ($uninstallCode.ExitCode -ne 0) { throw "Uninstaller failed with $($uninstallCode.ExitCode)" }
           if (Test-Path $installRoot) { throw 'Uninstaller left the application files behind' }
           if (-not (Test-Path $config)) { throw 'Uninstaller removed the user configuration' }
+          $userPathAfter = [Environment]::GetEnvironmentVariable('Path', 'User')
+          if ($userPathAfter -cne $userPathBefore) { throw 'Uninstaller did not restore the original user PATH' }
 
       - name: Upload installer artifact
         uses: actions/upload-artifact@v4
