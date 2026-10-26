@@ -36,6 +36,13 @@ export function createMcp(ctx, { onCall = () => {} } = {}) {
   const scopedHandoffRead = ctx.twinScope?.mode === 'scoped' && twinToolListed(ctx, 'list_handoffs');
   const scopedHandoffWrite = ctx.twinScope?.mode === 'scoped' && twinToolListed(ctx, 'send_handoff');
   const guideHasHandoff = hasHandoff && (ctx.twinScope?.mode !== 'scoped' || scopedHandoffRead || scopedHandoffWrite);
+  const memoryTypes = {
+    working: 'Temporary task state and next steps; keep short-lived and review or expire it.',
+    semantic: 'Durable facts, concepts, decisions, and relationships; preserve sources and uncertainty, and keep new claims proposed until reviewed.',
+    procedural: 'Reusable methods and workflows; call a Skill tested only when its tests or repeated evidence support that claim.',
+    episodic: 'Source-linked events and session outcomes; do not create a second episode for a session already captured.',
+  };
+  const memoryPolicy = ctx.twinScope?.memory_policy || Object.fromEntries(Object.keys(memoryTypes).map((type) => [type, true]));
   let sessionStorePromise = null;
   const sessionStore = () => sessionStorePromise ||= openSessionStore(ctx.env);
   // Refresh incrementally after the first session_list. The cooldown avoids walking a large local
@@ -48,6 +55,7 @@ export function createMcp(ctx, { onCall = () => {} } = {}) {
     ctx.readOnly
       ? 'This connection is READ-ONLY.'
       : 'WRITE: never overwrite. Every write needs your identity (ai_platform, agent_or_role, session_or_task_id) and returns a preview unless confirm=true; show the preview to the user before confirming unless their own phrase (e.g. a close-loop phrase) already authorised it. Never store credentials, tokens or account numbers. Keep each vault\'s material in that vault.',
+    `MEMORY TYPES ENABLED FOR THIS CONNECTION: ${Object.keys(memoryTypes).filter((type) => memoryPolicy[type] !== false).join(', ') || 'none'}. BrainLink uses memory types internally, not as folders the user must manage. Keep working state temporary; avoid duplicate episodes; preserve sources for durable semantic/procedural candidates. A session-close approval covers its episode only, not extra durable notes. Any additional note needs its own preview and user approval. Memory type does not prove truth or permission.`,
     ctx.twinScope?.mode === 'scoped'
       ? 'SMART: use only the listed tools and enabled vault choices. Respect not_in_brain and never infer content that retrieval did not return. TYPED GRAPH: when a source clearly supports a workflow/entity relationship, propose it through propose_note using a same-vault visible entity ID and this Twin scope; BrainLink always stores new typed records as status=proposed and relationships as review=proposed. Never call a candidate verified or graph-visible until a person reviews it.'
       : 'SMART: vault_search accepts rephrasings and translations (queries) — add an English translation for non-English questions; respect status not_in_brain, folder, tag and since/until filters. "What changed / what\'s open?" → brain_brief, vault_recent, open_loops. "Remember …" → remember. Quick thoughts → append_daily. Meetings, decisions, people, projects, ideas → propose_note with a template. Mention existing notes by their exact title; BrainLink links them and adds a Related section automatically. TYPED GRAPH: when a source clearly supports a workflow/entity relationship, propose it through propose_note using a same-vault visible entity ID and a short evidence excerpt; BrainLink always stores new typed records as status=proposed and relationships as review=proposed. Never call a candidate verified or graph-visible until a person reviews it.',
@@ -70,6 +78,11 @@ export function createMcp(ctx, { onCall = () => {} } = {}) {
     })),
     agents: agents.map((a) => ({ name: a.name, vault: a.vault, role: a.role, activation_phrases: a.activation, close_phrases: a.close, close_writes_to: a.close_target })),
     identity: { required_on_writes: ['ai_platform', 'agent_or_role', 'session_or_task_id'], ai_platform_values: cfg.platforms, made_by_line: 'Made by {ai_platform} ({agent_or_role}).' },
+    memory_model: {
+      purpose: 'Internal organization and retrieval model; users do not need to sort every note into separate folders.',
+      types: Object.fromEntries(Object.entries(memoryTypes).filter(([type]) => memoryPolicy[type] !== false).map(([type, description]) => [type, { description, enabled: true }])),
+      approval: 'A session-close approval authorizes only the private episode. Each additional durable semantic or procedural note needs a separate preview and approval.',
+    },
     write_rules: ctx.twinScope?.mode === 'scoped' ? [
       'General note writes are unavailable to this profile-scoped connection; handoff read/send require separate explicit grants.',
       ...(scopedSessionClose ? ['session_close is limited to a private summary and an explicit preview/confirmation flow in a granted vault.'] : []),

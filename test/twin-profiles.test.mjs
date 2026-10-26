@@ -240,6 +240,9 @@ test('Twin memory policy blocks disabled types at tool, prompt and resource boun
     assert.deepEqual(validate(cfg), [], `${item.type} policy fixture remains valid`);
     const ctx = createContext(cfg, { env: { BRAINLINK_HOME: path.join(root, `app-${item.type}`), BRAINLINK_AGENT_TOKEN: 'fictional-agent-token', BRAINLINK_SEMANTIC: '0' } });
     const mcp = createMcp(ctx);
+    const init = await mcp.handle({ jsonrpc: '2.0', id: 5, method: 'initialize', params: { protocolVersion: '2025-03-26' } });
+    const enabledTypes = ['working', 'semantic', 'procedural', 'episodic'].filter((type) => type !== item.type).join(', ');
+    assert.ok(init.result.instructions.includes(`MEMORY TYPES ENABLED FOR THIS CONNECTION: ${enabledTypes}.`), `${item.type} stays out of this connection's memory guidance`);
     const listed = await mcp.handle({ jsonrpc: '2.0', id: 1, method: 'tools/list' });
     assert.ok(!listed.result.tools.some((tool) => tool.name === item.tool), `${item.type} tool is not advertised`);
     const denied = await mcp.handle({ jsonrpc: '2.0', id: 2, method: 'tools/call', params: { name: item.tool, arguments: item.args || {} } });

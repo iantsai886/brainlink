@@ -676,6 +676,12 @@ test('MCP: initialize, tools, prompts, resources, errors', async () => {
   assert.match(init.result.instructions, /"Connect to Chief of Staff" → agent_connect/);
   const names = (await call('tools/list')).result.tools.map((t) => t.name);
   for (const n of ['brainlink_guide', 'vault_search', 'agent_connect', 'agent_close_loop', 'propose_note', 'send_handoff', 'search', 'fetch']) assert.ok(names.includes(n), n);
+  const guide = await call('tools/call', { name: 'brainlink_guide', arguments: {} });
+  const model = guide.result.structuredContent.memory_model;
+  assert.deepEqual(Object.keys(model.types), ['working', 'semantic', 'procedural', 'episodic']);
+  assert.ok(Object.values(model.types).every((item) => item.enabled));
+  assert.match(model.approval, /Each additional durable semantic or procedural note needs a separate preview and approval/);
+  assert.match(init.result.instructions, /MEMORY TYPES ENABLED FOR THIS CONNECTION: working, semantic, procedural, episodic/);
   const prompts = (await call('prompts/list')).result.prompts.map((p) => p.name);
   assert.ok(prompts.includes('connect-chief-of-staff') && prompts.includes('close-loop-chief-of-staff'));
   assert.match((await call('prompts/get', { name: 'close-loop-chief-of-staff', arguments: { focus: 'launch' } })).result.messages[0].content.text, /launch/);
