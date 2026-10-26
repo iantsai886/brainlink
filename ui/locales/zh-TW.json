@@ -513,6 +513,7 @@
   "twinProfiles.confirmCreate": "要為以下 Vault 建立 {name}：{vaults}，並指派這些 AI Agent：{agents} 嗎？啟用的記憶類型：{memory}。所選 Agent 只會取得勾選的權限。要繼續嗎？",
   "twinProfiles.created": "Twin 已建立。",
   "twinProfiles.edit": "編輯權限",
+  "twinProfiles.editUnavailable": "各 Vault 權限不同；此處不能編輯",
   "twinProfiles.saveChanges": "儲存 Twin 變更",
   "twinProfiles.cancelEdit": "取消",
   "twinProfiles.confirmUpdate": "要將 {name} 更新為使用這些 Vault：{vaults}、Agent 操作：{agents}、記憶類型：{memory} 嗎？獲准讀取工作階段的 Agent 也能讀取先前指派給此 Twin 的工作階段。這會取代目前權限，並保留既有 GitHub 指派。要繼續嗎？",

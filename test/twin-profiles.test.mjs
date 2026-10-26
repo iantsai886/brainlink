@@ -4,7 +4,7 @@ import { mkdtemp, mkdir, readFile, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { normalize, validate, saveConfig } from '../src/config.mjs';
-import { twinProfileStatus } from '../src/twin-profiles.mjs';
+import { twinProfileStatus, profileScopeEditable } from '../src/twin-profiles.mjs';
 import { startSetup } from '../src/setup.mjs';
 import { createContext } from '../src/core.mjs';
 import { createMcp } from '../src/server.mjs';
@@ -54,6 +54,11 @@ test('Twin status shows limited runtime scope and never exposes agent credential
   assert.equal(status.enforcement, 'scoped_agent_read_only');
   assert.equal(status.profiles[0].declaration_status, 'agent_profile_scope_active');
   assert.equal(status.profiles[0].memory_policy_enforcement, 'tools_prompts_resources');
+  assert.equal(status.profiles[0].editable_scope, true);
+  const scoped = fixture('C:\\fictional-vault');
+  scoped.vaults.push({ name: 'Fictional Other', path: 'C:\\fictional-other' });
+  scoped.twin_profiles[0].vaults.push({ name: 'Fictional Other', access: 'read' });
+  assert.equal(profileScopeEditable(scoped.twin_profiles[0]), false, 'an agent scoped to only one of two profile vaults cannot use the uniform-permission editor');
   assert.equal(status.profiles[0].agents[0].name, 'Fictional Codex');
   assert.equal(status.profiles[0].agents[0].vaults[0].operations.includes('write_note'), false);
   assert.doesNotMatch(JSON.stringify(status), /tokenHash|f{64}/);
@@ -496,5 +501,39 @@ test('Setup edits a Twin without changing its identity or source policy and refu
     const saved = JSON.parse(savedBeforeRefusal);
     assert.deepEqual(saved.twin_profiles[0].source_policy, cfg.twin_profiles[0].source_policy);
     assert.deepEqual(validate(saved), []);
+  } finally { setup.server.close(); }
+});
+
+test('Setup refuses edits when a Twin has different AI access by vault', async () => {
+  const root = await mkdtemp(path.join(tmpdir(), 'brainlink-twin-heterogeneous-edit-'));
+  const home = path.join(root, 'home');
+  const firstVault = path.join(root, 'first-vault');
+  const secondVault = path.join(root, 'second-vault');
+  await mkdir(firstVault);
+  await mkdir(secondVault);
+  const env = { BRAINLINK_HOME: path.join(home, 'app') };
+  const cfg = fixture(firstVault);
+  cfg.vaults.push({ name: 'Fictional Other', path: secondVault });
+  cfg.twin_profiles[0].vaults.push({ name: 'Fictional Other', access: 'read' });
+  await saveConfig(cfg, path.join(env.BRAINLINK_HOME, 'config.json'));
+  const setup = await startSetup({ env, home, os: 'linux', port: 0, useCli: false });
+  const base = `http://127.0.0.1:${setup.port}`;
+  const call = async (url, body) => {
+    const response = await fetch(`${base}${url}`, { method: body ? 'POST' : 'GET', headers: { 'X-BrainLink-Token': setup.token, 'Content-Type': 'application/json' }, body: body ? JSON.stringify(body) : undefined });
+    return { status: response.status, body: await response.json() };
+  };
+  try {
+    const status = await call('/api/state');
+    assert.equal(status.body.twin_profiles.profiles[0].editable_scope, false);
+    const before = await readFile(path.join(env.BRAINLINK_HOME, 'config.json'), 'utf8');
+    const refused = await call('/api/twins/update', {
+      profile_id: 'org_twin_1', name: 'Must Not Broaden', mode: 'organisation', owner: 'fictional-owner',
+      vaults: [{ name: 'Fictional Org', access: 'propose' }, { name: 'Fictional Other', access: 'read' }],
+      agent_access: [{ agent_id: 'agent_codex', operations: ['search', 'read_note'] }],
+      memory_policy: { working: true, semantic: true, procedural: true, episodic: true },
+    });
+    assert.equal(refused.status, 400);
+    assert.match(refused.body.error, /different AI access by vault/);
+    assert.equal(await readFile(path.join(env.BRAINLINK_HOME, 'config.json'), 'utf8'), before);
   } finally { setup.server.close(); }
 });

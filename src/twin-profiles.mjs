@@ -1,4 +1,14 @@
 // Profile declarations and the first runtime enforcement gate for named agent tokens.
+export function profileScopeEditable(profile) {
+  const profileVaults = new Set((profile?.vaults || []).map((item) => item.name));
+  return (profile?.agent_access || []).every((agent) => {
+    const grants = agent.vaults || [];
+    if (grants.length !== profileVaults.size || grants.some((grant) => !profileVaults.has(grant.name))) return false;
+    const scopes = new Set(grants.map((grant) => JSON.stringify([grant.access, [...(grant.operations || [])].sort()])));
+    return scopes.size <= 1;
+  });
+}
+
 export function twinProfileStatus(cfg) {
   const profiles = (cfg.twin_profiles || []).map((profile) => ({
     id: profile.id,
@@ -14,6 +24,7 @@ export function twinProfileStatus(cfg) {
       name: cfg.ai_agents.find((agent) => agent.id === agent_id)?.name || 'Unknown agent',
       vaults: vaults.map(({ name, access, operations }) => ({ name, access, operations: [...operations] })),
     })),
+    editable_scope: profileScopeEditable(profile),
     declaration_status: 'agent_profile_scope_active',
     memory_policy_enforcement: 'tools_prompts_resources',
   }));

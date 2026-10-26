@@ -513,6 +513,7 @@
   "twinProfiles.confirmCreate": "Criar {name} para estes cofres: {vaults}. Atribuir estes agentes de IA: {agents}. Tipos de memória ativos: {memory}. Os agentes escolhidos receberão somente o acesso marcado. Continuar?",
   "twinProfiles.created": "Perfil Twin criado.",
   "twinProfiles.edit": "Editar acesso",
+  "twinProfiles.editUnavailable": "Acesso por cofre; edição indisponível aqui",
   "twinProfiles.saveChanges": "Salvar alterações do Twin",
   "twinProfiles.cancelEdit": "Cancelar",
   "twinProfiles.confirmUpdate": "Atualizar {name} para estes cofres: {vaults}. Ações dos agentes: {agents}. Tipos de memória ativos: {memory}. Agentes autorizados a ler sessões também poderão ler sessões antigas deste Twin. Isso substituirá o acesso atual; a associação do GitHub será mantida. Continuar?",

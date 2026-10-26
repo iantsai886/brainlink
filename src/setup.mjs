@@ -34,7 +34,7 @@ import { recommendSessionVault } from './sessions/routing.mjs';
 import { listSessionEndCues, dismissSessionEndCue, sessionEndCueId, matchSessionEndCue } from './sessions/end-cue.mjs';
 import { listSessionFilingFolders, suggestedSessionFolder } from './sessions/folders.mjs';
 import { sessionHookStatus, setSessionHook } from './sessions/hooks.mjs';
-import { twinProfileStatus } from './twin-profiles.mjs';
+import { twinProfileStatus, profileScopeEditable } from './twin-profiles.mjs';
 import { createRsiLedger } from './rsi-ledger.mjs';
 import { createRsiExperiments } from './rsi-experiments.mjs';
 import { createRsiDiscovery } from './rsi-discovery.mjs';
@@ -662,6 +662,7 @@ export async function startSetup(opts = {}) {
       const cfg = await loadConfig(file);
       const profile = cfg.twin_profiles.find((item) => item.id === String(b.profile_id || ''));
       if (!profile) throw new Error('Choose an existing Twin profile.');
+      if (!profileScopeEditable(profile)) throw new Error('This Twin has different AI access by vault. The simple Setup editor cannot safely change its permissions.');
       const name = String(b.name || '').trim();
       const owner = String(b.owner || '').trim();
       const mode = String(b.mode || '');
