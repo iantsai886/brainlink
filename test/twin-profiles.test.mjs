@@ -59,10 +59,16 @@ test('Twin status shows limited runtime scope and never exposes agent credential
   assert.doesNotMatch(JSON.stringify(status), /tokenHash|f{64}/);
 });
 
-test('Twin status appears in the main UI and escapes every profile-provided label', async () => {
+test('Twin setup creates profiles from local UI choices and escapes every profile-provided label', async () => {
   const html = await readFile(new URL('../ui/index.html', import.meta.url), 'utf8');
   assert.match(html, /id="twin-profiles-panel"/);
   assert.match(html, /id="twin-profiles"/);
+  assert.match(html, /id="twin-create"/);
+  assert.match(html, /data-twin-vault/);
+  assert.match(html, /data-twin-agent/);
+  assert.match(html, /data-twin-memory/);
+  assert.match(html, /POST', '\/api\/twins\/create'/);
+  assert.match(html, /confirm\(t\('twinProfiles\.confirmCreate'/);
   assert.match(html, /esc\(p\.name\)/);
   assert.match(html, /esc\(t\('twinProfiles\.owner', \{ owner: p\.owner \}\)\)/);
   assert.match(html, /twinProfiles\.limits/);
@@ -391,5 +397,51 @@ test('local Setup assigns an unowned session only to a session-authorized Twin a
     const owned = await (await openSessionStore(env)).readSession(source.id, { profile_id: 'org_twin_1', limit: 10 });
     assert.equal(owned.messages[0].text, 'Synthetic private content.');
     await assert.rejects((await openSessionStore(env)).readSession(source.id, { profile_id: 'another_twin' }), (error) => error.code === 'E_NOT_FOUND');
+  } finally { setup.server.close(); }
+});
+
+test('Setup creates a validated Twin from explicit vault, agent, action and memory choices', async () => {
+  const root = await mkdtemp(path.join(tmpdir(), 'brainlink-twin-create-'));
+  const home = path.join(root, 'home');
+  const vaultPath = path.join(root, 'vault');
+  await mkdir(vaultPath);
+  const env = { BRAINLINK_HOME: path.join(home, 'app') };
+  const cfg = fixture(vaultPath);
+  cfg.ai_agents.push({ id: 'agent_personal', name: 'Fictional Personal Agent', kind: 'local', tokenHash: hashToken('fictional-second-agent-token'), connected: false, revoked: false });
+  cfg.vaults.push({ name: 'Fictional Private', path: path.join(root, 'private'), private: true });
+  await mkdir(cfg.vaults[1].path);
+  await saveConfig(cfg, path.join(env.BRAINLINK_HOME, 'config.json'));
+  const setup = await startSetup({ env, home, os: 'linux', port: 0, useCli: false });
+  const base = `http://127.0.0.1:${setup.port}`;
+  const api = async (body, authenticated = true) => {
+    const response = await fetch(`${base}/api/twins/create`, { method: 'POST', headers: { ...(authenticated ? { 'X-BrainLink-Token': setup.token } : {}), 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
+    return { status: response.status, body: await response.json() };
+  };
+  try {
+    const request = {
+      name: 'Fictional Personal Twin', mode: 'personal', owner: 'fictional-owner',
+      vaults: [{ name: 'Fictional Org', access: 'propose' }],
+      agent_access: [{ agent_id: 'agent_personal', operations: ['search', 'read_note', 'propose_note'] }],
+      memory_policy: { working: true, semantic: true, procedural: false, episodic: true },
+    };
+    assert.equal((await api(request, false)).status, 401, 'local Setup token is required');
+    const created = await api(request);
+    assert.equal(created.status, 200, created.body.error);
+    assert.equal(created.body.profile.mode, 'personal');
+    assert.deepEqual(created.body.profile.vaults, [{ name: 'Fictional Org', access: 'propose' }]);
+    assert.deepEqual(created.body.profile.memory_policy, request.memory_policy);
+    assert.deepEqual(created.body.profile.allowed_actions.sort(), ['propose_note', 'read_note', 'search']);
+    assert.equal(created.body.profile.agents[0].name, 'Fictional Personal Agent');
+    assert.doesNotMatch(JSON.stringify(created.body), /fictional-second-agent-token|tokenHash/);
+
+    const privateVault = await api({ ...request, name: 'Should Refuse', vaults: [{ name: 'Fictional Private', access: 'read' }], agent_access: [] });
+    assert.equal(privateVault.status, 400);
+    assert.match(privateVault.body.error, /non-private vaults/);
+    const unsupported = await api({ ...request, name: 'Should Refuse Too', agent_access: [{ agent_id: 'agent_personal', operations: ['write_note'] }] });
+    assert.equal(unsupported.status, 400);
+    assert.match(unsupported.body.error, /supported permission/);
+    const saved = JSON.parse(await readFile(path.join(env.BRAINLINK_HOME, 'config.json'), 'utf8'));
+    assert.equal(saved.twin_profiles.length, 2, 'rejected requests do not alter the stored profiles');
+    assert.deepEqual(validate(saved), []);
   } finally { setup.server.close(); }
 });

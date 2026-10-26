@@ -7,7 +7,7 @@ import { execFile } from 'node:child_process';
 import { setTimeout as delay } from 'node:timers/promises';
 import { homedir } from 'node:os';
 import path from 'node:path';
-import { loadConfig, saveConfig, configPath, normalize, LOCALES, appHome } from './config.mjs';
+import { loadConfig, saveConfig, configPath, normalize, validate, LOCALES, appHome } from './config.mjs';
 import { PACKS, buildPack, scaffold, mergePack } from './packs.mjs';
 import { CLIENTS, detect, connectClient, disconnectClient, test } from './connectors.mjs';
 import { createContext, search, searchWithVerdict, readNote, ensureDefaultIgnore, readExcludedFolders, writeExcludedFolders, DEFAULT_EXCLUDED_FOLDERS, SUGGESTED_EXCLUDED_FOLDERS, safeJoin, vaultRoot } from './core.mjs';
@@ -615,6 +615,48 @@ export async function startSetup(opts = {}) {
       delete profile.github_repository;
       await saveConfig(cfg, file);
       return { ok: true, assignments: githubAssignmentProjection(cfg) };
+    },
+    'POST /api/twins/create': async (b) => {
+      const cfg = await loadConfig(file);
+      const name = String(b.name || '').trim();
+      const owner = String(b.owner || '').trim();
+      const mode = String(b.mode || '');
+      if (!name || name.length > 120 || !owner || owner.length > 160 || !['personal', 'organisation', 'client'].includes(mode)) throw new Error('Enter a profile name and owner, then choose Personal, Organisation or Client.');
+      const vaults = Array.isArray(b.vaults) ? b.vaults : [];
+      if (!vaults.length || vaults.length > 50) throw new Error('Choose at least one available non-private vault.');
+      const profileVaults = [];
+      for (const item of vaults) {
+        const vault = cfg.vaults.find((entry) => entry.name === item?.name);
+        if (!vault || vault.private || !['read', 'propose'].includes(item?.access)) throw new Error('Twin profiles can use only available non-private vaults, with read or propose access.');
+        profileVaults.push({ name: vault.name, access: item.access });
+      }
+      if (new Set(profileVaults.map((item) => item.name)).size !== profileVaults.length) throw new Error('Choose each vault only once.');
+      const allowedOperations = new Set(['search', 'read_note', 'read_session', 'propose_note']);
+      const rawAgents = Array.isArray(b.agent_access) ? b.agent_access : [];
+      const agentIds = new Set();
+      const agentAccess = rawAgents.map((entry) => {
+        const agent = cfg.ai_agents.find((item) => item.id === entry?.agent_id && !item.revoked);
+        const operations = Array.isArray(entry?.operations) ? [...new Set(entry.operations)] : [];
+        if (!agent || agentIds.has(agent.id) || !operations.length || operations.some((operation) => !allowedOperations.has(operation))) throw new Error('Choose active AI agents and at least one supported permission for each.');
+        if (operations.includes('propose_note') && profileVaults.some((vault) => vault.access !== 'propose')) throw new Error('Choose propose access for every profile vault before granting an AI permission to propose notes.');
+        agentIds.add(agent.id);
+        const access = operations.includes('propose_note') ? 'propose' : 'read';
+        return { agent_id: agent.id, vaults: profileVaults.map(({ name }) => ({ name, access, operations })) };
+      });
+      const memory = b.memory_policy || {};
+      const memory_policy = Object.fromEntries(['working', 'semantic', 'procedural', 'episodic'].map((key) => [key, memory[key] === true]));
+      const allowed_actions = [...new Set(agentAccess.flatMap((entry) => entry.vaults.flatMap((vault) => vault.operations)))];
+      const profile = {
+        id: `${name.toLowerCase().replace(/[^a-z0-9]+/g, '_').replace(/^_|_$/g, '').slice(0, 48) || 'twin'}_${randomBytes(3).toString('hex')}`,
+        name, mode, owner, vaults: profileVaults,
+        source_policy: { private_default: true, provenance_required: true, session_capture: 'metadata-only' },
+        memory_policy, allowed_actions, agent_access: agentAccess,
+      };
+      const next = normalize({ ...cfg, twin_profiles: [...cfg.twin_profiles, profile] });
+      const errors = validate(next);
+      if (errors.length) throw new Error(`This Twin could not be saved: ${errors[0]}`);
+      await saveConfig(next, file);
+      return { ok: true, profile: twinProfileStatus(next).profiles.find((item) => item.id === profile.id) };
     },
     'POST /api/github/share-candidates': async (b) => {
       const cfg = await loadConfig(file);
