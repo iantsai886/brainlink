@@ -4,6 +4,16 @@ const ENTITY_TYPES = new Set(['person', 'team', 'workflow', 'dataset', 'artifact
 const PREDICATES = new Set(['owned_by', 'runs', 'consumes', 'produces', 'depends_on', 'part_of', 'assigned_to', 'informed_by']);
 const SCOPES = new Set(['personal', 'organisation', 'client']);
 const ID = /^[a-z][a-z0-9._:-]{1,127}$/;
+const DISCOVERY_RULES = [
+  { predicate: 'owned_by', targets: ['team', 'person'], phrase: /\b(?:owned by|owner is|belongs to)\b/i },
+  { predicate: 'runs', targets: ['workflow'], phrase: /\b(?:runs|operates|executes)\b/i },
+  { predicate: 'consumes', targets: ['dataset', 'artifact'], phrase: /\b(?:consumes|uses|reads|takes in)\b/i },
+  { predicate: 'produces', targets: ['dataset', 'artifact'], phrase: /\b(?:produces|creates|outputs|generates)\b/i },
+  { predicate: 'depends_on', targets: ['workflow', 'dataset', 'project'], phrase: /\b(?:depends on|requires|relies on)\b/i },
+  { predicate: 'part_of', targets: ['team', 'project'], phrase: /\b(?:part of|belongs to)\b/i },
+  { predicate: 'assigned_to', targets: ['person', 'team'], phrase: /\bassigned to\b/i },
+  { predicate: 'informed_by', targets: ['artifact', 'dataset', 'concept'], phrase: /\b(?:informed by|based on|derived from)\b/i },
+];
 
 function scalar(value) {
   const s = String(value || '').trim();
@@ -116,6 +126,47 @@ export function deriveProposedTypedRelations(notes) {
   return proposals;
 }
 
+// Deterministic, review-only discovery. It reads only the already-authorized vault index passed
+// by the caller, requires a typed current source and a unique same-scope target, and stores one
+// short sentence as evidence. It never creates or verifies a relationship by itself.
+export function discoverTypedRelationshipCandidates(notes, sourceIndex, { limit = 12 } = {}) {
+  const sourceNote = notes[sourceIndex];
+  if (!sourceNote || sourceNote.private || sourceNote.generated) return [];
+  const sourceMeta = parseRecord(sourceNote.raw).meta;
+  if (!ENTITY_TYPES.has(sourceMeta.type) || !ID.test(sourceMeta.id || '') || !SCOPES.has(sourceMeta.scope) || sourceMeta.status !== 'current') return [];
+  const entities = typedEntityMetadataMap(notes);
+  const body = String(sourceNote.body || '');
+  if (entities.size > 5000 || body.length > 200_000) return [];
+  const positions = new Map(notes.map((note, index) => [note, index]));
+  if (!entities.has(sourceNote)) return [];
+  const existing = new Set(parseRecord(sourceNote.raw).relations.map((r) => `${r.predicate}\0${r.target}`));
+  const paragraphs = body.split(/\r?\n/).flatMap((line) => line.split(/(?<=[.!?])\s+/u));
+  const found = new Map();
+  for (const [targetNote, targetMeta] of entities) {
+    if (targetNote === sourceNote || targetNote.private || targetNote.generated || targetMeta.scope !== sourceMeta.scope || !DISCOVERY_RULES.some((r) => r.targets.includes(targetMeta.type))) continue;
+    const title = targetNote.title || pathTitle(targetNote.rel);
+    if (!title) continue;
+    const escaped = title.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+    const mention = new RegExp(`(^|[^\\p{L}\\p{N}_])${escaped}(?=$|[^\\p{L}\\p{N}_])`, 'iu');
+    for (const sentence of paragraphs) {
+      const evidence = sentence.trim().replace(/^[-*#>\s]+/, '').replace(/\s+/g, ' ');
+      if (!evidence || evidence.length > 320 || !mention.test(evidence)) continue;
+      for (const rule of DISCOVERY_RULES) {
+        const key = `${rule.predicate}\0${targetMeta.entity_id}`;
+        if (!rule.targets.includes(targetMeta.type) || existing.has(key) || found.has(key)) continue;
+        const trigger = evidence.match(rule.phrase);
+        if (!trigger) continue;
+        const targetAt = evidence.search(mention);
+        if (targetAt < trigger.index) continue;
+        found.set(key, { target_id: targetMeta.entity_id, target_title: title, target_index: positions.get(targetNote), predicate: rule.predicate, evidence, confidence: 0.5 });
+      }
+    }
+  }
+  return [...found.values()].slice(0, Math.max(1, Math.min(30, Number(limit) || 12)));
+}
+
+function pathTitle(rel) { return String(rel || '').split(/[\\/]/).pop()?.replace(/\.md$/i, '') || ''; }
+
 // Change only the selected review marker and (when needed) the source record's status.
 // The caller must first revalidate the target and compare a content hash.
 export function approveTypedRelation(raw, relationIndex) {
@@ -123,9 +174,9 @@ export function approveTypedRelation(raw, relationIndex) {
   const match = String(raw || '').match(/^(\uFEFF?---[^\S\r\n]*\r?\n)([\s\S]*?)(\r?\n---[^\S\r\n]*(?:\r?\n|$))/);
   if (!match) throw new Error('This note has no valid frontmatter.');
   const lines = match[2].split(/\r?\n/);
-  const statusLine = lines.findIndex((line) => /^status:\s*(?:proposed|current)\s*$/.test(line));
+  const statusLine = lines.findIndex((line) => /^status:\s*["']?(?:proposed|current)["']?\s*$/.test(line));
   if (statusLine < 0) throw new Error('This record is not a reviewable typed entity.');
-  if (/^status:\s*proposed\s*$/.test(lines[statusLine])) lines[statusLine] = lines[statusLine].replace('proposed', 'current');
+  if (/^status:\s*["']?proposed["']?\s*$/.test(lines[statusLine])) lines[statusLine] = 'status: current';
   const section = lines.findIndex((line) => /^relations:\s*$/.test(line));
   if (section < 0) throw new Error('This note has no relationship suggestions.');
   const starts = [];
@@ -136,10 +187,39 @@ export function approveTypedRelation(raw, relationIndex) {
   if (start === undefined) throw new Error('The selected relationship no longer exists.');
   const end = starts[relationIndex + 1] ?? lines.findIndex((line, i) => i > start && /^[A-Za-z_][\w-]*:\s*/.test(line));
   const stop = end < 0 ? lines.length : end;
-  const reviewLine = lines.findIndex((line, i) => i > start && i < stop && /^\s{4}review:\s*proposed\s*$/.test(line));
+  const reviewLine = lines.findIndex((line, i) => i > start && i < stop && /^\s{4}review:\s*["']?proposed["']?\s*$/.test(line));
   if (reviewLine < 0) throw new Error('This relationship is no longer awaiting review.');
-  lines[reviewLine] = lines[reviewLine].replace('proposed', 'verified');
+  lines[reviewLine] = '    review: verified';
   return `${match[1]}${lines.join(raw.includes('\r\n') ? '\r\n' : '\n')}${match[3]}${String(raw).slice(match[0].length)}`;
+}
+
+export function appendTypedRelationProposal(raw, proposal) {
+  if (!PREDICATES.has(proposal?.predicate) || !ID.test(String(proposal?.target_id || '')) ||
+      typeof proposal?.evidence !== 'string' || !proposal.evidence.trim() || proposal.evidence.length > 320 ||
+      !Number.isFinite(proposal.confidence) || proposal.confidence < 0 || proposal.confidence > 1) throw new Error('Invalid relationship suggestion.');
+  const parsed = parseRecord(raw);
+  if (!ENTITY_TYPES.has(parsed.meta.type) || !ID.test(parsed.meta.id || '') || !SCOPES.has(parsed.meta.scope) || parsed.meta.status !== 'current') throw new Error('This typed record cannot receive a relationship suggestion.');
+  if (parsed.relations.some((r) => r.predicate === proposal.predicate && r.target === proposal.target_id)) throw new Error('This relationship is already recorded.');
+  const match = String(raw || '').match(/^(\uFEFF?---[^\S\r\n]*\r?\n)([\s\S]*?)(\r?\n---[^\S\r\n]*(?:\r?\n|$))/);
+  if (!match) throw new Error('This note has no valid frontmatter.');
+  const newline = raw.includes('\r\n') ? '\r\n' : '\n';
+  const lines = match[2].split(/\r?\n/);
+  const section = lines.findIndex((line) => /^relations:\s*$/.test(line));
+  const quote = (s) => JSON.stringify(String(s));
+  const relationLines = [
+    `  - predicate: ${proposal.predicate}`,
+    `    target: ${proposal.target_id}`,
+    '    review: proposed',
+    `    source: ${quote(proposal.evidence.trim())}`,
+    `    confidence: ${proposal.confidence}`,
+  ];
+  if (section < 0) lines.push('relations:', ...relationLines);
+  else {
+    let insert = section + 1;
+    while (insert < lines.length && (/^\s{2}-\s+/.test(lines[insert]) || /^\s{4}[A-Za-z_][\w-]*:\s*/.test(lines[insert]) || !lines[insert].trim())) insert++;
+    lines.splice(insert, 0, ...relationLines);
+  }
+  return `${match[1]}${lines.join(newline)}${match[3]}${String(raw).slice(match[0].length)}`;
 }
 
 export const TYPED_ENTITY_TYPES = [...ENTITY_TYPES];

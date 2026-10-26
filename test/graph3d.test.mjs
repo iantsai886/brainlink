@@ -195,6 +195,42 @@ test('typed relationship review requires a current note revision and adds only t
   } finally { s.server.close(); }
 });
 
+test('graph finds text-backed relationship candidates, saves them unapproved, then requires separate approval', async () => {
+  const home = await tmp('graph3d-discovery-home');
+  const vaultPath = path.join(home, 'vault');
+  await mkdir(vaultPath, { recursive: true });
+  const env = { BRAINLINK_HOME: path.join(home, 'app'), BRAINLINK_SEMANTIC: '0' };
+  const s = await startSetup({ env, home, os: 'linux', port: 0, useCli: false });
+  const base = `http://127.0.0.1:${s.port}`;
+  const api = (p, body) => fetch(base + p, { method: 'POST', headers: { 'X-BrainLink-Token': s.token, 'Content-Type': 'application/json' }, body: JSON.stringify(body || {}) }).then((r) => r.json());
+  try {
+    const added = await api('/api/vault', { path: vaultPath, name: 'Main', pack: 'simple', scaffold: false });
+    assert.equal(added.ok, true, JSON.stringify(added));
+    await new Promise((resolve) => setTimeout(resolve, 350));
+    const fs = await import('node:fs/promises');
+    await fs.writeFile(path.join(vaultPath, 'Workflow.md'), '---\ntype: workflow\nid: workflow.questions\nscope: organisation\nstatus: current\n---\n# Question workflow\n\nConsumes [[Question data]] every morning.\n');
+    await fs.writeFile(path.join(vaultPath, 'Question data.md'), '---\ntype: dataset\nid: dataset.questions\nscope: organisation\nstatus: current\n---\n# Question data\n');
+    await fs.writeFile(path.join(vaultPath, 'Private data.md'), '---\nprivate: true\ntype: dataset\nid: dataset.private\nscope: organisation\nstatus: current\n---\n# Private data\nPrivate canary.\n');
+    const detail = await api('/api/graph3d/note', { vault: 'Main', path: 'Workflow.md' });
+    assert.equal(detail.discovered_relationships.length, 1);
+    assert.equal(detail.discovered_relationships[0].target_id, 'dataset.questions');
+    assert.equal(JSON.stringify(detail), JSON.stringify(detail).replace(/dataset\.private|Private canary/, ''));
+    const candidate = detail.discovered_relationships[0];
+    const body = { vault: 'Main', path: 'Workflow.md', etag: detail.etag, target_id: candidate.target_id, predicate: candidate.predicate, evidence: candidate.evidence };
+    const stale = await api('/api/graph3d/relationship/propose', { ...body, etag: 'stale' });
+    assert.match(stale.error, /changed since it was opened/i);
+    const saved = await api('/api/graph3d/relationship/propose', body);
+    assert.equal(saved.ok, true, JSON.stringify(saved));
+    assert.equal((await api('/api/graph3d', {})).links.some((link) => link.predicate === 'consumes'), false, 'saving a suggestion must not create a verified edge');
+    const pending = await api('/api/graph3d/note', { vault: 'Main', path: 'Workflow.md' });
+    assert.equal(pending.proposed_relationships.length, 1);
+    assert.equal(pending.discovered_relationships.length, 0);
+    const approved = await api('/api/graph3d/relationship/approve', { vault: 'Main', path: 'Workflow.md', etag: pending.etag, relation_index: 0 });
+    assert.equal(approved.ok, true, JSON.stringify(approved));
+    assert.ok((await api('/api/graph3d', {})).links.some((link) => link.predicate === 'consumes'));
+  } finally { s.server.close(); }
+});
+
 // ---- Frontend (ui/notes3d.js, ui/notes3d.css): click-to-open, readable labels, sizing ----
 // No browser is available in this suite, so these are structural checks on the actual shipped
 // code (not a DOM/visual test) guarding the specific regressions this item fixed: clicking a node
@@ -226,6 +262,8 @@ test('graph UI exposes a confirmation-gated action for reviewing a suggested rel
   assert.match(src, /data-review-relation/);
   assert.match(src, /window\.confirm\(tr\('notes3d\.approveConfirm'\)\)/);
   assert.match(src, /api\('\/api\/graph3d\/relationship\/approve'/);
+  assert.match(src, /api\('\/api\/graph3d\/relationship\/propose'/);
+  assert.match(src, /notes3d\.saveSuggestionConfirm/);
 });
 
 test('ui/notes3d.js: hover label is escaped, and the selected node is visibly highlighted', async () => {

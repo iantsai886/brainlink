@@ -6,7 +6,7 @@ import path from 'node:path';
 import { normalize } from '../src/config.mjs';
 import { createContext, loadVault } from '../src/core.mjs';
 import { buildGraph3D, noteDetail3D } from '../src/graph3d.mjs';
-import { deriveTypedRelations } from '../src/typed-graph.mjs';
+import { deriveTypedRelations, discoverTypedRelationshipCandidates, appendTypedRelationProposal, approveTypedRelation } from '../src/typed-graph.mjs';
 import { proposeNote } from '../src/writes.mjs';
 import { createMcp } from '../src/server.mjs';
 
@@ -86,6 +86,35 @@ test('proposed relationship list shows only valid same-scope candidates targetin
   ];
   const { deriveProposedTypedRelations } = await import('../src/typed-graph.mjs');
   assert.deepEqual(deriveProposedTypedRelations(notes).map(({ source, target, relation_index, predicate }) => [source, target, relation_index, predicate]), [[1, 0, 0, 'runs']]);
+});
+
+test('deterministic relationship discovery proposes only explicit same-scope text patterns', () => {
+  const notes = [
+    { rel: 'Workflow.md', title: 'Question workflow', body: 'Consumes [[Question data]] every morning. May mention Client secret dataset.', raw: '---\ntype: workflow\nid: workflow.questions\nscope: organisation\nstatus: current\n---\n' },
+    { rel: 'Question data.md', title: 'Question data', body: 'Approved sample.', raw: '---\ntype: dataset\nid: dataset.questions\nscope: organisation\nstatus: current\n---\n' },
+    { rel: 'Client secret dataset.md', title: 'Client secret dataset', body: 'private fixture', private: true, raw: '---\ntype: dataset\nid: dataset.secret\nscope: organisation\nstatus: current\n---\n' },
+    { rel: 'Other dataset.md', title: 'Other dataset', body: '', raw: '---\ntype: dataset\nid: dataset.other\nscope: client\nstatus: current\n---\n' },
+  ];
+  const candidates = discoverTypedRelationshipCandidates(notes, 0);
+  assert.deepEqual(candidates.map(({ predicate, target_id, evidence }) => [predicate, target_id, evidence]), [['consumes', 'dataset.questions', 'Consumes [[Question data]] every morning.']]);
+});
+
+test('automatic relationship candidates are saved as proposed YAML and never verified automatically', () => {
+  const raw = '---\ntype: workflow\nid: workflow.questions\nscope: organisation\nstatus: current\n---\n# Questions\n';
+  const saved = appendTypedRelationProposal(raw, { predicate: 'consumes', target_id: 'dataset.questions', evidence: 'Consumes Question data.', confidence: 0.72 });
+  assert.match(saved, /^status: current$/m);
+  assert.match(saved, /^    review: proposed$/m);
+  assert.match(saved, /^    source: "Consumes Question data\."$/m);
+  assert.match(saved, /^    confidence: 0\.72$/m);
+  assert.throws(() => appendTypedRelationProposal(saved, { predicate: 'consumes', target_id: 'dataset.questions', evidence: 'Consumes Question data.', confidence: 0.72 }), /already recorded/i);
+});
+
+test('relationship review accepts valid quoted YAML status markers without changing unrelated frontmatter', () => {
+  const raw = '---\ntype: workflow\nid: workflow.questions\nscope: organisation\nstatus: "proposed"\ncustom: keep\nrelations:\n  - predicate: consumes\n    target: dataset.questions\n    review: "proposed"\n    source: evidence\n    confidence: 0.8\n---\nBody\n';
+  const saved = approveTypedRelation(raw, 0);
+  assert.match(saved, /^status: current$/m);
+  assert.match(saved, /^custom: keep$/m);
+  assert.match(saved, /^    review: verified$/m);
 });
 
 test('typed relationship proposals reject invalid IDs, predicates, evidence and cross-profile scopes', async () => {

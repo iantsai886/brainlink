@@ -4,7 +4,7 @@
 // this module adds the one rule loadVault doesn't already enforce: private vaults and
 // frontmatter-flagged private notes are dropped before a single node is built.
 import { loadVault, summarize } from './core.mjs';
-import { typedEntityMetadataMap, deriveProposedTypedRelations } from './typed-graph.mjs';
+import { typedEntityMetadataMap, deriveProposedTypedRelations, discoverTypedRelationshipCandidates } from './typed-graph.mjs';
 
 // n.private is already computed once, at index-build time, by core.mjs's isPrivateMeta — reusing
 // it here (rather than re-deriving private-ness from n.meta.private with a second, independent
@@ -85,10 +85,11 @@ export async function noteDetail3D(ctx, vaultName, rel) {
     if (edge.source !== i || !visible(edge.target)) return [];
     return [{ relation_index: edge.relation_index, predicate: edge.predicate, evidence: edge.evidence, confidence: edge.confidence, note: summarize(index, edge.target) }];
   });
+  const discoveredRelationships = discoverTypedRelationshipCandidates(index.notes, i).map(({ target_index, ...candidate }) => ({ ...candidate, note: summarize(index, target_index) }));
   return {
     vault: vaultName, path: n.rel, title: n.title, body: n.body, tags: [...n.tags],
     backlinks: [...index.backlinks[i]].filter(visible).map((j) => summarize(index, j)),
     outlinks: [...index.outlinks[i]].filter(visible).map((j) => summarize(index, j)),
-    relationships, proposed_relationships: proposedRelationships,
+    relationships, proposed_relationships: proposedRelationships, discovered_relationships: discoveredRelationships,
   };
 }

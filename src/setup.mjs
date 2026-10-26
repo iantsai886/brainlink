@@ -27,7 +27,7 @@ import { githubAssignmentProjection } from './sync/github-assignment.mjs';
 import { sessionsService } from './host.mjs';
 import { addAgent, renameAgent, removeAgent, revokeAgent, markConnected, findAgentByToken, publicAgent, localAgentSnippet, remoteAgentSnippet, generateAgentToken, hashToken } from './mcp-agents.mjs';
 import { buildGraph3D, noteDetail3D } from './graph3d.mjs';
-import { deriveProposedTypedRelations, approveTypedRelation } from './typed-graph.mjs';
+import { deriveProposedTypedRelations, discoverTypedRelationshipCandidates, appendTypedRelationProposal, approveTypedRelation } from './typed-graph.mjs';
 import { snapshotSettings, chooseSnapshot, suggestSnapshotFolder, clearSnapshot, startSnapshotWatcher, writeSnapshotOnce, loadSnapshotStatus, saveSnapshotStatus } from './snapshot.mjs';
 import { listHandoffs } from './writes.mjs';
 import { backupOnce, verifyBackup, restoreBackupToEmpty, loadBackupStatus, saveBackupStatus, pruneBackups, listVerifiedBackups } from './backup.mjs';
@@ -1184,6 +1184,30 @@ export async function startSetup(opts = {}) {
       const etag = createHash('sha256').update(raw).digest('hex');
       if (typeof b.etag !== 'string' || b.etag !== etag) throw new Error('This note changed since it was opened. Reload it before reviewing the relationship.');
       const next = approveTypedRelation(raw, relationIndex);
+      const tmp = `${full}.brainlink-${randomBytes(6).toString('hex')}.tmp`;
+      try { await writeFile(tmp, next, 'utf8'); await rename(tmp, full); }
+      catch (e) { try { await unlink(tmp); } catch {} throw e; }
+      return { ok: true, etag: createHash('sha256').update(next).digest('hex') };
+    },
+    'POST /api/graph3d/relationship/propose': async (b) => {
+      const cfg = await loadConfig(file);
+      const ctx = localContext(cfg, { ...env, BRAINLINK_SEMANTIC: '0' });
+      if (!b.vault || !ctx.enabled.includes(b.vault)) throw new Error('Unknown vault.');
+      const vault = ctx.byName.get(b.vault);
+      if (vault.private) throw new Error('Relationships in a private vault cannot be suggested in the shared graph.');
+      if (ctx.readOnly || vault.writes !== 'on') throw new Error('This vault does not allow relationship suggestions.');
+      const current = await readNote(ctx, b.vault, String(b.path || ''));
+      const index = await loadVault(ctx, b.vault);
+      const sourceIndex = index.byRel.get(current.path);
+      if (sourceIndex === undefined || index.notes[sourceIndex].generated) throw new Error('This record cannot receive a relationship suggestion.');
+      const candidates = discoverTypedRelationshipCandidates(index.notes, sourceIndex);
+      const candidate = candidates.find((item) => item.predicate === b.predicate && item.target_id === b.target_id && item.evidence === b.evidence);
+      if (!candidate) throw new Error('That connection is no longer a current suggestion. Reload the note and review it again.');
+      const full = safeJoin(vaultRoot(ctx, b.vault), current.path);
+      const raw = await readFile(full, 'utf8');
+      const etag = createHash('sha256').update(raw).digest('hex');
+      if (typeof b.etag !== 'string' || b.etag !== etag) throw new Error('This note changed since it was opened. Reload it before saving the suggestion.');
+      const next = appendTypedRelationProposal(raw, candidate);
       const tmp = `${full}.brainlink-${randomBytes(6).toString('hex')}.tmp`;
       try { await writeFile(tmp, next, 'utf8'); await rename(tmp, full); }
       catch (e) { try { await unlink(tmp); } catch {} throw e; }
