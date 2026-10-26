@@ -227,6 +227,12 @@ ol.todo li { padding-left: 4px; }
     <div class="row" style="margin-bottom:10px"><label class="muted" style="display:flex;flex-direction:row;gap:6px;align-items:center"><input type="checkbox" id="sess-private" style="width:auto"><span data-i18n="sessions.showPrivate"></span></label></div>
     <div id="session-hook-settings" class="cards"></div>
     <div id="session-end-cues" class="cards" aria-live="polite"></div>
+    <details class="card" style="margin-bottom:10px"><summary data-i18n="sessions.findFiled"></summary>
+      <p class="muted" data-i18n="sessions.findFiledHint"></p>
+      <div class="row"><label><span data-i18n="sessions.destination"></span><select id="filed-summary-vault"></select></label><button class="secondary" data-filed-list="1" data-i18n="sessions.searchFiled"></button></div>
+      <div id="filed-summaries-list" class="cards" aria-live="polite"></div>
+    </details>
+    <div id="filed-summary-editor" class="cards" style="margin-bottom:10px"></div>
     <div id="sessions-list" class="cards"></div>
     <div id="session-detail" style="margin-top:12px"></div>
   </section>
@@ -477,6 +483,7 @@ const $ = (id) => document.getElementById(id);
 const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 let S = null, pack = 'founder-os', editingTwinId = null;
 let activeFiledSummary = null;
+let filedSummaryRefs = [];
 let pendingSyncOnboarding = false; // set when a first-run vault pick just succeeded; cleared once the sync choice is saved
 let healthByClient = {}; // client id -> last /api/client-health (or /api/connect's health) result, kept across re-renders
 let pendingPresetClient = null;
@@ -582,9 +589,28 @@ function renderReady(r) {
 async function loadSessions() {
   loadSessionEndCues();
   loadSessionHookSettings();
+  $('filed-summary-vault').innerHTML = (S.vaults || []).filter((v) => v.exists).map((v) => `<option value="${esc(v.name)}">${esc(v.name)}${v.private ? ` (${esc(t('vault.private'))})` : ''}</option>`).join('');
   $('sessions-list').innerHTML = `<p class="skeleton">${esc(t('sessions.loading'))}</p>`;
   try { renderSessions((await api('POST', '/api/sessions', { include_private: $('sess-private').checked, limit: 20 })).sessions); }
   catch (e) { $('sessions-list').innerHTML = `<p class="error-box">${esc(t('sessions.loadError', { msg: e.message }))}</p>`; }
+}
+async function listFiledSummaries() {
+  const vault = $('filed-summary-vault').value;
+  if (!vault) { $('filed-summaries-list').innerHTML = `<p class="muted">${esc(t('sessions.noDestination'))}</p>`; return; }
+  $('filed-summaries-list').innerHTML = `<p class="skeleton">${esc(t('sessions.loading'))}</p>`;
+  try {
+    const result = await api('POST', '/api/sessions/filed-summaries', { vault });
+    filedSummaryRefs = result.summaries || [];
+    const rows = filedSummaryRefs.map((item, index) => `<div class="card"><b>${esc(item.title)}</b><span class="pill">${esc(t('sessions.proposed'))}</span><div class="muted">${esc(item.vault)} · ${esc(item.path)}</div><button class="link" data-filed-open="${index}">${esc(t('sessions.openFiled'))}</button></div>`).join('');
+    $('filed-summaries-list').innerHTML = `${rows || `<p class="muted">${esc(t('sessions.noFiledSummaries'))}</p>`}${result.truncated ? `<p class="muted">${esc(t('sessions.filedListLimit'))}</p>` : ''}`;
+  } catch (error) { $('filed-summaries-list').innerHTML = `<p class="error-box">${esc(error.message)}</p>`; }
+}
+async function showFiledSummaryEditor() {
+  if (!activeFiledSummary) throw new Error('Open a filed note first.');
+  const note = await api('POST', '/api/sessions/filed-summary', { ...activeFiledSummary, action: 'read' });
+  activeFiledSummary = { ...activeFiledSummary, etag: note.etag, status: 'proposed' };
+  $('filed-summary-editor').innerHTML = `<div class="card"><b>${esc(note.vault)} · ${esc(note.path)}</b><label>${esc(t('sessions.correctSummary'))}<textarea id="filed-summary-text" rows="8" maxlength="20000">${esc(note.summary)}</textarea></label><div class="row"><button class="primary" data-filed-save="1">${esc(t('sessions.saveCorrection'))}</button><button class="secondary" data-filed-withdraw="1">${esc(t('sessions.withdrawProposal'))}</button></div></div>`;
+  $('filed-summary-editor').scrollIntoView({ behavior: 'smooth', block: 'nearest' });
 }
 async function loadSessionEndCues() {
   try {
@@ -1295,13 +1321,16 @@ document.addEventListener('click', (e) => {
     document.querySelector('[data-file-confirm]').hidden = true;
     toast(t('sessions.savedPrivate', { path: result.path }));
     if (result.destination_rule_saved) toast(t('sessions.destinationRemembered'));
-    $('session-detail').insertAdjacentHTML('beforeend', `<div class="row" style="margin-top:8px"><button class="secondary" data-filed-edit="1">${esc(t('sessions.editFiledSummary'))}</button></div><div id="filed-summary-editor"></div>`);
+    $('filed-summary-editor').innerHTML = '';
+    $('session-detail').insertAdjacentHTML('beforeend', `<div class="row" style="margin-top:8px"><button class="secondary" data-filed-edit="1">${esc(t('sessions.editFiledSummary'))}</button></div>`);
   });
-  if (d.filedEdit) act(async () => {
-    if (!activeFiledSummary) throw new Error('Open the filed note from this session first.');
-    const note = await api('POST', '/api/sessions/filed-summary', { ...activeFiledSummary, action: 'read' });
-    activeFiledSummary = { ...activeFiledSummary, etag: note.etag, status: 'proposed' };
-    $('filed-summary-editor').innerHTML = `<div class="card"><label>${esc(t('sessions.correctSummary'))}<textarea id="filed-summary-text" rows="8" maxlength="20000">${esc(note.summary)}</textarea></label><div class="row"><button class="primary" data-filed-save="1">${esc(t('sessions.saveCorrection'))}</button><button class="secondary" data-filed-withdraw="1">${esc(t('sessions.withdrawProposal'))}</button></div></div>`;
+  if (d.filedEdit) act(showFiledSummaryEditor);
+  if (d.filedList) act(listFiledSummaries);
+  if (d.filedOpen !== undefined) act(async () => {
+    const item = filedSummaryRefs[Number(d.filedOpen)];
+    if (!item) throw new Error('That filed summary is no longer in the list. Search again.');
+    activeFiledSummary = item;
+    await showFiledSummaryEditor();
   });
   if (d.filedSave) act(async () => {
     if (!activeFiledSummary?.etag) throw new Error('Reload the filed summary before saving.');

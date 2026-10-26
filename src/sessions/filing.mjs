@@ -4,7 +4,7 @@ import { proposeNote } from '../writes.mjs';
 import { listSessionFilingFolders } from './folders.mjs';
 import { isPrivateMeta, parseFrontmatter, findSecrets, safeJoin, vaultRoot, isExcludedPath } from '../core.mjs';
 import { createHash, randomBytes } from 'node:crypto';
-import { lstat, readFile, writeFile, rename, unlink } from 'node:fs/promises';
+import { lstat, readFile, writeFile, rename, unlink, readdir } from 'node:fs/promises';
 import path from 'node:path';
 
 export function filingFields(session, vaultName, identity = {}, folder) {
@@ -83,6 +83,45 @@ async function openFiledEpisode(ctx, { vaultName, rel, sessionId, etag }) {
 export async function readFiledSessionSummary(ctx, input) {
   const opened = await openFiledEpisode(ctx, input);
   return { ok: true, vault: input.vaultName, path: input.rel, etag: opened.etag, summary: opened.summary };
+}
+
+export async function listFiledSessionSummaries(ctx, vaultName, { limit = 100 } = {}) {
+  if (!ctx.enabled.includes(vaultName)) throw new Error('Choose an enabled vault.');
+  const root = vaultRoot(ctx, vaultName), results = [];
+  let scanned = 0, truncated = false;
+  async function visit(dir, rel, depth) {
+    if (depth > 8 || results.length >= limit || scanned >= 20000) { truncated = true; return; }
+    let entries;
+    try { entries = await readdir(dir, { withFileTypes: true }); } catch { return; }
+    entries.sort((a, b) => a.name.localeCompare(b.name));
+    for (const entry of entries) {
+      if (entry.name.startsWith('.') || ['node_modules', '.git', '.obsidian', '.trash'].includes(entry.name)) continue;
+      const child = rel ? `${rel}/${entry.name}` : entry.name;
+      const full = safeJoin(root, child);
+      if (entry.isDirectory()) {
+        if (await isExcludedPath(root, child)) continue;
+        await visit(full, child, depth + 1);
+        if (results.length >= limit || scanned >= 20000) { truncated = true; return; }
+      } else if (entry.isFile() && entry.name.toLowerCase().endsWith('.md')) {
+        scanned++;
+        if (await isExcludedPath(root, child)) continue;
+        const info = await lstat(full);
+        if (info.isSymbolicLink() || !info.isFile()) continue;
+        const raw = await readFile(full, 'utf8');
+        const meta = parseFrontmatter(raw).meta;
+        const source = metadataValue(meta, 'source');
+        const sessionId = source.startsWith('BrainLink session ') ? source.slice('BrainLink session '.length) : '';
+        if (!sessionId || !/^s_[a-f0-9]{16}$/i.test(sessionId)
+          || metadataValue(meta, 'type').toLowerCase() !== 'episode'
+          || metadataValue(meta, 'status').toLowerCase() !== 'proposed'
+          || !isPrivateMeta(meta)) continue;
+        results.push({ vault: vaultName, path: child, sessionId, title: entry.name.replace(/\.md$/i, ''), status: 'proposed' });
+        if (results.length >= limit) { truncated = true; return; }
+      }
+    }
+  }
+  await visit(root, '', 0);
+  return { summaries: results, truncated };
 }
 
 export async function updateFiledSessionSummary(ctx, { vaultName, rel, sessionId, etag, action, summary, now = new Date() }) {

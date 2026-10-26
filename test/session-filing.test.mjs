@@ -162,6 +162,9 @@ test('local filing API requires its token and writes a private note only after c
   const manageFiled = (body, token = app.token) => fetch(`http://127.0.0.1:${app.port}/api/sessions/filed-summary`, {
     method: 'POST', headers: { 'Content-Type': 'application/json', 'X-BrainLink-Token': token }, body: JSON.stringify(body),
   });
+  const listFiled = (body, token = app.token) => fetch(`http://127.0.0.1:${app.port}/api/sessions/filed-summaries`, {
+    method: 'POST', headers: { 'Content-Type': 'application/json', 'X-BrainLink-Token': token }, body: JSON.stringify(body),
+  });
   const recommend = (id) => fetch(`http://127.0.0.1:${app.port}/api/sessions/recommend`, {
     method: 'POST', headers: { 'Content-Type': 'application/json', 'X-BrainLink-Token': app.token }, body: JSON.stringify({ id }),
   }).then((r) => r.json());
@@ -184,6 +187,12 @@ test('local filing API requires its token and writes a private note only after c
     const rel = written.path.slice('Company/'.length);
     const file = path.join(vault, ...rel.split('/'));
     assert.match(await readFile(file, 'utf8'), /private: true/);
+    assert.equal((await listFiled({ vault: 'Company' }, 'wrong')).status, 401);
+    const companyFiled = await (await listFiled({ vault: 'Company' })).json();
+    assert.equal(companyFiled.summaries.length, 1);
+    assert.equal(companyFiled.summaries[0].sessionId, saved.id);
+    assert.equal('summary' in companyFiled.summaries[0], false, 'list metadata does not include the private summary text');
+    assert.equal((await (await listFiled({ vault: 'Personal' })).json()).summaries.length, 0, 'vault selection prevents cross-vault results');
     const filedRef = { sessionId: saved.id, vault: 'Company', path: rel };
     assert.equal((await manageFiled({ ...filedRef, action: 'read' }, 'wrong')).status, 401);
     const opened = await (await manageFiled({ ...filedRef, action: 'read' })).json();
@@ -205,6 +214,7 @@ test('local filing API requires its token and writes a private note only after c
     assert.match(withdrawnRaw, /status: withdrawn/);
     assert.match(withdrawnRaw, /Proposal withdrawn by user/);
     assert.match(withdrawnRaw, /Corrected made-up product decision/);
+    assert.equal((await (await listFiled({ vault: 'Company' })).json()).summaries.length, 0, 'withdrawn proposals leave the active review list');
     assert.deepEqual(await recommend(next.id), { vault: 'Company', reason: 'Suggested from your saved choice for this exact project.', project: 'fictional-project', remember_available: true });
     const folderSuggestion = await folders(next.id, 'Company');
     assert.equal(folderSuggestion.suggested_folder, 'Projects/fictional-project');
