@@ -896,7 +896,10 @@ export async function startSetup(opts = {}) {
   const routes = {
     'GET /api/state': () => state(),
     'GET /api/rsi': async () => ({ ideas: await rsiLedger.list() }),
-    'GET /api/rsi/export': async () => ({ schema: 1, exported_at: new Date().toISOString(), ideas: await rsiLedger.list() }),
+    'GET /api/rsi/export': async () => {
+      const record = { schema: 1, exported_at: new Date().toISOString(), ideas: await rsiLedger.list() };
+      return { ...record, sha256: createHash('sha256').update(JSON.stringify(record)).digest('hex') };
+    },
     'POST /api/rsi/observations/analyze': async () => ({ report: analyzeActivitySignals(await readActivity(env, 20000)) }),
     'GET /api/rsi/experiments': async () => ({ suites: rsiExperiments.suites() }),
     'POST /api/rsi/experiments/run': async (b) => {

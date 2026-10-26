@@ -1,5 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
+import { createHash } from 'node:crypto';
 import { mkdtemp, mkdir, readFile, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
@@ -456,6 +457,8 @@ test('Setup exposes discovery only through authenticated local APIs and runs the
     assert.ok(exported.exported_at);
     assert.equal(exported.ideas[0].id, ideas.ideas[0].id);
     assert.equal(exported.ideas[0].discovery.source, 'arxiv');
+    const { sha256, ...unsignedExport } = exported;
+    assert.equal(sha256, createHash('sha256').update(JSON.stringify(unsignedExport)).digest('hex'), 'export has a verifiable integrity checksum');
     let freshness;
     for (let attempt = 0; attempt < 50 && !freshness; attempt++) {
       const response = await post('/api/rsi/discovery/refresh-source', { idea_id: ideas.ideas[0].id });
