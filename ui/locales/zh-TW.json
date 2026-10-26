@@ -302,7 +302,7 @@
   "sync.status.already-running": "同步已在執行",
   "github.title": "GitHub 共用知識 · 發佈前確認",
   "github.hint": "將選取且可見的筆記，與現有的本機 GitHub 複本進行預覽。本機提交與推送到 GitHub 都需要分別確認。",
-  "github.autoHint": "啟用後，BrainLink 會依此 Twin 核准的資料夾雙向同步安全變更。排程同步只會在 BrainLink 開啟時執行。若要在登入後持續執行，請到備份設定開啟「登入時在背景啟動 BrainLink」。遇到衝突會暫停，不會默默覆寫。首次執行可能會把核准的筆記發布到 GitHub。",
+  "github.autoHint": "啟用後，BrainLink 會依此 Twin 核准的資料夾雙向同步安全變更。排程同步需要 BrainLink 背景程序持續執行；關閉這個瀏覽器分頁不會停止它。若要在登入後啟動 BrainLink，請到備份設定開啟「登入時在背景啟動 BrainLink」。遇到衝突會暫停，不會默默覆寫。首次執行可能會把核准的筆記發布到 GitHub。",
   "github.autoInterval": "檢查間隔（小時）",
   "github.autoEnabled": "自動同步此 Twin 核准的筆記",
   "github.autoRun": "立即同步",

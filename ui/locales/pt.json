@@ -302,7 +302,7 @@
   "sync.status.already-running": "já está em andamento",
   "github.title": "Conhecimento partilhado no GitHub · rever antes de publicar",
   "github.hint": "Pré-visualize notas visíveis selecionadas num clone local existente do GitHub. A confirmação local e o envio ao GitHub exigem confirmações separadas.",
-  "github.autoHint": "Depois de ativar, o BrainLink sincroniza alterações seguras nas pastas aprovadas deste Twin. A sincronização programada só funciona enquanto o BrainLink estiver aberto. Para mantê-lo em execução após iniciar sessão, ative “Iniciar o BrainLink em segundo plano ao entrar” nas configurações de backup. Conflitos pausam a execução; nenhuma nota é sobrescrita em silêncio. A primeira execução pode publicar notas aprovadas no GitHub.",
+  "github.autoHint": "Depois de ativar, o BrainLink sincroniza alterações seguras nas pastas aprovadas deste Twin. A sincronização programada exige que o processo em segundo plano do BrainLink esteja ativo; fechar esta aba do navegador não o interrompe. Para iniciar o BrainLink após entrar no computador, ative “Iniciar o BrainLink em segundo plano ao entrar” nas configurações de backup. Conflitos pausam a execução; nenhuma nota é sobrescrita em silêncio. A primeira execução pode publicar notas aprovadas no GitHub.",
   "github.autoInterval": "Verificar a cada (horas)",
   "github.autoEnabled": "Sincronizar automaticamente as notas aprovadas deste Twin",
   "github.autoRun": "Sincronizar agora",
