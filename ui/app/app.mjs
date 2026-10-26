@@ -21,8 +21,7 @@ export async function startApp(root, api) {
   const onHash=()=>{const route=globalThis.location?.hash.slice(1);if(route!==ui.get().route){if(!notes.guard()){globalThis.location.hash='#'+ui.get().route;return;}ui.set({route:routes.includes(route)?route:'connect'});if(route==='graph')graph.load();if(route==='settings')settings.load();}};
   const onBeforeUnload=e=>{if(notes.get().dirty){e.preventDefault();e.returnValue='';}};
   const onKey=e=>{if((e.ctrlKey||e.metaKey)&&e.key.toLowerCase()==='s'&&ui.get().route==='notes'){e.preventDefault();notes.save();}};
-  const stopVaultChanges=api.onVaultChange?.(async()=>{const current=notes.get();await Promise.all([notes.load(),graph.load()]);if(current.note&&!current.dirty)await notes.open(current.note.id);});
   globalThis.addEventListener?.('hashchange',onHash);globalThis.addEventListener?.('beforeunload',onBeforeUnload);globalThis.addEventListener?.('keydown',onKey);
   await Promise.all([conn.refresh(),sess.load(),notes.load(),settings.load(),settings.loadTheme(),graph.load()]);render();
-  return {api,ui,hooks:{conn,sess,srch,notes,settings,graph},actions,render,dispose:()=>{cleanupGraph();stopVaultChanges?.();globalThis.removeEventListener?.('hashchange',onHash);globalThis.removeEventListener?.('beforeunload',onBeforeUnload);globalThis.removeEventListener?.('keydown',onKey);}};
+  return {api,ui,hooks:{conn,sess,srch,notes,settings,graph},actions,render,dispose:()=>{cleanupGraph();globalThis.removeEventListener?.('hashchange',onHash);globalThis.removeEventListener?.('beforeunload',onBeforeUnload);globalThis.removeEventListener?.('keydown',onKey);}};
 }

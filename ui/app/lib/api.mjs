@@ -34,7 +34,6 @@ export function createApi({ store, services = {}, access = {} }) {
   }
   return {
     store, services, access, vaults,
-    onVaultChange: (fn) => typeof access.onVaultChange === 'function' ? access.onVaultChange(fn) : () => {},
     detect: () => call('detect'), connect: id => call('connect', id), test: id => call('test', id), disconnect: id => call('disconnect', id),
     listSessions: sessions, readSession: id => store.readSession(id, opts({ limit: 100 })), setPrivate,
     search: async (q, filters = {}) => {

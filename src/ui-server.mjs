@@ -27,9 +27,7 @@ function proxy(name, overrides = {}) { return new Proxy({ ...overrides }, { get(
 const vaults = ${noInject(JSON.stringify(vaults))};
 const store = proxy('store', { vaults: () => vaults });
 const prefs = { get: (k) => rpc('prefs', 'get', [k]), set: (k, v) => rpc('prefs', 'set', [k, v]) };
-const events = new EventSource('/api/events?t=' + encodeURIComponent(T));
-const onVaultChange = (fn) => { events.addEventListener('vault-refresh', fn); return () => events.removeEventListener('vault-refresh', fn); };
-globalThis.brainlinkHost = { store, services: { connectors: proxy('connectors'), settings: proxy('settings') }, access: { prefs, onVaultChange } };
+globalThis.brainlinkHost = { store, services: { connectors: proxy('connectors'), settings: proxy('settings') }, access: { prefs } };
 import('/app/app.mjs').then(({ startApp }) => import('/app/lib/api.mjs').then(({ createApi }) => startApp(document.getElementById('app'), createApi(globalThis.brainlinkHost))));
 `.trim();
 }
@@ -51,10 +49,6 @@ export async function serveUi({ host, port = 0, token, openUrl } = {}) {
   const prefs = new Map(); // theme etc.; per-process only, not persisted across launches
   const targets = { store: host.store, connectors: host.services?.connectors || {}, settings: host.services?.settings || {},
     prefs: { async get(k) { return prefs.get(k); }, async set(k, v) { prefs.set(k, v); return true; } } };
-  const eventClients = new Set();
-  const watcher = host.store.watchFiles?.(() => {
-    for (const res of eventClients) { try { res.write('event: vault-refresh\ndata: {}\n\n'); } catch { eventClients.delete(res); } }
-  });
 
   const server = createServer(async (req, res) => {
     const host_ = req.headers.host || '';
@@ -67,14 +61,6 @@ export async function serveUi({ host, port = 0, token, openUrl } = {}) {
     if (req.method === 'GET' && url.pathname === '/boot.js') {
       const vaults = host.store.vaults();
       res.writeHead(200, { 'Content-Type': 'text/javascript; charset=utf-8', 'Cache-Control': 'no-store' }).end(bootScript(vaults));
-      return;
-    }
-    if (req.method === 'GET' && url.pathname === '/api/events') {
-      const given = Buffer.from(url.searchParams.get('t') || ''); const want = Buffer.from(token);
-      if (given.length !== want.length || !timingSafeEqual(given, want)) { res.writeHead(401).end(); return; }
-      res.writeHead(200, { 'Content-Type': 'text/event-stream; charset=utf-8', 'Cache-Control': 'no-store', Connection: 'keep-alive', 'X-Accel-Buffering': 'no' });
-      res.write(': connected\n\n'); eventClients.add(res);
-      res.on('close', () => eventClients.delete(res));
       return;
     }
     if (req.method === 'GET' && url.pathname.startsWith('/app/')) {
@@ -96,7 +82,6 @@ export async function serveUi({ host, port = 0, token, openUrl } = {}) {
     try { json(res, 200, { result: await target[call.method](...(call.args || [])) }); }
     catch (e) { json(res, 400, { error: e.message || String(e), code: e.code }); }
   });
-  server.on('close', () => { watcher?.stop(); for (const res of eventClients) res.end(); eventClients.clear(); });
   await new Promise((resolve, reject) => { server.once('error', reject); server.listen(port, '127.0.0.1', resolve); });
   port = server.address().port;
   const url = `http://127.0.0.1:${port}/?t=${token}`;
