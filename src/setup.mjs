@@ -27,6 +27,7 @@ import { githubAssignmentProjection } from './sync/github-assignment.mjs';
 import { runGitHubAutoSync } from './sync/github-auto-sync.mjs';
 import { sessionsService } from './host.mjs';
 import { addAgent, renameAgent, removeAgent, revokeAgent, markConnected, findAgentByToken, publicAgent, localAgentSnippet, remoteAgentSnippet, generateAgentToken, hashToken } from './mcp-agents.mjs';
+import { analyzeActivitySignals } from './rsi-observations.mjs';
 import { buildGraph3D, noteDetail3D, listProposedTypedRelations } from './graph3d.mjs';
 import { deriveProposedTypedRelations, discoverTypedRelationshipCandidates, appendTypedRelationProposal, approveTypedRelation } from './typed-graph.mjs';
 import { snapshotSettings, chooseSnapshot, suggestSnapshotFolder, clearSnapshot, startSnapshotWatcher, writeSnapshotOnce, loadSnapshotStatus, saveSnapshotStatus } from './snapshot.mjs';
@@ -891,6 +892,7 @@ export async function startSetup(opts = {}) {
   const routes = {
     'GET /api/state': () => state(),
     'GET /api/rsi': async () => ({ ideas: await rsiLedger.list() }),
+    'POST /api/rsi/observations/analyze': async () => ({ report: analyzeActivitySignals(await readActivity(env, 20000)) }),
     'GET /api/rsi/experiments': async () => ({ suites: rsiExperiments.suites() }),
     'POST /api/rsi/experiments/run': async (b) => {
       const ideas = await rsiLedger.list();

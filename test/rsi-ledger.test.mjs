@@ -5,6 +5,7 @@ import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { createRsiLedger } from '../src/rsi-ledger.mjs';
 import { startSetup } from '../src/setup.mjs';
+import { logActivity } from '../src/runtime.mjs';
 
 const temp = (prefix) => mkdtemp(path.join(tmpdir(), 'brainlink-rsi-' + prefix + '-'));
 const validIdea = { title: 'Improve handoff context', user_problem: 'Agents repeat searches after handoff.', hypothesis: 'A source-linked compact packet will reduce redundant reads without reducing task success.', memory_types: ['working', 'episodic'], sources: [{ url: 'https://example.org/research', accessed_at: '2026-10-25', claim: 'Study motivates a test, not proof for BrainLink.' }] };
@@ -143,10 +144,13 @@ test('RSI Setup panel has unique ids and one render/submit path', async () => {
   assert.equal((html.match(/id="rsi-idea-form"/g) || []).length, 1);
   assert.match(html, /data-rsi-field="promotion_commit_sha"/);
   assert.match(html, /data-rsi-monitor-submit/);
+  assert.match(html, /id="rsi-observe-run"/);
+  assert.match(html, /\/api\/rsi\/observations\/analyze/);
   for (const locale of ['en', 'zh-TW', 'pt']) {
     const catalog = JSON.parse(await readFile(new URL(`../ui/locales/${locale}.json`, import.meta.url), 'utf8'));
     assert.ok(catalog['rsi.promotionCommit'], `${locale} promotion commit label`);
     assert.ok(catalog['rsi.promotionCommitHint'], `${locale} promotion commit limitation`);
+    for (const key of ['rsi.observe.title', 'rsi.observe.hint', 'rsi.observe.run', 'rsi.observe.window', 'rsi.observe.stats', 'rsi.observe.noRate', 'rsi.observe.findings', 'rsi.observe.noFindings', 'rsi.observe.generated', 'rsi.observe.group.retrieval', 'rsi.observe.group.sessions', 'rsi.observe.group.filing', 'rsi.observe.group.handoff', 'rsi.observe.signal.insufficient_data', 'rsi.observe.signal.stable', 'rsi.observe.signal.review_failures', 'rsi.observe.signal.review_increase']) assert.ok(catalog[key], `${locale} ${key}`);
     for (const key of ['rsi.monitor.title', 'rsi.monitor.hint', 'rsi.monitor.start', 'rsi.monitor.end', 'rsi.monitor.testSet', 'rsi.monitor.samples', 'rsi.monitor.decision.stable', 'rsi.monitor.decision.regression', 'rsi.monitor.decision.inconclusive', 'rsi.monitor.guardrail.pass', 'rsi.monitor.guardrail.fail', 'rsi.monitor.guardrail.unknown', 'rsi.monitor.metricName', 'rsi.monitor.baseline', 'rsi.monitor.observed', 'rsi.monitor.reviewer', 'rsi.monitor.guardrails', 'rsi.monitor.results', 'rsi.monitor.evidenceRef', 'rsi.monitor.save', 'rsi.monitor.saved', 'rsi.monitor.history']) assert.ok(catalog[key], `${locale} ${key}`);
   }
   assert.equal((html.match(/async function loadRsi\(\)/g) || []).length, 1);
@@ -161,6 +165,14 @@ test('Setup exposes the RSI ledger only through authenticated local APIs', async
   const base = 'http://127.0.0.1:' + app.port;
   const post = (route, body, token = app.token) => fetch(base + route, { method: 'POST', headers: { 'Content-Type': 'application/json', 'X-BrainLink-Token': token }, body: JSON.stringify(body) });
   try {
+    assert.equal((await post('/api/rsi/observations/analyze', {}, 'wrong-token')).status, 401);
+    for (let i = 0; i < 5; i++) await logActivity(env, { tool: 'vault_search', ok: false, platform: 'PRIVATE_ACTIVITY_CANARY', message: 'PRIVATE_NOTE_CANARY' });
+    const observation = await post('/api/rsi/observations/analyze', {}).then(r => r.json());
+    const retrievalSignal = observation.report.categories.find(item => item.id === 'retrieval');
+    assert.equal(retrievalSignal.signal, 'review_failures');
+    assert.equal(retrievalSignal.current.failures, 5);
+    assert.doesNotMatch(JSON.stringify(observation), /PRIVATE_ACTIVITY_CANARY|PRIVATE_NOTE_CANARY/);
+    assert.equal(observation.report.privacy.report_saved, false);
     assert.equal((await post('/api/rsi/ideas', validIdea, 'wrong-token')).status, 401);
     const created = await post('/api/rsi/ideas', validIdea).then(r => r.json());
     assert.equal(created.idea.status, 'discovered');

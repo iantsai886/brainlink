@@ -277,6 +277,12 @@ main #ready, main #ask-panel, main #brain-panel, main #sessions-panel, main #s-c
         <button class="primary" type="submit" data-i18n="rsi.save">Save idea</button>
       </form>
     </details>
+    <div class="card" id="rsi-observations" style="margin-bottom:10px">
+      <b data-i18n="rsi.observe.title">Review local usage signals</b>
+      <p class="muted" data-i18n="rsi.observe.hint">BrainLink checks only local tool names and success/failure counts. It never reads note text or changes the system.</p>
+      <button type="button" id="rsi-observe-run" data-i18n="rsi.observe.run">Analyze local signals</button>
+      <div id="rsi-observe-report" aria-live="polite"></div>
+    </div>
     <details class="card" id="rsi-discovery" style="margin-bottom:10px"><summary data-i18n="rsi.discovery.title">Research discovery (opt-in)</summary>
       <p class="hint" data-i18n="rsi.discovery.hint"></p>
       <p id="rsi-discovery-status" class="muted" aria-live="polite"></p>
@@ -819,6 +825,15 @@ function renderDiscovery(d) {
   $('rsi-discovery-status').textContent = t('rsi.discovery.state.' + state) + ' · ' + t('rsi.discovery.sources', { sources: d.sources.filter(x => s.sources.includes(x.id)).map(x => x.label + ' (' + x.host + ')').join(', ') });
   $('rsi-discovery-runs').innerHTML = d.runs.map(r => '<li>' + esc(new Date(r.started_at).toLocaleString(LOCALE)) + ' · ' + esc(t('rsi.discovery.trigger.' + r.trigger)) + ' · ' + esc(t('rsi.discovery.run.' + r.status)) + ' · ' + esc(t('rsi.discovery.counts', { fetched: r.fetched, entries: r.entries, created: r.created.length, duplicates: r.duplicates, irrelevant: r.dropped.irrelevant, hostile: r.dropped.secret + r.dropped.instruction_like, invalid: r.dropped.invalid, over: r.dropped.over_limit })) + (r.errors.length ? '<br>' + r.errors.map(esc).join('<br>') : '') + '</li>').join('') || '<li>' + esc(t('rsi.discovery.noRuns')) + '</li>';
 }
+function renderObservationReport(report) {
+  const percent = value => Number.isFinite(value) ? Math.round(value * 100) + '%' : t('rsi.observe.noRate');
+  $('rsi-observe-report').innerHTML = `<p class="muted">${esc(t('rsi.observe.window', { days: report.current_window_days, events: report.events_analyzed }))}</p>${report.categories.map(item => `<div class="row muted" style="font-size:13px;justify-content:space-between"><b>${esc(t('rsi.observe.group.' + item.id))}</b><span>${esc(t('rsi.observe.stats', { calls: item.current.calls, failures: item.current.failures, rate: percent(item.current.failure_rate) }))}</span><span class="pill">${esc(t('rsi.observe.signal.' + item.signal))}</span></div>`).join('')}${report.findings.length ? `<p>${esc(t('rsi.observe.findings', { count: report.findings.length }))}</p>` : `<p class="muted">${esc(t('rsi.observe.noFindings'))}</p>`}<p class="muted" style="font-size:12px">${esc(t('rsi.observe.generated', { when: new Date(report.generated_at).toLocaleString(LOCALE) }))}</p>`;
+}
+document.getElementById('rsi-observe-run').addEventListener('click', () => act(async () => {
+  const button = $('rsi-observe-run'); button.disabled = true;
+  try { renderObservationReport((await api('POST', '/api/rsi/observations/analyze')).report); }
+  finally { button.disabled = false; }
+}));
 async function loadDiscovery() { renderDiscovery((await api('GET', '/api/rsi/discovery')).discovery); }
 const rsiLines = (value) => String(value || '').split(/\r?\n/).map(x => x.trim()).filter(Boolean);
 $('rsi-discovery-form').addEventListener('submit', (e) => act(async () => {

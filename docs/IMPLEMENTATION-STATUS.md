@@ -1,6 +1,6 @@
 # BrainLink implementation status
 
-Status snapshot: 2026-10-26 (Asia/Taipei)
+Status snapshot: 2026-10-27 (Asia/Taipei)
 GitHub repository: `iantsai886/brainlink`
 Branch: `integration/brainlink-retrieval-evaluation` (integrates profile-scoped GitHub, RSI discovery, and independent retrieval evaluation)
 Code baseline: development target `1.2.8`, with `package.json` as the canonical version source. The `v1.2.7` tag belongs to the separate `wip/v1.2.7` release line; this branch continues from the full-source `main` history and does not move or recreate that tag.
@@ -330,3 +330,7 @@ Added an integration test that creates an encrypted fictional backup on one Brai
 ### Shared Twin-vault note-access guard (2026-10-27)
 
 Configuration now rejects granting note search, read, or write operations on the same vault to multiple Personal, Organisation, or Client Twin profiles. A vault can still be shared as the handoff mailbox when each profile has only explicit handoff operations there. Twin Setup's regression fixture now uses a separate Personal vault and verifies the shared-note grant is refused. The targeted profile/config/GitHub assignment run passed 24/25 before a test fixture correction; the corrected targeted guard tests passed 2/2. Final Windows `npm run test:all`: core 407 tests (401 passed, 0 failed, 6 platform/privilege skips), UI 29/29. The six skips require symlink privileges or platform behavior unavailable on this Windows host. This is local automated evidence; live client connections, hosted GitHub Actions, and packaged-app acceptance remain unverified.
+
+### On-demand RSI activity observer (2026-10-27)
+
+Added a manual local report comparing tool-call success/failure counts across the latest 30 days and the prior 30 days. It groups only recognized retrieval, session, filing and handoff tools; ignores health checks; returns aggregates without agent/platform labels or extra log fields; treats small samples as insufficient; and does not save the report, create proposals, or change code or permissions. The Setup API is authenticated and the UI has a localized manual action. Tests include synthetic failures and private-field canaries. Full Windows `npm run test:all`: core 409 tests (403 passed, 0 failed, 6 platform/privilege skips), UI 29/29. This is a first-order observation feature, not proof of answer quality, real token savings, or recursive improvement. Activity-log rotation can leave the 60-day comparison incomplete. Live use across AI clients and hosted CI remain unverified.
