@@ -304,7 +304,7 @@
   "github.hint": "Preview selected visible notes against an existing local GitHub clone. A local commit and GitHub push each require a separate confirmation.",
   "github.noProfiles": "GitHub sharing is locked until you create a Personal, Organisation, or Client Twin profile. This keeps each shared repository tied to one data owner.",
   "github.accessWarning": "GitHub access applies to the whole repository, not individual folders. Keep Personal, Organisation, and each Client in separate repositories. Agents with direct GitHub access can bypass BrainLink permissions.",
-  "github.autoHint": "After you turn this on, BrainLink checks this Twin’s approved folders and syncs safe changes both ways. Conflicts stop the run; no note is silently overwritten. The first run may publish approved notes to GitHub.",
+  "github.autoHint": "After you turn this on, BrainLink checks this Twin’s approved folders and syncs safe changes both ways. Scheduled sync runs only while BrainLink is open. To keep it running after you sign in, turn on “Start BrainLink in the background when I sign in” in Backup settings. Conflicts stop the run; no note is silently overwritten. The first run may publish approved notes to GitHub.",
   "github.autoInterval": "Check every (hours)",
   "github.autoEnabled": "Automatically sync this Twin’s approved notes",
   "github.autoRun": "Run sync now",
