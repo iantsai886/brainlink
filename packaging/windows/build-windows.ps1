@@ -26,10 +26,13 @@ Expand-Archive $ZipPath -DestinationPath "$Root\build\windows\node-unzip"
 Copy-Item "$Root\build\windows\node-unzip\$NodeArchivePrefix-win-x64\node.exe", "$Root\build\windows\node-unzip\$NodeArchivePrefix-win-x64\LICENSE" "$Stage\node\"
 
 # 2. App files (no tests, tools, vendor or keys).
-foreach ($p in "bin", "src", "ui", "samples", "package.json", "LICENSE.txt", "README.md") { Copy-Item -Recurse "$Root\$p" "$Stage\app\" }
+foreach ($p in "bin", "src", "ui", "samples", "skills", "package.json", "LICENSE.txt", "README.md") { Copy-Item -Recurse "$Root\$p" "$Stage\app\" }
 $Store = "$Stage\app\node_modules\brainlink-store"
 New-Item -ItemType Directory -Force $Store | Out-Null
 foreach ($p in "memory-store.mjs", "errors.mjs", "package.json") { Copy-Item "$Root\vendor\brainlink-store\$p" $Store }
+$Yaml = "$Stage\app\node_modules\yaml"
+New-Item -ItemType Directory -Force $Yaml | Out-Null
+Copy-Item -Recurse "$Root\node_modules\yaml\*" $Yaml
 
 # 3. Installer.
 $env:BRAINLINK_VERSION = $Version

@@ -38,7 +38,7 @@ for arch in arm64 x64; do
 done
 
 # 2. App files: only what customers need to run it (no test/, docs, vendor tools or issuer keys).
-cp -R "$ROOT/bin" "$ROOT/src" "$ROOT/ui" "$ROOT/samples" "$STAGE/app/"
+cp -R "$ROOT/bin" "$ROOT/src" "$ROOT/ui" "$ROOT/samples" "$ROOT/skills" "$STAGE/app/"
 cp "$ROOT/package.json" "$ROOT/LICENSE.txt" "$ROOT/README.md" "$STAGE/app/"
 
 # 3. Vendor brainlink-store so the bare `import ... from 'brainlink-store'` resolves with no
@@ -46,6 +46,8 @@ cp "$ROOT/package.json" "$ROOT/LICENSE.txt" "$ROOT/README.md" "$STAGE/app/"
 mkdir -p "$STAGE/app/node_modules/brainlink-store"
 cp "$STORE_SRC/memory-store.mjs" "$STORE_SRC/errors.mjs" "$STORE_SRC/interface.d.ts" \
    "$STORE_SRC/package.json" "$STORE_SRC/README.md" "$STAGE/app/node_modules/brainlink-store/"
+mkdir -p "$STAGE/app/node_modules/yaml"
+cp -R "$ROOT/node_modules/yaml/." "$STAGE/app/node_modules/yaml/"
 
 # 4. The BrainLink.app launcher bundle: a minimal double-clickable app (Info.plist + a small
 #    shell launcher in Contents/MacOS, no Node inside it). This IS the Finder install/open path:

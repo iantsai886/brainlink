@@ -138,6 +138,8 @@ Still weak: cross-language and synonym questions without a translation (needs a 
 
 ## 6. Packaging & distribution
 
+Native Windows, macOS and Linux packages include the complete runtime dependency set from `package.json`, plus the versioned portable Agent Skills under `skills/`. The installed package must be runnable offline after installation and must not depend on the developer checkout's `node_modules` or skill files.
+
 | | macOS | Windows | Linux |
 |---|---|---|---|
 | Installer | `.pkg` (pkgbuild + productbuild): `/Applications/BrainLink.app` + CLI link | Inno Setup `.exe` (per-user, no admin) | `.deb` (amd64/arm64) or per-user tar.gz installer |
