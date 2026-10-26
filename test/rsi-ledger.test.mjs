@@ -86,6 +86,13 @@ test('RSI experiment receipts are aggregate-only, append-only, and require a fre
   const raw = await readFile(ledger.file, 'utf8');
   assert.doesNotMatch(raw, /private query|query|snippet|vault_path/i);
   assert.equal(raw.trim().split(/\r?\n/).length, 6);
+  let compactIdea = await ledger.create({ ...validIdea, title: 'Lossless compact search experiment' });
+  for (const status of ['triaged', 'proposed']) compactIdea = await ledger.update({ id: compactIdea.id, expected_revision: compactIdea.revision, status });
+  compactIdea = await ledger.update({ id: compactIdea.id, expected_revision: compactIdea.revision, status: 'testing', fields: { candidate_version: 'compact-search-v1' } });
+  const compactReceipt = { ...receipt, run_id: 'BL-RSI-RUN-20261026-abcdef01', suite: 'retrieval-independent-v1', evaluator_version: 'retrieval-eval-v3', candidate_version: 'compact-search-v1', candidate_policy: 'lossless production compact response projection' };
+  const compactRecorded = await ledger.recordExperiment({ id: compactIdea.id, expected_revision: compactIdea.revision, receipt: compactReceipt });
+  assert.equal(compactRecorded.experiments[0].evaluator_version, 'retrieval-eval-v3');
+  assert.equal(compactRecorded.experiments[0].candidate_version, 'compact-search-v1');
 });
 
 test('RSI ledger rejects secret-bearing text and non-public source URLs', async () => {

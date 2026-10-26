@@ -10,6 +10,8 @@ test('RSI experiment runner only exposes the fixed fictional suites and returns 
   for (const suite of runner.suites()) {
     const receipt = await runner.run(suite.id);
     assert.equal(receipt.suite, suite.id);
+    assert.equal(receipt.evaluator_version, 'retrieval-eval-v3');
+    if (suite.id === 'retrieval-independent-v1') assert.equal(receipt.candidate_version, 'compact-search-v1');
     assert.match(receipt.fixture_sha256, /^[a-f0-9]{64}$/);
     assert.ok(receipt.sample_count >= 20);
     assert.equal(receipt.guardrails.candidate_privacy_violations, 0);

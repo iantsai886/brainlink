@@ -13,7 +13,7 @@ import { evaluateRetrieval, RETRIEVAL_EVALUATOR_VERSION } from './retrieval-eval
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 export const RSI_EXPERIMENT_SUITES = Object.freeze({
   'retrieval-rsi-v1': Object.freeze({ fixture: 'retrieval-rsi-v1.json', vault: 'vault', candidate_version: 'per-case-rephrasing-v1', policy: 'fixed rephrasing policy; semantic search off' }),
-  'retrieval-independent-v1': Object.freeze({ fixture: 'retrieval-independent-v1.json', vault: 'independent-vault', candidate_version: 'compact-coverage-v1', policy: 'fixed source-preserving compaction; evaluation only' }),
+  'retrieval-independent-v1': Object.freeze({ fixture: 'retrieval-independent-v1.json', vault: 'independent-vault', candidate_version: 'compact-search-v1', policy: 'lossless production MCP compact-search projection; evaluation only' }),
 });
 
 const safeRatio = (value) => Number.isFinite(value) ? Math.max(0, Math.min(1, Number(value))) : 0;
