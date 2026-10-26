@@ -484,6 +484,8 @@
   "backup.retentionHint": "Cópias antigas só são removidas depois que a nova cópia é verificada. Pastas danificadas ou desconhecidas são mantidas.",
   "backup.pruned": "{count} cópias antigas verificadas foram removidas.",
   "backup.encrypt": "Criptografar o conteúdo do backup",
+  "backup.confirmRecoveryKey": "Cole a chave de recuperação para confirmar que a salvou",
+  "backup.confirmRecoveryKeyPlaceholder": "Cole a chave de recuperação de 43 caracteres",
   "backup.encryptHint": "Somente novos backups serão criptografados; os antigos não mudam. Guarde a chave de recuperação em um local seguro fora deste computador. Sem ela, não é possível restaurar backups criptografados. O BrainLink guarda uma cópia local para os backups agendados.",
   "backup.showKey": "Mostrar ou criar chave de recuperação",
   "backup.copyKey": "Copiar chave",

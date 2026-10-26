@@ -4,7 +4,7 @@ import { mkdtemp, mkdir, writeFile, readFile, readdir, symlink } from 'node:fs/p
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { backupOnce, verifyBackup, restoreBackupToEmpty, loadBackupStatus, saveBackupStatus, pruneBackups } from '../src/backup.mjs';
-import { normalize, saveConfig } from '../src/config.mjs';
+import { loadConfig, normalize, saveConfig } from '../src/config.mjs';
 import { createOrReadBackupRecoveryKey } from '../src/backup-key.mjs';
 import { startSetup } from '../src/setup.mjs';
 
@@ -189,9 +189,16 @@ test('authenticated Setup enables scheduled backup only after a verified first c
     const recoveryKey = (await keyResponse.json()).key;
     assert.equal(recoveryKey.length, 43);
     assert.equal((await api('/api/backup/encryption-key').then((r) => r.json())).created, false, 'the recovery key stays stable for scheduled backups');
+    const wrongKey = `${recoveryKey[0] === 'A' ? 'B' : 'A'}${recoveryKey.slice(1)}`;
+    const rejectedConfirmation = await api('/api/backup', { enabled: true, folder: dest, intervalHours: 24, encrypted: true, recoveryKeyConfirmation: wrongKey });
+    assert.equal(rejectedConfirmation.status, 400, 'a mismatched recovery key cannot enable encryption');
+    assert.deepEqual(await readdir(dest), [], 'a mismatched recovery key cannot create a backup');
+    assert.equal((await loadConfig(path.join(home, 'config.json'))).backup.encrypted, false, 'a mismatched recovery key leaves settings unchanged');
     const response = await api('/api/backup', { enabled: true, folder: dest, intervalHours: 24, keepCount: 30, encrypted: true });
-    assert.equal(response.status, 200);
-    const result = await response.json();
+    assert.equal(response.status, 400, 'the recovery key must be re-entered before encryption is enabled');
+    const confirmed = await api('/api/backup', { enabled: true, folder: dest, intervalHours: 24, keepCount: 30, encrypted: true, recoveryKeyConfirmation: recoveryKey });
+    assert.equal(confirmed.status, 200);
+    const result = await confirmed.json();
     assert.equal(result.backup.status.ok, true);
     assert.equal(result.backup.status.encrypted, true);
     assert.equal((await verifyBackup(result.backup.status.folder, recoveryKey)).ok, true);
@@ -235,6 +242,8 @@ test('restore UI provides separate localized folder pickers and retains explicit
   assert.match(html, /\/api\/backup\/encryption-key/);
   assert.match(html, /recoveryKey: \$\('backup-restore-key'\)\.value/);
   assert.match(html, /encrypted: \$\('backup-encrypted'\)\.checked/);
+  assert.match(html, /recoveryKeyConfirmation: \$\('backup-key-confirm'\)\.value/);
+  assert.match(html, /id="backup-key-confirm-wrap" hidden/);
   assert.match(html, /if \(!confirm\(t\('backup\.restoreConfirm'\)\)\) return/);
   for (const locale of ['en', 'zh-TW', 'pt']) {
     const catalog = JSON.parse(await readFile(new URL(`../ui/locales/${locale}.json`, import.meta.url), 'utf8'));
@@ -243,6 +252,8 @@ test('restore UI provides separate localized folder pickers and retains explicit
     assert.ok(catalog['backup.retentionHint'], `${locale} retention policy explanation`);
     assert.ok(catalog['backup.encryptHint'], `${locale} encryption key warning`);
     assert.ok(catalog['backup.keyCreated'], `${locale} recovery key receipt`);
+    assert.ok(catalog['backup.confirmRecoveryKey'], `${locale} recovery key confirmation label`);
+    assert.ok(catalog['backup.confirmRecoveryKeyPlaceholder'], `${locale} recovery key confirmation placeholder`);
   }
 });
 

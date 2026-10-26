@@ -399,6 +399,7 @@ ol.todo li { padding-left: 4px; }
     </div>
     <label class="muted" style="display:flex;flex-direction:row;gap:6px;align-items:center;margin-top:10px"><input type="checkbox" id="backup-encrypted" style="width:auto"><span data-i18n="backup.encrypt"></span></label>
     <p class="hint" data-i18n="backup.encryptHint"></p>
+    <label id="backup-key-confirm-wrap" hidden><span data-i18n="backup.confirmRecoveryKey"></span><input id="backup-key-confirm" type="password" autocomplete="off" spellcheck="false" data-i18n-placeholder="backup.confirmRecoveryKeyPlaceholder"></label>
     <div class="row"><button id="backup-key" data-i18n="backup.showKey"></button><button id="backup-key-copy" data-i18n="backup.copyKey"></button><input id="backup-key-value" class="mono" type="password" readonly autocomplete="off" data-i18n-placeholder="backup.keyPlaceholder" style="flex:1"></div>
     <div class="row" style="margin-top:12px"><button id="backup-pick" data-i18n="backup.choose"></button><button class="primary" id="backup-save" data-i18n="backup.save"></button><button id="backup-run" data-i18n="backup.run"></button></div>
     <p id="backup-status" class="muted" role="status"></p>
@@ -1092,6 +1093,7 @@ async function load() {
   $('backup-hours').value = String(S.backup?.intervalHours || 24);
   $('backup-keep').value = String(S.backup?.keepCount ?? 0);
   $('backup-encrypted').checked = Boolean(S.backup?.encrypted);
+  $('backup-key-confirm-wrap').hidden = Boolean(S.backup?.encrypted) || !$('backup-encrypted').checked;
   $('backup-status').textContent = S.backup?.status ? (S.backup.status.ok
     ? `${t('backup.lastVerified', { count: S.backup.status.file_count, folder: S.backup.status.folder })}${S.backup.status.removed_count ? ` ${t('backup.pruned', { count: S.backup.status.removed_count })}` : ''}${S.backup.status.warning ? ` ${S.backup.status.warning}` : ''}`
     : t('backup.failed', { error: S.backup.status.error })) : t('backup.notRun');
@@ -1593,9 +1595,16 @@ $('backup-restore-pick-destination').onclick = async () => {
 };
 $('backup-save').onclick = () => act(async () => {
   const r = await api('POST', '/api/backup', { enabled: $('backup-enabled').checked,
-    folder: $('backup-folder').value, intervalHours: Number($('backup-hours').value), keepCount: Number($('backup-keep').value), encrypted: $('backup-encrypted').checked });
+    folder: $('backup-folder').value, intervalHours: Number($('backup-hours').value), keepCount: Number($('backup-keep').value), encrypted: $('backup-encrypted').checked,
+    recoveryKeyConfirmation: $('backup-key-confirm').value });
+  $('backup-key-confirm').value = '';
+  $('backup-key-confirm-wrap').hidden = true;
   toast(r.backup.enabled ? t('backup.saved') : t('backup.disabled'));
 });
+$('backup-encrypted').onchange = () => {
+  $('backup-key-confirm-wrap').hidden = Boolean(S.backup?.encrypted) || !$('backup-encrypted').checked;
+  if ($('backup-key-confirm-wrap').hidden) $('backup-key-confirm').value = '';
+};
 $('backup-key').onclick = () => act(async () => {
   const r = await api('POST', '/api/backup/encryption-key');
   $('backup-key-value').value = r.key;

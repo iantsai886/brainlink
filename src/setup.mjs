@@ -28,7 +28,7 @@ import { buildGraph3D, noteDetail3D } from './graph3d.mjs';
 import { snapshotSettings, chooseSnapshot, suggestSnapshotFolder, clearSnapshot, startSnapshotWatcher, writeSnapshotOnce, loadSnapshotStatus, saveSnapshotStatus } from './snapshot.mjs';
 import { listHandoffs } from './writes.mjs';
 import { backupOnce, verifyBackup, restoreBackupToEmpty, loadBackupStatus, saveBackupStatus, pruneBackups } from './backup.mjs';
-import { createOrReadBackupRecoveryKey, requireBackupKey } from './backup-key.mjs';
+import { createOrReadBackupRecoveryKey, parseBackupKey, requireBackupKey } from './backup-key.mjs';
 import { fileSessionSummary } from './sessions/filing.mjs';
 import { isStartupEnabled, setStartupEnabled } from './startup.mjs';
 import { recommendSessionVault } from './sessions/routing.mjs';
@@ -1142,7 +1142,13 @@ export async function startSetup(opts = {}) {
     'POST /api/backup': async (b) => {
       const cfg = await loadConfig(file);
       const next = { ...cfg, backup: { enabled: Boolean(b.enabled), folder: b.folder || null, intervalHours: Number(b.intervalHours || 24), keepCount: Number(b.keepCount ?? cfg.backup.keepCount ?? 0), encrypted: Boolean(b.encrypted) } };
-      if (next.backup.encrypted && !await requireBackupKey(env)) throw new Error('Create a recovery key before enabling encrypted backups.');
+      if (next.backup.encrypted && !cfg.backup.encrypted) {
+        const storedKey = await requireBackupKey(env);
+        const confirmedKey = parseBackupKey(String(b.recoveryKeyConfirmation || ''));
+        if (!timingSafeEqual(storedKey, confirmedKey)) throw new Error('The recovery key did not match. Copy the displayed key and try again.');
+      } else if (next.backup.encrypted) {
+        await requireBackupKey(env);
+      }
       if (next.backup.enabled) await runBackup(next); // verify before enabling the schedule
       await saveConfig(next, file);
       refreshBackupTimer(next);

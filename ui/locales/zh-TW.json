@@ -484,6 +484,8 @@
   "backup.retentionHint": "新備份驗證成功後，才會刪除較舊且已驗證的備份；損壞或不明資料夾會保留。",
   "backup.pruned": "已刪除 {count} 份較舊且已驗證的備份。",
   "backup.encrypt": "加密備份內容",
+  "backup.confirmRecoveryKey": "貼上復原金鑰，確認你已保存它",
+  "backup.confirmRecoveryKeyPlaceholder": "貼上 43 字元復原金鑰",
   "backup.encryptHint": "只有新備份會加密；舊備份不會改動。請把復原金鑰保存在這台電腦以外的安全位置。沒有金鑰就無法還原加密備份。BrainLink 會在本機保留一份供排程備份使用。",
   "backup.showKey": "顯示或建立復原金鑰",
   "backup.copyKey": "複製金鑰",

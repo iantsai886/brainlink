@@ -484,6 +484,8 @@
   "backup.retentionHint": "Old copies are removed only after the new copy is verified. Damaged or unknown folders are kept.",
   "backup.pruned": "Removed {count} older verified copies.",
   "backup.encrypt": "Encrypt backup contents",
+  "backup.confirmRecoveryKey": "Paste the recovery key to confirm you saved it",
+  "backup.confirmRecoveryKeyPlaceholder": "Paste the 43-character recovery key",
   "backup.encryptHint": "Only new backups are encrypted; old copies stay unchanged. Keep the recovery key somewhere safe away from this computer. Without it, encrypted backups cannot be restored. BrainLink stores a local copy for scheduled backups.",
   "backup.showKey": "Show or create recovery key",
   "backup.copyKey": "Copy key",
