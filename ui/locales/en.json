@@ -512,6 +512,7 @@
   "backup.restoreTitle": "Restore a backup",
   "backup.restoreHint": "Choose a verified backup folder and a separate empty destination. Encrypted backups need the recovery key unless this device already has it. BrainLink will not overwrite your current vaults.",
   "backup.historyRefresh": "Find verified backups",
+  "backup.historyLabel": "Verified backup",
   "backup.historyEmpty": "Choose a verified backup",
   "backup.historyFiles": "files",
   "backup.historyEncrypted": "encrypted",

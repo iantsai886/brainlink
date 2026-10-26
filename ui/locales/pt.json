@@ -512,6 +512,7 @@
   "backup.restoreTitle": "Restaurar backup",
   "backup.restoreHint": "Escolha uma pasta de backup verificada e um destino vazio separado. Backups criptografados precisam da chave, a menos que ela já esteja neste dispositivo. Os cofres atuais não serão substituídos.",
   "backup.historyRefresh": "Encontrar backups verificados",
+  "backup.historyLabel": "Backup verificado",
   "backup.historyEmpty": "Escolha um backup verificado",
   "backup.historyFiles": "arquivos",
   "backup.historyEncrypted": "criptografado",

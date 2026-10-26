@@ -512,6 +512,7 @@
   "backup.restoreTitle": "還原備份",
   "backup.restoreHint": "選擇已驗證的備份資料夾與另一個空白目的地。如果這台裝置沒有復原金鑰，加密備份需要輸入金鑰。BrainLink 不會覆蓋目前的資料庫。",
   "backup.historyRefresh": "尋找已驗證的備份",
+  "backup.historyLabel": "已驗證的備份",
   "backup.historyEmpty": "選擇已驗證的備份",
   "backup.historyFiles": "個檔案",
   "backup.historyEncrypted": "已加密",
