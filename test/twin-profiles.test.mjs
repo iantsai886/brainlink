@@ -467,6 +467,51 @@ test('preset AI apps receive only the selected Twin permissions and disconnect r
   } finally { setup.server.close(); }
 });
 
+test('preset AI apps can receive scoped session and handoff tools without semantic-note access', async () => {
+  const root = await mkdtemp(path.join(tmpdir(), 'brainlink-preset-handoff-'));
+  const home = path.join(root, 'home');
+  const vaultPath = path.join(root, 'org-vault');
+  await mkdir(path.join(vaultPath, 'Handoffs'), { recursive: true });
+  await mkdir(path.join(home, '.cursor'), { recursive: true });
+  const env = { BRAINLINK_HOME: path.join(home, 'app'), HOME: home, USERPROFILE: home };
+  const cfg = fixture(vaultPath);
+  cfg.twin_profiles[0].vaults[0].access = 'propose';
+  cfg.twin_profiles[0].memory_policy = { working: true, semantic: false, procedural: false, episodic: true };
+  cfg.twin_profiles[0].allowed_actions = [];
+  cfg.twin_profiles[0].agent_access = [];
+  cfg.handoff = { vault: 'Fictional Org', folder: 'Handoffs' };
+  await saveConfig(cfg, path.join(env.BRAINLINK_HOME, 'config.json'));
+  const setup = await startSetup({ env, home, os: 'linux', port: 0, useCli: false });
+  const base = `http://127.0.0.1:${setup.port}`;
+  const api = async (route, body) => {
+    const response = await fetch(`${base}${route}`, { method: 'POST', headers: { 'X-BrainLink-Token': setup.token, 'Content-Type': 'application/json' }, body: JSON.stringify(body || {}) });
+    return { status: response.status, body: await response.json() };
+  };
+  try {
+    const connected = await api('/api/connect', { client: 'cursor', profile_id: 'org_twin_1', vaults: [{ name: 'Fictional Org', operations: ['read_session', 'handoff_read', 'write_handoff'] }] });
+    assert.equal(connected.status, 200, JSON.stringify(connected.body));
+    assert.equal(connected.body.health.ok, true, JSON.stringify(connected.body));
+    assert.equal(connected.body.health.tool, 'session_list');
+    const clientConfig = JSON.parse(await readFile(path.join(home, '.cursor', 'mcp.json'), 'utf8'));
+    const token = clientConfig.mcpServers.brainlink.env.BRAINLINK_AGENT_TOKEN;
+    const saved = JSON.parse(await readFile(path.join(env.BRAINLINK_HOME, 'config.json'), 'utf8'));
+    const agent = saved.ai_agents.find((item) => item.preset_client_id === 'cursor');
+    const grant = saved.twin_profiles[0].agent_access.find((item) => item.agent_id === agent.id).vaults[0];
+    assert.equal(grant.access, 'propose');
+    assert.deepEqual(grant.operations.sort(), ['handoff_read', 'read_session', 'write_handoff']);
+    const ctx = createContext(saved, { env: { ...env, BRAINLINK_AGENT_TOKEN: token } });
+    const mcp = createMcp(ctx);
+    const listed = await mcp.handle({ jsonrpc: '2.0', id: 1, method: 'tools/list', params: {} });
+    const names = listed.result.tools.map((tool) => tool.name);
+    assert.ok(names.includes('session_list'));
+    assert.ok(names.includes('list_handoffs'));
+    assert.ok(names.includes('send_handoff'));
+    assert.equal(names.includes('vault_search'), false, 'semantic note access remains off');
+    const handoffs = await mcp.handle({ jsonrpc: '2.0', id: 2, method: 'tools/call', params: { name: 'list_handoffs', arguments: { limit: 1 } } });
+    assert.equal(handoffs.result.isError, false);
+  } finally { setup.server.close(); }
+});
+
 test('local Setup assigns an unowned session only to a session-authorized Twin and keeps it private', async () => {
   const root = await mkdtemp(path.join(tmpdir(), 'brainlink-twin-session-assignment-'));
   const home = path.join(root, 'home');
@@ -553,6 +598,15 @@ test('Setup creates a validated Twin from explicit vault, agent, action and memo
     const unsupported = await api({ ...request, name: 'Should Refuse Too', agent_access: [{ agent_id: 'agent_personal', operations: ['write_note'] }] });
     assert.equal(unsupported.status, 400);
     assert.match(unsupported.body.error, /supported action/);
+    const disabledMemory = await api({ ...request, name: 'Should Refuse Disabled Memory', memory_policy: { ...request.memory_policy, semantic: false }, agent_access: [{ agent_id: 'agent_personal', vaults: [{ name: 'Fictional Org', operations: ['search'] }] }] });
+    assert.equal(disabledMemory.status, 400);
+    assert.match(disabledMemory.body.error, /Enable semantic memory/);
+    const mixedSessionScope = await api({ ...request, name: 'Should Refuse Session Scope', agent_access: [{ agent_id: 'agent_personal', vaults: [
+      { name: 'Fictional Org', operations: ['read_session'] },
+      { name: 'Fictional Other', operations: ['search'] },
+    ] }] });
+    assert.equal(mixedSessionScope.status, 400);
+    assert.match(mixedSessionScope.body.error, /Session history access applies across/);
     const saved = JSON.parse(await readFile(path.join(env.BRAINLINK_HOME, 'config.json'), 'utf8'));
     assert.equal(saved.twin_profiles.length, 2, 'rejected requests do not alter the stored profiles');
     assert.deepEqual(validate(saved), []);
@@ -597,6 +651,9 @@ test('Setup edits a Twin without changing its identity or source policy and refu
     const changedMode = await api({ ...request, mode: 'client' });
     assert.equal(changedMode.status, 400);
     assert.match(changedMode.body.error, /type and owner cannot be changed/);
+    const disabledMemory = await api({ ...request, name: 'Invalid memory grant', agent_access: [{ agent_id: 'agent_unassigned', operations: ['read_session'] }], memory_policy: { working: false, semantic: true, procedural: true, episodic: false } });
+    assert.equal(disabledMemory.status, 400);
+    assert.match(disabledMemory.body.error, /Enable episodic memory/);
     assert.equal(await readFile(path.join(env.BRAINLINK_HOME, 'config.json'), 'utf8'), savedBeforeRefusal);
     const privateVault = await api({ ...request, name: 'Must Not Save', vaults: [{ name: 'Fictional Private', access: 'read' }] });
     assert.equal(privateVault.status, 400);
@@ -657,6 +714,18 @@ test('Setup edits each Twin agent vault grant independently without widening acc
     });
     assert.equal(refused.status, 400);
     assert.match(refused.body.error, /propose access for a vault/);
+    assert.equal(await readFile(path.join(env.BRAINLINK_HOME, 'config.json'), 'utf8'), afterValidUpdate);
+    const mixedSessionScope = await call('/api/twins/update', {
+      profile_id: 'org_twin_1', name: 'Invalid session scope', mode: 'organisation', owner: 'fictional-owner',
+      vaults: [{ name: 'Fictional Org', access: 'read' }, { name: 'Fictional Other', access: 'read' }],
+      agent_access: [{ agent_id: 'agent_codex', vaults: [
+        { name: 'Fictional Org', operations: ['read_session'] },
+        { name: 'Fictional Other', operations: ['search'] },
+      ] }],
+      memory_policy: { working: true, semantic: true, procedural: true, episodic: true },
+    });
+    assert.equal(mixedSessionScope.status, 400);
+    assert.match(mixedSessionScope.body.error, /Session history access applies across/);
     assert.equal(await readFile(path.join(env.BRAINLINK_HOME, 'config.json'), 'utf8'), afterValidUpdate);
   } finally { setup.server.close(); }
 });

@@ -57,6 +57,21 @@ async function readUiStatic(rel) {
 const json = (res, code, body) => res.writeHead(code, { 'Content-Type': 'application/json', 'Cache-Control': 'no-store' }).end(JSON.stringify(body));
 const LOCALES_DIR = path.join(ROOT, 'ui', 'locales');
 
+function assertTwinActionsMatchMemory(agentAccess, memoryPolicy) {
+  const requiredMemory = {
+    search: 'semantic', read_note: 'semantic',
+    read_session: 'episodic', propose_note: 'episodic',
+    handoff_read: 'working', write_handoff: 'working',
+  };
+  for (const grant of agentAccess.flatMap((agent) => agent.vaults)) {
+    for (const operation of grant.operations) {
+      const memoryType = requiredMemory[operation];
+      if (memoryType && memoryPolicy[memoryType] !== true) throw new Error(`Enable ${memoryType} memory before granting ${operation} access.`);
+      if (operation === 'propose_note' && memoryPolicy.semantic !== true) throw new Error('Enable semantic memory before granting propose_note access.');
+    }
+  }
+}
+
 export function pickFolder(os = process.platform, prompt = 'Choose your Obsidian / Markdown vault folder') {
   return new Promise((resolve) => {
     const done = (err, out) => resolve(err ? null : String(out).trim() || null);
@@ -422,16 +437,30 @@ export async function startSetup(opts = {}) {
     const mcp = createMcp(ctx, { onCall: (e) => pending.push(logActivity(env, { ...e, platform: c.platform, mode: 'health-check' })) });
     const t0 = Date.now();
     await mcp.handle({ jsonrpc: '2.0', id: 1, method: 'initialize', params: {} });
+    const listed = ctx.twinScope.mode === 'scoped'
+      ? await mcp.handle({ jsonrpc: '2.0', id: 2, method: 'tools/list', params: {} })
+      : null;
+    const toolNames = (listed?.result?.tools || []).map((item) => item.name);
     const scopedGrant = ctx.twinScope.mode === 'scoped'
       ? ctx.twinScope.grants.find((grant) => grant.operations.includes('search') && ctx.twinScope.memory_policy?.semantic && ctx.enabled.includes(grant.name))
       : null;
-    const tool = scopedGrant ? 'vault_search' : 'brainlink_guide';
-    if (ctx.twinScope.mode === 'scoped' && !scopedGrant) return {
+    const scopedTool = scopedGrant ? 'vault_search'
+      : ['session_list', 'list_handoffs', 'brainlink_guide'].find((name) => toolNames.includes(name));
+    const tool = ctx.twinScope.mode === 'scoped' ? (scopedTool || 'tools/list') : 'brainlink_guide';
+    const expectedByAction = { search: 'vault_search', read_note: 'vault_read_note', read_session: 'session_list', propose_note: 'session_close', handoff_read: 'list_handoffs', write_handoff: 'send_handoff' };
+    const scopeHasLiveTool = ctx.twinScope.mode !== 'scoped' || ctx.twinScope.grants
+      .filter((grant) => ctx.enabled.includes(grant.name))
+      .flatMap((grant) => grant.operations)
+      .some((action) => toolNames.includes(expectedByAction[action]));
+    if (!scopeHasLiveTool) return {
       ok: false, client: clientId, tool: null, took_ms: 0,
-      message: 'This AI app needs semantic memory and search access to run its connection test. Update its Twin permissions first.',
+      message: 'This AI app has no usable tools under its selected Twin permissions. Review its memory and action settings.',
     };
-    const args = scopedGrant ? { vault: scopedGrant.name, query: 'BrainLink connection check', limit: 1 } : {};
-    const called = await mcp.handle({ jsonrpc: '2.0', id: 2, method: 'tools/call', params: { name: tool, arguments: args } });
+    const scopedVault = scopedGrant?.name;
+    const args = tool === 'vault_search' ? { vault: scopedVault, query: 'BrainLink connection check', limit: 1 }
+      : tool === 'session_list' || tool === 'list_handoffs' ? { limit: 1 } : {};
+    const called = tool === 'tools/list' ? listed
+      : await mcp.handle({ jsonrpc: '2.0', id: 3, method: 'tools/call', params: { name: tool, arguments: args } });
     await Promise.all(pending);
     const took_ms = Date.now() - t0;
     const ok = Boolean(called?.result) && !called.result.isError;
@@ -457,13 +486,19 @@ export async function startSetup(opts = {}) {
       const vault = cfg.vaults.find((entry) => entry.name === name);
       const operations = Array.isArray(item?.operations) ? [...new Set(item.operations)] : [];
       if (!profileVault || !vault || vault.private || seen.has(name)) throw new Error('Choose only non-private vaults already included in this Twin profile.');
-      if (!operations.length || operations.some((action) => !['search', 'read_note'].includes(action))) throw new Error('For now, built-in AI apps can receive search and note-reading access only.');
-      if (operations.includes('search') && profile.memory_policy?.semantic !== true) throw new Error('Turn on semantic memory in this Twin profile before granting search access.');
-      if (operations.includes('read_note') && profile.memory_policy?.semantic !== true) throw new Error('Turn on semantic memory in this Twin profile before granting note-reading access.');
+      if (!operations.length || operations.some((action) => !['search', 'read_note', 'read_session', 'propose_note', 'handoff_read', 'write_handoff'].includes(action))) throw new Error('Choose supported search, note, session, or handoff actions.');
+      const needsSemantic = operations.some((action) => ['search', 'read_note', 'propose_note'].includes(action));
+      const needsEpisodic = operations.some((action) => ['read_session', 'propose_note'].includes(action));
+      const needsWorking = operations.some((action) => ['handoff_read', 'write_handoff'].includes(action));
+      if (needsSemantic && profile.memory_policy?.semantic !== true) throw new Error('Turn on semantic memory in this Twin profile before granting note or search access.');
+      if (needsEpisodic && profile.memory_policy?.episodic !== true) throw new Error('Turn on episodic memory in this Twin profile before granting session access.');
+      if (needsWorking && profile.memory_policy?.working !== true) throw new Error('Turn on working memory in this Twin profile before granting handoff access.');
+      if (operations.some((action) => ['handoff_read', 'write_handoff'].includes(action)) && cfg.handoff?.vault !== name) throw new Error('Handoff access is available only in the vault configured as BrainLink’s handoff mailbox.');
+      if (operations.some((action) => ['propose_note', 'write_handoff'].includes(action)) && profileVault.access !== 'propose') throw new Error('Choose propose access for a vault before allowing session closeouts or sending handoffs.');
       seen.add(name);
-      return { name, access: 'read', operations };
+      return { name, access: operations.some((action) => ['propose_note', 'write_handoff'].includes(action)) ? 'propose' : 'read', operations };
     });
-    if (!grants.some((grant) => grant.operations.includes('search'))) throw new Error('Allow search in at least one selected vault so BrainLink can verify the connection.');
+    if (grants.some((grant) => grant.operations.includes('read_session')) && grants.some((grant) => !grant.operations.includes('read_session'))) throw new Error('Session history access applies across this Twin. Select session access for every vault granted to this AI, or remove the other vaults from its access.');
 
     let agent = cfg.ai_agents.find((item) => item.preset_client_id === clientId);
     const token = generateAgentToken();
@@ -714,7 +749,7 @@ export async function startSetup(opts = {}) {
         profileVaults.push({ name: vault.name, access: item.access });
       }
       if (new Set(profileVaults.map((item) => item.name)).size !== profileVaults.length) throw new Error('Choose each vault only once.');
-      const allowedOperations = new Set(['search', 'read_note', 'read_session', 'propose_note']);
+      const allowedOperations = new Set(['search', 'read_note', 'read_session', 'propose_note', 'handoff_read', 'write_handoff']);
       const rawAgents = Array.isArray(b.agent_access) ? b.agent_access : [];
       const agentIds = new Set();
       const agentAccess = rawAgents.map((entry) => {
@@ -727,15 +762,18 @@ export async function startSetup(opts = {}) {
           const profileVault = profileVaults.find((vault) => vault.name === grant?.name);
           const operations = Array.isArray(grant?.operations) ? [...new Set(grant.operations)] : [];
           if (!profileVault || grantNames.has(profileVault.name) || !operations.length || operations.some((operation) => !allowedOperations.has(operation))) throw new Error('Each AI permission must name a selected vault and at least one supported action.');
-          if (operations.includes('propose_note') && profileVault.access !== 'propose') throw new Error('Choose propose access for a vault before allowing an AI agent to propose notes there.');
+          if (operations.some((operation) => ['handoff_read', 'write_handoff'].includes(operation)) && cfg.handoff?.vault !== profileVault.name) throw new Error('Handoff actions must use the configured BrainLink handoff vault.');
+          if (operations.some((operation) => ['propose_note', 'write_handoff'].includes(operation)) && profileVault.access !== 'propose') throw new Error('Choose propose access for a vault before allowing session closeouts or handoff messages there.');
           grantNames.add(profileVault.name);
-          return { name: profileVault.name, access: operations.includes('propose_note') ? 'propose' : 'read', operations };
+          return { name: profileVault.name, access: operations.some((operation) => ['propose_note', 'write_handoff'].includes(operation)) ? 'propose' : 'read', operations };
         });
+        if (vaultGrants.some((grant) => grant.operations.includes('read_session')) && vaultGrants.some((grant) => !grant.operations.includes('read_session'))) throw new Error('Session history access applies across this AI connection. Grant session access to every selected vault or remove the other vaults.');
         agentIds.add(agent.id);
         return { agent_id: agent.id, vaults: vaultGrants };
       });
       const memory = b.memory_policy || {};
       const memory_policy = Object.fromEntries(['working', 'semantic', 'procedural', 'episodic'].map((key) => [key, memory[key] === true]));
+      assertTwinActionsMatchMemory(agentAccess, memory_policy);
       const allowed_actions = [...new Set(agentAccess.flatMap((entry) => entry.vaults.flatMap((vault) => vault.operations)))];
       const profile = {
         id: `${name.toLowerCase().replace(/[^a-z0-9]+/g, '_').replace(/^_|_$/g, '').slice(0, 48) || 'twin'}_${randomBytes(3).toString('hex')}`,
@@ -770,7 +808,7 @@ export async function startSetup(opts = {}) {
       if (new Set(profileVaults.map((item) => item.name)).size !== profileVaults.length) throw new Error('Choose each vault only once.');
       const assignmentVault = profile.github_repository?.vault;
       if (assignmentVault && !profileVaults.some((item) => item.name === assignmentVault)) throw new Error('Clear this profile’s GitHub assignment before removing its assigned vault.');
-      const allowedOperations = new Set(['search', 'read_note', 'read_session', 'propose_note']);
+      const allowedOperations = new Set(['search', 'read_note', 'read_session', 'propose_note', 'handoff_read', 'write_handoff']);
       const rawAgents = Array.isArray(b.agent_access) ? b.agent_access : [];
       const agentIds = new Set();
       const agentAccess = rawAgents.map((entry) => {
@@ -783,19 +821,23 @@ export async function startSetup(opts = {}) {
           const profileVault = profileVaults.find((vault) => vault.name === grant?.name);
           const operations = Array.isArray(grant?.operations) ? [...new Set(grant.operations)] : [];
           if (!profileVault || grantNames.has(profileVault.name) || !operations.length || operations.some((operation) => !allowedOperations.has(operation))) throw new Error('Each AI permission must name a selected vault and at least one supported action.');
-          if (operations.includes('propose_note') && profileVault.access !== 'propose') throw new Error('Choose propose access for a vault before allowing an AI agent to propose notes there.');
+          if (operations.some((operation) => ['handoff_read', 'write_handoff'].includes(operation)) && cfg.handoff?.vault !== profileVault.name) throw new Error('Handoff actions must use the configured BrainLink handoff vault.');
+          if (operations.some((operation) => ['propose_note', 'write_handoff'].includes(operation)) && profileVault.access !== 'propose') throw new Error('Choose propose access for a vault before allowing session closeouts or handoff messages there.');
           grantNames.add(profileVault.name);
-          return { name: profileVault.name, access: operations.includes('propose_note') ? 'propose' : 'read', operations };
+          return { name: profileVault.name, access: operations.some((operation) => ['propose_note', 'write_handoff'].includes(operation)) ? 'propose' : 'read', operations };
         });
+        if (vaultGrants.some((grant) => grant.operations.includes('read_session')) && vaultGrants.some((grant) => !grant.operations.includes('read_session'))) throw new Error('Session history access applies across this AI connection. Grant session access to every selected vault or remove the other vaults.');
         agentIds.add(agent.id);
         return { agent_id: agent.id, vaults: vaultGrants };
       });
       const memory = b.memory_policy || {};
+      const memory_policy = Object.fromEntries(['working', 'semantic', 'procedural', 'episodic'].map((key) => [key, memory[key] === true]));
+      assertTwinActionsMatchMemory(agentAccess, memory_policy);
       profile.name = name;
       profile.owner = owner;
       profile.mode = mode;
       profile.vaults = profileVaults;
-      profile.memory_policy = Object.fromEntries(['working', 'semantic', 'procedural', 'episodic'].map((key) => [key, memory[key] === true]));
+      profile.memory_policy = memory_policy;
       profile.agent_access = agentAccess;
       profile.allowed_actions = [...new Set(agentAccess.flatMap((entry) => entry.vaults.flatMap((vault) => vault.operations)))];
       const next = normalize(cfg);
