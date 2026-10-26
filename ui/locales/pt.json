@@ -494,6 +494,7 @@
   "ingestion.running": "Verificando a pasta selecionada…",
   "ingestion.lastRun": "Verificação {trigger} às {at}: {count} arquivos novos ou alterados.",
   "ingestion.failed": "A última verificação falhou: {error}",
+  "ingestion.retryScheduled": "A verificação falhou (tentativa {attempt}); será repetida às {at}. {error}",
   "ingestion.saved": "Verificação diária salva. Ela funciona enquanto o BrainLink estiver aberto; ative a inicialização ao entrar para executar após o login.",
   "ingestion.disabled": "Verificações automáticas desativadas. Você ainda pode verificar manualmente.",
   "ingestion.scanDone": "Verificação concluída: {count} arquivos novos ou alterados.",

@@ -37,6 +37,10 @@ Windows validation: Node.js 24.18.0; serialized core run `node --import ./test/_
 
 On 2026-10-26, added the portable `brainlink-raw-to-wiki` Agent Skill in `skills/` with byte-identical Claude Code and Codex copies. Its instructions require explicit folder scope, same-vault source links, duplicate search, preview and approval before writing, and a receipt only after BrainLink confirms the note exists. Skill, schedule, and scan UI tests passed 5/5; no live Claude Code, Codex, or other client execution was performed.
 
+### Scheduled source-scan retry (2026-10-26)
+
+Scheduled Raw-to-Wiki scans now retry a failed run twice, 15 minutes apart, for at most three attempts per scheduled day. The retry state is stored in local configuration; scan status remains content-free. Saving unchanged settings preserves a pending retry, while changing the schedule clears stale retry state. Turning the schedule off pauses retries; manual Scan now remains available. `test/ingestion-schedule.test.mjs` passes 4/4, including recovery when a missing source folder returns. The full core suite passed 388 tests (382 passed, 0 failed, 6 platform/privilege skips) before this retry change; full-suite coverage of the new change is pending. No unattended AI processing or auto-filing was added.
+
 Full Windows validation for this implementation: Node.js 24.18.0, `npm run test:all`, core 334 tests (328 passed, 0 failed, 6 skipped) and UI 28 tests (28 passed, 0 failed). The skips are platform or Windows symlink-privilege dependent. `git diff --check` passed. This validates the local code path and fictional test data only; it does not verify a live user vault, background monitoring, token savings, cross-client behavior, or release readiness.
 
 ### End-of-session review link (2026-10-25)

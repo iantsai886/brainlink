@@ -54,7 +54,7 @@ BrainLink is the memory, permissions, provenance and handoff layer; AI agents ar
 | Semantic | Durable notes, decisions and linked knowledge | Retrieve concise, cited context |
 | Procedural | Versioned skills, role instructions and repeatable workflows | Reuse validated ways of working |
 
-For the raw-source → reviewed linked-knowledge flow, see [Raw-to-Wiki knowledge flow](RAW-WIKI-INGESTION-MODEL.md). Setup supports a manual scan or a daily scan at a user-selected local time for one explicitly selected folder. Scans prepare a review queue; they do not create knowledge notes unattended.
+For the raw-source → reviewed linked-knowledge flow, see [Raw-to-Wiki knowledge flow](RAW-WIKI-INGESTION-MODEL.md). Setup supports a manual scan or a daily scan at a user-selected local time for one explicitly selected folder. Failed scheduled scans retry twice, 15 minutes apart, then wait until the next day; turning the schedule off pauses it. Scans prepare a review queue; they do not create knowledge notes unattended.
 
 Backup Settings lets users choose a destination and either an hour interval or a fixed daily local time. Daily backups run in the background, verify the new copy, and retry a failed run after a delay. The first verified backup is created when the schedule is saved; encrypted backups require recovery-key confirmation. Legacy configurations keep their interval schedule unless the user changes it.
 

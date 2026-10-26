@@ -43,7 +43,7 @@ import { createRsiLedger } from './rsi-ledger.mjs';
 import { createRsiExperiments } from './rsi-experiments.mjs';
 import { createRsiDiscovery } from './rsi-discovery.mjs';
 import { ingestionQueue } from './ingestion.mjs';
-import { ingestionScheduleDue, localDateAndTime, validateIngestionSchedule } from './ingestion-schedule.mjs';
+import { INGESTION_MAX_ATTEMPTS, INGESTION_RETRY_DELAY_MS, ingestionScheduleDue, localDateAndTime, validateIngestionSchedule } from './ingestion-schedule.mjs';
 import { briefScheduleDue, validateBriefSchedule } from './brief-schedule.mjs';
 
 const UI_STATIC_TYPES = { '.js': 'text/javascript; charset=utf-8', '.css': 'text/css; charset=utf-8', '.json': 'application/json; charset=utf-8' };
@@ -300,13 +300,46 @@ export async function startSetup(opts = {}) {
     ingestionTickRunning = true;
     try {
       const cfg = await loadConfig(file);
-      if (!ingestionScheduleDue(cfg.ingestion, new Date(), cfg.timezone)) return;
-      // Persist the local day before scanning so a failure is reported once, not retried every tick.
-      cfg.ingestion.last_scheduled_date = localDateAndTime(new Date(), cfg.timezone).date;
+      const now = new Date();
+      if (!ingestionScheduleDue(cfg.ingestion, now, cfg.timezone)) return;
+      const localDate = localDateAndTime(now, cfg.timezone).date;
+      const isRetry = cfg.ingestion.retry_date === localDate && Boolean(cfg.ingestion.retry_after);
+      const attempt = isRetry ? (Number(cfg.ingestion.retry_count) || 1) + 1 : 1;
+      // Mark the day before the initial run, then retry failures at a bounded interval.
+      if (!isRetry) {
+        cfg.ingestion.last_scheduled_date = localDate;
+        cfg.ingestion.retry_count = 0;
+        cfg.ingestion.retry_date = null;
+        cfg.ingestion.retry_after = null;
+      }
       await saveConfig(cfg, file);
-      await runIngestion(cfg, { trigger: 'schedule' });
+      try {
+        await runIngestion(cfg, { trigger: 'schedule' });
+        const latest = await loadConfig(file);
+        if (latest.ingestion?.vault === cfg.ingestion.vault && latest.ingestion?.folder === cfg.ingestion.folder) {
+          latest.ingestion.retry_count = 0;
+          latest.ingestion.retry_date = null;
+          latest.ingestion.retry_after = null;
+          await saveConfig(latest, file);
+        }
+      } catch (error) {
+        const latest = await loadConfig(file);
+        const sameSchedule = latest.ingestion?.enabled && latest.ingestion?.vault === cfg.ingestion.vault && latest.ingestion?.folder === cfg.ingestion.folder;
+        const retryAt = sameSchedule && attempt < (opts.ingestionMaxAttempts ?? INGESTION_MAX_ATTEMPTS)
+          ? new Date(Date.now() + (opts.ingestionRetryMs ?? INGESTION_RETRY_DELAY_MS)).toISOString() : null;
+        if (sameSchedule) {
+          latest.ingestion.retry_count = attempt;
+          latest.ingestion.retry_date = retryAt ? localDate : null;
+          latest.ingestion.retry_after = retryAt;
+          await saveConfig(latest, file);
+        }
+        await saveIngestionStatus({ ...ingestionStatus, attempt, retry_after: retryAt }).catch(() => {});
+        if (!ingestionStatus) throw error;
+      }
     } catch (error) {
-      await saveIngestionStatus({ ok: false, at: new Date().toISOString(), trigger: 'schedule', queued_total: 0, scanned: 0, skipped: 0, error: error.message || String(error) }).catch(() => {});
+      if (!ingestionStatus?.at || ingestionStatus.trigger !== 'schedule') {
+        await saveIngestionStatus({ ok: false, at: new Date().toISOString(), trigger: 'schedule', queued_total: 0, scanned: 0, skipped: 0, error: error.message || String(error) }).catch(() => {});
+      }
     } finally { ingestionTickRunning = false; }
   }, opts.ingestionTickMs ?? 30_000);
   ingestionTimer.unref?.();

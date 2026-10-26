@@ -494,6 +494,7 @@
   "ingestion.running": "正在掃描所選資料夾……",
   "ingestion.lastRun": "{trigger}掃描時間：{at}；找到 {count} 個新增或變更檔案。",
   "ingestion.failed": "上次掃描失敗：{error}",
+  "ingestion.retryScheduled": "掃描失敗（第 {attempt} 次）；將於 {at} 重試。{error}",
   "ingestion.saved": "每日掃描已儲存。BrainLink 開啟時會執行；若要登入後自動執行，請開啟登入時啟動。",
   "ingestion.disabled": "已關閉背景掃描；你仍可手動掃描。",
   "ingestion.scanDone": "掃描完成：找到 {count} 個新增或變更檔案。",

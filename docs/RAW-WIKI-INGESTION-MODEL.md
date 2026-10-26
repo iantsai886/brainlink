@@ -37,7 +37,7 @@ The `Raw` and `Wiki` labels should be optional logical areas or profile-selected
 
 ## Automation boundary
 
-The reel suggests a file-drop hook or overnight schedule. BrainLink currently has an opt-in **daily scan** for one selected folder and a manual **Scan now** action. It checks scope and privacy before reading a bounded frontmatter header, then reports changed-file metadata in the review queue. Processing and writing stay distinct. The schedule only runs while BrainLink is open; enable launch at sign-in if daily scans should resume after login. Automatic changes to trusted facts, permissions, or existing notes require an explicit policy and an audit trail. Preserve pause, retry, failure, and rollback states.
+The reel suggests a file-drop hook or overnight schedule. BrainLink currently has an opt-in **daily scan** for one selected folder and a manual **Scan now** action. It checks scope and privacy before reading a bounded frontmatter header, then reports changed-file metadata in the review queue. Processing and writing stay distinct. The schedule only runs while BrainLink is open; enable launch at sign-in if daily scans should resume after login. A failed scheduled scan is retried twice, 15 minutes apart; after three total attempts it waits until the next scheduled day. Turning the schedule off pauses future runs, and a manual scan remains available. Automatic changes to trusted facts, permissions, or existing notes require an explicit policy and an audit trail. Preserve pause, retry, failure, and rollback states.
 
 ## How to prove it helps
 
@@ -54,4 +54,4 @@ Do not call it a token-saving improvement if token use falls while answer qualit
 
 ## Decision and remaining work
 
-Adopt the Raw-to-Wiki pipeline as a product direction. The scanner uses BrainLink's existing vault and note-proposal tools; it does not create a parallel memory store. The current daily/manual scan, queue, read-only source viewer, and portable approval-gated AI workflow are implemented. A live OS-startup acceptance check, richer pause/retry controls, unattended AI processing, and token/quality measurement remain. Keep automatic note writing off until privacy, source links, rollback, and token/quality evaluation pass. No token savings or unattended filing are claimed.
+Adopt the Raw-to-Wiki pipeline as a product direction. The scanner uses BrainLink's existing vault and note-proposal tools; it does not create a parallel memory store. The current daily/manual scan, bounded schedule retries, queue, read-only source viewer, and portable approval-gated AI workflow are implemented and locally tested. A live OS-startup acceptance check, unattended AI processing, and token/quality measurement remain. Keep automatic note writing off until privacy, source links, rollback, and token/quality evaluation pass. No token savings or unattended filing are claimed.

@@ -494,6 +494,7 @@
   "ingestion.running": "Scanning the selected folder…",
   "ingestion.lastRun": "{trigger} scan at {at}: {count} new or changed files found.",
   "ingestion.failed": "Last scan failed: {error}",
+  "ingestion.retryScheduled": "Scan failed (attempt {attempt}); retrying at {at}. {error}",
   "ingestion.saved": "Daily scan saved. It runs while BrainLink is open; enable launch at sign-in to run after you log in.",
   "ingestion.disabled": "Daily background scans turned off. You can still scan manually.",
   "ingestion.scanDone": "Scan complete: {count} new or changed files.",

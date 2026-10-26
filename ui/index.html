@@ -1154,7 +1154,7 @@ async function load() {
   $('ingestion-folder').value = S.ingestion?.folder || '';
   $('ingestion-time').value = S.ingestion?.time || '02:00';
   $('ingestion-status').textContent = S.ingestion?.status?.at
-    ? (S.ingestion.status.ok ? t('ingestion.lastRun', { count: S.ingestion.status.queued_total, at: new Date(S.ingestion.status.at).toLocaleString(LOCALE), trigger: t('ingestion.trigger.' + S.ingestion.status.trigger) }) : t('ingestion.failed', { error: S.ingestion.status.error || '' }))
+    ? (S.ingestion.status.ok ? t('ingestion.lastRun', { count: S.ingestion.status.queued_total, at: new Date(S.ingestion.status.at).toLocaleString(LOCALE), trigger: t('ingestion.trigger.' + S.ingestion.status.trigger) }) : S.ingestion.status.retry_after ? t('ingestion.retryScheduled', { attempt: S.ingestion.status.attempt, at: new Date(S.ingestion.status.retry_after).toLocaleString(LOCALE), error: S.ingestion.status.error || '' }) : t('ingestion.failed', { error: S.ingestion.status.error || '' }))
     : t('ingestion.never');
   if (S.ingestion?.status?.running) $('ingestion-status').textContent = t('ingestion.running');
   $('ingestion-run').disabled = !S.vaults.some((v) => !v.private && v.exists);
