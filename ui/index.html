@@ -321,6 +321,11 @@ ol.todo li { padding-left: 4px; }
       <label><span data-i18n="sync.syncedFolder"></span><input id="sync-folder" class="mono" data-i18n-placeholder="sync.folderPlaceholder"></label>
       <div id="sync-suggestions" class="muted" style="font-size:13px;align-self:end"></div>
     </div>
+    <div id="sync-schedule-row" class="grid2" style="margin-top:10px" hidden>
+      <label><span data-i18n="sync.automatic"></span><span><input id="sync-scheduled" type="checkbox" style="width:auto"> <span data-i18n="sync.enableSchedule"></span></span></label>
+      <label id="sync-interval-row"><span data-i18n="sync.interval"></span><select id="sync-interval"><option value="1" data-i18n="sync.hour1"></option><option value="6" data-i18n="sync.hour6"></option><option value="12" data-i18n="sync.hour12"></option><option value="24" data-i18n="sync.hour24"></option><option value="168" data-i18n="sync.hour168"></option></select></label>
+    </div>
+    <p id="sync-status" class="muted" role="status" style="margin-top:8px"></p>
     <div class="row" style="margin-top:12px"><button class="primary" id="sync-save" data-i18n="sync.saveBtn"></button><button id="sync-run" data-i18n="sync.runBtn"></button></div>
     <details style="margin-top:16px">
       <summary data-i18n="github.title"></summary>
@@ -981,6 +986,12 @@ async function load() {
   const syncVaultChoice = SY.vault || (syncVaults.some((v) => v.name === 'brain') ? 'brain' : syncVaults.length === 1 ? syncVaults[0].name : '');
   $('sync-vault').innerHTML = `<option value="">${esc(t('sync.chooseVault'))}</option>` + syncVaults.map((v) => `<option value="${esc(v.name)}" ${v.name === syncVaultChoice ? 'selected' : ''}>${esc(v.name)}</option>`).join('');
   $('sync-vault-row').hidden = SY.provider === 'local';
+  $('sync-schedule-row').hidden = SY.provider === 'local';
+  $('sync-scheduled').checked = Boolean(SY.scheduled);
+  $('sync-interval').value = String(SY.intervalHours || 6);
+  $('sync-interval-row').hidden = !SY.scheduled;
+  $('sync-status').textContent = SY.running ? t('sync.running') : SY.status?.at
+    ? t('sync.lastRun', { status: t('sync.status.' + SY.status.status), at: new Date(SY.status.at).toLocaleString(LOCALE) }) : t('sync.never');
   const shareableVaults = S.vaults.filter((v) => !v.private && v.exists);
   $('github-vault').innerHTML = shareableVaults.map((v) => `<option value="${esc(v.name)}">${esc(v.name)}</option>`).join('');
   $('github-load').disabled = !shareableVaults.length;
@@ -1161,15 +1172,16 @@ $('sess-share-full').onchange = () => act(async () => {
   S.sessions_sharing = r.sessions;
   toast(t('sessions.shareToastSaved'));
 });
-$('sync-provider').onchange = () => { const p = $('sync-provider').value; $('sync-folder-row').hidden = p === 'local'; $('sync-vault-row').hidden = p === 'local'; renderSyncSuggestions(p, S.sync.suggested_folders); };
+$('sync-provider').onchange = () => { const p = $('sync-provider').value; $('sync-folder-row').hidden = p === 'local'; $('sync-vault-row').hidden = p === 'local'; $('sync-schedule-row').hidden = p === 'local'; renderSyncSuggestions(p, S.sync.suggested_folders); };
+$('sync-scheduled').onchange = () => { $('sync-interval-row').hidden = !$('sync-scheduled').checked; };
 $('sync-save').onclick = () => act(async () => {
   const provider = $('sync-provider').value;
-  const r = await api('POST', '/api/sync', { provider, folder: provider === 'local' ? null : $('sync-folder').value, vault: provider === 'local' ? null : $('sync-vault').value, device: $('sync-device').value });
+  const r = await api('POST', '/api/sync', { provider, folder: provider === 'local' ? null : $('sync-folder').value, vault: provider === 'local' ? null : $('sync-vault').value, scheduled: provider !== 'local' && $('sync-scheduled').checked, intervalHours: Number($('sync-interval').value), device: $('sync-device').value });
   toast(provider === 'local' ? t('sync.localToast') : t('sync.providerToast', { folder: r.sync.folder }));
 });
 $('sync-run').onclick = () => act(async () => {
   const provider = $('sync-provider').value;
-  await api('POST', '/api/sync', { provider, folder: provider === 'local' ? null : $('sync-folder').value, vault: provider === 'local' ? null : $('sync-vault').value, device: $('sync-device').value });
+  await api('POST', '/api/sync', { provider, folder: provider === 'local' ? null : $('sync-folder').value, vault: provider === 'local' ? null : $('sync-vault').value, scheduled: provider !== 'local' && $('sync-scheduled').checked, intervalHours: Number($('sync-interval').value), device: $('sync-device').value });
   const { result } = await api('POST', '/api/sync/run', {});
   if (result.status === 'ok' || result.status === 'local-only') toast(t('sync.runDone', { pushed: result.pushed.length, pulled: result.pulled.length, conflicts: result.conflicts.length }));
   else toast(t('sync.runStatus', { status: result.status }));

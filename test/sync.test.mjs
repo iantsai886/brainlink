@@ -34,6 +34,10 @@ test('sync settings accept a named public vault and refuse an unknown or private
   assert.equal(chooseSync(cfg, { provider: 'gdrive', folder, vault: 'Work' }).sync.vault, 'Work');
   assert.throws(() => chooseSync(cfg, { provider: 'gdrive', folder, vault: 'Missing' }), /existing public vault/);
   assert.throws(() => chooseSync(cfg, { provider: 'gdrive', folder, vault: 'Personal' }), /existing public vault/);
+  assert.equal(chooseSync(cfg, { provider: 'gdrive', folder, vault: 'Work', scheduled: true, intervalHours: 12 }).sync.scheduled, true);
+  assert.equal(chooseSync(cfg, { provider: 'gdrive', folder, vault: 'Work', intervalHours: 12 }).sync.intervalHours, 12);
+  assert.throws(() => chooseSync(cfg, { provider: 'gdrive', folder, vault: 'Work', scheduled: 'yes' }), /scheduled must be a boolean/);
+  assert.throws(() => chooseSync(cfg, { provider: 'gdrive', folder, vault: 'Work', intervalHours: 0 }), /intervalHours must be 1–168/);
 });
 
 for (const p of ['gdrive', 'icloud', 'dropbox']) test(`${p}: push then pull round trip`, async () => {

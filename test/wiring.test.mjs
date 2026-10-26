@@ -3,10 +3,11 @@ import assert from 'node:assert/strict';
 import { mkdtemp, mkdir, readFile, writeFile, cp, readdir } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { spawn } from 'node:child_process';
+import { setTimeout as delay } from 'node:timers/promises';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
-import { normalize, validate } from '../src/config.mjs';
+import { normalize, validate, saveConfig, configPath } from '../src/config.mjs';
 import { detect, connect, disconnect, test as testClient, UNSUPPORTED } from '../src/connectors.mjs';
 import { runSync } from '../src/sync-cli.mjs';
 import { startSetup } from '../src/setup.mjs';
@@ -343,9 +344,11 @@ test('setup UI: /api/sync chooses a provider (and rejects a bad one); state() re
     assert.deepEqual(st0.sync.providers, ['local', 'gdrive', 'icloud', 'dropbox']);
     const target = path.join(home, 'DriveFolder');
     await mkdir(target, { recursive: true });
-    const r = await (await api('POST', '/api/sync', { provider: 'gdrive', folder: target, device: 'test-device' })).json();
+    const r = await (await api('POST', '/api/sync', { provider: 'gdrive', folder: target, scheduled: false, intervalHours: 12, device: 'test-device' })).json();
     assert.equal(r.ok, true);
     assert.equal(r.sync.provider, 'gdrive');
+    assert.equal(r.sync.scheduled, false);
+    assert.equal(r.sync.intervalHours, 12);
     const st1 = await (await api('GET', '/api/state')).json();
     assert.equal(st1.sync.folder, target);
     const blocked = await (await api('POST', '/api/sync/run', {})).json();
@@ -357,6 +360,36 @@ test('setup UI: /api/sync chooses a provider (and rejects a bad one); state() re
     assert.equal(localRun.result.status, 'local-only');
     const bad = await api('POST', '/api/sync', { provider: 'gdrive', folder: 'relative' });
     assert.equal(bad.status, 400);
+  } finally { s.server.close(); }
+});
+
+test('Setup runs scheduled folder sync, preserves private notes, and keeps its server alive', async () => {
+  const home = await tmp('setup-scheduled-sync');
+  const env = { BRAINLINK_HOME: path.join(home, 'app'), HOME: home, BRAINLINK_SEMANTIC: '0' };
+  const vault = await tmp('setup-scheduled-sync-vault');
+  const folder = await tmp('setup-scheduled-sync-target');
+  await writeFile(path.join(vault, 'Public.md'), 'Shared knowledge.');
+  await writeFile(path.join(vault, 'Private.md'), '---\nprivate: true\n---\nNever shared.');
+  const cfg = normalize({ vaults: [{ name: 'Work', path: vault }], sync: { provider: 'dropbox', folder, vault: 'Work', scheduled: true, intervalHours: 1, device: 'test-device' } });
+  await saveConfig(cfg, configPath(env));
+  const s = await startSetup({ env, home, os: 'linux', port: 0, useCli: false, idleMinutes: 0.005, syncIntervalMs: 60_000 });
+  const base = `http://127.0.0.1:${s.port}`;
+  const api = (p) => fetch(base + p, { headers: { 'X-BrainLink-Token': s.token } });
+  try {
+    let state;
+    for (let i = 0; i < 80; i++) {
+      state = await (await api('/api/state')).json();
+      if (state.sync.status?.trigger === 'schedule') break;
+      await delay(25);
+    }
+    assert.equal(state.sync.status?.trigger, 'schedule', 'the scheduled pass ran without a user click');
+    assert.equal(state.sync.status?.status, 'ok');
+    assert.equal(state.sync.status?.pushed, 1);
+    assert.match(await readFile(path.join(folder, 'BrainLink', 'notes', 'Public.md'), 'utf8'), /Shared knowledge/);
+    await assert.rejects(readFile(path.join(folder, 'BrainLink', 'notes', 'Private.md')));
+    await delay(350);
+    assert.equal((await (await api('/api/state')).json()).sync.status.trigger, 'schedule', 'scheduled sync keeps Setup alive past its idle timeout');
+    assert.equal(JSON.parse(await readFile(path.join(env.BRAINLINK_HOME, 'sync-status.json'), 'utf8')).config_key.length, 64);
   } finally { s.server.close(); }
 });
 

@@ -1,9 +1,10 @@
 // Setup UI backend: a local-only web app (127.0.0.1, random session token) that picks the
 // vault folder, applies a rule pack and connects AI clients.
 import { createServer } from 'node:http';
-import { readFile, stat, lstat, cp, mkdir, writeFile, rename } from 'node:fs/promises';
+import { readFile, stat, lstat, cp, mkdir, writeFile, rename, unlink } from 'node:fs/promises';
 import { randomBytes, timingSafeEqual, createHash } from 'node:crypto';
 import { execFile } from 'node:child_process';
+import { setTimeout as delay } from 'node:timers/promises';
 import { homedir } from 'node:os';
 import path from 'node:path';
 import { loadConfig, saveConfig, configPath, normalize, LOCALES, appHome } from './config.mjs';
@@ -112,10 +113,11 @@ export async function startSetup(opts = {}) {
   let idleTimer = null;
   let backupEnabled = false;
   let ingestionKeepsAlive = false;
+  let syncKeepsAlive = false;
   const quit = () => setTimeout(() => { snapshotWatcher?.stop(); (opts.onQuit ? opts.onQuit() : server.close()); }, 100);
   const touch = () => {
     clearTimeout(idleTimer);
-    if (!opts.idleMinutes || backupEnabled || discoveryKeepsAlive || ingestionKeepsAlive) return;
+    if (!opts.idleMinutes || backupEnabled || discoveryKeepsAlive || ingestionKeepsAlive || syncKeepsAlive) return;
     idleTimer = setTimeout(quit, opts.idleMinutes * 60e3);
     idleTimer.unref?.();
   };
@@ -124,8 +126,13 @@ export async function startSetup(opts = {}) {
   // whenever the setting changes so a just-picked folder, or turning it off, takes effect at once.
   const snapshotStateFile = path.join(appHome(env), 'snapshot-state.json');
   const backupStateFile = path.join(appHome(env), 'backup-state.json');
+  const syncStatusFile = path.join(appHome(env), 'sync-status.json');
   let snapshotWatcher = null;
   let backupTimer = null;
+  let syncTimer = null;
+  let syncRunning = false;
+  let syncTickRunning = false;
+  let syncStatus = await readFile(syncStatusFile, 'utf8').then((raw) => JSON.parse(raw)).catch(() => null);
   let backupRunning = false;
   let backupTickRunning = false;
   let backupStatus = await loadBackupStatus(backupStateFile);
@@ -210,6 +217,65 @@ export async function startSetup(opts = {}) {
       throw error;
     } finally { backupRunning = false; }
   }
+  async function saveSyncReceipt(receipt) {
+    syncStatus = receipt;
+    await mkdir(path.dirname(syncStatusFile), { recursive: true });
+    const temp = `${syncStatusFile}.${randomBytes(5).toString('hex')}.tmp`;
+    try {
+      await writeFile(temp, JSON.stringify(receipt, null, 2) + '\n', { flag: 'wx', mode: 0o600 });
+      for (let attempt = 0; ; attempt++) {
+        try { await rename(temp, syncStatusFile); break; }
+        catch (error) {
+          if (process.platform !== 'win32' || !['EPERM', 'EACCES', 'EBUSY'].includes(error.code) || attempt >= 19) throw error;
+          await delay(25);
+        }
+      }
+    } catch (error) { await unlink(temp).catch(() => {}); throw error; }
+  }
+  function syncScheduleKey(settings) {
+    return createHash('sha256').update(JSON.stringify({ provider: settings.provider, folder: settings.folder, vault: settings.vault, device: settings.device, scheduled: settings.scheduled, intervalHours: settings.intervalHours })).digest('hex');
+  }
+  async function runSyncTask(cfg, trigger = 'manual') {
+    if (syncRunning) return { status: 'already-running', pushed: [], pulled: [], conflicts: [], sessions: 0 };
+    syncRunning = true;
+    try {
+      const result = await runSync(cfg, env);
+      await saveSyncReceipt({ at: new Date().toISOString(), trigger, status: result.status, config_key: syncScheduleKey(syncSettings(cfg)),
+        pushed: result.pushed?.length || 0, pulled: result.pulled?.length || 0, conflicts: result.conflicts?.length || 0 });
+      return result;
+    } catch {
+      await saveSyncReceipt({ at: new Date().toISOString(), trigger, status: 'failed', config_key: syncScheduleKey(syncSettings(cfg)), pushed: 0, pulled: 0, conflicts: 0 }).catch(() => {});
+      return { status: 'failed', pushed: [], pulled: [], conflicts: [], sessions: 0 };
+    } finally { syncRunning = false; }
+  }
+  function refreshSyncSchedule(cfg) {
+    if (syncTimer) { clearTimeout(syncTimer); clearInterval(syncTimer); }
+    syncTimer = null;
+    const settings = syncSettings(cfg);
+    syncKeepsAlive = Boolean(settings.provider !== 'local' && settings.scheduled);
+    touch();
+    if (!syncKeepsAlive) return;
+    const interval = opts.syncIntervalMs ?? settings.intervalHours * 3600e3;
+    const lastAttempt = syncStatus?.config_key === syncScheduleKey(settings) ? Date.parse(syncStatus?.at || '') : NaN;
+    const firstDelay = Number.isFinite(lastAttempt) ? Math.max(0, interval - (Date.now() - lastAttempt)) : 0;
+    const tick = async () => {
+      if (syncTickRunning || syncRunning) return;
+      syncTickRunning = true;
+      try {
+        const latest = await loadConfig(file);
+        const current = syncSettings(latest);
+        if (current.provider !== 'local' && current.scheduled) await runSyncTask(latest, 'schedule');
+      } catch {
+        await saveSyncReceipt({ at: new Date().toISOString(), trigger: 'schedule', status: 'failed', config_key: syncScheduleKey(settings), pushed: 0, pulled: 0, conflicts: 0 }).catch(() => {});
+      } finally { syncTickRunning = false; }
+    };
+    syncTimer = setTimeout(() => {
+      tick();
+      syncTimer = setInterval(tick, interval);
+      syncTimer.unref?.();
+    }, firstDelay);
+    syncTimer.unref?.();
+  }
   function refreshBackupTimer(cfg) {
     if (backupTimer) { clearTimeout(backupTimer); clearInterval(backupTimer); }
     backupTimer = null;
@@ -278,6 +344,7 @@ export async function startSetup(opts = {}) {
   const initialConfig = await loadConfig(file);
   refreshBackupTimer(initialConfig);
   refreshIngestionSchedule(initialConfig);
+  refreshSyncSchedule(initialConfig);
 
   async function state() {
     const cfg = await loadConfig(file);
@@ -300,7 +367,7 @@ export async function startSetup(opts = {}) {
       activity: await readActivity(env, 15),
       semantic: await detectEmbedder(cfg, env),
       obsidian_vaults: (await findObsidianVaults({ home, os, env })).filter((o) => !cfg.vaults.some((v) => path.resolve(v.path) === path.resolve(o.path))),
-      sync: { ...syncSettings(cfg), providers: PROVIDERS, provider_labels: PROVIDER_LABELS, suggested_folders: suggestFolders(home) },
+      sync: { ...syncSettings(cfg), providers: PROVIDERS, provider_labels: PROVIDER_LABELS, suggested_folders: suggestFolders(home), status: syncStatus, running: syncRunning },
       sessions_sharing: cfg.sessions,
       // P1a: imported sessions default to private, and a private session is invisible to every
       // connected AI while sessions.shareSummaries is off -- regardless of the "Show private
@@ -516,13 +583,14 @@ export async function startSetup(opts = {}) {
       // desktop client syncs it — no API, no credentials). validateSync (src/sync/settings.mjs)
       // rejects anything else.
       const cfg = await loadConfig(file);
-      const next = chooseSync(cfg, { provider: b.provider, folder: b.folder, device: b.device });
+      const next = chooseSync(cfg, { provider: b.provider, folder: b.folder, vault: b.vault, scheduled: b.scheduled, intervalHours: b.intervalHours, device: b.device });
       await saveConfig(next, file);
+      refreshSyncSchedule(next);
       return { ok: true, sync: syncSettings(next) };
     },
     'POST /api/sync/run': async () => {
       const cfg = await loadConfig(file);
-      const result = await runSync(cfg, env);
+      const result = await runSyncTask(cfg, 'manual');
       return { ok: result.status === 'ok' || result.status === 'local-only', result };
     },
     'POST /api/github/assignment/inspect': async (b) => {
@@ -935,7 +1003,7 @@ export async function startSetup(opts = {}) {
     }
     try { json(res, 200, await route(body)); } catch (e) { json(res, 400, { error: String(e.message || e) }); }
   });
-  server.once('close', () => { snapshotWatcher?.stop(); clearInterval(discoveryTimer); clearInterval(ingestionTimer); if (backupTimer) { clearTimeout(backupTimer); clearInterval(backupTimer); } });
+  server.once('close', () => { snapshotWatcher?.stop(); clearInterval(discoveryTimer); clearInterval(ingestionTimer); if (backupTimer) { clearTimeout(backupTimer); clearInterval(backupTimer); } if (syncTimer) { clearTimeout(syncTimer); clearInterval(syncTimer); } });
   await new Promise((resolve, reject) => { server.once('error', reject); server.listen(port, '127.0.0.1', resolve); });
   port = server.address().port;
   touch();
