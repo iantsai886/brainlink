@@ -220,10 +220,16 @@ test('filed ingestion requires a saved linked knowledge note and refuses a stale
 });
 
 test('ingestion MCP tools are exposed with explicit folder and review instructions', () => {
-  const names = createMcp(ctxOf(normalize({}))).tools.map((t) => t.name);
+  const mcp = createMcp(ctxOf(normalize({})));
+  const names = mcp.tools.map((t) => t.name);
   assert.ok(names.includes('ingestion_queue'));
   assert.ok(names.includes('ingestion_record'));
-  assert.match(createMcp(ctxOf(normalize({}))).instructions, /never scan the whole vault/i);
+  assert.match(mcp.instructions, /daily schedule while BrainLink is running/i);
+  assert.match(mcp.instructions, /do not ask an AI to read, summarize, or file notes/i);
+  assert.match(mcp.instructions, /never scan the whole vault/i);
+  const queue = mcp.tools.find((tool) => tool.name === 'ingestion_queue');
+  assert.match(queue.description, /does not read source bodies/i);
+  assert.match(queue.description, /does not .* change the Setup background-scan schedule/i);
 });
 
 test('parseFrontmatter: a leading UTF-8 BOM or blank lines before --- still detect private: true', () => {
