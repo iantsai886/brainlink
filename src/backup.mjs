@@ -1,7 +1,7 @@
 // Local vault backup, deliberately separate from the filtered cloud-sharing snapshot.
 // Never follows symlinks, overwrites an earlier backup, or writes inside a source vault.
 import { createHash, randomBytes } from 'node:crypto';
-import { lstat, realpath, readdir, readFile, writeFile, mkdir, rename, unlink } from 'node:fs/promises';
+import { lstat, realpath, readdir, readFile, writeFile, mkdir, rename, unlink, rm } from 'node:fs/promises';
 import { setTimeout as delay } from 'node:timers/promises';
 import path from 'node:path';
 
@@ -68,36 +68,47 @@ export async function backupOnce(vaults, destination, now = new Date(), artifact
     roots.push({ name: v.name, root });
   }
   const stamp = now.toISOString().replace(/[:.]/g, '-');
-  const backupDir = path.join(dest, `BrainLink-Backup-${stamp}-${randomBytes(4).toString('hex')}`);
-  await mkdir(backupDir);
+  const backupName = `BrainLink-Backup-${stamp}-${randomBytes(4).toString('hex')}`;
+  const backupDir = path.join(dest, backupName);
+  const stagingDir = path.join(dest, `.${backupName}.partial`);
+  if (path.dirname(stagingDir) !== dest || !within(dest, stagingDir)) throw new Error('Invalid temporary backup location.');
   if (!Array.isArray(artifacts) || artifacts.length > 50) throw new Error('Backup artifacts must be a list of at most 50 files.');
   for (const artifact of artifacts) {
     const name = String(artifact?.name || '');
     if (!/^[a-zA-Z0-9_-]+(?:\/[a-zA-Z0-9_.-]+)*$/.test(name) || name.split('/').some(part => part === '.' || part === '..')) throw new Error('Invalid backup artifact path.');
   }
   const manifest = { format: 'brainlink-backup-v1', created_at: now.toISOString(), vaults: [], files: [], artifacts: [] };
-  for (const [index, v] of roots.entries()) {
-    const folder = `${index + 1}-${safeName(v.name)}`;
-    manifest.vaults.push({ name: v.name, folder });
-    for (const file of await filesUnder(v.root)) {
-      const data = await readFile(file.full);
-      const target = path.join(backupDir, 'vaults', folder, ...file.rel.split('/'));
+  await mkdir(stagingDir);
+  try {
+    for (const [index, v] of roots.entries()) {
+      const folder = `${index + 1}-${safeName(v.name)}`;
+      manifest.vaults.push({ name: v.name, folder });
+      for (const file of await filesUnder(v.root)) {
+        const data = await readFile(file.full);
+        const target = path.join(stagingDir, 'vaults', folder, ...file.rel.split('/'));
+        await mkdir(path.dirname(target), { recursive: true });
+        await writeFile(target, data, { flag: 'wx' });
+        manifest.files.push({ vault: v.name, path: file.rel, bytes: data.length, sha256: hash(data), stored: `vaults/${folder}/${file.rel}` });
+      }
+    }
+    for (const artifact of artifacts) {
+      const name = String(artifact?.name || '');
+      const data = Buffer.isBuffer(artifact.data) ? artifact.data : Buffer.from(String(artifact.data ?? ''));
+      const stored = 'artifacts/' + name;
+      const target = path.resolve(stagingDir, ...stored.split('/'));
+      if (!within(stagingDir, target)) throw new Error('Invalid backup artifact path.');
       await mkdir(path.dirname(target), { recursive: true });
       await writeFile(target, data, { flag: 'wx' });
-      manifest.files.push({ vault: v.name, path: file.rel, bytes: data.length, sha256: hash(data), stored: `vaults/${folder}/${file.rel}` });
+      manifest.artifacts.push({ path: name, bytes: data.length, sha256: hash(data), stored });
     }
+    await writeFile(path.join(stagingDir, 'manifest.json'), JSON.stringify(manifest, null, 2) + '\n', { flag: 'wx' });
+    await rename(stagingDir, backupDir);
+  } catch (error) {
+    // The staging path is a random, direct child of the already-verified destination.
+    // Remove only this invocation's incomplete copy; a completed backup is never touched.
+    if (path.dirname(stagingDir) === dest && within(dest, stagingDir)) await rm(stagingDir, { recursive: true, force: true }).catch(() => {});
+    throw error;
   }
-  for (const artifact of artifacts) {
-    const name = String(artifact?.name || '');
-    const data = Buffer.isBuffer(artifact.data) ? artifact.data : Buffer.from(String(artifact.data ?? ''));
-    const stored = 'artifacts/' + name;
-    const target = path.resolve(backupDir, ...stored.split('/'));
-    if (!within(backupDir, target)) throw new Error('Invalid backup artifact path.');
-    await mkdir(path.dirname(target), { recursive: true });
-    await writeFile(target, data, { flag: 'wx' });
-    manifest.artifacts.push({ path: name, bytes: data.length, sha256: hash(data), stored });
-  }
-  await writeFile(path.join(backupDir, 'manifest.json'), JSON.stringify(manifest, null, 2) + '\n', { flag: 'wx' });
   return { folder: backupDir, vault_count: manifest.vaults.length, file_count: manifest.files.length + manifest.artifacts.length };
 }
 

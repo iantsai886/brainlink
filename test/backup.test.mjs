@@ -17,6 +17,7 @@ test('backup preserves private and public files and verifies their hashes', asyn
   await writeFile(path.join(root, '.obsidian', 'app.json'), '{}');
   const result = await backupOnce([{ name: 'Personal', path: root }], dest, new Date('2026-10-23T00:00:00Z'));
   assert.equal(result.file_count, 2);
+  assert.deepEqual(await readdir(dest), [path.basename(result.folder)], 'completed backups appear only after the manifest is ready');
   assert.equal((await verifyBackup(result.folder)).ok, true);
   const manifest = JSON.parse(await readFile(path.join(result.folder, 'manifest.json'), 'utf8'));
   const privateFile = manifest.files.find((f) => f.path === 'Private.md');
@@ -62,6 +63,17 @@ test('verified backup includes and restores the BrainLink RSI ledger artifact', 
 test('backup rejects traversal in extra artifact paths', async () => {
   const root = await tmp('artifact-traversal-source'), dest = await tmp('artifact-traversal-dest');
   await assert.rejects(backupOnce([{ name: 'Workspace', path: root }], dest, new Date(), [{ name: '../outside.txt', data: 'blocked' }]), /artifact path/);
+});
+
+test('a failed backup removes only its partial staging folder and keeps prior backups', async () => {
+  const root = await tmp('partial-source'), dest = await tmp('partial-destination');
+  await writeFile(path.join(root, 'Note.md'), 'fictional note');
+  const first = await backupOnce([{ name: 'Workspace', path: root }], dest, new Date('2026-10-25T00:00:00Z'));
+  const brokenArtifact = { name: 'rsi/ledger.jsonl' };
+  Object.defineProperty(brokenArtifact, 'data', { get() { throw new Error('fixture write failure'); } });
+  await assert.rejects(backupOnce([{ name: 'Workspace', path: root }], dest, new Date('2026-10-26T00:00:00Z'), [brokenArtifact]), /fixture write failure/);
+  assert.deepEqual(await readdir(dest), [path.basename(first.folder)], 'the earlier verified backup remains; the partial staging folder is gone');
+  assert.equal((await verifyBackup(first.folder)).ok, true);
 });
 
 test('backup rejects symlinked files when the host permits symlinks', async (t) => {
