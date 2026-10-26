@@ -12,7 +12,10 @@ const temp = (name) => mkdtemp(path.join(tmpdir(), `brainlink-ingestion-schedule
 
 test('daily scan schedule validates input and follows the configured local time', () => {
   assert.throws(() => validateIngestionSchedule({ enabled: true, vault: 'Team', folder: 'Raw', time: '25:00' }), /valid daily scan time/i);
-  assert.throws(() => validateIngestionSchedule({ enabled: true, vault: 'Team', folder: '', time: '02:00' }), /Choose a vault and one folder/i);
+  assert.throws(() => validateIngestionSchedule({ enabled: true, targets: [], time: '02:00' }), /Add at least one vault folder/i);
+  assert.throws(() => validateIngestionSchedule({ enabled: true, targets: [{ vault: 'Team', folder: '../private' }], time: '02:00' }), /safe folder path/i);
+  assert.throws(() => validateIngestionSchedule({ enabled: true, targets: [{ vault: 'Team', folder: 'Raw' }, { vault: 'team', folder: 'raw' }], time: '02:00' }), /only be added once/i);
+  assert.throws(() => validateIngestionSchedule({ enabled: true, targets: Array.from({ length: 21 }, (_, i) => ({ vault: 'Team', folder: `Raw${i}` })), time: '02:00' }), /no more than 20/i);
   const at = new Date('2026-10-25T12:30:00.000Z');
   assert.deepEqual(localDateAndTime(at, 'UTC'), { date: '2026-10-25', time: '12:30' });
   const schedule = { enabled: true, vault: 'Team', folder: 'Raw', time: '12:00' };
@@ -25,6 +28,7 @@ test('daily scan schedule validates input and follows the configured local time'
   const retried = validateIngestionSchedule({ ...schedule, enabled: true }, { ...schedule, enabled: true, last_scheduled_date: '2026-10-25', retry_count: 1, retry_date: '2026-10-25', retry_after: '2026-10-25T12:45:00.000Z' });
   assert.equal(retried.retry_count, 1, 'saving unchanged settings preserves the retry schedule');
   assert.equal(validateIngestionSchedule({ ...schedule, time: '13:00' }, { ...schedule, retry_count: 1 }).retry_after, null, 'changing the schedule clears stale retries');
+  assert.deepEqual(normalize({ ingestion: { vault: 'Legacy', folder: 'Raw' } }).ingestion.targets, [{ vault: 'Legacy', folder: 'Raw' }], 'old single-folder settings migrate to a one-item list');
 });
 
 test('failed scheduled scan retries once the source folder returns, without logging note content', async () => {
@@ -71,13 +75,18 @@ test('Setup offers authenticated manual scans and runs an enabled daily scan in 
   const home = await temp('api');
   const appHome = path.join(home, 'app');
   const vault = path.join(home, 'vault');
+  const secondVault = path.join(home, 'second-vault');
+  const privateVault = path.join(home, 'private-vault');
   await mkdir(path.join(vault, 'Raw'), { recursive: true });
   await writeFile(path.join(vault, 'Raw', 'Source.md'), '# Source\n\nFictional intake item.');
+  await mkdir(path.join(secondVault, 'Incoming'), { recursive: true });
+  await writeFile(path.join(secondVault, 'Incoming', 'Second.md'), '# Second\n\nAnother fictional intake item.');
+  await mkdir(path.join(privateVault, 'Raw'), { recursive: true });
   const env = { BRAINLINK_HOME: appHome, HOME: home, BRAINLINK_SEMANTIC: '0' };
   const now = new Date();
   const local = localDateAndTime(now, 'UTC');
   const pastMinute = `${local.time.slice(0, 2)}:${String(Math.max(0, Number(local.time.slice(3)) - 1)).padStart(2, '0')}`;
-  await saveConfig(normalize({ timezone: 'UTC', vaults: [{ name: 'Fictional Team', path: vault }], ingestion: { enabled: true, vault: 'Fictional Team', folder: 'Raw', time: pastMinute } }), path.join(appHome, 'config.json'));
+  await saveConfig(normalize({ timezone: 'UTC', vaults: [{ name: 'Fictional Team', path: vault }, { name: 'Fictional Project', path: secondVault }, { name: 'Private Notes', path: privateVault, private: true }], ingestion: { enabled: true, targets: [{ vault: 'Fictional Team', folder: 'Raw' }, { vault: 'Fictional Project', folder: 'Incoming' }], time: pastMinute } }), path.join(appHome, 'config.json'));
   const app = await startSetup({ env, home, os: 'linux', port: 0, useCli: false, ingestionTickMs: 20 });
   const base = `http://127.0.0.1:${app.port}`;
   const get = (route, token = app.token) => fetch(base + route, { headers: { 'X-BrainLink-Token': token } });
@@ -91,7 +100,8 @@ test('Setup offers authenticated manual scans and runs an enabled daily scan in 
       await delay(20);
     }
     assert.equal(status.ingestion.status.trigger, 'schedule', `the background timer scans at the configured local time: ${JSON.stringify(status.ingestion)}`);
-    assert.equal(status.ingestion.status.queued_total, 1);
+    assert.equal(status.ingestion.status.queued_total, 2);
+    assert.equal(status.ingestion.status.targets.length, 2);
     for (let i = 0; i < 100 && status.ingestion.running; i++) { await delay(10); status = await get('/api/state').then((r) => r.json()); }
     assert.equal(status.ingestion.running, false, 'scheduled work finishes before the manual run starts');
     assert.equal((await readFile(path.join(appHome, 'ingestion-state.json'), 'utf8')).includes('Fictional intake item'), false, 'saved scan status contains no note body');
@@ -101,6 +111,18 @@ test('Setup offers authenticated manual scans and runs an enabled daily scan in 
     assert.equal(manualResult.trigger, 'manual');
     assert.equal(manualResult.queued_total, 1);
     assert.equal(manualResult.candidates[0].path, 'Raw/Source.md');
+    const multi = await post('/api/ingestion/run', { targets: [{ vault: 'Fictional Team', folder: 'Raw' }, { vault: 'Fictional Project', folder: 'Incoming' }] });
+    const multiResult = await multi.json();
+    assert.equal(multiResult.queued_total, 2);
+    assert.deepEqual(new Set(multiResult.candidates.map((item) => item.vault)), new Set(['Fictional Team', 'Fictional Project']));
+    const unknownTarget = await post('/api/ingestion/settings', { enabled: true, targets: [{ vault: 'Fictional Team', folder: 'Raw' }, { vault: 'Missing Vault', folder: 'Raw' }], time: pastMinute });
+    assert.notEqual(unknownTarget.status, 200, 'unknown vault targets are refused before saving');
+    const privateTarget = await post('/api/ingestion/settings', { enabled: true, targets: [{ vault: 'Fictional Team', folder: 'Raw' }, { vault: 'Private Notes', folder: 'Raw' }], time: pastMinute });
+    assert.notEqual(privateTarget.status, 200, 'private vault targets are refused before saving');
+    await post('/api/vault/private', { name: 'Fictional Project', private: true });
+    const privacyConfig = JSON.parse(await readFile(path.join(appHome, 'config.json'), 'utf8'));
+    assert.deepEqual(privacyConfig.ingestion.targets, [{ vault: 'Fictional Team', folder: 'Raw' }], 'making one vault private removes only its scan target');
+    assert.equal(privacyConfig.ingestion.enabled, true, 'other public scan targets keep their schedule');
     const saved = await post('/api/ingestion/settings', { enabled: false, vault: 'Fictional Team', folder: 'Raw', time: pastMinute });
     assert.equal(saved.status, 200);
     assert.equal((await saved.json()).ingestion.enabled, false);
@@ -109,13 +131,15 @@ test('Setup offers authenticated manual scans and runs an enabled daily scan in 
 
 test('ingestion scan UI has manual and scheduled controls with all locale strings', async () => {
   const html = await readFile(new URL('../ui/index.html', import.meta.url), 'utf8');
-  for (const id of ['ingestion-enabled', 'ingestion-vault', 'ingestion-folder', 'ingestion-time', 'ingestion-save', 'ingestion-run', 'ingestion-status', 'ingestion-queue']) {
+  for (const id of ['ingestion-enabled', 'ingestion-vault', 'ingestion-folder', 'ingestion-add', 'ingestion-target-list', 'ingestion-time', 'ingestion-save', 'ingestion-run', 'ingestion-status', 'ingestion-queue']) {
     assert.equal((html.match(new RegExp(`id="${id}"`, 'g')) || []).length, 1, id);
   }
-  assert.match(html, /api\('POST', '\/api\/ingestion\/run'/);
-  assert.match(html, /data-open-note="\$\{esc\(r\.vault\)\}::\$\{esc\(item\.path\)\}"/, 'queue entries open their source note in the existing safe reader');
+  assert.match(html, /api\('POST', '\/api\/ingestion\/run', \{ targets: currentIngestionTargets\(\) \}\)/);
+  assert.match(html, /data-open-note="\$\{esc\(item\.vault \|\| r\.vault\)\}::\$\{esc\(item\.path\)\}"/, 'queue entries open each source note in its own vault');
+  assert.match(html, /document\.addEventListener\('click', async \(event\) => \{\s*const removeIngestionTarget/);
+  assert.match(html, /currentIngestionTargets\(\)\.push\(target\)/);
   for (const locale of ['en', 'zh-TW', 'pt']) {
     const catalog = JSON.parse(await readFile(new URL(`../ui/locales/${locale}.json`, import.meta.url), 'utf8'));
-    for (const key of ['ingestion.title', 'ingestion.hint', 'ingestion.enabled', 'ingestion.vault', 'ingestion.folder', 'ingestion.time', 'ingestion.save', 'ingestion.run', 'ingestion.never', 'ingestion.running', 'ingestion.lastRun', 'ingestion.failed', 'ingestion.retryScheduled', 'ingestion.saved', 'ingestion.disabled', 'ingestion.scanDone', 'ingestion.empty', 'ingestion.limited', 'ingestion.trigger.manual', 'ingestion.trigger.schedule']) assert.ok(catalog[key], `${locale} ${key}`);
+    for (const key of ['ingestion.title', 'ingestion.hint', 'ingestion.enabled', 'ingestion.vault', 'ingestion.folder', 'ingestion.addTarget', 'ingestion.targets', 'ingestion.removeTarget', 'ingestion.emptyTargets', 'ingestion.targetRequired', 'ingestion.maxTargets', 'ingestion.duplicateTarget', 'ingestion.time', 'ingestion.save', 'ingestion.run', 'ingestion.never', 'ingestion.running', 'ingestion.lastRun', 'ingestion.failed', 'ingestion.retryScheduled', 'ingestion.saved', 'ingestion.disabled', 'ingestion.scanDone', 'ingestion.empty', 'ingestion.limited', 'ingestion.trigger.manual', 'ingestion.trigger.schedule']) assert.ok(catalog[key], `${locale} ${key}`);
   }
 });

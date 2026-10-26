@@ -43,7 +43,7 @@ import { createRsiLedger } from './rsi-ledger.mjs';
 import { createRsiExperiments } from './rsi-experiments.mjs';
 import { createRsiDiscovery } from './rsi-discovery.mjs';
 import { ingestionQueue } from './ingestion.mjs';
-import { INGESTION_MAX_ATTEMPTS, INGESTION_RETRY_DELAY_MS, ingestionScheduleDue, localDateAndTime, validateIngestionSchedule } from './ingestion-schedule.mjs';
+import { INGESTION_MAX_ATTEMPTS, INGESTION_RETRY_DELAY_MS, ingestionScheduleDue, localDateAndTime, normalizeIngestionTargets, validateIngestionSchedule } from './ingestion-schedule.mjs';
 import { briefScheduleDue, validateBriefSchedule } from './brief-schedule.mjs';
 
 const UI_STATIC_TYPES = { '.js': 'text/javascript; charset=utf-8', '.css': 'text/css; charset=utf-8', '.json': 'application/json; charset=utf-8' };
@@ -278,18 +278,32 @@ export async function startSetup(opts = {}) {
     await writeFile(temp, JSON.stringify(status, null, 2) + '\n', { flag: 'wx' });
     await rename(temp, ingestionStateFile);
   }
-  async function runIngestion(cfg, { trigger = 'manual', vaultName = cfg.ingestion?.vault, folder = cfg.ingestion?.folder } = {}) {
+  async function runIngestion(cfg, { trigger = 'manual', targets = cfg.ingestion?.targets?.length ? cfg.ingestion.targets : [{ vault: cfg.ingestion?.vault, folder: cfg.ingestion?.folder }] } = {}) {
     if (ingestionRunning) throw new Error('A source scan is already running.');
-    if (!vaultName || !folder) throw new Error('Choose one vault and one folder to scan.');
+    const selected = normalizeIngestionTargets(targets);
+    if (!selected.length || selected.some((target) => !target?.vault || !target?.folder)) throw new Error('Add at least one vault folder to scan.');
     ingestionRunning = true;
     try {
       const ctx = localContext(cfg, { ...env, BRAINLINK_SEMANTIC: '0' });
-      const queue = await ingestionQueue(ctx, vaultName, folder, { limit: 100 });
-      const status = { ok: true, at: new Date().toISOString(), trigger, vault: vaultName, folder: queue.folder, queued_total: queue.queued_total, scanned: queue.scanned, skipped: queue.skipped, truncated: queue.truncated, error: null };
+      const candidates = [], folders = [];
+      let queued_total = 0, scanned = 0, skipped = 0, truncated = false;
+      for (const target of selected) {
+        try {
+          const remaining = Math.max(0, 100 - candidates.length);
+          const queue = await ingestionQueue(ctx, target.vault, target.folder, { limit: Math.max(1, remaining) });
+          queued_total += queue.queued_total; scanned += queue.scanned; skipped += queue.skipped; truncated ||= queue.truncated;
+          folders.push({ vault: target.vault, folder: queue.folder, ok: true, queued_total: queue.queued_total, scanned: queue.scanned, skipped: queue.skipped, truncated: queue.truncated });
+          for (const item of queue.candidates.slice(0, remaining)) candidates.push({ ...item, vault: target.vault });
+        } catch (error) {
+          folders.push({ vault: target.vault, folder: target.folder, ok: false, error: error.message || String(error) });
+        }
+      }
+      const failures = folders.filter((entry) => !entry.ok);
+      const status = { ok: failures.length === 0, at: new Date().toISOString(), trigger, vault: selected.length === 1 ? selected[0].vault : null, folder: selected.length === 1 ? selected[0].folder : null, targets: folders, queued_total, scanned, skipped, truncated, error: failures.length ? failures.map((entry) => `${entry.vault}: ${entry.error}`).join('; ').slice(0, 500) : null };
       await saveIngestionStatus(status);
-      return { ...status, candidates: queue.candidates };
+      return { ...status, candidates, limited: queued_total > candidates.length };
     } catch (error) {
-      const status = { ok: false, at: new Date().toISOString(), trigger, vault: vaultName, folder: String(folder), queued_total: 0, scanned: 0, skipped: 0, error: error.message || String(error) };
+      const status = { ok: false, at: new Date().toISOString(), trigger, vault: null, folder: null, queued_total: 0, scanned: 0, skipped: 0, error: error.message || String(error) };
       await saveIngestionStatus(status).catch(() => {});
       throw error;
     } finally { ingestionRunning = false; }
@@ -314,9 +328,10 @@ export async function startSetup(opts = {}) {
       }
       await saveConfig(cfg, file);
       try {
-        await runIngestion(cfg, { trigger: 'schedule' });
+        const result = await runIngestion(cfg, { trigger: 'schedule' });
+        if (!result.ok) throw new Error(result.error || 'One or more scan folders could not be read.');
         const latest = await loadConfig(file);
-        if (latest.ingestion?.vault === cfg.ingestion.vault && latest.ingestion?.folder === cfg.ingestion.folder) {
+        if (JSON.stringify(latest.ingestion?.targets || []) === JSON.stringify(cfg.ingestion?.targets || [])) {
           latest.ingestion.retry_count = 0;
           latest.ingestion.retry_date = null;
           latest.ingestion.retry_after = null;
@@ -324,7 +339,7 @@ export async function startSetup(opts = {}) {
         }
       } catch (error) {
         const latest = await loadConfig(file);
-        const sameSchedule = latest.ingestion?.enabled && latest.ingestion?.vault === cfg.ingestion.vault && latest.ingestion?.folder === cfg.ingestion.folder;
+        const sameSchedule = latest.ingestion?.enabled && JSON.stringify(latest.ingestion?.targets || []) === JSON.stringify(cfg.ingestion?.targets || []);
         const retryAt = sameSchedule && attempt < (opts.ingestionMaxAttempts ?? INGESTION_MAX_ATTEMPTS)
           ? new Date(Date.now() + (opts.ingestionRetryMs ?? INGESTION_RETRY_DELAY_MS)).toISOString() : null;
         if (sameSchedule) {
@@ -861,7 +876,10 @@ export async function startSetup(opts = {}) {
     'POST /api/vault/remove': async (b) => {
       const cfg = await loadConfig(file);
       const next = { ...cfg, vaults: cfg.vaults.filter((v) => v.name !== b.name), agents: cfg.agents.filter((a) => a.vault !== b.name), handoff: cfg.handoff?.vault === b.name ? null : cfg.handoff };
-      if (next.ingestion?.vault === b.name) next.ingestion = { ...next.ingestion, enabled: false };
+      if ((next.ingestion?.targets || []).some((target) => target.vault === b.name)) {
+        const targets = next.ingestion.targets.filter((target) => target.vault !== b.name);
+        next.ingestion = { ...next.ingestion, targets, vault: targets[0]?.vault || null, folder: targets[0]?.folder || null, enabled: Boolean(next.ingestion.enabled && targets.length), last_scheduled_date: null, retry_count: 0, retry_date: null, retry_after: null };
+      }
       await saveConfig(next, file);
       refreshVaultWatcher(next);
       refreshIngestionSchedule(next);
@@ -886,7 +904,10 @@ export async function startSetup(opts = {}) {
       const v = cfg.vaults.find((x) => x.name === b.name);
       if (!v) throw new Error(`Unknown vault "${b.name}".`);
       v.private = Boolean(b.private);
-      if (v.private && cfg.ingestion?.vault === v.name) cfg.ingestion = { ...cfg.ingestion, enabled: false };
+      if (v.private && (cfg.ingestion?.targets || []).some((target) => target.vault === v.name)) {
+        const targets = cfg.ingestion.targets.filter((target) => target.vault !== v.name);
+        cfg.ingestion = { ...cfg.ingestion, targets, vault: targets[0]?.vault || null, folder: targets[0]?.folder || null, enabled: Boolean(cfg.ingestion.enabled && targets.length), last_scheduled_date: null, retry_count: 0, retry_date: null, retry_after: null };
+      }
       await saveConfig(cfg, file);
       refreshIngestionSchedule(cfg);
       // S5: a vault just marked private must stop being watched/synced into the shared snapshot
@@ -1437,7 +1458,7 @@ export async function startSetup(opts = {}) {
       const next = { ...cfg, ingestion: validateIngestionSchedule(b, cfg.ingestion) };
       if (next.ingestion.enabled) {
         const ctx = localContext(next, { ...env, BRAINLINK_SEMANTIC: '0' });
-        await ingestionQueue(ctx, next.ingestion.vault, next.ingestion.folder, { limit: 1 });
+        for (const target of next.ingestion.targets) await ingestionQueue(ctx, target.vault, target.folder, { limit: 1 });
       }
       await saveConfig(next, file);
       refreshIngestionSchedule(next);
@@ -1445,9 +1466,8 @@ export async function startSetup(opts = {}) {
     },
     'POST /api/ingestion/run': async (b) => {
       const cfg = await loadConfig(file);
-      const vaultName = String(b.vault || cfg.ingestion?.vault || '');
-      const folder = String(b.folder || cfg.ingestion?.folder || '');
-      return runIngestion(cfg, { trigger: 'manual', vaultName, folder });
+      const targets = Array.isArray(b.targets) ? b.targets : b.vault && b.folder ? [{ vault: String(b.vault), folder: String(b.folder) }] : undefined;
+      return runIngestion(cfg, { trigger: 'manual', targets });
     },
     'POST /api/brief/settings': async (b) => {
       const cfg = await loadConfig(file);

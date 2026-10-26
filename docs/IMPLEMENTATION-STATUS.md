@@ -41,6 +41,10 @@ On 2026-10-26, added the portable `brainlink-raw-to-wiki` Agent Skill in `skills
 
 Scheduled Raw-to-Wiki scans now retry a failed run twice, 15 minutes apart, for at most three attempts per scheduled day. The retry state is stored in local configuration; scan status remains content-free. Saving unchanged settings preserves a pending retry, while changing the schedule clears stale retry state. Turning the schedule off pauses retries; manual Scan now remains available. `test/ingestion-schedule.test.mjs` passes 4/4, including recovery when a missing source folder returns. The full core suite passed 388 tests (382 passed, 0 failed, 6 platform/privilege skips) before this retry change; full-suite coverage of the new change is pending. No unattended AI processing or auto-filing was added.
 
+### Multi-folder source scanning (2026-10-27)
+
+Setup now lets users manage up to 20 scan folders across public vaults. A manual run scans the selected list and keeps each result tied to its own vault; one daily schedule scans the same targets. Private or unknown vaults, hidden paths, duplicate targets, and unsafe relative paths are rejected. Existing one-folder configurations load as a one-target list. Marking a target vault private or removing it removes those targets from the schedule and clears stale retry state. `test/ingestion-schedule.test.mjs` passes 4/4, including two-vault scheduled and manual scans, legacy migration, and private/unknown-vault rejection. UI locale and inline-script syntax checks pass. The full core suite has not been rerun after this change; no live desktop or customer-vault validation is claimed.
+
 Full Windows validation for this implementation: Node.js 24.18.0, `npm run test:all`, core 334 tests (328 passed, 0 failed, 6 skipped) and UI 28 tests (28 passed, 0 failed). The skips are platform or Windows symlink-privilege dependent. `git diff --check` passed. This validates the local code path and fictional test data only; it does not verify a live user vault, background monitoring, token savings, cross-client behavior, or release readiness.
 
 ### End-of-session review link (2026-10-25)

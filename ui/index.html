@@ -389,6 +389,9 @@ ol.todo li { padding-left: 4px; }
       <label><span data-i18n="ingestion.folder"></span><input id="ingestion-folder" class="mono" placeholder="Raw"></label>
       <label><span data-i18n="ingestion.time"></span><input id="ingestion-time" type="time" value="02:00"></label>
     </div>
+    <div class="row" style="margin-top:8px"><button type="button" id="ingestion-add" data-i18n="ingestion.addTarget"></button></div>
+    <h3 data-i18n="ingestion.targets"></h3>
+    <div id="ingestion-target-list" class="cards"></div>
     <div class="row" style="margin-top:12px"><button class="primary" id="ingestion-save" data-i18n="ingestion.save"></button><button id="ingestion-run" data-i18n="ingestion.run"></button></div>
     <p id="ingestion-status" class="muted" role="status"></p>
     <div id="ingestion-queue" class="cards" aria-live="polite"></div>
@@ -481,7 +484,7 @@ const vaultEvents = new EventSource('/api/events?t=' + encodeURIComponent(T));
 vaultEvents.addEventListener('vault-changed', () => window.dispatchEvent(new Event('brainlink:vault-changed')));
 const $ = (id) => document.getElementById(id);
 const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
-let S = null, pack = 'founder-os', editingTwinId = null;
+let S = null, pack = 'founder-os', editingTwinId = null, ingestionTargetsDraft = null;
 let activeFiledSummary = null;
 let filedSummaryRefs = [];
 let pendingSyncOnboarding = false; // set when a first-run vault pick just succeeded; cleared once the sync choice is saved
@@ -500,6 +503,20 @@ async function api(method, url, body) {
 }
 function toast(msg, bad) { const t = $('toast'); t.textContent = msg; t.className = 'show' + (bad ? ' bad' : ''); clearTimeout(t._h); t._h = setTimeout(() => (t.className = ''), bad ? 6000 : 3500); }
 async function act(fn) { try { await fn(); await load(); } catch (e) { toast(e.message, true); } }
+function currentIngestionTargets() {
+  if (ingestionTargetsDraft === null) {
+    const saved = S?.ingestion?.targets;
+    ingestionTargetsDraft = Array.isArray(saved) && saved.length ? saved.map((target) => ({ vault: target.vault, folder: target.folder }))
+      : S?.ingestion?.vault && S?.ingestion?.folder ? [{ vault: S.ingestion.vault, folder: S.ingestion.folder }] : [];
+  }
+  return ingestionTargetsDraft;
+}
+function renderIngestionTargets() {
+  if (!$('ingestion-target-list') || !S) return;
+  const targets = currentIngestionTargets();
+  $('ingestion-target-list').innerHTML = targets.length ? targets.map((target, index) => `<div class="card" style="display:flex;align-items:center;justify-content:space-between;gap:12px"><span><b>${esc(target.vault)}</b><br><span class="mono muted">${esc(target.folder)}</span></span><button type="button" data-ingestion-remove="${index}">${esc(t('ingestion.removeTarget'))}</button></div>`).join('') : `<p class="muted">${esc(t('ingestion.emptyTargets'))}</p>`;
+  $('ingestion-run').disabled = !targets.length;
+}
 
 // ---- i18n: plain JSON locale files (ui/locales/*.json), no library ----
 const SUPPORTED_LOCALES = ['en', 'zh-TW', 'pt'];
@@ -1152,6 +1169,7 @@ async function load() {
   $('ingestion-enabled').checked = Boolean(S.ingestion?.enabled);
   $('ingestion-vault').innerHTML = S.vaults.filter((v) => !v.private && v.exists).map((v) => `<option value="${esc(v.name)}" ${v.name === S.ingestion?.vault ? 'selected' : ''}>${esc(v.name)}</option>`).join('');
   $('ingestion-folder').value = S.ingestion?.folder || '';
+  renderIngestionTargets();
   $('ingestion-time').value = S.ingestion?.time || '02:00';
   $('ingestion-status').textContent = S.ingestion?.status?.at
     ? (S.ingestion.status.ok ? t('ingestion.lastRun', { count: S.ingestion.status.queued_total, at: new Date(S.ingestion.status.at).toLocaleString(LOCALE), trigger: t('ingestion.trigger.' + S.ingestion.status.trigger) }) : S.ingestion.status.retry_after ? t('ingestion.retryScheduled', { attempt: S.ingestion.status.attempt, at: new Date(S.ingestion.status.retry_after).toLocaleString(LOCALE), error: S.ingestion.status.error || '' }) : t('ingestion.failed', { error: S.ingestion.status.error || '' }))
@@ -1608,6 +1626,12 @@ document.addEventListener('change', (e) => {
   if (e.target.id === 'github-vault') { githubInspected = null; $('github-assign-confirm').disabled = true; githubCandidates = []; githubPullCandidates = []; renderGitHubCandidates(); renderGitHubPullCandidates(); $('github-status').textContent = ''; $('github-result').hidden = true; }
 });
 document.addEventListener('click', async (event) => {
+  const removeIngestionTarget = event.target.closest('[data-ingestion-remove]');
+  if (removeIngestionTarget) {
+    currentIngestionTargets().splice(Number(removeIngestionTarget.dataset.ingestionRemove), 1);
+    renderIngestionTargets();
+    return;
+  }
   const editButton = event.target.closest('[data-twin-edit]');
   if (editButton) {
     editingTwinId = editButton.dataset.twinEdit;
@@ -1694,14 +1718,24 @@ $('backup-pick').onclick = async () => {
     else if (r.unavailable) toast(t('backup.pickerUnavailable'), true);
   } catch (e) { toast(e.message, true); }
 };
+$('ingestion-add').onclick = () => {
+  const target = { vault: $('ingestion-vault').value, folder: $('ingestion-folder').value.trim().replace(/\\/g, '/') };
+  if (!target.vault || !target.folder) { toast(t('ingestion.targetRequired'), true); return; }
+  if (currentIngestionTargets().length >= 20) { toast(t('ingestion.maxTargets'), true); return; }
+  if (currentIngestionTargets().some((item) => item.vault.toLocaleLowerCase() === target.vault.toLocaleLowerCase() && item.folder.toLocaleLowerCase() === target.folder.toLocaleLowerCase())) { toast(t('ingestion.duplicateTarget'), true); return; }
+  currentIngestionTargets().push(target);
+  $('ingestion-folder').value = '';
+  renderIngestionTargets();
+};
 $('ingestion-save').onclick = () => act(async () => {
-  const r = await api('POST', '/api/ingestion/settings', { enabled: $('ingestion-enabled').checked, vault: $('ingestion-vault').value, folder: $('ingestion-folder').value, time: $('ingestion-time').value });
+  const r = await api('POST', '/api/ingestion/settings', { enabled: $('ingestion-enabled').checked, targets: currentIngestionTargets(), time: $('ingestion-time').value });
+  ingestionTargetsDraft = null;
   toast(t(r.ingestion.enabled ? 'ingestion.saved' : 'ingestion.disabled'));
 });
 $('ingestion-run').onclick = () => act(async () => {
-  const r = await api('POST', '/api/ingestion/run', { vault: $('ingestion-vault').value, folder: $('ingestion-folder').value });
-  $('ingestion-queue').innerHTML = r.candidates.length ? `${r.limited ? `<p class="muted">${esc(t('ingestion.limited', { shown: r.candidates.length, total: r.queued_total }))}</p>` : ''}${r.candidates.map((item) => `<div class="card"><button class="link" data-open-note="${esc(r.vault)}::${esc(item.path)}"><b>${esc(item.title)}</b></button><span class="mono muted">${esc(item.path)}</span><small class="muted">${esc(item.updated_at)}</small></div>`).join('')}` : `<p class="muted">${esc(t('ingestion.empty'))}</p>`;
-  toast(t('ingestion.scanDone', { count: r.queued_total }));
+  const r = await api('POST', '/api/ingestion/run', { targets: currentIngestionTargets() });
+  $('ingestion-queue').innerHTML = r.candidates.length ? `${r.limited ? `<p class="muted">${esc(t('ingestion.limited', { shown: r.candidates.length, total: r.queued_total }))}</p>` : ''}${r.candidates.map((item) => `<div class="card"><button class="link" data-open-note="${esc(item.vault || r.vault)}::${esc(item.path)}"><b>${esc(item.title)}</b></button><span class="mono muted">${esc(item.vault || r.vault)} · ${esc(item.path)}</span><small class="muted">${esc(item.updated_at)}</small></div>`).join('')}` : `<p class="muted">${esc(t('ingestion.empty'))}</p>`;
+  toast(r.ok ? t('ingestion.scanDone', { count: r.queued_total }) : (r.error || t('ingestion.failed', { error: '' })), !r.ok);
 });
 $('brief-save').onclick = () => act(async () => {
   const r = await api('POST', '/api/brief/settings', { enabled: $('brief-enabled').checked, vault: $('brief-vault').value, time: $('brief-time').value });
