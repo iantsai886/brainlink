@@ -143,6 +143,7 @@
         if (detail.backlinks.length) parts.push(`<div class="muted" style="font-size:12px;margin-top:10px">Linked from</div><div class="row">${detail.backlinks.map((n) => chip(n, 'backlink')).join('')}</div>`);
         if (detail.outlinks.length) parts.push(`<div class="muted" style="font-size:12px;margin-top:10px">Links to</div><div class="row">${detail.outlinks.map((n) => chip(n, 'link')).join('')}</div>`);
         if (detail.relationships?.length) parts.push(`<div class="muted" style="font-size:12px;margin-top:10px">Typed relationships</div>${detail.relationships.map((r) => `<div style="margin:5px 0"><div><b>${esc(r.predicate)}</b> · ${esc(r.direction)}</div><div class="row">${chip(r.note, 'related record')}</div><small class="muted">${esc(r.evidence)} · confidence ${esc(r.confidence)}</small></div>`).join('')}`);
+        if (detail.proposed_relationships?.length) parts.push(`<div class="muted" style="font-size:12px;margin-top:12px"><b>${esc(tr('notes3d.proposedRelationships'))}</b></div><p class="muted">${esc(tr('notes3d.proposedHint'))}</p>${detail.proposed_relationships.map((r) => `<div class="card" style="margin:6px 0"><div><b>${esc(r.predicate)}</b></div><div class="row">${chip(r.note, tr('notes3d.suggestedTarget'))}</div><small class="muted">${esc(r.evidence)} · ${esc(tr('notes3d.confidence', { confidence: r.confidence }))}</small>${detail.writable ? `<div style="margin-top:8px"><button type="button" class="chip" data-review-relation="${esc(r.relation_index)}">${esc(tr('notes3d.approveRelationship'))}</button></div>` : ''}</div>`).join('')}`);
         document.getElementById('notes3d-links').innerHTML = parts.join('');
       }).catch((e) => { if (selectedId === node.id) document.getElementById('notes3d-body').innerHTML = `<p class="error-box">Could not open this note: ${esc(e.message)}</p>`; });
     }
@@ -221,6 +222,15 @@
           toast('Note saved.');
           return loadGraph();
         }).catch((err) => { document.getElementById('notes3d-save-status').textContent = err.message; }).finally(() => { button.disabled = false; });
+        return;
+      }
+      const review = e.target.closest('[data-review-relation]');
+      if (review) {
+        if (!currentDetail || !window.confirm(tr('notes3d.approveConfirm'))) return;
+        review.disabled = true;
+        api('/api/graph3d/relationship/approve', { vault: currentDetail.vault, path: currentDetail.path, etag: currentDetail.etag, relation_index: Number(review.dataset.reviewRelation) })
+          .then(() => { toast(tr('notes3d.approvedToast')); return refreshGraph(); })
+          .catch((err) => { review.disabled = false; toast(err.message, true); });
         return;
       }
       if (e.target.id === 'notes3d-close') {

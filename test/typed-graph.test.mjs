@@ -77,6 +77,17 @@ test('typed graph relationship suggestions are saved as proposed and become edge
   assert.ok(reviewed.links.some((link) => link.predicate === 'owned_by'), 'explicitly reviewed relation enters the typed graph');
 });
 
+test('proposed relationship list shows only valid same-scope candidates targeting current visible entities', async () => {
+  const notes = [
+    { rel: 'Target.md', raw: entity({ type: 'team', id: 'team.target' }) },
+    { rel: 'Proposal.md', raw: `---\ntype: workflow\nid: workflow.proposal\nscope: organisation\nstatus: proposed\nrelations:\n  - predicate: runs\n    target: team.target\n    review: proposed\n    source: "Team workflow map"\n    confidence: 0.8\n---\n# Proposal\n` },
+    { rel: 'Private.md', private: true, raw: entity({ type: 'team', id: 'team.private' }) },
+    { rel: 'BadTarget.md', raw: entity({ type: 'workflow', id: 'workflow.bad', relations: '  - predicate: runs\n    target: team.private\n    review: proposed\n    source: private\n    confidence: 0.9\n' }) },
+  ];
+  const { deriveProposedTypedRelations } = await import('../src/typed-graph.mjs');
+  assert.deepEqual(deriveProposedTypedRelations(notes).map(({ source, target, relation_index, predicate }) => [source, target, relation_index, predicate]), [[1, 0, 0, 'runs']]);
+});
+
 test('typed relationship proposals reject invalid IDs, predicates, evidence and cross-profile scopes', async () => {
   const dir = await temp('relationship-validation');
   await mkdir(path.join(dir, 'Inbox'), { recursive: true });

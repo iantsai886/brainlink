@@ -87,5 +87,60 @@ export function deriveTypedRelations(notes) {
   return edges;
 }
 
+// Suggestions are visible only after the caller has applied its vault and privacy filters.
+// Targets must still be unique, current, visible records in the same Twin scope.
+export function deriveProposedTypedRelations(notes) {
+  const records = notes.map((note) => ({ note, ...parseRecord(note.raw) }));
+  const byId = new Map();
+  const duplicates = new Set();
+  for (let i = 0; i < records.length; i++) {
+    const { note, meta } = records[i];
+    if (!note.generated && !note.private && ENTITY_TYPES.has(meta.type) && ID.test(meta.id || '') && SCOPES.has(meta.scope) && meta.status === 'current') {
+      if (byId.has(meta.id)) { byId.delete(meta.id); duplicates.add(meta.id); }
+      else if (!duplicates.has(meta.id)) byId.set(meta.id, i);
+    }
+  }
+  const proposals = [];
+  for (let source = 0; source < records.length; source++) {
+    const { note, meta, relations } = records[source];
+    if (note.generated || note.private || !ENTITY_TYPES.has(meta.type) || !ID.test(meta.id || '') || !SCOPES.has(meta.scope) || !['current', 'proposed'].includes(meta.status)) continue;
+    relations.forEach((relation, relation_index) => {
+      const target = byId.get(relation.target);
+      const confidenceText = relation.confidence || '';
+      if (target === undefined || target === source || !PREDICATES.has(relation.predicate) || relation.review !== 'proposed' ||
+          !relation.source || relation.source.length > 300 || !/^(?:0(?:\.\d+)?|1(?:\.0+)?)$/.test(confidenceText) ||
+          records[target].meta.scope !== meta.scope) return;
+      proposals.push({ source, target, relation_index, predicate: relation.predicate, evidence: relation.source, confidence: Number(confidenceText) });
+    });
+  }
+  return proposals;
+}
+
+// Change only the selected review marker and (when needed) the source record's status.
+// The caller must first revalidate the target and compare a content hash.
+export function approveTypedRelation(raw, relationIndex) {
+  if (!Number.isInteger(relationIndex) || relationIndex < 0) throw new Error('Invalid relationship selection.');
+  const match = String(raw || '').match(/^(\uFEFF?---[^\S\r\n]*\r?\n)([\s\S]*?)(\r?\n---[^\S\r\n]*(?:\r?\n|$))/);
+  if (!match) throw new Error('This note has no valid frontmatter.');
+  const lines = match[2].split(/\r?\n/);
+  const statusLine = lines.findIndex((line) => /^status:\s*(?:proposed|current)\s*$/.test(line));
+  if (statusLine < 0) throw new Error('This record is not a reviewable typed entity.');
+  if (/^status:\s*proposed\s*$/.test(lines[statusLine])) lines[statusLine] = lines[statusLine].replace('proposed', 'current');
+  const section = lines.findIndex((line) => /^relations:\s*$/.test(line));
+  if (section < 0) throw new Error('This note has no relationship suggestions.');
+  const starts = [];
+  for (let i = section + 1; i < lines.length && !/^[A-Za-z_][\w-]*:\s*/.test(lines[i]); i++) {
+    if (/^\s{2}-\s+/.test(lines[i])) starts.push(i);
+  }
+  const start = starts[relationIndex];
+  if (start === undefined) throw new Error('The selected relationship no longer exists.');
+  const end = starts[relationIndex + 1] ?? lines.findIndex((line, i) => i > start && /^[A-Za-z_][\w-]*:\s*/.test(line));
+  const stop = end < 0 ? lines.length : end;
+  const reviewLine = lines.findIndex((line, i) => i > start && i < stop && /^\s{4}review:\s*proposed\s*$/.test(line));
+  if (reviewLine < 0) throw new Error('This relationship is no longer awaiting review.');
+  lines[reviewLine] = lines[reviewLine].replace('proposed', 'verified');
+  return `${match[1]}${lines.join(raw.includes('\r\n') ? '\r\n' : '\n')}${match[3]}${String(raw).slice(match[0].length)}`;
+}
+
 export const TYPED_ENTITY_TYPES = [...ENTITY_TYPES];
 export const TYPED_RELATION_PREDICATES = [...PREDICATES];

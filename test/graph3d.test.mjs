@@ -159,6 +159,42 @@ test('/api/graph3d and /api/graph3d/note: same exclusion guarantee over HTTP', a
   } finally { s.server.close(); }
 });
 
+test('typed relationship review requires a current note revision and adds only the explicitly approved edge', async () => {
+  const home = await tmp('graph3d-review-home');
+  const vaultPath = path.join(home, 'vault');
+  await mkdir(vaultPath, { recursive: true });
+  const env = { BRAINLINK_HOME: path.join(home, 'app'), BRAINLINK_SEMANTIC: '0' };
+  const s = await startSetup({ env, home, os: 'linux', port: 0, useCli: false });
+  const base = `http://127.0.0.1:${s.port}`;
+  const api = (p, body) => fetch(base + p, { method: 'POST', headers: { 'X-BrainLink-Token': s.token, 'Content-Type': 'application/json' }, body: JSON.stringify(body || {}) }).then((r) => r.json());
+  try {
+    const added = await api('/api/vault', { path: vaultPath, name: 'Main', pack: 'simple', scaffold: false });
+    assert.equal(added.ok, true, JSON.stringify(added));
+    await new Promise((resolve) => setTimeout(resolve, 350));
+    const fs = await import('node:fs/promises');
+    await fs.writeFile(path.join(vaultPath, 'Team.md'), '---\ntype: team\nid: team.product\nscope: organisation\nstatus: current\n---\n# Product team\n');
+    const proposal = '---\ntype: workflow\nid: workflow.collect\nscope: organisation\nstatus: proposed\nrelations:\n  - predicate: runs\n    target: team.product\n    review: proposed\n    source: "Operations handbook section 2"\n    confidence: 0.9\n---\n# Collect questions\n';
+    await fs.writeFile(path.join(vaultPath, 'Workflow.md'), proposal);
+    const detail = await api('/api/graph3d/note', { vault: 'Main', path: 'Workflow.md' });
+    assert.equal(detail.proposed_relationships.length, 1);
+    assert.equal(detail.proposed_relationships[0].note.title, 'Team');
+    assert.equal((await api('/api/graph3d', {})).links.some((link) => link.predicate === 'runs'), false);
+
+    const stale = await api('/api/graph3d/relationship/approve', { vault: 'Main', path: 'Workflow.md', etag: 'stale', relation_index: 0 });
+    assert.match(stale.error, /changed since it was opened/i);
+    const approved = await api('/api/graph3d/relationship/approve', { vault: 'Main', path: 'Workflow.md', etag: detail.etag, relation_index: 0 });
+    assert.equal(approved.ok, true, JSON.stringify(approved));
+    const saved = await fs.readFile(path.join(vaultPath, 'Workflow.md'), 'utf8');
+    assert.match(saved, /^status: current$/m);
+    assert.match(saved, /^    review: verified$/m);
+    const graph = await api('/api/graph3d', {});
+    assert.ok(graph.links.some((link) => link.predicate === 'runs'));
+
+    const repeated = await api('/api/graph3d/relationship/approve', { vault: 'Main', path: 'Workflow.md', etag: approved.etag, relation_index: 0 });
+    assert.match(repeated.error, /no longer an eligible suggestion/i);
+  } finally { s.server.close(); }
+});
+
 // ---- Frontend (ui/notes3d.js, ui/notes3d.css): click-to-open, readable labels, sizing ----
 // No browser is available in this suite, so these are structural checks on the actual shipped
 // code (not a DOM/visual test) guarding the specific regressions this item fixed: clicking a node
@@ -182,6 +218,14 @@ test('active Setup UI reloads the graph on vault events and keeps an open editor
   assert.match(page, /dispatchEvent\(new Event\('brainlink:vault-changed'\)\)/);
   assert.match(graph, /addEventListener\('brainlink:vault-changed',[\s\S]*?refreshGraph\(\)/);
   assert.match(graph, /if \(editor && !editor\.hidden\) \{ pendingVaultRefresh = true; return; \}/);
+});
+
+test('graph UI exposes a confirmation-gated action for reviewing a suggested relationship', async () => {
+  const { readFile } = await import('node:fs/promises');
+  const src = await readFile(new URL('../ui/notes3d.js', import.meta.url), 'utf8');
+  assert.match(src, /data-review-relation/);
+  assert.match(src, /window\.confirm\(tr\('notes3d\.approveConfirm'\)\)/);
+  assert.match(src, /api\('\/api\/graph3d\/relationship\/approve'/);
 });
 
 test('ui/notes3d.js: hover label is escaped, and the selected node is visibly highlighted', async () => {
