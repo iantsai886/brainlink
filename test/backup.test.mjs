@@ -70,6 +70,32 @@ test('encrypted backups hide file names and contents, verify the key, and restor
   assert.equal(await readFile(path.join(recovered, '1-Personal-Vault', 'Private Name — secret.md'), 'utf8'), 'UNIQUE_PRIVATE_CONTENT_7kL4');
 });
 
+test('encrypted backup restores through a fresh BrainLink Setup using only the exported recovery key', async () => {
+  const source = await tmp('portable-source'), destination = await tmp('portable-backups'), restored = await tmp('portable-restored');
+  const sourceHome = await tmp('portable-source-home'), secondHome = await tmp('portable-second-home');
+  await writeFile(path.join(source, 'Private.md'), 'PORTABLE_RECOVERY_PRIVATE_FIXTURE');
+  const sourceEnv = { BRAINLINK_HOME: sourceHome };
+  const recoveryKey = (await createOrReadBackupRecoveryKey(sourceEnv)).key;
+  const backup = await backupOnce([{ name: 'Personal', path: source }], destination, new Date('2026-10-27T00:00:00Z'), [], { encryptionKey: recoveryKey });
+  const secondEnv = { BRAINLINK_HOME: secondHome, HOME: secondHome, BRAINLINK_SEMANTIC: '0' };
+  const secondApp = await startSetup({ env: secondEnv, home: secondHome, os: 'win32', port: 0, useCli: false, idleMinutes: 0.01 });
+  const api = (body) => fetch(`http://127.0.0.1:${secondApp.port}/api/backup/restore`, {
+    method: 'POST', headers: { 'Content-Type': 'application/json', 'X-BrainLink-Token': secondApp.token }, body: JSON.stringify(body),
+  });
+  try {
+    await assert.rejects(readFile(path.join(secondHome, 'backup-key.bin')), { code: 'ENOENT' }, 'the second install must not have the source device key');
+    const wrongKey = `${recoveryKey[0] === 'A' ? 'B' : 'A'}${recoveryKey.slice(1)}`;
+    const refused = await api({ backupFolder: backup.folder, destination: restored, confirm: true, recoveryKey: wrongKey });
+    assert.equal(refused.status, 400);
+    assert.deepEqual(await readdir(restored), [], 'a wrong key leaves the restore target empty');
+    const response = await api({ backupFolder: backup.folder, destination: restored, confirm: true, recoveryKey });
+    assert.equal(response.status, 200);
+    assert.equal((await response.json()).file_count, 1);
+    assert.equal(await readFile(path.join(restored, '1-Personal', 'Private.md'), 'utf8'), 'PORTABLE_RECOVERY_PRIVATE_FIXTURE');
+    await assert.rejects(readFile(path.join(secondHome, 'backup-key.bin')), { code: 'ENOENT' }, 'restore does not silently copy the recovery key into local app data');
+  } finally { secondApp.server.close(); }
+});
+
 test('encrypted retention needs the local key and preserves encrypted copies when the key is wrong', async () => {
   const root = await tmp('encrypted-retention-source'), dest = await tmp('encrypted-retention-dest');
   await writeFile(path.join(root, 'Private.md'), 'fixture');
