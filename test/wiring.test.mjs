@@ -296,6 +296,28 @@ test('connectors: Hermes refuses malformed YAML without changing or backing it u
   assert.equal((await readdir(folder)).some((name) => name.includes('.brainlink-backup-')), false);
 });
 
+test('connectors: Hermes uses its Windows LocalAppData default, honors HERMES_HOME, and falls back to legacy home', async () => {
+  const home = await tmp('hermes-paths');
+  const localAppData = path.join(home, 'LocalAppData');
+  const currentFile = path.join(localAppData, 'hermes', 'config.yaml');
+  const legacyFile = path.join(home, '.hermes', 'config.yaml');
+  const overrideFile = path.join(home, 'custom-hermes', 'config.yaml');
+  const opts = { home, os: 'win32', env: { LOCALAPPDATA: localAppData }, launch: { command: process.execPath, args: ['brainlink.mjs', 'serve'] }, useCli: false };
+
+  await mkdir(path.dirname(currentFile), { recursive: true });
+  await writeFile(currentFile, 'model: current\n');
+  assert.equal((await detect(opts)).hermes.file, currentFile, 'Windows should use the current LocalAppData location');
+
+  const overridden = { ...opts, env: { ...opts.env, HERMES_HOME: path.dirname(overrideFile) } };
+  assert.equal((await detect(overridden)).hermes.file, overrideFile, 'an explicit Hermes profile/home must win');
+
+  const legacyHome = await tmp('hermes-legacy-path');
+  await mkdir(path.dirname(path.join(legacyHome, '.hermes', 'config.yaml')), { recursive: true });
+  await writeFile(path.join(legacyHome, '.hermes', 'config.yaml'), 'model: legacy\n');
+  const legacy = await detect({ ...opts, home: legacyHome, env: { LOCALAPPDATA: path.join(legacyHome, 'LocalAppData') } });
+  assert.equal(legacy.hermes.file, path.join(legacyHome, '.hermes', 'config.yaml'), 'existing legacy config remains discoverable');
+});
+
 // ---- bin/brainlink.mjs: connect --all and sync ----
 
 test('CLI: `brainlink connect --all` connects every present client and skips the rest', async () => {

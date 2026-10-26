@@ -1,6 +1,7 @@
 // One-click "Connect AI": writes BrainLink into each AI client's MCP config, keeping a
 // timestamped backup of the previous file. Refuses to touch a config it cannot parse.
 import { readFile, writeFile, mkdir, copyFile, rename, stat } from 'node:fs/promises';
+import { existsSync } from 'node:fs';
 import { execFileSync } from 'node:child_process';
 import path from 'node:path';
 import { parseDocument } from 'yaml';
@@ -42,7 +43,15 @@ export const CLIENTS = {
   },
   hermes: {
     title: 'Hermes Agent', platform: 'Hermes Agent', role: 'Hermes Agent', format: 'yaml',
-    file: ({ home, env }) => path.join(env.HERMES_HOME || path.join(home, '.hermes'), 'config.yaml'),
+    file: ({ home, os, env }) => {
+      if (env.HERMES_HOME) return path.join(env.HERMES_HOME, 'config.yaml');
+      const legacy = path.join(home, '.hermes');
+      if (os === 'win32') {
+        const current = path.join(env.LOCALAPPDATA || path.join(home, 'AppData', 'Local'), 'hermes');
+        if (existsSync(path.join(current, 'config.yaml')) || !existsSync(path.join(legacy, 'config.yaml'))) return path.join(current, 'config.yaml');
+      }
+      return path.join(legacy, 'config.yaml');
+    },
     note: 'Start a new Hermes session or run /reload-mcp. If Hermes runs in WSL or on another machine, configure BrainLink in that environment too.',
   },
   windsurf: {
