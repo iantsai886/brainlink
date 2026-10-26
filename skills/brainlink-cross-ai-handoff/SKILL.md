@@ -7,7 +7,7 @@ metadata:
   version: "0.2.0"
   applicable-clients: "Claude Code; Codex CLI"
   required-tools: "BrainLink MCP: brainlink_guide, send_handoff, list_handoffs"
-  test-status: "Local fictional MCP handoff and Git checkpoint fixtures pass; live Claude Code/Codex handoff not yet verified"
+  test-status: "Local fictional MCP handoff and Git checkpoint fixtures pass; live Claude Code/Codex handoff not yet verified because Claude is signed out; Codex CLI made live guide/search calls on a fictional vault and did not retrieve a private canary; Claude MCP health connected"
   rollback: "Revert the Git commit that changes this skill; no data migration"
 ---
 

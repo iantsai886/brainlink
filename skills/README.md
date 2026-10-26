@@ -10,7 +10,7 @@ The manifest follows the [Agent Skills specification](https://agentskills.io/spe
 - **Clients:** Codex CLI and Claude Code, where the repo-local skill directory is enabled.
 - **Tools:** connected BrainLink MCP `brainlink_guide`, `send_handoff`, and `list_handoffs`.
 - **Scope:** no private source text, no cross-lane data, no guessed destination. Sending is preview-first and requires approval unless the user clearly authorized the handoff.
-- **Validation:** Agent Skills manifest/parity test; local two-client MCP fixture for preview, pickup, private-source rejection, acknowledgement, and sender-reported Git checkpoint checks. Claude Code CLI is not installed in the validation environment; live two-client runtime handoff is still pending.
+- **Validation:** Agent Skills manifest/parity test and local two-client fixture pass. Codex CLI 0.164.0-alpha.11.1 made live `brainlink_guide` and `vault_search` calls on a fictional vault; a planted private canary was not returned. Claude Code 2.1.310 reported the same fixture MCP server as connected, but Claude is signed out. A real Claude-to-Codex handoff and acknowledgement are still pending.
 - **Rollback:** revert the Git change to the canonical skill and both client copies. No vault migration is needed.
 
 ## `brainlink-session-closeout` 1.0.0
