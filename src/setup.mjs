@@ -9,7 +9,7 @@ import { homedir } from 'node:os';
 import path from 'node:path';
 import { loadConfig, saveConfig, configPath, normalize, validate, LOCALES, appHome } from './config.mjs';
 import { PACKS, buildPack, scaffold, mergePack } from './packs.mjs';
-import { CLIENTS, detect, connectClient, disconnectClient, test } from './connectors.mjs';
+import { CLIENTS, detect, connectClient, disconnectClient, readClientAgentToken, test } from './connectors.mjs';
 import { createContext, search, searchWithVerdict, readNote, ensureDefaultIgnore, readExcludedFolders, writeExcludedFolders, DEFAULT_EXCLUDED_FOLDERS, SUGGESTED_EXCLUDED_FOLDERS, safeJoin, vaultRoot } from './core.mjs';
 import { ROOT, launchSpec, readActivity, refreshMap, logActivity } from './runtime.mjs';
 import { detectEmbedder } from './embed.mjs';
@@ -23,7 +23,7 @@ import { runSync } from './sync-cli.mjs';
 import { listGitHubShareCandidates, previewGitHubRepository, commitGitHubSelectedNotes, pushGitHubSelectedNotes, listGitHubPullCandidates, importGitHubSelectedNotes, saveGitHubConflictCopies, inspectGitHubAssignment, githubAssignmentStatus } from './sync/github-preview.mjs';
 import { githubAssignmentProjection } from './sync/github-assignment.mjs';
 import { sessionsService } from './host.mjs';
-import { addAgent, renameAgent, removeAgent, revokeAgent, markConnected, findAgentByToken, publicAgent, localAgentSnippet, remoteAgentSnippet } from './mcp-agents.mjs';
+import { addAgent, renameAgent, removeAgent, revokeAgent, markConnected, findAgentByToken, publicAgent, localAgentSnippet, remoteAgentSnippet, generateAgentToken, hashToken } from './mcp-agents.mjs';
 import { buildGraph3D, noteDetail3D } from './graph3d.mjs';
 import { snapshotSettings, chooseSnapshot, suggestSnapshotFolder, clearSnapshot, startSnapshotWatcher, writeSnapshotOnce, loadSnapshotStatus, saveSnapshotStatus } from './snapshot.mjs';
 import { listHandoffs } from './writes.mjs';
@@ -388,6 +388,7 @@ export async function startSetup(opts = {}) {
   // connectClient already refuses apps it did not detect; a live handshake (clientHealthCheck)
   // confirms the write actually works before it is reported as connected, and is undone otherwise.
   async function connectAll(cfg) {
+    if (cfg.twin_profiles?.length) return { connected: [], skipped: [], failed: ['Choose a Twin profile and permissions for each AI app before connecting it.'] };
     const found = await detect(clientOpts());
     const connected = [], skipped = [], failed = [];
     for (const [id, c] of Object.entries(found)) {
@@ -406,11 +407,12 @@ export async function startSetup(opts = {}) {
   // exact same createMcp() a real `brainlink serve` process would run, using that client's own
   // platform/role env so the call looks identical to one the client would make. Logs through the
   // normal activity log (content-free: tool name + ok/fail only) so it shows up in the call log too.
-  async function clientHealthCheck(clientId) {
+  async function clientHealthCheck(clientId, suppliedToken) {
     const c = CLIENTS[clientId];
     if (!c) throw new Error(`Unknown client "${clientId}".`);
     const cfg = await loadConfig(file);
-    const ctx = createContext(cfg, { env: { ...env, BRAINLINK_AGENT_TOKEN: '', BRAINLINK_AI_PLATFORM: c.platform, BRAINLINK_AGENT_ROLE: c.role } });
+    const token = suppliedToken ?? await readClientAgentToken(clientId, clientOpts());
+    const ctx = createContext(cfg, { env: { ...env, BRAINLINK_AGENT_TOKEN: token, BRAINLINK_AI_PLATFORM: c.platform, BRAINLINK_AGENT_ROLE: c.role } });
     if (ctx.twinScope.mode === 'unassigned') return {
       ok: false, client: clientId, tool: null, took_ms: 0,
       message: 'This AI app has no Twin profile permission yet. Connect it through a named AI agent assigned to a Twin profile.',
@@ -420,11 +422,85 @@ export async function startSetup(opts = {}) {
     const mcp = createMcp(ctx, { onCall: (e) => pending.push(logActivity(env, { ...e, platform: c.platform, mode: 'health-check' })) });
     const t0 = Date.now();
     await mcp.handle({ jsonrpc: '2.0', id: 1, method: 'initialize', params: {} });
-    const called = await mcp.handle({ jsonrpc: '2.0', id: 2, method: 'tools/call', params: { name: 'brainlink_guide', arguments: {} } });
+    const scopedGrant = ctx.twinScope.mode === 'scoped'
+      ? ctx.twinScope.grants.find((grant) => grant.operations.includes('search') && ctx.twinScope.memory_policy?.semantic && ctx.enabled.includes(grant.name))
+      : null;
+    const tool = scopedGrant ? 'vault_search' : 'brainlink_guide';
+    if (ctx.twinScope.mode === 'scoped' && !scopedGrant) return {
+      ok: false, client: clientId, tool: null, took_ms: 0,
+      message: 'This AI app needs semantic memory and search access to run its connection test. Update its Twin permissions first.',
+    };
+    const args = scopedGrant ? { vault: scopedGrant.name, query: 'BrainLink connection check', limit: 1 } : {};
+    const called = await mcp.handle({ jsonrpc: '2.0', id: 2, method: 'tools/call', params: { name: tool, arguments: args } });
     await Promise.all(pending);
     const took_ms = Date.now() - t0;
     const ok = Boolean(called?.result) && !called.result.isError;
-    return { ok, client: clientId, tool: 'brainlink_guide', took_ms, message: ok ? `Live MCP call succeeded: brainlink_guide (${took_ms}ms).` : 'The MCP call failed; see Activity below.' };
+    return { ok, client: clientId, tool, took_ms, message: ok ? `Live MCP call succeeded: ${tool} (${took_ms}ms).` : 'The MCP call failed; see Activity below.' };
+  }
+
+  // Give a built-in client its own revocable, profile-scoped identity. The token is written only
+  // into that client's local MCP config; BrainLink stores its hash and never returns either in UI.
+  async function connectPresetWithTwin(b) {
+    const clientId = String(b.client || '');
+    const client = CLIENTS[clientId];
+    if (!client) throw new Error('Choose a supported AI app.');
+    const cfg = await loadConfig(file);
+    const profileId = String(b.profile_id || '');
+    const profile = cfg.twin_profiles.find((item) => item.id === profileId);
+    if (!profile) throw new Error('Choose an existing Twin profile.');
+    const requested = Array.isArray(b.vaults) ? b.vaults : [];
+    if (!requested.length || requested.length > profile.vaults.length) throw new Error('Choose at least one vault for this AI app.');
+    const seen = new Set();
+    const grants = requested.map((item) => {
+      const name = String(item?.name || '');
+      const profileVault = profile.vaults.find((grant) => grant.name === name);
+      const vault = cfg.vaults.find((entry) => entry.name === name);
+      const operations = Array.isArray(item?.operations) ? [...new Set(item.operations)] : [];
+      if (!profileVault || !vault || vault.private || seen.has(name)) throw new Error('Choose only non-private vaults already included in this Twin profile.');
+      if (!operations.length || operations.some((action) => !['search', 'read_note'].includes(action))) throw new Error('For now, built-in AI apps can receive search and note-reading access only.');
+      if (operations.includes('search') && profile.memory_policy?.semantic !== true) throw new Error('Turn on semantic memory in this Twin profile before granting search access.');
+      if (operations.includes('read_note') && profile.memory_policy?.semantic !== true) throw new Error('Turn on semantic memory in this Twin profile before granting note-reading access.');
+      seen.add(name);
+      return { name, access: 'read', operations };
+    });
+    if (!grants.some((grant) => grant.operations.includes('search'))) throw new Error('Allow search in at least one selected vault so BrainLink can verify the connection.');
+
+    let agent = cfg.ai_agents.find((item) => item.preset_client_id === clientId);
+    const token = generateAgentToken();
+    if (!agent) {
+      const name = `BrainLink preset: ${clientId}`;
+      if (cfg.ai_agents.some((item) => item.name.toLowerCase() === name.toLowerCase())) throw new Error('A manually created AI agent already uses BrainLink’s reserved name. Rename it before connecting this app.');
+      agent = { id: `preset_${clientId}_${randomBytes(4).toString('hex')}`, name, kind: 'local', tokenHash: hashToken(token), connected: false, revoked: false, createdAt: new Date().toISOString(), lastSeenAt: null, preset_client_id: clientId };
+      cfg.ai_agents.push(agent);
+    } else {
+      agent.tokenHash = hashToken(token);
+      agent.connected = false;
+      agent.revoked = false;
+    }
+    for (const item of cfg.twin_profiles) item.agent_access = (item.agent_access || []).filter((grant) => grant.agent_id !== agent.id);
+    const currentProfile = cfg.twin_profiles.find((item) => item.id === profileId);
+    currentProfile.agent_access.push({ agent_id: agent.id, vaults: grants });
+    currentProfile.allowed_actions = [...new Set([...(currentProfile.allowed_actions || []), ...grants.flatMap((grant) => grant.operations)])];
+    const validationErrors = validate(cfg);
+    if (validationErrors.length) throw new Error(`These permissions cannot be saved: ${validationErrors[0]}`);
+
+    const before = await loadConfig(file);
+    const clientConfigFile = client.file(clientOpts());
+    const previousClientConfig = await readFile(clientConfigFile, 'utf8').catch(() => null);
+    await saveConfig(cfg, file);
+    try {
+      const connected = await connectClient(clientId, { ...clientOpts(), extraEnv: { BRAINLINK_AGENT_TOKEN: token } });
+      const health = await clientHealthCheck(clientId, token);
+      if (!health.ok) throw new Error(health.message);
+      const latest = await loadConfig(file);
+      await saveConfig(markConnected(latest, agent.id), file);
+      return { ...connected, health, twin_profile: currentProfile.name };
+    } catch (error) {
+      await saveConfig(before, file).catch(() => {});
+      if (previousClientConfig !== null) await writeFile(clientConfigFile, previousClientConfig, 'utf8').catch(() => {});
+      else await disconnectClient(clientId, clientOpts()).catch(() => {});
+      throw new Error(`Could not verify ${client.title}; the previous permissions were restored. ${error.message || error}`);
+    }
   }
 
   // Same live-proof pattern as clientHealthCheck, keyed by an agent's own token instead of a
@@ -777,6 +853,8 @@ export async function startSetup(opts = {}) {
       return { ok: true, agent: a };
     },
     'POST /api/connect': async (b) => {
+      const cfg = await loadConfig(file);
+      if (cfg.twin_profiles?.length) return connectPresetWithTwin(b);
       // connectClient refuses undetected apps. A write with no verified handshake is not a real
       // connection, so an unhealthy check undoes the write instead of reporting Connected.
       const r = await connectClient(b.client, clientOpts());
@@ -785,7 +863,16 @@ export async function startSetup(opts = {}) {
       return { ...r, health };
     },
     'POST /api/client-health': (b) => clientHealthCheck(b.client),
-    'POST /api/disconnect': (b) => disconnectClient(b.client, clientOpts()),
+    'POST /api/disconnect': async (b) => {
+      const cfg = await loadConfig(file);
+      const managed = cfg.ai_agents.find((agent) => agent.preset_client_id === String(b.client || ''));
+      if (managed) {
+        const revoked = revokeAgent(cfg, managed.id);
+        for (const profile of revoked.twin_profiles) profile.agent_access = (profile.agent_access || []).filter((grant) => grant.agent_id !== managed.id);
+        await saveConfig(revoked, file);
+      }
+      return disconnectClient(b.client, clientOpts());
+    },
     // Normalized {ok,message} check (connectors.mjs `test`): same detect() the buttons above
     // already use, re-shaped for callers that want one consistent result instead of each
     // function's own shape (see connectors.mjs for why /api/connect keeps its richer shape).

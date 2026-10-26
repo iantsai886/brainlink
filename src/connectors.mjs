@@ -79,6 +79,31 @@ export async function detect(opts) {
   return out;
 }
 
+// Setup may re-test a preset connector after it has been assigned a Twin scope. Read the
+// credential from that client's MCP config; BrainLink stores only its hash. Never return this
+// value from Setup state or logs.
+export async function readClientAgentToken(id, opts) {
+  const c = CLIENTS[id];
+  if (!c) throw new Error(`Unknown client "${id}"`);
+  const file = c.file(opts);
+  if (!(await exists(file))) return '';
+  const raw = await readFile(file, 'utf8');
+  if (c.format === 'toml') {
+    const lines = raw.split(/\r?\n/);
+    let inEnv = false;
+    for (const line of lines) {
+      const section = line.match(/^\s*\[([^\]]+)\]\s*$/);
+      if (section) inEnv = section[1].trim() === `mcp_servers.${SERVER_KEY}.env`;
+      if (!inEnv) continue;
+      const token = line.match(/^\s*BRAINLINK_AGENT_TOKEN\s*=\s*("(?:\\.|[^"\\])*")\s*$/);
+      if (token) { try { return JSON.parse(token[1]); } catch { return ''; } }
+    }
+    return '';
+  }
+  try { return String(JSON.parse(raw || '{}').mcpServers?.[SERVER_KEY]?.env?.BRAINLINK_AGENT_TOKEN || ''); }
+  catch { return ''; }
+}
+
 async function backup(file, now) {
   if (!(await exists(file))) return null;
   const dest = `${file}.brainlink-backup-${now.toISOString().replace(/[:.]/g, '-')}`;

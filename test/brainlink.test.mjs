@@ -15,7 +15,7 @@ import { proposeNote, sendHandoff, listHandoffs, frontmatter, resolveIdentity } 
 import { connectAgent, closeLoop, resolveAgent, latestCaptures } from '../src/agents.mjs';
 import { createMcp, serveHttp, VERSION } from '../src/server.mjs';
 import { buildPack, scaffold, mergePack } from '../src/packs.mjs';
-import { connectClient, disconnectClient, detect, codexToml } from '../src/connectors.mjs';
+import { connectClient, disconnectClient, detect, codexToml, readClientAgentToken } from '../src/connectors.mjs';
 import { startSetup } from '../src/setup.mjs';
 import { ingestionQueue, recordIngestion } from '../src/ingestion.mjs';
 
@@ -747,6 +747,17 @@ test('connectors: Codex TOML block is replaced, not duplicated', async () => {
   assert.match(twice, /command = "C:\\\\BrainLink\\\\node.exe"/);
   assert.match(twice, /\[mcp_servers\.other\]\ncommand = "x"/);
   assert.equal(codexToml(twice, null).includes('brainlink'), false);
+});
+
+test('connectors: the scoped Codex health check reads its token only from the BrainLink TOML env table', async () => {
+  const home = await tmp('codex-token-home');
+  const codexHome = path.join(home, '.codex');
+  const opts = { home, os: 'linux', env: { CODEX_HOME: codexHome }, launch: { command: '/brainlink/node', args: ['serve'] }, useCli: false };
+  await mkdir(codexHome, { recursive: true });
+  const token = 'bla_scoped-codex-token';
+  const content = codexToml('[mcp_servers.other]\ncommand = "other"\n', { command: '/brainlink/node', args: ['serve'], env: { BRAINLINK_AGENT_TOKEN: token, BRAINLINK_AI_PLATFORM: 'ChatGPT Codex' } });
+  await writeFile(path.join(codexHome, 'config.toml'), content);
+  assert.equal(await readClientAgentToken('codex', opts), token);
 });
 
 test('packs: scaffold never overwrites; merge replaces same-named vault', async () => {

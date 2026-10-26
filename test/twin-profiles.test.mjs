@@ -72,6 +72,9 @@ test('Twin setup creates profiles from local UI choices and escapes every profil
   assert.match(html, /data-twin-edit=/);
   assert.match(html, /POST', '\/api\/twins\/update'/);
   assert.match(html, /twinProfiles\.confirmUpdate/);
+  assert.match(html, /id="preset-connect-modal"/);
+  assert.match(html, /data-connect-scope=/);
+  assert.match(html, /POST', '\/api\/connect'/);
   assert.match(html, /twinProfiles\.identityHint/);
   assert.match(html, /data-twin-vault/);
   assert.match(html, /data-twin-agent/);
@@ -403,6 +406,64 @@ test('authenticated local status exposes Twin scopes without returning agent cre
     }).then((response) => response.json());
     assert.equal(presetHealth.ok, false);
     assert.match(presetHealth.message, /no Twin profile permission/);
+  } finally { setup.server.close(); }
+});
+
+test('preset AI apps receive only the selected Twin permissions and disconnect revokes their token', async () => {
+  const root = await mkdtemp(path.join(tmpdir(), 'brainlink-preset-twin-'));
+  const home = path.join(root, 'home');
+  const vaultPath = path.join(root, 'org-vault');
+  const privatePath = path.join(root, 'private-vault');
+  await mkdir(vaultPath, { recursive: true });
+  await mkdir(privatePath, { recursive: true });
+  await mkdir(path.join(home, '.cursor'), { recursive: true });
+  await writeFile(path.join(vaultPath, 'Public.md'), 'Synthetic public team note.');
+  await writeFile(path.join(privatePath, 'Private.md'), 'PRESET_PRIVATE_CANARY_839');
+  const env = { BRAINLINK_HOME: path.join(home, 'app'), HOME: home, USERPROFILE: home };
+  const cfg = normalize({ version: 2, locale: 'en', vaults: [
+    { name: 'Example Org', path: vaultPath },
+    { name: 'Ian Private', path: privatePath, private: true },
+  ], twin_profiles: [{
+    id: 'org_scope', name: 'Example Org', mode: 'organisation', owner: 'synthetic-owner',
+    vaults: [{ name: 'Example Org', access: 'read' }],
+    source_policy: { private_default: true, provenance_required: true, session_capture: 'metadata-only' },
+    memory_policy: { working: false, semantic: true, procedural: false, episodic: false },
+    allowed_actions: [], agent_access: [],
+  }] });
+  await saveConfig(cfg, path.join(env.BRAINLINK_HOME, 'config.json'));
+  const setup = await startSetup({ env, home, os: 'linux', port: 0, useCli: false });
+  const base = `http://127.0.0.1:${setup.port}`;
+  const api = async (route, body) => {
+    const response = await fetch(`${base}${route}`, { method: 'POST', headers: { 'X-BrainLink-Token': setup.token, 'Content-Type': 'application/json' }, body: JSON.stringify(body || {}) });
+    return { status: response.status, body: await response.json() };
+  };
+  try {
+    const connected = await api('/api/connect', { client: 'cursor', profile_id: 'org_scope', vaults: [{ name: 'Example Org', operations: ['search', 'read_note'] }] });
+    assert.equal(connected.status, 200, JSON.stringify(connected.body));
+    assert.equal(connected.body.health.ok, true, JSON.stringify(connected.body));
+    assert.equal(connected.body.health.tool, 'vault_search');
+    const clientConfig = JSON.parse(await readFile(path.join(home, '.cursor', 'mcp.json'), 'utf8'));
+    const secret = clientConfig.mcpServers.brainlink.env.BRAINLINK_AGENT_TOKEN;
+    assert.match(secret, /^bla_/);
+    const saved = JSON.parse(await readFile(path.join(env.BRAINLINK_HOME, 'config.json'), 'utf8'));
+    const managed = saved.ai_agents.find((agent) => agent.preset_client_id === 'cursor');
+    assert.equal(managed.tokenHash, hashToken(secret));
+    assert.equal(saved.twin_profiles[0].agent_access[0].vaults[0].name, 'Example Org');
+    assert.doesNotMatch(JSON.stringify(connected.body), new RegExp(secret));
+    const stateResponse = await fetch(`${base}/api/state`, { headers: { 'X-BrainLink-Token': setup.token } });
+    const state = await stateResponse.json();
+    assert.doesNotMatch(JSON.stringify(state), new RegExp(secret));
+    assert.doesNotMatch(JSON.stringify(state), /tokenHash/);
+
+    const invalid = await api('/api/connect', { client: 'cursor', profile_id: 'org_scope', vaults: [{ name: 'Ian Private', operations: ['search'] }] });
+    assert.equal(invalid.status, 400);
+    assert.match(invalid.body.error, /non-private vaults/);
+
+    const disconnected = await api('/api/disconnect', { client: 'cursor' });
+    assert.equal(disconnected.status, 200);
+    const after = JSON.parse(await readFile(path.join(env.BRAINLINK_HOME, 'config.json'), 'utf8'));
+    assert.equal(after.ai_agents.find((agent) => agent.preset_client_id === 'cursor').tokenHash, null);
+    assert.equal(after.twin_profiles[0].agent_access.length, 0);
   } finally { setup.server.close(); }
 });
 
