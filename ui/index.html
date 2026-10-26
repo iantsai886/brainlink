@@ -388,6 +388,19 @@ ol.todo li { padding-left: 4px; }
     <div id="ingestion-queue" class="cards" aria-live="polite"></div>
   </section>
 
+  <section id="s-brief">
+    <h2 data-i18n="brief.title"></h2>
+    <p class="hint" data-i18n="brief.hint"></p>
+    <label class="muted" style="display:flex;flex-direction:row;gap:6px;align-items:center"><input type="checkbox" id="brief-enabled" style="width:auto"><span data-i18n="brief.enabled"></span></label>
+    <div class="grid2" style="margin-top:10px">
+      <label><span data-i18n="brief.vault"></span><select id="brief-vault"></select></label>
+      <label><span data-i18n="brief.time"></span><input id="brief-time" type="time" value="08:00"></label>
+    </div>
+    <div class="row" style="margin-top:12px"><button class="primary" id="brief-save" data-i18n="brief.save"></button><button id="brief-run" data-i18n="brief.run"></button></div>
+    <p id="brief-status" class="muted" role="status"></p>
+    <div id="brief-output" class="cards" aria-live="polite"></div>
+  </section>
+
   <section id="s-backup">
     <h2 data-i18n="backup.title"></h2>
     <p class="hint" data-i18n="backup.hint"></p>
@@ -1092,6 +1105,19 @@ async function load() {
     : t('ingestion.never');
   if (S.ingestion?.status?.running) $('ingestion-status').textContent = t('ingestion.running');
   $('ingestion-run').disabled = !S.vaults.some((v) => !v.private && v.exists);
+  $('brief-enabled').checked = Boolean(S.brief?.enabled);
+  $('brief-vault').innerHTML = `<option value="">${esc(t('brief.chooseVault'))}</option>` + S.vaults.filter((v) => !v.private && v.exists).map((v) => `<option value="${esc(v.name)}" ${v.name === S.brief?.vault ? 'selected' : ''}>${esc(v.name)}</option>`).join('');
+  $('brief-time').value = S.brief?.time || '08:00';
+  $('brief-status').textContent = S.brief?.running ? t('brief.running') : S.brief?.status?.at
+    ? (S.brief.status.ok ? t('brief.lastRun', { vault: S.brief.status.vault || '', at: new Date(S.brief.status.at).toLocaleString(LOCALE), trigger: t('brief.trigger.' + S.brief.status.trigger) }) : t('brief.failed', { error: S.brief.status.error || '' }))
+    : t('brief.never');
+  const br = S.brief?.status?.result;
+  if (!br) $('brief-output').innerHTML = '';
+  else {
+    const list = (label, items, field) => items?.length ? `<div class="card"><b>${esc(label)}</b><ul>${items.slice(0, 8).map((item) => `<li>${esc(typeof item === 'string' ? item : item[field] || item.title || item.path || '')}</li>`).join('')}</ul></div>` : '';
+    $('brief-output').innerHTML = `<div class="card"><b>${esc(t('brief.health'))}</b><p>${esc(t('brief.healthCounts', { notes: br.health.notes, links: br.health.links, unlinked: br.health.not_linked, broken: br.health.broken_links }))}</p></div>${list(t('brief.changed'), br.changed, 'title')}${list(t('brief.tasks'), br.open_loops.tasks, 'task')}${list(t('brief.next'), br.open_loops.next_actions, 'action')}${list(t('brief.decisions'), br.open_loops.decisions_waiting, 'decision')}${list(t('brief.questions'), br.open_loops.unresolved_questions, 'question')}`;
+  }
+  $('brief-run').disabled = !S.vaults.some((v) => !v.private && v.exists);
   $('startup-at-login').checked = Boolean(S.startup_at_login);
   $('backup-folder').value = S.backup?.folder || '';
   $('backup-hours').value = String(S.backup?.intervalHours || 24);
@@ -1592,6 +1618,14 @@ $('ingestion-run').onclick = () => act(async () => {
   const r = await api('POST', '/api/ingestion/run', { vault: $('ingestion-vault').value, folder: $('ingestion-folder').value });
   $('ingestion-queue').innerHTML = r.candidates.length ? `${r.limited ? `<p class="muted">${esc(t('ingestion.limited', { shown: r.candidates.length, total: r.queued_total }))}</p>` : ''}${r.candidates.map((item) => `<div class="card"><button class="link" data-open-note="${esc(r.vault)}::${esc(item.path)}"><b>${esc(item.title)}</b></button><span class="mono muted">${esc(item.path)}</span><small class="muted">${esc(item.updated_at)}</small></div>`).join('')}` : `<p class="muted">${esc(t('ingestion.empty'))}</p>`;
   toast(t('ingestion.scanDone', { count: r.queued_total }));
+});
+$('brief-save').onclick = () => act(async () => {
+  const r = await api('POST', '/api/brief/settings', { enabled: $('brief-enabled').checked, vault: $('brief-vault').value, time: $('brief-time').value });
+  toast(t(r.brief.enabled ? 'brief.saved' : 'brief.disabled'));
+});
+$('brief-run').onclick = () => act(async () => {
+  await api('POST', '/api/brief/run', { vault: $('brief-vault').value });
+  toast(t('brief.done'));
 });
 $('backup-restore-pick-source').onclick = async () => {
   try {

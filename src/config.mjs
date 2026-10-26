@@ -45,7 +45,7 @@ export const AGENT_KINDS = ['local', 'remote'];
 export const CONFIG_SCHEMA_VERSION = 2;
 
 export function emptyConfig() {
-  return { version: CONFIG_SCHEMA_VERSION, timezone: null, locale: null, vaults: [], agents: [], ai_agents: [], twin_profiles: [], handoff: null, platforms: DEFAULT_PLATFORMS, http: { port: 8765, token: null }, connections: {}, sessions: { shareSummaries: false, shareFullText: false }, session_filing: { projectVaults: {}, projectFolders: {} }, backup: { enabled: false, folder: null, intervalHours: 24, scheduleMode: 'interval', time: '02:00', last_scheduled_date: null, keepCount: 0, encrypted: false }, ingestion: { enabled: false, vault: null, folder: null, time: '02:00' } };
+  return { version: CONFIG_SCHEMA_VERSION, timezone: null, locale: null, vaults: [], agents: [], ai_agents: [], twin_profiles: [], handoff: null, platforms: DEFAULT_PLATFORMS, http: { port: 8765, token: null }, connections: {}, sessions: { shareSummaries: false, shareFullText: false }, session_filing: { projectVaults: {}, projectFolders: {} }, backup: { enabled: false, folder: null, intervalHours: 24, scheduleMode: 'interval', time: '02:00', last_scheduled_date: null, keepCount: 0, encrypted: false }, ingestion: { enabled: false, vault: null, folder: null, time: '02:00' }, brief: { enabled: false, vault: null, time: '08:00', last_scheduled_date: null } };
 }
 
 // Fill defaults so the rest of the code never checks for missing keys.
@@ -62,6 +62,7 @@ export function normalize(raw = {}) {
   cfg.connections = raw.connections || {};
   cfg.backup = { enabled: false, folder: null, intervalHours: 24, scheduleMode: 'interval', time: '02:00', last_scheduled_date: null, keepCount: 0, encrypted: false, ...(raw.backup || {}) };
   cfg.ingestion = { enabled: false, vault: null, folder: null, time: '02:00', ...(raw.ingestion || {}) };
+  cfg.brief = { enabled: false, vault: null, time: '08:00', last_scheduled_date: null, ...(raw.brief || {}) };
   cfg.session_filing = { projectVaults: {}, projectFolders: {}, ...(raw.session_filing || {}) };
   if (!cfg.session_filing.projectVaults || typeof cfg.session_filing.projectVaults !== 'object' || Array.isArray(cfg.session_filing.projectVaults)) cfg.session_filing.projectVaults = {};
   if (!cfg.session_filing.projectFolders || typeof cfg.session_filing.projectFolders !== 'object' || Array.isArray(cfg.session_filing.projectFolders)) cfg.session_filing.projectFolders = {};

@@ -99,7 +99,7 @@ Clean-room implementations of the strongest patterns in Obsidian Copilot, Khoj a
 | **Meaning-based search** | If Ollama with an embedding model is installed, search fuses keyword and meaning results; vectors cached per chunk hash on this computer; off otherwise | Khoj bi-encoder + hash-incremental index |
 | **Smarter keyword search** | Stemming, `#tag` and `[[Note]]` guaranteed hits, rephrasings fused (RRF), folder / tag / date filters, graph boost from links, co-citations and shared tags | Copilot v3 search, query expansion, graph boost |
 | **Memories** | "Remember that…" saves a fact every AI sees when it connects; duplicates skipped | Copilot saved memories |
-| **Open loops & brief** | Unchecked tasks, next actions, unresolved questions, decisions waiting; "Brief me" combines changes, open items and link health | Khoj automations (on-demand) |
+| **Open loops & brief** | Unchecked tasks, next actions, unresolved questions, decisions waiting; "Brief me" combines changes, open items and link health. Setup can run it on demand or daily for one public vault. | Khoj automations |
 | **Templates** | Meeting (transcripts → attendees as links, action items as tasks), decision, person, project, idea | Meetily / Anarlog meeting notes |
 | **Daily note** | Quick capture into today's note, honouring Obsidian's daily-note folder and format | Obsidian daily notes |
 | **Link health** | Unlinked notes, broken links, duplicate titles, stale active notes | — |
@@ -107,7 +107,7 @@ Clean-room implementations of the strongest patterns in Obsidian Copilot, Khoj a
 | **Smart connect** | "Connect to …" also loads what changed this week, open loops and memories | — |
 | **Graph view** | Setup shows the vault as a live link map with notes / links / unlinked counts | Brain 3D |
 
-Not yet: scheduled briefs (needs a background helper), cross-encoder rerank, cloud embedding providers.
+Not yet: cross-encoder rerank, cloud embedding providers. Scheduled briefs run locally while BrainLink is open; there are no remote notifications, and the brief is stored in BrainLink's local app data rather than written into the vault.
 
 ## 4c. Historical retrieval-quality experiment (2026-10-18)
 

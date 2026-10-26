@@ -13,7 +13,7 @@ import { CLIENTS, detect, connectClient, disconnectClient, readClientAgentToken,
 import { createContext, search, searchWithVerdict, readNote, ensureDefaultIgnore, readExcludedFolders, writeExcludedFolders, DEFAULT_EXCLUDED_FOLDERS, SUGGESTED_EXCLUDED_FOLDERS, safeJoin, vaultRoot } from './core.mjs';
 import { ROOT, launchSpec, readActivity, refreshMap, logActivity } from './runtime.mjs';
 import { detectEmbedder } from './embed.mjs';
-import { vaultHealth } from './insights.mjs';
+import { vaultHealth, brief as createBrief } from './insights.mjs';
 import { loadVault } from './core.mjs';
 import { resolveNoteWikilinks } from './links.mjs';
 import { VERSION, createMcp } from './server.mjs';
@@ -42,6 +42,7 @@ import { createRsiExperiments } from './rsi-experiments.mjs';
 import { createRsiDiscovery } from './rsi-discovery.mjs';
 import { ingestionQueue } from './ingestion.mjs';
 import { ingestionScheduleDue, localDateAndTime, validateIngestionSchedule } from './ingestion-schedule.mjs';
+import { briefScheduleDue, validateBriefSchedule } from './brief-schedule.mjs';
 
 const UI_STATIC_TYPES = { '.js': 'text/javascript; charset=utf-8', '.css': 'text/css; charset=utf-8', '.json': 'application/json; charset=utf-8' };
 const UI_DIR = path.join(ROOT, 'ui');
@@ -133,11 +134,12 @@ export async function startSetup(opts = {}) {
   let idleTimer = null;
   let backupEnabled = false;
   let ingestionKeepsAlive = false;
+  let briefKeepsAlive = false;
   let syncKeepsAlive = false;
   const quit = () => setTimeout(() => { snapshotWatcher?.stop(); (opts.onQuit ? opts.onQuit() : server.close()); }, 100);
   const touch = () => {
     clearTimeout(idleTimer);
-    if (!opts.idleMinutes || backupEnabled || discoveryKeepsAlive || ingestionKeepsAlive || syncKeepsAlive) return;
+    if (!opts.idleMinutes || backupEnabled || discoveryKeepsAlive || ingestionKeepsAlive || briefKeepsAlive || syncKeepsAlive) return;
     idleTimer = setTimeout(quit, opts.idleMinutes * 60e3);
     idleTimer.unref?.();
   };
@@ -159,6 +161,51 @@ export async function startSetup(opts = {}) {
   const ingestionStateFile = path.join(appHome(env), 'ingestion-state.json');
   let ingestionStatus = await readFile(ingestionStateFile, 'utf8').then((raw) => JSON.parse(raw)).catch(() => ({ ok: null, at: null, trigger: null, queued_total: 0, scanned: 0, skipped: 0, error: null }));
   let ingestionRunning = false;
+  const briefStateFile = path.join(appHome(env), 'brief-state.json');
+  let briefStatus = await readFile(briefStateFile, 'utf8').then((raw) => JSON.parse(raw)).catch(() => ({ ok: null, at: null, trigger: null, vault: null, result: null, error: null }));
+  let briefRunning = false;
+  async function saveBriefStatus(status) {
+    briefStatus = status;
+    await mkdir(path.dirname(briefStateFile), { recursive: true });
+    const temp = `${briefStateFile}.${randomBytes(5).toString('hex')}.tmp`;
+    await writeFile(temp, JSON.stringify(status, null, 2) + '\n', { flag: 'wx' });
+    await rename(temp, briefStateFile);
+  }
+  async function runBrief(cfg, { trigger = 'manual', vaultName = cfg.brief?.vault } = {}) {
+    if (briefRunning) throw new Error('A brief is already running.');
+    const selected = cfg.vaults.find((item) => item.name === vaultName && !item.private);
+    if (!selected || !(await stat(selected.path).then((s) => s.isDirectory(), () => false))) throw new Error('Choose one existing public vault for the brief.');
+    briefRunning = true;
+    try {
+      const result = await createBrief(localContext(cfg, { ...env, BRAINLINK_SEMANTIC: '0' }), vaultName, { days: 7 });
+      const status = { ok: true, at: new Date().toISOString(), trigger, vault: vaultName, result, error: null };
+      await saveBriefStatus(status);
+      return status;
+    } catch (error) {
+      const status = { ok: false, at: new Date().toISOString(), trigger, vault: vaultName, result: null, error: error.message || String(error) };
+      await saveBriefStatus(status).catch(() => {});
+      throw error;
+    } finally { briefRunning = false; }
+  }
+  let briefTickRunning = false;
+  const briefTimer = setInterval(async () => {
+    if (briefTickRunning || briefRunning) return;
+    briefTickRunning = true;
+    try {
+      const cfg = await loadConfig(file);
+      if (!briefScheduleDue(cfg.brief, new Date(), cfg.timezone)) return;
+      cfg.brief.last_scheduled_date = localDateAndTime(new Date(), cfg.timezone).date;
+      await saveConfig(cfg, file);
+      await runBrief(cfg, { trigger: 'schedule' });
+    } catch (error) {
+      await saveBriefStatus({ ok: false, at: new Date().toISOString(), trigger: 'schedule', vault: null, result: null, error: error.message || String(error) }).catch(() => {});
+    } finally { briefTickRunning = false; }
+  }, opts.briefTickMs ?? 30_000);
+  briefTimer.unref?.();
+  function refreshBriefSchedule(cfg) {
+    briefKeepsAlive = Boolean(cfg.brief?.enabled);
+    touch();
+  }
   async function saveIngestionStatus(status) {
     ingestionStatus = status;
     await mkdir(path.dirname(ingestionStateFile), { recursive: true });
@@ -401,6 +448,7 @@ export async function startSetup(opts = {}) {
   const initialConfig = await loadConfig(file);
   refreshBackupTimer(initialConfig);
   refreshIngestionSchedule(initialConfig);
+  refreshBriefSchedule(initialConfig);
   refreshSyncSchedule(initialConfig);
 
   async function state() {
@@ -434,6 +482,7 @@ export async function startSetup(opts = {}) {
       snapshot: { ...snapshotSettings(cfg), suggested_folder: suggestSnapshotFolder(home), ...(await loadSnapshotStatus(snapshotStateFile)) },
       backup: { ...cfg.backup, status: backupStatus, running: backupRunning },
       ingestion: { ...cfg.ingestion, status: ingestionStatus, running: ingestionRunning },
+      brief: { ...cfg.brief, status: briefStatus, running: briefRunning },
       startup_at_login: ['win32', 'darwin', 'linux'].includes(os) ? await isStartupEnabled(env, home, os) : false,
     };
   }
@@ -1224,6 +1273,21 @@ export async function startSetup(opts = {}) {
       const vaultName = String(b.vault || cfg.ingestion?.vault || '');
       const folder = String(b.folder || cfg.ingestion?.folder || '');
       return runIngestion(cfg, { trigger: 'manual', vaultName, folder });
+    },
+    'POST /api/brief/settings': async (b) => {
+      const cfg = await loadConfig(file);
+      const next = { ...cfg, brief: validateBriefSchedule(b, cfg.brief) };
+      if (next.brief.enabled) {
+        const selected = next.vaults.find((item) => item.name === next.brief.vault && !item.private);
+        if (!selected || !(await stat(selected.path).then((s) => s.isDirectory(), () => false))) throw new Error('Choose an existing public vault before enabling scheduled briefs.');
+      }
+      await saveConfig(next, file);
+      refreshBriefSchedule(next);
+      return { ok: true, brief: { ...next.brief, status: briefStatus } };
+    },
+    'POST /api/brief/run': async (b) => {
+      const cfg = await loadConfig(file);
+      return runBrief(cfg, { trigger: 'manual', vaultName: String(b.vault || cfg.brief?.vault || '') });
     },
     'POST /api/startup': async (b) => ({ ok: true, enabled: await setStartupEnabled(Boolean(b.enabled), { env, home, os }) }),
     'POST /api/backup/restore': async (b) => {
