@@ -26,7 +26,9 @@ export async function replaceDiscoveryFile(temp, file, { os = process.platform, 
   for (let attempt = 0; ; attempt++) {
     try { await renameFile(temp, file); return; }
     catch (error) {
-      if (os !== 'win32' || !['EPERM', 'EACCES', 'EBUSY'].includes(error.code) || attempt >= 19) throw error;
+      // Windows antivirus/indexing can hold a just-written settings file longer than the
+      // original 500 ms retry window. Keep retries bounded, but allow up to one second.
+      if (os !== 'win32' || !['EPERM', 'EACCES', 'EBUSY'].includes(error.code) || attempt >= 39) throw error;
       await wait(25);
     }
   }

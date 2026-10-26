@@ -33,6 +33,17 @@ test('Windows RSI settings replacement retries transient sharing violations and 
   assert.deepEqual(waits, [25, 25]);
 
   attempts = 0;
+  await replaceDiscoveryFile('tmp', 'settings', {
+    os: 'win32',
+    renameFile: async () => {
+      attempts++;
+      if (attempts <= 25) { const error = new Error('longer antivirus/indexer lock'); error.code = 'EPERM'; throw error; }
+    },
+    wait: async (ms) => waits.push(ms),
+  });
+  assert.equal(attempts, 26, 'Windows file replacement remains retryable beyond a brief lock');
+
+  attempts = 0;
   await assert.rejects(replaceDiscoveryFile('tmp', 'settings', {
     os: 'linux', renameFile: async () => { attempts++; const error = new Error('busy'); error.code = 'EBUSY'; throw error; }, wait: async () => {},
   }), /busy/);
@@ -439,7 +450,17 @@ test('Setup exposes discovery only through authenticated local APIs and runs the
     const ideas = await fetch(base + '/api/rsi', { headers: { 'X-BrainLink-Token': app.token } }).then(r => r.json());
     assert.equal(ideas.ideas.length, 1);
     assert.equal(ideas.ideas[0].origin, 'discovery');
-    const freshness = await post('/api/rsi/discovery/refresh-source', { idea_id: ideas.ideas[0].id }).then(r => r.json());
+    let freshness;
+    for (let attempt = 0; attempt < 50 && !freshness; attempt++) {
+      const response = await post('/api/rsi/discovery/refresh-source', { idea_id: ideas.ideas[0].id });
+      const body = await response.json();
+      if (response.ok) freshness = body;
+      else {
+        assert.match(body.error || '', /already running/, 'only a concurrent discovery run may defer this source check');
+        await delay(20);
+      }
+    }
+    assert.ok(freshness, 'source freshness check starts after any scheduled run finishes');
     assert.equal(freshness.check.status, 'unchanged');
   } finally { app.server.close(); }
 });
