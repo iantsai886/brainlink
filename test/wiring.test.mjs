@@ -393,6 +393,41 @@ test('Setup runs scheduled folder sync, preserves private notes, and keeps its s
   } finally { s.server.close(); }
 });
 
+test('scheduled sync resumes from its saved receipt after Setup restarts', async () => {
+  const home = await tmp('setup-scheduled-sync-restart');
+  const env = { BRAINLINK_HOME: path.join(home, 'app'), HOME: home, BRAINLINK_SEMANTIC: '0' };
+  const vault = await tmp('setup-scheduled-sync-restart-vault');
+  const folder = await tmp('setup-scheduled-sync-restart-target');
+  await writeFile(path.join(vault, 'Public.md'), 'Shared knowledge.');
+  await saveConfig(normalize({ vaults: [{ name: 'Work', path: vault }], sync: { provider: 'gdrive', folder, vault: 'Work', scheduled: true, intervalHours: 1, device: 'test-device' } }), configPath(env));
+  const start = async () => {
+    const s = await startSetup({ env, home, os: 'linux', port: 0, useCli: false, syncIntervalMs: 900 });
+    const api = (p) => fetch(`http://127.0.0.1:${s.port}${p}`, { headers: { 'X-BrainLink-Token': s.token } });
+    return { ...s, api };
+  };
+  const waitForScheduledRun = async (s, differentFrom = null) => {
+    for (let i = 0; i < 100; i++) {
+      const status = (await (await s.api('/api/state')).json()).sync.status;
+      if (status?.trigger === 'schedule' && status.at !== differentFrom) return status;
+      await delay(20);
+    }
+    assert.fail('scheduled sync did not run before the test deadline');
+  };
+
+  let first = await start();
+  const firstReceipt = await waitForScheduledRun(first);
+  await new Promise((resolve, reject) => first.server.close((error) => error ? reject(error) : resolve()));
+
+  const second = await start();
+  try {
+    await delay(150);
+    const resumed = (await (await second.api('/api/state')).json()).sync.status;
+    assert.equal(resumed.at, firstReceipt.at, 'restart honors the saved interval instead of immediately repeating the run');
+    const nextReceipt = await waitForScheduledRun(second, firstReceipt.at);
+    assert.ok(Date.parse(nextReceipt.at) - Date.parse(firstReceipt.at) >= 700, 'the next run follows the configured interval');
+  } finally { await new Promise((resolve) => second.server.close(resolve)); }
+});
+
 // ---- setup.mjs: Sessions view (src/host.mjs's sessionsService, over src/sessions/*) ----
 
 test('setup UI: /api/sessions list/read/private wire the same session store as session_list/session_read', async () => {
