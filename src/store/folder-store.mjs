@@ -4,7 +4,7 @@
 // is delegated to brainlink-store's createMemoryStore (the reference implementation the contract
 // is defined against); this module only adds the disk mirror and a frontmatter-aware search.
 import { createMemoryStore } from 'brainlink-store';
-import { mkdirSync } from 'node:fs';
+import { mkdirSync, watch as watchFs } from 'node:fs';
 import { readdir, readFile, writeFile, rename as fsRename, mkdir, unlink } from 'node:fs/promises';
 import path from 'node:path';
 import { normalize } from '../config.mjs';
@@ -75,6 +75,8 @@ export function createFolderStore(opts = {}) {
 
   const inner = createMemoryStore({ vaults, clock, readOnly, logRetention });
   const diskPath = new Map(); // note id -> absolute file path on disk
+  const knownFiles = new Map(); // vault-relative path key -> note id
+  const fileKey = (vaultName, relPath) => `${vaultName}\0${relPath}`;
   const blobDir = async (vaultName) => { const d = path.join(vaultPaths[vaultName], '.brainlink', 'blobs'); await mkdir(d, { recursive: true }); return d; };
 
   // Initial scan: read-only ingest of whatever is already on disk. Never writes back, so an
@@ -88,18 +90,95 @@ export function createFolderStore(opts = {}) {
         try {
           const w = await inner.write({ vault: v.name, path: rel, body, frontmatter: meta }, { expected_etag: '' });
           diskPath.set(w.id, full);
+          knownFiles.set(fileKey(v.name, rel), w.id);
         } catch { /* unreadable/duplicate on disk: skip, keep the folder untouched */ }
       }
     }
   })();
+
+  let refreshFlight = null;
+  async function refreshFromDisk() {
+    await ready;
+    if (refreshFlight) return refreshFlight;
+    refreshFlight = (async () => {
+      const seen = new Set(); let changed = false;
+      for (const v of vaults) {
+        for (const full of await walkMarkdown(vaultPaths[v.name])) {
+          const rel = path.relative(vaultPaths[v.name], full).split(path.sep).join('/');
+          const key = fileKey(v.name, rel); seen.add(key);
+          let raw;
+          try { raw = await readFile(full, 'utf8'); } catch { continue; }
+          const { meta, body } = parseNoteFile(raw);
+          const id = knownFiles.get(key);
+          if (id) {
+            let current;
+            try { current = await inner.read(id); } catch { knownFiles.delete(key); }
+            if (current && (current.body !== body || JSON.stringify(current.frontmatter) !== JSON.stringify(meta))) {
+              try {
+                await inner.write({ id, vault: v.name, path: rel, body, frontmatter: meta, author: 'external-file-change' }, { expected_etag: current.etag });
+                diskPath.set(id, full); changed = true;
+              } catch { /* a concurrent BrainLink edit wins; the next filesystem event can retry */ }
+              continue;
+            }
+            if (current) continue;
+          }
+          try {
+            const created = await inner.write({ vault: v.name, path: rel, body, frontmatter: meta, author: 'external-file-change' }, { expected_etag: '' });
+            knownFiles.set(key, created.id); diskPath.set(created.id, full); changed = true;
+          } catch { /* unreadable, duplicate, or a conflicting path: leave disk untouched */ }
+        }
+      }
+      for (const [key, id] of [...knownFiles]) {
+        if (seen.has(key)) continue;
+        try {
+          const current = await inner.read(id);
+          await inner.delete(id, { expected_etag: current.etag });
+          diskPath.delete(id); changed = true;
+        } catch { /* already removed or changed concurrently */ }
+        knownFiles.delete(key);
+      }
+      return { changed };
+    })().finally(() => { refreshFlight = null; });
+    return refreshFlight;
+  }
+
+  function watchFiles(onChange, { debounceMs = 350, fallbackIntervalMs = 15000 } = {}) {
+    let timer = null, stopped = false, running = false;
+    const notify = () => {
+      if (stopped) return;
+      clearTimeout(timer);
+      timer = setTimeout(async () => {
+        if (running || stopped) return;
+        running = true;
+        try { const result = await refreshFromDisk(); if (result.changed && !stopped) onChange(); }
+        catch { /* watchers must not expose file paths or contents in errors */ }
+        finally { running = false; }
+      }, debounceMs);
+      timer.unref?.();
+    };
+    const watchers = [];
+    for (const v of vaults) {
+      try {
+        const w = watchFs(vaultPaths[v.name], { recursive: true }, notify);
+        w.on('error', () => {}); watchers.push(w);
+      } catch { /* polling below covers platforms without recursive watch support */ }
+    }
+    const interval = watchers.length === vaults.length ? null : setInterval(notify, fallbackIntervalMs);
+    interval?.unref?.();
+    return { stop() { stopped = true; clearTimeout(timer); if (interval) clearInterval(interval); for (const w of watchers) { try { w.close(); } catch {} } } };
+  }
 
   async function writeNoteToDisk(vaultName, relPath, frontmatter, body, noteId) {
     const target = path.join(vaultPaths[vaultName], relPath);
     const prev = diskPath.get(noteId);
     await mkdir(path.dirname(target), { recursive: true });
     await writeFile(target, renderNoteFile(frontmatter, body));
-    if (prev && prev !== target) await unlink(prev).catch(() => {}); // path changed: drop the stale file, new content is already at target
+    if (prev && prev !== target) {
+      knownFiles.delete(fileKey(vaultName, path.relative(vaultPaths[vaultName], prev).split(path.sep).join('/')));
+      await unlink(prev).catch(() => {}); // path changed: drop the stale file, new content is already at target
+    }
     diskPath.set(noteId, target);
+    knownFiles.set(fileKey(vaultName, relPath), noteId);
   }
 
   // Lazy, cached search context over the same directories (src/core.mjs reads disk directly, so
@@ -129,6 +208,8 @@ export function createFolderStore(opts = {}) {
   const store = {
     vaults: inner.vaults,
     subscribe: inner.subscribe,
+    refreshFromDisk,
+    watchFiles,
     ...passthrough,
 
     async write(input, o = {}) {
@@ -148,6 +229,8 @@ export function createFolderStore(opts = {}) {
       if (prev) await fsRename(prev, target).catch(async () => writeFile(target, renderNoteFile(before.frontmatter, before.body)));
       else await writeFile(target, renderNoteFile(before.frontmatter, before.body));
       diskPath.set(id, target);
+      knownFiles.delete(fileKey(before.vault, before.path));
+      knownFiles.set(fileKey(before.vault, newPath), id);
       return r;
     },
     async revert(id, o = {}) {

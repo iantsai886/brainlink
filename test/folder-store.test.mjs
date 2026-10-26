@@ -1,7 +1,7 @@
 // Folder-backed BrainStore: must pass the published contract, and keep untouched notes byte-stable.
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtempSync, readFileSync, writeFileSync, mkdirSync, rmSync } from 'node:fs';
+import { mkdtempSync, readFileSync, writeFileSync, mkdirSync, rmSync, unlinkSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { createFolderStore } from '../src/store/folder-store.mjs';
@@ -54,4 +54,43 @@ test('folder-store: rename moves the file without touching its bytes', async () 
   await store.rename(w.id, 'Sub/B.md', { expected_etag: w.etag });
   assert.equal(readFileSync(path.join(root, 'Work', 'Sub', 'B.md'), 'utf8'), before);
   rmSync(root, { recursive: true, force: true });
+});
+
+test('folder-store: refresh imports external creates and edits and tombstones external removals', async () => {
+  const root = mkdtempSync(path.join(tmpdir(), 'bl-folder-refresh-'));
+  try {
+    const dir = path.join(root, 'Work'); mkdirSync(dir, { recursive: true });
+    writeFileSync(path.join(dir, 'Existing.md'), 'before');
+    const store = createFolderStore({ vaults: [{ name: 'Work', private: false }], vaultPaths: { Work: dir } });
+    const original = await store.read('Work:Existing.md');
+    writeFileSync(path.join(dir, 'Existing.md'), 'after from Obsidian');
+    writeFileSync(path.join(dir, 'New.md'), 'new from Obsidian');
+    const result = await store.refreshFromDisk();
+    assert.equal(result.changed, true);
+    assert.equal((await store.read(original.id)).body, 'after from Obsidian');
+    assert.equal((await store.read('Work:New.md')).body, 'new from Obsidian');
+    unlinkSync(path.join(dir, 'New.md'));
+    assert.equal((await store.refreshFromDisk()).changed, true);
+    const remaining = await store.list({ vault: 'Work' });
+    assert.equal(remaining.length, 1);
+    assert.equal(remaining[0].path, 'Existing.md');
+    assert.equal(remaining[0].id, original.id);
+    assert.equal((await store.read('Work:New.md').catch(() => null)), null);
+  } finally { rmSync(root, { recursive: true, force: true }); }
+});
+
+test('folder-store: file watcher reports a content-free change after an external note appears', async () => {
+  const root = mkdtempSync(path.join(tmpdir(), 'bl-folder-watch-'));
+  try {
+    const dir = path.join(root, 'Work'); mkdirSync(dir, { recursive: true });
+    const store = createFolderStore({ vaults: [{ name: 'Work', private: false }], vaultPaths: { Work: dir } });
+    await store.list({ vault: 'Work' }); // settle the initial disk scan before watching for new changes
+    let resolveChange; const changed = new Promise((resolve) => { resolveChange = resolve; });
+    const watcher = store.watchFiles(() => resolveChange('changed'), { debounceMs: 40, fallbackIntervalMs: 100 });
+    try {
+      writeFileSync(path.join(dir, 'External.md'), 'do not include this content in notifications');
+      assert.equal(await Promise.race([changed, new Promise((resolve) => setTimeout(() => resolve('timeout'), 5000))]), 'changed');
+      assert.equal((await store.read('Work:External.md')).body, 'do not include this content in notifications');
+    } finally { watcher.stop(); }
+  } finally { rmSync(root, { recursive: true, force: true }); }
 });
