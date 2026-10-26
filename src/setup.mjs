@@ -1048,6 +1048,7 @@ export async function startSetup(opts = {}) {
     'POST /api/sessions/hooks/set': (b) => setSessionHook(b.client, b.enabled, { home, env, os }),
     'POST /api/sessions/end-cues': async () => {
       const cues = (await listSessionEndCues(path.join(appHome(env), 'sessions', 'end-cues'))).slice(0, 100);
+      await sessions.refresh();
       const store = await sessions.store();
       const imported = await store.listSessions({ limit: 100000 });
       return { cues: cues.map((cue) => ({ id: sessionEndCueId(cue), client: cue.client, ended_at: cue.ended_at,
@@ -1055,6 +1056,7 @@ export async function startSetup(opts = {}) {
     },
     'POST /api/sessions/end-cues/dismiss': (b) => dismissSessionEndCue(path.join(appHome(env), 'sessions', 'end-cues'), b.id),
     'POST /api/sessions': async (b) => {
+      await sessions.refresh();
       const result = await sessions.list({ q: b.q, client: b.client, project: b.project, since: b.since, limit: b.limit, include_private: Boolean(b.include_private) });
       const store = await sessions.store();
       const annotated = await Promise.all(result.sessions.map(async (item) => {

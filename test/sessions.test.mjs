@@ -8,6 +8,7 @@ import { fileURLToPath } from 'node:url';
 import { redactText } from '../src/sessions/redact.mjs';
 import { estTokens, clip } from '../src/sessions/tokens.mjs';
 import { createSessionStore } from '../src/sessions/store.mjs';
+import { createSessionRefresher } from '../src/sessions/index.mjs';
 import { importClaudeCode, defaultRoot as defaultClaudeRoot } from '../src/sessions/claude-code.mjs';
 import { importCodex, defaultRoot as defaultCodexRoot, defaultHistoryFile } from '../src/sessions/codex.mjs';
 
@@ -80,6 +81,33 @@ test('session store: explicit Twin assignment is one-way, private, and survives 
   assert.equal(persisted.session.private, true);
   assert.equal(persisted.messages[0].text, 'Synthetic message.');
   await assert.rejects(store.readSession(session.id, { profile_id: 'org_twin' }), (error) => error.code === 'E_NOT_FOUND');
+});
+
+test('session refresher throttles routine transcript scans but can force a fresh import', async () => {
+  const home = await tmp('session-refresh');
+  const appHome = path.join(home, 'brainlink-data');
+  const env = { HOME: home, BRAINLINK_HOME: appHome };
+  const store = await createSessionStore({ dir: path.join(appHome, 'sessions') });
+  let now = 1_000_000;
+  const refresh = createSessionRefresher({ getStore: async () => store, env, clock: () => now, cooldownMs: 5000 });
+  const root = path.join(home, '.codex', 'sessions', '2026', '10', '26');
+  await mkdir(root, { recursive: true });
+  const writeRollout = async (id, prompt) => writeFile(path.join(root, `rollout-${id}.jsonl`), [
+    JSON.stringify({ type: 'session_meta', payload: { id, cwd: path.join(home, 'fictional-project') } }),
+    JSON.stringify({ type: 'response_item', timestamp: '2026-10-26T01:00:00.000Z', payload: { type: 'message', role: 'user', content: [{ type: 'input_text', text: prompt }] } }),
+  ].join('\n') + '\n');
+  await writeRollout('first', 'Synthetic first session');
+  await refresh();
+  assert.equal((await store.listSessions()).length, 1);
+  await writeRollout('second', 'Synthetic second session');
+  now += 1000;
+  await refresh();
+  assert.equal((await store.listSessions()).length, 1, 'recent routine reads use the cached import');
+  await refresh({ force: true });
+  assert.equal((await store.listSessions()).length, 2, 'an explicit session review imports new transcripts immediately');
+  now += 5000;
+  await refresh();
+  assert.equal((await store.listSessions()).length, 2, 'routine refresh resumes after the cooldown');
 });
 
 // ---- Claude Code importer ----

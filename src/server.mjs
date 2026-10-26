@@ -11,7 +11,7 @@ import { recentNotes, openLoops, vaultHealth, brief } from './insights.mjs';
 import { listCommands, fillCommand } from './commands.mjs';
 import { TEMPLATES } from './templates.mjs';
 import { connectAgent, closeLoop } from './agents.mjs';
-import { openSessionStore, importAll } from './sessions/index.mjs';
+import { openSessionStore, createSessionRefresher } from './sessions/index.mjs';
 import { sessionList, sessionRead, sessionLog } from './sessions/mcp.mjs';
 import { closeSession } from './sessions/close.mjs';
 import { listSessionFilingFolders } from './sessions/folders.mjs';
@@ -43,11 +43,9 @@ export function createMcp(ctx, { onCall = () => {} } = {}) {
   const guideHasHandoff = hasHandoff && (ctx.twinScope?.mode !== 'scoped' || scopedHandoffRead || scopedHandoffWrite);
   let sessionStorePromise = null;
   const sessionStore = () => sessionStorePromise ||= openSessionStore(ctx.env);
-  // Lazy, memoized: the first session_list call (not createMcp itself, which some callers use
-  // against a store they are still seeding) imports once; every later call just awaits the same
-  // resolved promise, so a stale or empty index never reaches a client.
-  let sessionImportPromise = null;
-  const importSessions = () => sessionImportPromise ||= sessionStore().then((store) => importAll({ store, env: ctx.env })).catch(() => {});
+  // Refresh incrementally after the first session_list. The cooldown avoids walking a large local
+  // transcript directory on every tool call; the Setup UI's explicit review path forces a refresh.
+  const refreshSessions = createSessionRefresher({ getStore: sessionStore, env: ctx.env });
 
   const instructions = [
     `BrainLink: the user's Markdown / Obsidian vaults (enabled here: ${ctx.enabled.join(', ') || 'none — open BrainLink Setup'}).`,
@@ -162,7 +160,7 @@ export function createMcp(ctx, { onCall = () => {} } = {}) {
       // (src/sessions/mcp.mjs isRelaxableImport). The spread order below (cfg values after ...a)
       // makes sure anything the caller sneaks in under these names as undeclared arguments is
       // overwritten, not honoured.
-      run: async (a) => { await importSessions(); return sessionList(await sessionStore(), { ...a, include_private: false, allow_imported_private: cfg.sessions.shareSummaries, profile_id: ctx.twinScope?.mode === 'scoped' ? ctx.twinScope.profile_id : undefined, allow_profile_private: ctx.twinScope?.mode === 'scoped' }); } },
+      run: async (a) => { const store = await refreshSessions(); return sessionList(store, { ...a, include_private: false, allow_imported_private: cfg.sessions.shareSummaries, profile_id: ctx.twinScope?.mode === 'scoped' ? ctx.twinScope.profile_id : undefined, allow_profile_private: ctx.twinScope?.mode === 'scoped' }); } },
     { name: 'session_read', title: 'Read one AI session', annotations: RO,
       description: 'Defaults to the summary plus up to 3 short key-turn snippets (no raw messages, ~800 tokens); needs the user\'s BrainLink Settings "share summaries" choice (off by default). Pass full=true to page the real message text at ~4k tokens via next_offset; needs the separate "share full text" choice (also off by default). Either way, a private session you are not allowed to see returns a private:true message, not an error.',
       inputSchema: { type: 'object', properties: {
