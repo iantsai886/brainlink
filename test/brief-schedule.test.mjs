@@ -56,7 +56,14 @@ test('Setup schedules local briefs for explicitly selected public or private vau
     assert.ok(status.brief.status.result.open_loops.tasks.some((item) => item.task === 'Finish public project'));
     assert.doesNotMatch(JSON.stringify(status.brief.status), /PRIVATE_BRIEF_CANARY_6184|PRIVATE_VAULT_BRIEF_CANARY_1139|PERSONAL_TASK_CANARY_1139/);
     assert.doesNotMatch(await readFile(path.join(appHome, 'brief-state.json'), 'utf8'), /PRIVATE_BRIEF_CANARY_6184|PRIVATE_VAULT_BRIEF_CANARY_1139|PERSONAL_TASK_CANARY_1139/);
-    const manual = await post('/api/brief/run', { vault: 'Fictional Public' });
+    let manual;
+    for (let i = 0; i < 50; i++) {
+      manual = await post('/api/brief/run', { vault: 'Fictional Public' });
+      if (manual.status === 200) break;
+      const error = await manual.clone().text();
+      assert.match(error, /A brief is already running\./, 'only retry the expected scheduled-run overlap');
+      await delay(20);
+    }
     assert.equal(manual.status, 200, await manual.clone().text());
     assert.equal((await manual.json()).trigger, 'manual');
     const privateSettings = await post('/api/brief/settings', { enabled: true, vault: 'Fictional Private', time: '08:00' });

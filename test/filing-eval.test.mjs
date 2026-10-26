@@ -68,12 +68,31 @@ test('frozen filing RSI fixture improves over intake and emits aggregate-only ev
   assert.doesNotMatch(JSON.stringify(report), /RSI_FILING_PRIVATE_CANARY_42|Bluebird Strategy\.md|Private Acquisition Brief|filing-vault/);
 });
 
+test('corrected filing fixture treats historical-note exclusions as deliberate abstentions', async () => {
+  const root = await mkdtemp(path.join(tmpdir(), 'bl-filing-rsi-v2-'));
+  const vaultPath = path.resolve('samples/evaluation/filing-vault');
+  const fixturePath = path.resolve('samples/evaluation/filing-rsi-v2.json');
+  const fixture = JSON.parse(await readFile(fixturePath, 'utf8'));
+  const ctx = createContext(normalize({ vaults: [{ name: fixture.vault, path: vaultPath }] }), {
+    env: { BRAINLINK_HOME: path.join(root, 'app'), BRAINLINK_VAULTS: fixture.vault },
+  });
+  const report = await evaluateSessionFiling(ctx, fixture);
+  assert.equal(report.case_count, 20);
+  assert.equal(report.candidate.accuracy, 1);
+  assert.equal(report.candidate.precision, 1);
+  assert.equal(report.candidate.coverage, 0.8);
+  assert.equal(report.candidate.privacy_violations, 0);
+  assert.equal(report.candidate.cases[15].suggested, false);
+  assert.equal(report.candidate.cases[15].correct, true);
+  assert.equal(report.decision, 'eligible_for_review');
+});
+
 test('CLI filing evaluation prints aggregate evidence and never changes the fixture vault', async () => {
   const root = await mkdtemp(path.join(tmpdir(), 'bl-filing-eval-cli-'));
   const home = path.join(root, 'home');
   const vaultPath = path.resolve('samples/evaluation/filing-vault');
   await saveConfig(normalize({ vaults: [{ name: 'Acme Filing Eval', path: vaultPath }] }), path.join(home, 'config.json'));
-  const fixturePath = path.resolve('samples/evaluation/filing-rsi-v1.json');
+  const fixturePath = path.resolve('samples/evaluation/filing-rsi-v2.json');
   const { stdout } = await execFileAsync(process.execPath, [path.resolve('bin/brainlink.mjs'), 'eval-filing', '--fixture', fixturePath], {
     cwd: process.cwd(), env: { ...process.env, BRAINLINK_HOME: home, HOME: root },
   });

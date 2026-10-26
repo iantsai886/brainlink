@@ -2,4 +2,6 @@
 
 This isolated fictional vault and its 20 labelled cases evaluate conservative session-folder suggestions. It includes ambiguous cases, deliberate abstentions, and a private canary that must not influence a suggestion. It is a development benchmark, not customer data or independent evidence of production accuracy, token savings, or cross-client handoff.
 
-Run `node bin/brainlink.mjs eval-filing --fixture "$PWD/samples/evaluation/filing-rsi-v1.json"` after pointing a local BrainLink config at this sample vault as `Acme Filing Eval`. The report contains only opaque case IDs and aggregate metrics. No fixture vault files or routing configuration are changed.
+Run `node bin/brainlink.mjs eval-filing --fixture "$PWD/samples/evaluation/filing-rsi-v2.json"` after pointing a local BrainLink config at this sample vault as `Acme Filing Eval`. The report contains only opaque case IDs and aggregate metrics. No fixture vault files or routing configuration are changed.
+
+`filing-rsi-v1.json` is retained as historical evidence. Its case 016 expected filing into `Knowledge Intake`, but that note is marked historical and is correctly excluded from suggestions. Version 2 corrects the expected result to abstention; it does not change production behavior or the source fixture vault.
