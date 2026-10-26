@@ -68,7 +68,7 @@ Evaluator v2 returned `quality_regression` for `compact-coverage-v1`: baseline t
 
 ### Lossless compact-search evaluation (2026-10-26)
 
-Evaluator v3 now compares the actual compact MCP projection against full diagnostic results on the frozen 30-case set. The local run preserved task success at 17/30, source recall at 1.000, and zero privacy violations; mean estimated result tokens fell from 497 to 427 (about 14%). The result is `eligible_for_review`, which means only that the lossless formatting change reduced estimated context without worsening this source/context proxy. It does not prove generated-answer quality, billed token savings, or customer results. The machine-readable clean-commit receipt is recorded in `samples/evaluation/reports/retrieval-independent-windows-v2.json`.
+Evaluator v3 now compares the actual compact MCP projection against full diagnostic results on the frozen 30-case set. On Windows/Node.js 24.22.1, the clean-commit run on source commit `c1d26c6513d9ff420957c5d9787085aba27ab186` preserved task success at 17/30, source recall at 1.000, and zero privacy violations; mean estimated result tokens fell from 497 to 427 (about 14%). The result is `eligible_for_review`, which means only that the lossless formatting change reduced estimated context without worsening this source/context proxy. It does not prove generated-answer quality, billed token savings, or customer results. The machine-readable receipt is `samples/evaluation/reports/retrieval-independent-windows-v2.json`.
 
 ## Session filing evaluation (read-only RSI evidence)
 
