@@ -18,6 +18,7 @@ import { resolveNoteWikilinks } from './links.mjs';
 import { VERSION, createMcp } from './server.mjs';
 import { findObsidianVaults, nestedVaults } from './obsidian.mjs';
 import { syncSettings, chooseSync, suggestFolders, PROVIDERS, PROVIDER_LABELS } from './sync/settings.mjs';
+import { runSync } from './sync-cli.mjs';
 import { listGitHubShareCandidates, previewGitHubRepository, commitGitHubSelectedNotes, pushGitHubSelectedNotes, listGitHubPullCandidates, importGitHubSelectedNotes, saveGitHubConflictCopies, inspectGitHubAssignment, githubAssignmentStatus } from './sync/github-preview.mjs';
 import { githubAssignmentProjection } from './sync/github-assignment.mjs';
 import { sessionsService } from './host.mjs';
@@ -518,6 +519,11 @@ export async function startSetup(opts = {}) {
       const next = chooseSync(cfg, { provider: b.provider, folder: b.folder, device: b.device });
       await saveConfig(next, file);
       return { ok: true, sync: syncSettings(next) };
+    },
+    'POST /api/sync/run': async () => {
+      const cfg = await loadConfig(file);
+      const result = await runSync(cfg, env);
+      return { ok: result.status === 'ok' || result.status === 'local-only', result };
     },
     'POST /api/github/assignment/inspect': async (b) => {
       const cfg = await loadConfig(file);

@@ -44,15 +44,57 @@ test('runSync: local-only by default, no store touched, writes one content-free 
 
 test('runSync: non-local provider with an offline folder queues instead of failing', async () => {
   const env = { BRAINLINK_HOME: await tmp('sync-home2') };
-  const cfg = normalize({ sync: { provider: 'dropbox', folder: path.join(await tmp('not-mounted'), 'missing'), device: 'macA' } });
+  const vault = await tmp('sync-offline-vault');
+  const cfg = normalize({ vaults: [{ name: 'Brain', path: vault }], sync: { provider: 'dropbox', folder: path.join(await tmp('not-mounted'), 'missing'), device: 'macA' } });
   const r = await runSync(cfg, env);
   assert.equal(r.status, 'queued');
+});
+
+test('runSync: sends and receives real Markdown through the configured public vault', async () => {
+  const env = { BRAINLINK_HOME: await tmp('sync-real-home') };
+  const vault = await tmp('sync-real-vault');
+  const folder = await tmp('sync-real-folder');
+  await writeFile(path.join(vault, 'Local note.md'), '# Local note\nSaved in the actual vault.\n');
+  const cfg = normalize({ vaults: [{ name: 'Work', path: vault }], sync: { provider: 'gdrive', folder, device: 'laptop' } });
+
+  const first = await runSync(cfg, env);
+  assert.equal(first.status, 'ok');
+  assert.deepEqual(first.pushed, ['Local note.md']);
+  assert.match(await readFile(path.join(folder, 'BrainLink', 'notes', 'Local note.md'), 'utf8'), /Saved in the actual vault/);
+
+  await writeFile(path.join(folder, 'BrainLink', 'notes', 'Remote note.md'), '# Remote note\nCreated on another device.\n');
+  const second = await runSync(cfg, env);
+  assert.equal(second.status, 'ok');
+  assert.deepEqual(second.pulled, ['Remote note.md']);
+  assert.match(await readFile(path.join(vault, 'Remote note.md'), 'utf8'), /Created on another device/);
+  assert.equal(await readFile(path.join(vault, 'Local note.md'), 'utf8'), '# Local note\nSaved in the actual vault.\n', 'the source file remains intact');
+});
+
+test('runSync: refuses an ambiguous vault and a target inside the selected vault', async () => {
+  const env = { BRAINLINK_HOME: await tmp('sync-guard-home') };
+  const one = await tmp('sync-guard-one'); const two = await tmp('sync-guard-two');
+  const folder = await tmp('sync-guard-target');
+  const ambiguous = normalize({ vaults: [{ name: 'One', path: one }, { name: 'Two', path: two }], sync: { provider: 'dropbox', folder, device: 'pc' } });
+  assert.equal((await runSync(ambiguous, env)).status, 'vault-ambiguous');
+
+  const nested = normalize({ vaults: [{ name: 'brain', path: one }], sync: { provider: 'dropbox', folder: path.join(one, 'cloud-sync'), device: 'pc' } });
+  assert.equal((await runSync(nested, env)).status, 'target-inside-vault');
+});
+
+test('runSync: never syncs a private vault even when it is the only configured vault', async () => {
+  const env = { BRAINLINK_HOME: await tmp('sync-private-home') };
+  const vault = await tmp('sync-private-vault'); const folder = await tmp('sync-private-target');
+  const cfg = normalize({ vaults: [{ name: 'brain', path: vault, private: true }], sync: { provider: 'dropbox', folder, device: 'pc' } });
+  const r = await runSync(cfg, env);
+  assert.equal(r.status, 'vault-required');
+  await assert.rejects(readFile(path.join(folder, 'BrainLink', 'sessions', 'pc.json')));
 });
 
 test('runSync: non-private sessions get scope "brain" so they reach the sync target; private sessions stay local', async () => {
   const env = { BRAINLINK_HOME: await tmp('sync-sessions-home') };
   const folder = await tmp('sync-sessions-folder');
-  const cfg = normalize({ sync: { provider: 'dropbox', folder, device: 'd1' } });
+  const vault = await tmp('sync-sessions-vault');
+  const cfg = normalize({ vaults: [{ name: 'brain', path: vault }], sync: { provider: 'dropbox', folder, device: 'd1' } });
   const store = await openSessionStore(env);
   const pub = await store.putSession({ client: 'claude-code', source_id: 'pub/1', project: '/x', title: 'Public', summary: 'pub summary', started_at: '2026-10-10T00:00:00Z', note_refs: [], private: false, messages: [] });
   await store.putSession({ client: 'claude-code', source_id: 'priv/1', project: '/x', title: 'Private', summary: 'priv summary', started_at: '2026-10-10T00:00:00Z', note_refs: [], private: true, messages: [] });
@@ -290,6 +332,13 @@ test('setup UI: /api/sync chooses a provider (and rejects a bad one); state() re
     assert.equal(r.sync.provider, 'gdrive');
     const st1 = await (await api('GET', '/api/state')).json();
     assert.equal(st1.sync.folder, target);
+    const blocked = await (await api('POST', '/api/sync/run', {})).json();
+    assert.equal(blocked.ok, false);
+    assert.equal(blocked.result.status, 'vault-required', 'the manual action fails closed without a public vault');
+    await api('POST', '/api/sync', { provider: 'local', device: 'test-device' });
+    const localRun = await (await api('POST', '/api/sync/run', {})).json();
+    assert.equal(localRun.ok, true);
+    assert.equal(localRun.result.status, 'local-only');
     const bad = await api('POST', '/api/sync', { provider: 'gdrive', folder: 'relative' });
     assert.equal(bad.status, 400);
   } finally { s.server.close(); }

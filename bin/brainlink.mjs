@@ -231,7 +231,7 @@ async function main() {
       const cfg = await loadConfig();
       const r = await runSync(cfg);
       const label = PROVIDER_LABELS[r.provider] || r.provider;
-      const notesNote = r.provider !== 'local' ? ' (notes: pending the store integration — see brainlink-store/docs/progress.md)' : '';
+      const notesNote = r.status === 'vault-required' ? ' (add one public vault to sync)' : r.status === 'vault-ambiguous' ? ' (choose one public vault named brain, or keep only one public vault enabled)' : r.status === 'target-inside-vault' ? ' (choose a separate sync folder outside the vault)' : '';
       out(`sync (${label}): ${r.status}${notesNote}; sessions in index: ${r.sessions}`
         + (r.pushed?.length ? `; pushed ${r.pushed.length}` : '') + (r.pulled?.length ? `; pulled ${r.pulled.length}` : '') + (r.conflicts?.length ? `; conflicts ${r.conflicts.length}` : ''));
       return;

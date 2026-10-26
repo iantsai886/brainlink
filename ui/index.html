@@ -320,7 +320,7 @@ ol.todo li { padding-left: 4px; }
       <label><span data-i18n="sync.syncedFolder"></span><input id="sync-folder" class="mono" data-i18n-placeholder="sync.folderPlaceholder"></label>
       <div id="sync-suggestions" class="muted" style="font-size:13px;align-self:end"></div>
     </div>
-    <div class="row" style="margin-top:12px"><button class="primary" id="sync-save" data-i18n="sync.saveBtn"></button></div>
+    <div class="row" style="margin-top:12px"><button class="primary" id="sync-save" data-i18n="sync.saveBtn"></button><button id="sync-run" data-i18n="sync.runBtn"></button></div>
     <details style="margin-top:16px">
       <summary data-i18n="github.title"></summary>
       <p class="hint" data-i18n="github.hint"></p>
@@ -1161,6 +1161,13 @@ $('sync-save').onclick = () => act(async () => {
   const provider = $('sync-provider').value;
   const r = await api('POST', '/api/sync', { provider, folder: provider === 'local' ? null : $('sync-folder').value, device: $('sync-device').value });
   toast(provider === 'local' ? t('sync.localToast') : t('sync.providerToast', { folder: r.sync.folder }));
+});
+$('sync-run').onclick = () => act(async () => {
+  const provider = $('sync-provider').value;
+  await api('POST', '/api/sync', { provider, folder: provider === 'local' ? null : $('sync-folder').value, device: $('sync-device').value });
+  const { result } = await api('POST', '/api/sync/run', {});
+  if (result.status === 'ok' || result.status === 'local-only') toast(t('sync.runDone', { pushed: result.pushed.length, pulled: result.pulled.length, conflicts: result.conflicts.length }));
+  else toast(t('sync.runStatus', { status: result.status }));
 });
 let githubCandidates = [];
 let githubInspected = null;

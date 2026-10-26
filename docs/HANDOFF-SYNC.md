@@ -6,7 +6,9 @@ Status snapshot: 2026-10-25. This note describes the current sync boundaries; `d
 
 `src/host.mjs` wraps the pure exports in `src/sync/settings.mjs` — `syncSettings`, `suggestFolders`, `validateSync`, and `chooseSync` — with `config.json` load/save for the Settings UI. Keep the wrapper signature compatible with `settingsService()` in `src/host.mjs`.
 
-The configured Drive/iCloud/Dropbox folder is still a settings-only path: the real `BrainStore` in `src/store/folder-store.mjs` is not yet wired to `src/sync/engine.mjs` for actual vault file movement. The CLI currently reports that note sync is pending store integration. Do not infer end-to-end local-folder sync from the Settings control.
+`brainlink sync` and the Setup **Sync now** button connect `src/sync/engine.mjs` to `src/store/folder-store.mjs` and the configured on-disk vault. For safety it picks a public vault named `brain`; if none exists, it may use the sole public vault. When several public vaults exist without a `brain` vault, it stops with `vault-ambiguous` instead of guessing. Private vaults never qualify. It also refuses a sync folder located inside the selected vault. Sync runs only when the user invokes it; background scheduling is not implemented. The receiving folder must be a folder already synced by the user's Drive/iCloud/Dropbox desktop client.
+
+Local tests now exercise send and receive between two temporary folders, the Setup endpoint, private-vault refusal, ambiguous-vault refusal, and target-inside-vault refusal. The full serialized core and UI suites pass on Windows/Node 24.22.1. A real Drive/iCloud/Dropbox desktop client run and a second-device acceptance check remain unverified. Sync state is local per device. Conflict handling keeps both copies; deletes are never propagated.
 
 ## GitHub shared knowledge
 
