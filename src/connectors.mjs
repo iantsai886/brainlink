@@ -3,6 +3,7 @@
 import { readFile, writeFile, mkdir, copyFile, rename, stat } from 'node:fs/promises';
 import { execFileSync } from 'node:child_process';
 import path from 'node:path';
+import { parseDocument } from 'yaml';
 
 export const SERVER_KEY = 'brainlink';
 
@@ -39,6 +40,11 @@ export const CLIENTS = {
     file: ({ home }) => path.join(home, '.gemini', 'config', 'mcp_config.json'),
     note: 'BrainLink is in Antigravity global MCP settings. Reload MCP servers or restart Antigravity.',
   },
+  hermes: {
+    title: 'Hermes Agent', platform: 'Hermes Agent', role: 'Hermes Agent', format: 'yaml',
+    file: ({ home, env }) => path.join(env.HERMES_HOME || path.join(home, '.hermes'), 'config.yaml'),
+    note: 'Start a new Hermes session or run /reload-mcp. If Hermes runs in WSL or on another machine, configure BrainLink in that environment too.',
+  },
   windsurf: {
     title: 'Windsurf', platform: 'other', role: 'Windsurf', format: 'json',
     file: ({ home }) => path.join(home, '.codeium', 'windsurf', 'mcp_config.json'),
@@ -51,6 +57,15 @@ const exists = (p) => stat(p).then(() => true, () => false);
 export function serverEntry(client, launch, extraEnv = {}) {
   const c = CLIENTS[client];
   return { command: launch.command, args: [...launch.args], env: { BRAINLINK_AGENT_TOKEN: '', BRAINLINK_AI_PLATFORM: c.platform, BRAINLINK_AGENT_ROLE: c.role, ...extraEnv } };
+}
+
+function parseYaml(raw, file) {
+  const doc = parseDocument(raw || '', { uniqueKeys: true });
+  if (doc.errors.length) throw new Error(`${file} is not valid YAML; fix it, then try again (BrainLink will not overwrite it).`);
+  const value = doc.toJS();
+  if (value != null && (typeof value !== 'object' || Array.isArray(value))) throw new Error(`${file} must contain a YAML mapping; BrainLink will not overwrite it.`);
+  if (value?.mcp_servers != null && (typeof value.mcp_servers !== 'object' || Array.isArray(value.mcp_servers))) throw new Error(`${file} has an invalid mcp_servers section; BrainLink will not overwrite it.`);
+  return { doc, value: value || {} };
 }
 
 // ChatGPT needs a public HTTPS MCP connector; it can't reach 127.0.0.1, so there is no config
@@ -67,7 +82,7 @@ async function detectOne(id, c, opts) {
   let connected = false;
   if (await exists(file)) {
     const raw = await readFile(file, 'utf8');
-    connected = c.format === 'toml' ? /^\[mcp_servers\.brainlink\]/m.test(raw) : (() => { try { return Boolean(JSON.parse(raw || '{}').mcpServers?.[SERVER_KEY]); } catch { return false; } })();
+    connected = c.format === 'toml' ? /^\[mcp_servers\.brainlink\]/m.test(raw) : c.format === 'yaml' ? (() => { try { return Boolean(parseYaml(raw, file).value.mcp_servers?.[SERVER_KEY]); } catch { return false; } })() : (() => { try { return Boolean(JSON.parse(raw || '{}').mcpServers?.[SERVER_KEY]); } catch { return false; } })();
   }
   return { title: c.title, file, present, connected, canConnect: present || Boolean(c.manual), manual: Boolean(c.manual), note: c.note };
 }
@@ -99,6 +114,10 @@ export async function readClientAgentToken(id, opts) {
       if (token) { try { return JSON.parse(token[1]); } catch { return ''; } }
     }
     return '';
+  }
+  if (c.format === 'yaml') {
+    try { return String(parseYaml(raw, file).value.mcp_servers?.[SERVER_KEY]?.env?.BRAINLINK_AGENT_TOKEN || ''); }
+    catch { return ''; }
   }
   try { return String(JSON.parse(raw || '{}').mcpServers?.[SERVER_KEY]?.env?.BRAINLINK_AGENT_TOKEN || ''); }
   catch { return ''; }
@@ -163,6 +182,12 @@ export async function connectClient(id, opts) {
   const raw = (await exists(file)) ? await readFile(file, 'utf8') : '';
   let text;
   if (c.format === 'toml') text = codexToml(raw, entry);
+  else if (c.format === 'yaml') {
+    const { doc, value } = parseYaml(raw, file);
+    if (!value.mcp_servers) doc.set('mcp_servers', {});
+    doc.setIn(['mcp_servers', SERVER_KEY], entry);
+    text = doc.toString();
+  }
   else {
     let json;
     try { json = raw.trim() ? JSON.parse(raw) : {}; } catch { throw new Error(`${file} is not valid JSON; fix it or remove it, then try again (BrainLink will not overwrite it).`); }
@@ -184,6 +209,12 @@ export async function disconnectClient(id, opts) {
   const raw = await readFile(file, 'utf8');
   let text;
   if (c.format === 'toml') text = codexToml(raw, null);
+  else if (c.format === 'yaml') {
+    const { doc, value } = parseYaml(raw, file);
+    if (!value.mcp_servers?.[SERVER_KEY]) return { client: id, removed: false };
+    doc.deleteIn(['mcp_servers', SERVER_KEY]);
+    text = doc.toString();
+  }
   else {
     const json = JSON.parse(raw || '{}');
     if (!json.mcpServers?.[SERVER_KEY]) return { client: id, removed: false };

@@ -1,6 +1,6 @@
 # BrainLink MCP
 
-One Obsidian / Markdown vault that every AI can search and write to safely: Claude Desktop and Claude Code, ChatGPT Codex, Cursor, Gemini CLI, Windsurf, and any Streamable-HTTP MCP client (such as Grok bots). Product spec: [docs/PRODUCT-SPEC.md](docs/PRODUCT-SPEC.md). Typed company/workflow graph design: [docs/GRAPH-KNOWLEDGE-MODEL.md](docs/GRAPH-KNOWLEDGE-MODEL.md).
+One Obsidian / Markdown vault that every AI can search and write to safely: Claude Desktop and Claude Code, ChatGPT Codex, Cursor, Gemini CLI, Google Antigravity, Hermes Agent, Windsurf, and any Streamable-HTTP MCP client (such as Grok bots). Product spec: [docs/PRODUCT-SPEC.md](docs/PRODUCT-SPEC.md). Typed company/workflow graph design: [docs/GRAPH-KNOWLEDGE-MODEL.md](docs/GRAPH-KNOWLEDGE-MODEL.md).
 
 ## For customers
 

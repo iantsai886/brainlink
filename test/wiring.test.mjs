@@ -6,9 +6,10 @@ import { spawn } from 'node:child_process';
 import { setTimeout as delay } from 'node:timers/promises';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { parse } from 'yaml';
 
 import { normalize, validate, saveConfig, configPath } from '../src/config.mjs';
-import { detect, connect, disconnect, test as testClient, UNSUPPORTED } from '../src/connectors.mjs';
+import { detect, connect, disconnect, readClientAgentToken, test as testClient, UNSUPPORTED } from '../src/connectors.mjs';
 import { runSync } from '../src/sync-cli.mjs';
 import { startSetup } from '../src/setup.mjs';
 import { openSessionStore } from '../src/sessions/index.mjs';
@@ -242,6 +243,57 @@ test('connectors: Antigravity is available as a manual setup but is not auto-det
   assert.equal(found.antigravity.present, false);
   assert.equal(found.antigravity.manual, true);
   assert.equal(found.antigravity.canConnect, true);
+});
+
+test('connectors: Hermes merges YAML safely, reads its scoped token, backs up settings, and disconnects only BrainLink', async () => {
+  const home = await tmp('hermes-connect');
+  const folder = path.join(home, '.hermes');
+  const file = path.join(folder, 'config.yaml');
+  await mkdir(folder, { recursive: true });
+  const original = '# Keep this comment\nmodel: deepseek-chat\nmcp_servers:\n  calendar:\n    command: calendar-mcp\n  brainlink:\n    command: old-command\n';
+  await writeFile(file, original);
+  const opts = {
+    home, os: 'win32', env: {}, launch: { command: process.execPath, args: ['brainlink.mjs', 'serve'] }, useCli: false,
+    extraEnv: { BRAINLINK_AGENT_TOKEN: 'fictional-hermes-token' }, now: new Date('2026-10-27T12:00:00.000Z'),
+  };
+
+  const before = await detect(opts);
+  assert.equal(before.hermes.present, true);
+  assert.equal(before.hermes.connected, true);
+  assert.equal(before.hermes.canConnect, true);
+  const connected = await connect('hermes', opts);
+  assert.equal(connected.ok, true);
+  const config = parse(await readFile(file, 'utf8'));
+  assert.equal(config.model, 'deepseek-chat');
+  assert.equal(config.mcp_servers.calendar.command, 'calendar-mcp');
+  assert.equal(config.mcp_servers.brainlink.env.BRAINLINK_AGENT_TOKEN, 'fictional-hermes-token');
+  assert.equal(await readClientAgentToken('hermes', opts), 'fictional-hermes-token');
+  assert.match(await readFile(file, 'utf8'), /# Keep this comment/, 'YAML comments should be retained');
+  const backupName = (await readdir(folder)).find((name) => name.includes('.brainlink-backup-'));
+  assert.ok(backupName);
+  assert.equal(await readFile(path.join(folder, backupName), 'utf8'), original);
+
+  const removed = await disconnect('hermes', opts);
+  assert.equal(removed.ok, true);
+  const after = parse(await readFile(file, 'utf8'));
+  assert.equal(after.mcp_servers.brainlink, undefined);
+  assert.equal(after.mcp_servers.calendar.command, 'calendar-mcp');
+  assert.equal(after.model, 'deepseek-chat');
+});
+
+test('connectors: Hermes refuses malformed YAML without changing or backing it up', async () => {
+  const home = await tmp('hermes-bad-yaml');
+  const folder = path.join(home, '.hermes');
+  const file = path.join(folder, 'config.yaml');
+  await mkdir(folder, { recursive: true });
+  const original = 'mcp_servers: [\n';
+  await writeFile(file, original);
+  const opts = { home, os: 'win32', env: {}, launch: { command: process.execPath, args: ['brainlink.mjs', 'serve'] }, useCli: false };
+  const connected = await connect('hermes', opts);
+  assert.equal(connected.ok, false);
+  assert.match(connected.message, /not valid YAML/);
+  assert.equal(await readFile(file, 'utf8'), original);
+  assert.equal((await readdir(folder)).some((name) => name.includes('.brainlink-backup-')), false);
 });
 
 // ---- bin/brainlink.mjs: connect --all and sync ----

@@ -497,7 +497,7 @@ let filedSummaryRefs = [];
 let pendingSyncOnboarding = false; // set when a first-run vault pick just succeeded; cleared once the sync choice is saved
 let healthByClient = {}; // client id -> last /api/client-health (or /api/connect's health) result, kept across re-renders
 let pendingPresetClient = null;
-const CLIENT_LABEL = { 'claude-code': 'Claude Code', 'claude-desktop': 'Claude Desktop', cursor: 'Cursor', codex: 'ChatGPT Codex', gemini: 'Gemini CLI', antigravity: 'Google Antigravity', windsurf: 'Windsurf' };
+const CLIENT_LABEL = { 'claude-code': 'Claude Code', 'claude-desktop': 'Claude Desktop', cursor: 'Cursor', codex: 'ChatGPT Codex', gemini: 'Gemini CLI', antigravity: 'Google Antigravity', hermes: 'Hermes Agent', windsurf: 'Windsurf' };
 const clientLabel = (id) => CLIENT_LABEL[id] || (id ? id[0].toUpperCase() + id.slice(1) : 'Other');
 const CLIENT_COLOR_VARS = ['c1', 'c2', 'c3', 'c4', 'c5', 'c6', 'c7', 'c8'];
 function clientColor(id) { let h = 0; for (const c of String(id)) h = (h * 31 + c.charCodeAt(0)) >>> 0; return `var(--${CLIENT_COLOR_VARS[h % CLIENT_COLOR_VARS.length]})`; }

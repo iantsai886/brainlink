@@ -5,7 +5,7 @@
   "private": true,
   "type": "module",
   "bin": { "brainlink": "bin/brainlink.mjs" },
-  "dependencies": { "brainlink-store": "file:./vendor/brainlink-store" },
+  "dependencies": { "brainlink-store": "file:./vendor/brainlink-store", "yaml": "^2.9.1" },
   "scripts": {
     "test": "node --import ./test/_preload.mjs --test --test-concurrency=1 \"test/*.test.mjs\"",
     "test:ui": "node --import ./test/_preload.mjs --test \"ui/app/test/*.test.mjs\"",
