@@ -119,3 +119,26 @@ test('close reports a recoverable partial save when filing returns a non-written
   assert.doesNotMatch(JSON.stringify(result), /unwritten proposal/);
   assert.equal((await store.readSession(result.session_id, {})).session.private, true);
 });
+
+test('concurrent closes for one task ID preserve the first outcome and reject the duplicate', async () => {
+  const root = await mkdtemp(path.join(tmpdir(), 'bl-close-concurrent-'));
+  await mkdir(path.join(root, 'Inbox'));
+  const env = { BRAINLINK_HOME: path.join(root, 'app'), HOME: root, BRAINLINK_AI_PLATFORM: 'Codex' };
+  const ctx = createContext(normalize({ vaults: [{ name: 'Company', path: root }] }), { env });
+  const store = await openSessionStore(env);
+  const fileSummary = async (_ctx, _session, _vault, confirm) => {
+    if (!confirm) return { ok: true, written: false, preview: 'preview' };
+    await new Promise((resolve) => setTimeout(resolve, 25));
+    return { ok: true, written: true, path: 'Company/Inbox/Fictional.md' };
+  };
+  const base = { vault: 'Company', title: 'Fictional task', goal: 'Preserve one outcome', session_or_task_id: 'same-task-1', confirm: true };
+  const results = await Promise.all([
+    closeSession(ctx, store, { ...base, outcome: 'First outcome' }, new Date('2026-10-27T00:00:00.000Z'), { fileSummary }),
+    closeSession(ctx, store, { ...base, outcome: 'Conflicting second outcome' }, new Date('2026-10-27T00:00:01.000Z'), { fileSummary }),
+  ]);
+  assert.equal(results.filter((result) => result.session_saved === true).length, 1);
+  assert.equal(results.filter((result) => result.ok === false && result.session_saved === undefined).length, 1);
+  const saved = await store.readSession(results.find((result) => result.session_saved).session_id, {});
+  assert.match(saved.session.summary, /First outcome/);
+  assert.doesNotMatch(saved.session.summary, /Conflicting second outcome/);
+});
