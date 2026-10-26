@@ -18,7 +18,7 @@ export function closeSummary(args) {
     + section('Open questions', args.open_questions) + section('Next actions', args.next_actions);
 }
 
-export async function closeSession(ctx, store, args, now = new Date()) {
+export async function closeSession(ctx, store, args, now = new Date(), { fileSummary = fileSessionSummary } = {}) {
   if (!args.vault) return { ok: false, errors: ['destination vault is required'] };
   vault(ctx, args.vault);
   const id = resolveIdentity(ctx, args);
@@ -44,11 +44,38 @@ export async function closeSession(ctx, store, args, now = new Date()) {
   const session = { id: sessionId, client, profile_id: profileId, title: `${args.title} (${sessionId.slice(-6)})`, project: args.project || '', summary, updated_at: now.toISOString(), private: true };
   const identity = { ...id, session_or_task_id: sourceId };
   const folder = typeof args.folder === 'string' ? args.folder : undefined;
-  const draft = await fileSessionSummary(ctx, session, args.vault, false, identity, folder);
+  const draft = await fileSummary(ctx, session, args.vault, false, identity, folder);
   if (!draft.ok || !args.confirm) return { ...draft, session_id: sessionId, session_saved: false };
 
   const stored = await store.putSession({ client, source_id: sourceId, profile_id: profileId, project: session.project, title: session.title,
     summary, started_at: now.toISOString(), note_refs: [], private: true, messages: [] }, profileId ? { profile_id: profileId } : {});
-  const note = await fileSessionSummary(ctx, { ...session, id: stored.id }, args.vault, true, identity, folder);
+  let note;
+  try {
+    note = await fileSummary(ctx, { ...session, id: stored.id }, args.vault, true, identity, folder);
+  } catch {
+    // The session store and Markdown vault are separate persistence systems. Never hide a
+    // successful private session write behind a generic tool error; give the client a safe,
+    // content-free recovery instruction and the exact session ID to find in Setup.
+    return {
+      ok: false,
+      errors: ['The private session was saved, but filing its vault note did not complete. Check the saved session in BrainLink before retrying.'],
+      session_id: stored.id,
+      session_saved: true,
+      filing_status: 'unknown',
+      next: 'Open Sessions in BrainLink, review this saved session, then use File summary to finish filing it.',
+    };
+  }
+  if (!note?.ok || note.written !== true) {
+    // A valid response may still be only a proposal (for example, a proposal-only vault),
+    // or may reject a destination that changed between preview and confirmation.
+    return {
+      ok: false,
+      errors: ['The private session was saved, but its vault note was not written. Review the saved session and destination in BrainLink before retrying.'],
+      session_id: stored.id,
+      session_saved: true,
+      filing_status: 'not_written',
+      next: 'Open Sessions in BrainLink, review this saved session and choose a writable destination before using File summary.',
+    };
+  }
   return { ...note, session_id: stored.id, session_saved: true };
 }
