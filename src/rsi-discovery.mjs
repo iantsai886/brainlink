@@ -1,5 +1,5 @@
 // Opt-in RSI research discovery. Off by default; when the user enables it, BrainLink queries fixed
-// public research feeds (arXiv Atom and Crossref JSON) for the user's topic terms, keeps only entries that
+// public research sources (arXiv Atom, Crossref JSON and GitHub repository search) for the user's topic terms, keeps only entries that
 // match one of the user's own problem statements and a BrainLink memory/agent workflow, and appends
 // them to the local RSI ledger as `discovered` proposals. It never fetches a caller-supplied URL,
 // never sends problem statements or vault content off the machine, never executes or promotes
@@ -17,6 +17,7 @@ import { setTimeout as delay } from 'node:timers/promises';
 export const DISCOVERY_SOURCES = Object.freeze({
   arxiv: Object.freeze({ id: 'arxiv', label: 'arXiv', host: 'export.arxiv.org', path: '/api/query', format: 'atom', entryHosts: ['arxiv.org', 'www.arxiv.org'] }),
   crossref: Object.freeze({ id: 'crossref', label: 'Crossref', host: 'api.crossref.org', path: '/works', format: 'json' }),
+  github: Object.freeze({ id: 'github', label: 'GitHub projects', host: 'api.github.com', path: '/search/repositories', format: 'json' }),
 });
 const MAX_BYTES = 1_000_000;
 const TIMEOUT_MS = 15_000;
@@ -33,6 +34,8 @@ export async function replaceDiscoveryFile(temp, file, { os = process.platform, 
 const MAX_ENTRIES_PER_FEED = 25;
 const MAX_RUNS_KEPT = 10;
 const MAX_EVENTS_KEPT = 20;
+const GITHUB_OWNER = /^[A-Za-z0-9](?:[A-Za-z0-9-]{0,38})$/;
+const GITHUB_REPOSITORY = /^[A-Za-z0-9](?:[A-Za-z0-9_.-]{0,99})$/;
 
 export const DEFAULT_DISCOVERY = Object.freeze({ enabled: false, paused: false, sources: ['arxiv'], topics: [], signals: [], interval_hours: 168, max_new_per_run: 5 });
 
@@ -122,7 +125,10 @@ function privateAddress(address) {
 export async function fetchFeed(rawUrl, { fetchImpl = fetch, lookup = dnsLookup, timeoutMs = TIMEOUT_MS, maxBytes = MAX_BYTES } = {}) {
   let url; try { url = new URL(rawUrl); } catch { throw new Error('Discovery refused an invalid feed URL.'); }
   const source = Object.values(DISCOVERY_SOURCES).find((item) => item.host === url.hostname);
-  if (url.protocol !== 'https:' || url.username || url.password || url.port || !source || url.pathname !== source.path) throw new Error('Discovery refused a feed outside the built-in HTTPS allowlist.');
+  const pathParts = url.pathname.split('/');
+  const githubRepoPath = source?.id === 'github' && pathParts.length === 4 && pathParts[1] === 'repos' && GITHUB_OWNER.test(pathParts[2]) && GITHUB_REPOSITORY.test(pathParts[3]);
+  const allowedPath = source && (url.pathname === source.path || githubRepoPath);
+  if (url.protocol !== 'https:' || url.username || url.password || url.port || !allowedPath || githubRepoPath && (url.search || url.hash)) throw new Error('Discovery refused a feed outside the built-in HTTPS allowlist.');
   const answers = await lookup(url.hostname, { all: true, verbatim: true });
   const addresses = (Array.isArray(answers) ? answers : [answers]).map(a => typeof a === 'string' ? a : a?.address).filter(Boolean);
   if (!addresses.length || addresses.some(privateAddress)) throw new Error('Discovery refused a feed host that resolves to a private or reserved address.');
@@ -168,6 +174,14 @@ export function feedUrl(sourceId, topic) {
     url.searchParams.set('query.bibliographic', topic);
     url.searchParams.set('rows', String(MAX_ENTRIES_PER_FEED));
     url.searchParams.set('select', 'DOI,title,abstract,published,type');
+    return url.href;
+  }
+  if (sourceId === 'github') {
+    const url = new URL(`https://${source.host}${source.path}`);
+    url.searchParams.set('q', topic);
+    url.searchParams.set('sort', 'updated');
+    url.searchParams.set('order', 'desc');
+    url.searchParams.set('per_page', String(MAX_ENTRIES_PER_FEED));
     return url.href;
   }
   const params = new URLSearchParams({ search_query: `all:"${topic}"`, sortBy: 'submittedDate', sortOrder: 'descending', max_results: String(MAX_ENTRIES_PER_FEED) });
@@ -220,7 +234,7 @@ const crossrefDate = (item) => {
   return `${parts[0]}-${month}-${day}`;
 };
 
-const sourceClaim = (entry) => `Abstract states (not verified): ${firstSentence(entry.summary)}`.slice(0, 500);
+const sourceClaim = (entry) => `${entry.source_kind === 'github' ? 'Repository description' : 'Abstract'} states (not verified): ${firstSentence(entry.summary)}`.slice(0, 500);
 const sourceSnapshot = (entry) => ({ url: canonicalSourceUrl(entry.url), title: entry.title, published_at: entry.published_at, claim: sourceClaim(entry) });
 const sourceFingerprint = (source) => createHash('sha256').update(JSON.stringify({ url: canonicalSourceUrl(source.url), title: source.title || '', published_at: source.published_at || 'unknown', claim: source.claim || '' })).digest('hex');
 
@@ -247,6 +261,13 @@ function freshnessUrl(sourceId, rawSourceUrl) {
     endpoint.searchParams.set('select', 'DOI,title,abstract,published,type');
     return endpoint.href;
   }
+  if (sourceId === 'github') {
+    if (sourceUrl.hostname.toLowerCase() !== 'github.com' || sourceUrl.search || sourceUrl.hash) throw new Error('The saved GitHub source is not supported.');
+    const parts = sourceUrl.pathname.split('/').filter(Boolean);
+    if (parts.length !== 2 || !GITHUB_OWNER.test(parts[0]) || !GITHUB_REPOSITORY.test(parts[1])) throw new Error('The saved GitHub source is not supported.');
+    endpoint.pathname = `/repos/${parts[0]}/${parts[1]}`;
+    return endpoint.href;
+  }
   throw new Error('The saved discovery source is not supported.');
 }
 
@@ -266,6 +287,26 @@ export function parseCrossref(json) {
       published_at: crossrefDate(item),
     };
   });
+}
+
+function parseGitHubRepository(item) {
+  const fullName = typeof item?.full_name === 'string' ? item.full_name.trim() : '';
+  const [owner, repo] = fullName.split('/');
+  if (fullName.split('/').length !== 2 || !GITHUB_OWNER.test(owner || '') || !GITHUB_REPOSITORY.test(repo || '')) return null;
+  if (item?.archived === true || item?.disabled === true || item?.private === true) return null;
+  const title = plain(fullName, 160);
+  const summary = plain(typeof item.description === 'string' ? item.description : '', 1200);
+  const pushedAt = typeof item.pushed_at === 'string' ? item.pushed_at : '';
+  const published = pushedAt.match(/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z$/)?.[0]?.slice(0, 10) || 'unknown';
+  return { url: `https://github.com/${owner}/${repo}`, title, summary, published_at: published };
+}
+
+export function parseGitHub(json, { single = false } = {}) {
+  let data;
+  try { data = typeof json === 'string' ? JSON.parse(json) : json; } catch { throw new Error('GitHub response was not valid JSON.'); }
+  const items = single ? [data] : data?.items;
+  if (!Array.isArray(items)) throw new Error('GitHub response did not contain repository results.');
+  return items.slice(0, MAX_ENTRIES_PER_FEED).map(parseGitHubRepository).filter(Boolean);
 }
 
 // ---- relevance ----
@@ -382,7 +423,8 @@ export function createRsiDiscovery({ home, ledger, fetchImpl, lookup, now = () =
           try {
             const payload = await fetchFeed(feedUrl(sourceId, topic), { fetchImpl, lookup });
             receipt.fetched++;
-            const entries = sourceId === 'crossref' ? parseCrossref(payload) : parseAtom(payload, sourceId);
+            const entries = sourceId === 'crossref' ? parseCrossref(payload) : sourceId === 'github' ? parseGitHub(payload) : parseAtom(payload, sourceId);
+            if (sourceId === 'github') for (const entry of entries) entry.source_kind = 'github';
             for (const entry of entries) {
               receipt.entries++;
               if (!entry.url || !entry.title || !entry.summary) { receipt.dropped.invalid++; continue; }
@@ -437,7 +479,8 @@ export function createRsiDiscovery({ home, ledger, fetchImpl, lookup, now = () =
       };
       try {
         const payload = await fetchFeed(url, { fetchImpl, lookup });
-        const entries = sourceId === 'crossref' ? parseCrossref(payload) : parseAtom(payload, sourceId);
+        const entries = sourceId === 'crossref' ? parseCrossref(payload) : sourceId === 'github' ? parseGitHub(payload, { single: true }) : parseAtom(payload, sourceId);
+        if (sourceId === 'github') for (const entry of entries) entry.source_kind = 'github';
         const match = entries.find((entry) => canonicalSourceUrl(entry.url) === canonicalSourceUrl(original.url));
         if (!match) receipt.status = 'not_found';
         else {

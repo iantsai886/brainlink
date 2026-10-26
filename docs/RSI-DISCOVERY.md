@@ -1,13 +1,13 @@
 # RSI research discovery (opt-in)
 
-Status: implemented and locally tested on 2026-10-25 (Asia/Taipei). arXiv and Crossref adapters are covered with recorded, synthetic responses; live source access was not exercised in this development run.
+Status: implemented and locally tested on 2026-10-26 (Asia/Taipei). arXiv, Crossref, and public GitHub repository search adapters are covered with synthetic responses; live source access was not exercised in this development run.
 
 ## What it does
 
 Discovery is the first runtime stage of the [RSI operating model](RSI-OPERATING-MODEL.md) (A0 observe → A1 recommend). It is **off by default**. When the user turns it on in Setup → Improve BrainLink → Research discovery, BrainLink:
 
-1. Sends each configured search topic (at most five, letters/numbers/spaces/`-+.` only) only to the public sources the user selected: arXiv's Atom API (`https://export.arxiv.org/api/query`) and/or Crossref's JSON works API (`https://api.crossref.org/works`).
-2. Parses the returned Atom or JSON metadata as untrusted data. Crossref abstracts are retained only as a short first-sentence excerpt with a DOI citation; Crossref notes that some abstracts may be copyrighted.
+1. Sends each configured search topic (at most five, letters/numbers/spaces/`-+.` only) only to the public sources the user selected: arXiv's Atom API (`https://export.arxiv.org/api/query`), Crossref's JSON works API (`https://api.crossref.org/works`), and/or GitHub's public repository search API (`https://api.github.com/search/repositories`).
+2. Parses the returned Atom or JSON metadata as untrusted data. Crossref abstracts are retained only as a short first-sentence excerpt with a DOI citation; Crossref notes that some abstracts may be copyrighted. GitHub results use only the public repository name, description and last-pushed date; BrainLink does not clone repositories, read code, rank by stars, or treat a description as verified evidence.
 3. Keeps an entry only when it matches **both** one of the user's own problem statements (at least two shared terms and 25% of the statement's terms) **and** a BrainLink memory/agent workflow term (for example handoff, retrieval, knowledge graph, tool use, episodic memory).
 4. Appends kept entries to the existing local RSI ledger as `discovered` proposals, at most `max_new_per_run` (1–10, default 5) per run.
 
@@ -26,7 +26,7 @@ Runs start manually ("Run now") or from a schedule (every 1, 7, 14 or 30 days). 
 |---|---|---|
 | SSRF / arbitrary fetch | HTTPS only, exact source host and endpoint-path allowlist, no credentials or custom port, every DNS answer checked against private, loopback, link-local, CGNAT, multicast, documentation and IPv4-mapped ranges before connecting, `redirect: 'manual'` with 3xx refused | `feed fetching refuses hosts outside the allowlist…` |
 | Unbounded download | 15 s deadline for connect and body, 1 MB cap on declared and streamed size, content-type must be Atom/XML or JSON as expected, at most 25 entries per feed | same |
-| XML / JSON attacks | Any XML DTD or entity declaration refuses the feed; JSON must parse and contain a bounded `message.items` list | Atom and Crossref parser tests |
+| XML / JSON attacks | Any XML DTD or entity declaration refuses the feed; JSON must parse and contain a bounded source-specific results list/object | Atom, Crossref and GitHub parser tests |
 | Markup / UI spoofing | Tags stripped before and after entity decoding, CDATA unwrapped, control and bidirectional-override characters removed, lengths capped; the UI escapes everything | same |
 | Prompt injection | Entries addressing an AI or asking to reveal/send secrets or run commands are dropped and counted as unsafe, so no agent later reads them as part of a proposal | `a run files relevant entries…` |
 | Secret / private-data leakage | Topics and problem statements reject secrets, URLs and email addresses; feed entries containing secret-like strings are dropped; the ledger's own secret scan still applies; errors stored in run receipts have URLs removed | settings and failure tests |
@@ -46,17 +46,17 @@ Runs start manually ("Run now") or from a schedule (every 1, 7, 14 or 30 days). 
 
 ## Manual source freshness check
 
-For a discovered proposal, Setup can recheck the already stored public arXiv identifier or DOI. BrainLink builds the request from that identifier and the adapter's fixed allowlisted endpoint; it does not accept a URL from the UI. arXiv checks use the exact paper ID and Crossref checks use an exact DOI filter. The request does not resend the user's topic, problem statement, vault, or session data. This is an explicit user action, not background monitoring.
+For a discovered proposal, Setup can recheck the already stored public arXiv identifier, DOI, or GitHub repository identity. BrainLink builds the request from that identifier and the adapter's fixed allowlisted endpoint; it does not accept a URL from the UI. arXiv checks use the exact paper ID, Crossref checks use an exact DOI filter, and GitHub checks fetch only the exact public repository metadata. The request does not resend the user's topic, problem statement, vault, or session data. This is an explicit user action, not background monitoring.
 
 The check compares a SHA-256 fingerprint of the stored and observed citation metadata (canonical source URL, title, publication date, and the same short unverified claim field). It records only the proposal ID, source type, check time, status, and fingerprints in `rsi/discovery.json`; it does not save another title/abstract snapshot or mutate the immutable proposal, its claim, review state, or provenance. Statuses are `unchanged`, `changed`, `not_found`, `unsafe`, `unavailable`, or `paused`. “Unchanged” means only that these selected metadata fields matched at check time; it does not validate the paper's claims or prove relevance. A changed result asks the reviewer to inspect the citation manually. Recent receipts are capped at 50 and included in the existing private app-data backup.
 
-The check does not verify the truth of the source content, automatically update citations, or retain every version of the source. Automated tests use synthetic responses; live arXiv/Crossref behavior has not been validated in this implementation run.
+The check does not verify the truth of the source content, automatically update citations, or retain every version of the source. Automated tests use synthetic responses; live arXiv, Crossref and GitHub behavior has not been validated in this implementation run.
 
 ## Limits
 
-- Two sources (arXiv preprints and Crossref scholarly metadata). Standards bodies, open-source releases, user feedback and support issues are not yet sources. Crossref metadata quality and coverage depend on member deposits; its API returns metadata and does not provide article full text.
+- Three sources: arXiv preprints, Crossref scholarly metadata, and public GitHub repository search. GitHub contributes project names, descriptions and update dates only; it does not inspect code, releases, maintainer health or security. Standards bodies, user feedback and support issues are not yet sources. Crossref metadata quality and coverage depend on member deposits; its API returns metadata and does not provide article full text. GitHub's public Search API has rate limits; failures are recorded and not retried in a tight loop.
 - Relevance is lexical term overlap, not semantic understanding. It will miss relevant work that uses different wording and can admit loosely related papers; the reviewer decides.
-- The extracted claim is the abstract's first sentence. It is not verified and says nothing about whether the idea helps BrainLink.
+- The extracted claim is the abstract's or repository description's first sentence. It is not verified and says nothing about whether the idea helps BrainLink.
 - DNS is checked before the request but the HTTP client resolves the name again; the fixed host allowlist is the primary SSRF control.
 - The ledger is append-only, so a discovered proposal is removed from consideration by rejecting it, not by deleting it. Scheduled private backups include both the ledger and `rsi/discovery.json`; restore places them in an inspectable `BrainLink/rsi/` folder and does not overwrite live app data.
 - The prompt-injection filter is a pattern list. It reduces risk; it is not a guarantee, which is why discovery output is never executed and is always labelled unverified.
@@ -66,6 +66,8 @@ The check does not verify the truth of the source content, automatically update 
 - [Crossref REST API](https://www.crossref.org/documentation/retrieve-metadata/rest-api/) — public works endpoint and JSON metadata.
 - [Crossref access and authentication](https://www.crossref.org/documentation/retrieve-metadata/rest-api/access-and-authentication/) — public access requires no account; polite-pool identification is optional.
 - [Crossref REST API tips](https://www.crossref.org/documentation/retrieve-metadata/rest-api/tips-for-using-the-crossref-rest-api/) — selective fields and efficient metadata requests. The [REST API overview](https://www.crossref.org/documentation/retrieve-metadata/rest-api/) notes some abstracts may be copyrighted.
+- [GitHub Search repositories API](https://docs.github.com/en/rest/search/search#search-repositories) — public repository metadata search.
+- [GitHub REST API rate limits](https://docs.github.com/en/rest/using-the-rest-api/rate-limits-for-the-rest-api) — unauthenticated public access and stricter limits for search endpoints.
 
 ## Rollback
 
