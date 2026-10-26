@@ -26,6 +26,10 @@ test('every native installer bundles all production dependencies and portable Br
   }
   assert.ok(pkg.dependencies.yaml, 'YAML connector dependency must remain a production dependency');
 
+  const windowsBuilder = await read('packaging/windows/build-windows.ps1');
+  assert.match(windowsBuilder, /LOCALAPPDATA.*Inno Setup 6\\ISCC\.exe/, 'Windows builder must find a per-user Inno Setup installation');
+  assert.match(windowsBuilder, /Inno Setup compiler failed with exit code/, 'Windows builder must report compiler failures');
+
   const macZipTest = await read('packaging/macos/test-zip.sh');
   assert.match(macZipTest, /app\/node_modules\/yaml\/dist\/index\.js/, 'the macOS package smoke test must check a loadable YAML runtime');
   assert.match(macZipTest, /app\/skills\/brainlink-session-closeout\/SKILL\.md/, 'the macOS package smoke test must check a shipped skill');

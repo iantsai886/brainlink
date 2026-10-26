@@ -36,9 +36,18 @@ Copy-Item -Recurse "$Root\node_modules\yaml\*" $Yaml
 
 # 3. Installer.
 $env:BRAINLINK_VERSION = $Version
-$Iscc = (Get-Command iscc.exe -ErrorAction SilentlyContinue).Source
-if (-not $Iscc) { $Iscc = "${env:ProgramFiles(x86)}\Inno Setup 6\ISCC.exe" }
+$IsccCommand = Get-Command iscc.exe -ErrorAction SilentlyContinue
+$IsccCandidates = @()
+if ($IsccCommand) { $IsccCandidates += $IsccCommand.Source }
+$IsccCandidates += @(
+    (Join-Path $env:LOCALAPPDATA 'Programs\Inno Setup 6\ISCC.exe'),
+    "${env:ProgramFiles(x86)}\Inno Setup 6\ISCC.exe",
+    "$env:ProgramFiles\Inno Setup 6\ISCC.exe"
+)
+$Iscc = $IsccCandidates | Where-Object { $_ -and (Test-Path -LiteralPath $_ -PathType Leaf) } | Select-Object -First 1
+if (-not $Iscc) { throw 'Inno Setup 6 compiler not found. Install it per-user or system-wide, or add ISCC.exe to PATH.' }
 $IsccArgs = @("$Here\BrainLink.iss")
 if ($env:BRAINLINK_SIGN -eq "1") { $IsccArgs = @("/DSIGN") + $IsccArgs }
 & $Iscc @IsccArgs
+if ($LASTEXITCODE -ne 0) { throw "Inno Setup compiler failed with exit code $LASTEXITCODE" }
 Get-FileHash "$Root\dist\BrainLink-Setup-$Version.exe" -Algorithm SHA256 | Format-List
