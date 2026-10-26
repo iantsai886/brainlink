@@ -203,3 +203,7 @@ Backup Settings now keeps the existing interval option and adds a fixed daily ti
 ### Cross-client test preflight (2026-10-26)
 
 Claude Code 2.1.310 and Codex CLI 0.164.0-alpha.11.1 are installed. The local auth-status checks found Codex signed in and Claude Code not signed in. No model calls were made. This means the live two-client continuation test is still unverified and needs Claude Code sign-in before it can run; the repository's fictional cross-client acceptance tests remain local automated evidence only.
+
+### Portable reviewed session-closeout Skill (2026-10-26)
+
+Added `brainlink-session-closeout` 1.0.0 under the canonical `skills/` folder and identical Codex/Claude discovery paths. It tells connected Agent Skills clients how to summarize observed work, keep data within the authorized Personal/Organisation/Client vault, use `session_close` preview and confirmation, check both session and note save receipts, and avoid reading transcripts from lifecycle cues. The skill does not make session capture automatic: a client must invoke the workflow, and a cue alone remains a reminder. Manifest, byte-parity, and workflow assertions are covered by `test/skills.test.mjs`; live client execution is still unverified. Rollback: revert the skill, its two discovery copies, documentation, and test together; no data migration.

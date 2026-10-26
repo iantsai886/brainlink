@@ -13,4 +13,13 @@ The manifest follows the [Agent Skills specification](https://agentskills.io/spe
 - **Validation:** Agent Skills manifest/parity test; local two-client MCP fixture for preview, pickup, private-source rejection, acknowledgement, and sender-reported Git checkpoint checks. Claude Code CLI is not installed in the validation environment; live two-client runtime handoff is still pending.
 - **Rollback:** revert the Git change to the canonical skill and both client copies. No vault migration is needed.
 
+## `brainlink-session-closeout` 1.0.0
+
+- **Purpose:** guide an AI client to prepare and verify a private, source-aware session closeout through BrainLink's existing `session_close` flow.
+- **Clients:** any Agent Skills-compatible client connected to BrainLink MCP; Claude Code and Codex have repository discovery copies.
+- **Tools:** `brainlink_guide`, `session_close`, and optionally `session_filing_folders`.
+- **Scope:** keeps summaries private and proposed, requires an explicit allowed vault, preserves the preview/confirmation gate, and never reads transcripts from a hook cue alone.
+- **Validation:** manifest and byte-identical discovery-copy assertions plus a local workflow test. No live model/client closeout or automatic transcript processing is claimed.
+- **Rollback:** revert the Git change to the canonical skill and both client copies. No vault migration is needed.
+
 To validate the files and client copies, run `node --test test/skills.test.mjs`. To run the fictional two-client MCP flow, run `node --import ./test/_preload.mjs --test test/cross-client-handoff.test.mjs`. It exercises the real MCP tools without simulating model behavior or claiming live client completion.

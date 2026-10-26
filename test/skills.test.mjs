@@ -70,3 +70,21 @@ test('portable Raw-to-Wiki Skill is identical for Claude Code and Codex and requ
   assert.match(body, /scheduled scan only detects changed-file metadata/);
   assert.match(body, /content-free/);
 });
+
+test('portable session-closeout Skill is identical across clients and preserves privacy and save receipts', async () => {
+  const id = 'brainlink-session-closeout';
+  const skillPaths = [`skills/${id}/SKILL.md`, `.agents/skills/${id}/SKILL.md`, `.claude/skills/${id}/SKILL.md`];
+  const contents = await Promise.all(skillPaths.map((file) => readFile(path.join(ROOT, file), 'utf8')));
+  assert.equal(new Set(contents).size, 1, 'canonical skill and client copies must stay byte-identical');
+  const { fields, body } = parseSkill(contents[0], skillPaths[0]);
+  assert.equal(fields.metadata.version, '1.0.0');
+  assert.match(fields.metadata['applicable-clients'], /Any AI client/);
+  for (const tool of ['brainlink_guide', 'session_close']) assert.ok(fields.compatibility.includes(tool) || fields.metadata['required-tools'].includes(tool), tool);
+  assert.match(body, /session_close/);
+  assert.match(body, /confirm=false/);
+  assert.match(body, /confirm=true/);
+  assert.match(body, /never guess across Personal, Organisation, or Client boundaries/);
+  assert.match(body, /Never read a transcript just because a hook provides its path/);
+  assert.match(body, /both the `written` and `session_saved` fields/);
+  assert.match(body, /Do not promote an AI-reported outcome to verified semantic knowledge/);
+});
