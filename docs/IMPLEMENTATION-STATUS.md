@@ -278,3 +278,7 @@ Added per-Twin automatic GitHub sync controls to Setup. Automatic sync is off by
 ### Current-branch sync status reconciliation (2026-10-27)
 
 The summary table reflects scheduled GitHub sync implemented on this branch; earlier historical paragraphs that say automatic sync was not implemented describe older commits. Setup help explains that the background process must remain running and that closing the browser tab does not stop it. Starting BrainLink after sign-in is a separate opt-in. These updates do not establish live GitHub, cross-device, native login-start, or customer acceptance.
+
+### Twin handoff capability guide correction (2026-10-27)
+
+Updated `twinProfileStatus.next_gate`, which is shown to connected agents, to describe the existing append-only handoff replies and supported lifecycle states instead of incorrectly claiming reply/update semantics were missing. The guide now names the real limits: general note writes and free-form session logging are unavailable, simultaneous updates are not coordinated, and live cross-client acceptance is unverified. Regression coverage in `test/twin-profiles.test.mjs` checks both the available lifecycle and these limitations. `node --import ./test/_preload.mjs --test test/twin-profiles.test.mjs test/cross-client-handoff.test.mjs` passed 18/18 on Windows; `git diff --check` passed. This verifies the local guidance and protocol tests, not native multi-AI acceptance.

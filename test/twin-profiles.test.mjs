@@ -54,6 +54,9 @@ test('Twin status shows limited runtime scope and never exposes agent credential
   assert.equal(status.enforcement, 'scoped_agent_read_only');
   assert.equal(status.profiles[0].declaration_status, 'agent_profile_scope_active');
   assert.equal(status.profiles[0].memory_policy_enforcement, 'tools_prompts_resources');
+  assert.match(status.next_gate, /append-only replies support ACKNOWLEDGED, IN_PROGRESS, BLOCKED, COMPLETED and CANCELLED/);
+  assert.doesNotMatch(status.next_gate, /richer reply\/update semantics are not implemented/);
+  assert.match(status.next_gate, /Simultaneous handoff updates are not coordinated/);
   assert.equal(status.profiles[0].editable_scope, true);
   const scoped = fixture('C:\\fictional-vault');
   scoped.vaults.push({ name: 'Fictional Other', path: 'C:\\fictional-other' });
