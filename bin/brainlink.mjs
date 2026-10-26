@@ -174,14 +174,14 @@ async function main() {
       return;
     }
     case 'status': {
-      const { cfg, ctx } = await openContext();
+      const { cfg, ctx } = await openContext(process.env, { trustedLocal: true });
       out(`BrainLink ${VERSION}\nconfig: ${configPath()}\ndata:   ${appHome()}\ntimezone: ${ctx.tz}`);
       for (const v of cfg.vaults) out(`vault  ${v.name}: ${v.path}${await stat(v.path).then(() => '', () => '  ← MISSING')}`);
       for (const a of ctx.agents) out(`agent  ${a.name} @ ${a.vault}: "${a.activation[0]}" / "${a.close[0]}"`);
       return;
     }
     case 'brief': {
-      const { ctx } = await openContext();
+      const { ctx } = await openContext(process.env, { trustedLocal: true });
       const v = opt('vault', ctx.enabled[0]);
       if (!v) fail('no vault configured; run brainlink setup');
       const b = await brief(ctx, v, { days: Number(opt('days', 7)) });
@@ -201,7 +201,7 @@ async function main() {
       const vaultName = opt('vault-name', fixture.vault);
       const { ctx } = vaultRoot
         ? { ctx: createContext(normalize({ vaults: [{ name: vaultName, path: path.resolve(vaultRoot) }] }), { env: { ...process.env, BRAINLINK_SEMANTIC: '0' } }) }
-        : await openContext();
+        : await openContext(process.env, { trustedLocal: true });
       let sourceCommit = null, sourceBranch = null, workingTreeClean = null, trackedTreeClean = null, untrackedPathsPresent = null;
       try {
         sourceCommit = execFileSync('git', ['rev-parse', 'HEAD'], { cwd: ROOT, encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'] }).trim();
@@ -218,7 +218,7 @@ async function main() {
       const fixtureFile = opt('fixture');
       if (!fixtureFile) fail('--fixture FILE is required');
       const fixture = JSON.parse(await readFile(path.resolve(fixtureFile), 'utf8'));
-      const { ctx } = await openContext();
+      const { ctx } = await openContext(process.env, { trustedLocal: true });
       out(JSON.stringify(await evaluateSessionFiling(ctx, fixture), null, 2));
       return;
     }

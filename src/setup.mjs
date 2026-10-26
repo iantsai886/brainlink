@@ -98,6 +98,9 @@ export async function startSetup(opts = {}) {
   const pickRestoreSourceFolder = opts.pickRestoreSourceFolder || (() => pickFolder(os, 'Choose a BrainLink backup folder'));
   const pickRestoreDestinationFolder = opts.pickRestoreDestinationFolder || (() => pickFolder(os, 'Choose an empty restore destination'));
   const clientOpts = () => ({ home, os, env, launch: launchSpec(env), useCli: opts.useCli });
+  // Setup and its scheduled local jobs operate with the user's local authority. AI client
+  // health checks intentionally use createContext() without this bypass.
+  const localContext = (cfg, contextEnv = env) => createContext(cfg, { env: contextEnv, trustedLocal: true });
   const sessions = sessionsService(env); // src/host.mjs: cross-session reads over src/sessions/* (importAll, session_list/read semantics)
   const rsiLedger = createRsiLedger({ home: appHome(env) });
   const rsiExperiments = createRsiExperiments({ env });
@@ -151,7 +154,7 @@ export async function startSetup(opts = {}) {
     if (!vaultName || !folder) throw new Error('Choose one vault and one folder to scan.');
     ingestionRunning = true;
     try {
-      const ctx = createContext(cfg, { env: { ...env, BRAINLINK_SEMANTIC: '0' }, platform: 'BrainLink Setup' });
+      const ctx = localContext(cfg, { ...env, BRAINLINK_SEMANTIC: '0' });
       const queue = await ingestionQueue(ctx, vaultName, folder, { limit: 100 });
       const status = { ok: true, at: new Date().toISOString(), trigger, vault: vaultName, folder: queue.folder, queued_total: queue.queued_total, scanned: queue.scanned, skipped: queue.skipped, truncated: queue.truncated, error: null };
       await saveIngestionStatus(status);
@@ -316,7 +319,7 @@ export async function startSetup(opts = {}) {
     snapshotWatcher = null;
     const settings = snapshotSettings(cfg);
     if (!settings.enabled) return;
-    const ctx = createContext(cfg, { env });
+    const ctx = localContext(cfg);
     if (!ctx.enabled.length) {
       // No vault left to watch (e.g. the last one was just removed) — still run one write so a
       // previously-synced snapshot's note copies are cleared from the destination folder, not
@@ -348,7 +351,7 @@ export async function startSetup(opts = {}) {
 
   async function state() {
     const cfg = await loadConfig(file);
-    const ctx = createContext(cfg, { env });
+    const ctx = localContext(cfg);
     const vaults = [];
     for (const v of cfg.vaults) {
       const ok = await stat(v.path).then((s) => s.isDirectory(), () => false);
@@ -407,7 +410,11 @@ export async function startSetup(opts = {}) {
     const c = CLIENTS[clientId];
     if (!c) throw new Error(`Unknown client "${clientId}".`);
     const cfg = await loadConfig(file);
-    const ctx = createContext(cfg, { env: { ...env, BRAINLINK_AI_PLATFORM: c.platform, BRAINLINK_AGENT_ROLE: c.role } });
+    const ctx = createContext(cfg, { env: { ...env, BRAINLINK_AGENT_TOKEN: '', BRAINLINK_AI_PLATFORM: c.platform, BRAINLINK_AGENT_ROLE: c.role } });
+    if (ctx.twinScope.mode === 'unassigned') return {
+      ok: false, client: clientId, tool: null, took_ms: 0,
+      message: 'This AI app has no Twin profile permission yet. Connect it through a named AI agent assigned to a Twin profile.',
+    };
     if (!ctx.enabled.length) return { ok: false, client: clientId, tool: null, took_ms: 0, message: 'Add a vault first, then test the connection.' };
     const pending = [];
     const mcp = createMcp(ctx, { onCall: (e) => pending.push(logActivity(env, { ...e, platform: c.platform, mode: 'health-check' })) });
@@ -510,7 +517,7 @@ export async function startSetup(opts = {}) {
       const cfg = await loadConfig(file);
       const name = b.vault || cfg.vaults[cfg.vaults.length - 1]?.name;
       if (!name) return { nodes: [], edges: [] };
-      const ctx = createContext(cfg, { env: { ...env, BRAINLINK_VAULTS: name, BRAINLINK_SEMANTIC: '0' } });
+      const ctx = localContext(cfg, { ...env, BRAINLINK_VAULTS: name, BRAINLINK_SEMANTIC: '0' });
       const index = await loadVault(ctx, name);
       // Big vaults: show the 600 most-connected notes so the map stays readable.
       const deg = (i) => index.backlinks[i].size + index.outlinks[i].size;
@@ -724,37 +731,37 @@ export async function startSetup(opts = {}) {
     'POST /api/github/share-candidates': async (b) => {
       const cfg = await loadConfig(file);
       const vaultName = String(b.vault || '');
-      const ctx = createContext(cfg, { env: { ...env, BRAINLINK_SEMANTIC: '0' } });
+      const ctx = localContext(cfg, { ...env, BRAINLINK_SEMANTIC: '0' });
       return { vault: vaultName, notes: await listGitHubShareCandidates(ctx, vaultName, String(b.profile_id || '')) };
     },
     'POST /api/github/preview': async (b) => {
       const cfg = await loadConfig(file);
-      const ctx = createContext(cfg, { env: { ...env, BRAINLINK_SEMANTIC: '0' } });
+      const ctx = localContext(cfg, { ...env, BRAINLINK_SEMANTIC: '0' });
       return previewGitHubRepository({ ctx, repoPath: String(b.repository || ''), vaultName: String(b.vault || ''), paths: b.paths, profileId: String(b.profile_id || '') });
     },
       'POST /api/github/commit-selected': async (b) => {
         const cfg = await loadConfig(file);
-        const ctx = createContext(cfg, { env: { ...env, BRAINLINK_SEMANTIC: '0' } });
+        const ctx = localContext(cfg, { ...env, BRAINLINK_SEMANTIC: '0' });
         return commitGitHubSelectedNotes({ ctx, repoPath: String(b.repository || ''), vaultName: String(b.vault || ''), paths: b.paths, profileId: String(b.profile_id || '') });
       },
       'POST /api/github/push-selected': async (b) => {
         const cfg = await loadConfig(file);
-        const ctx = createContext(cfg, { env: { ...env, BRAINLINK_SEMANTIC: '0' } });
+        const ctx = localContext(cfg, { ...env, BRAINLINK_SEMANTIC: '0' });
         return pushGitHubSelectedNotes({ ctx, repoPath: String(b.repository || ''), vaultName: String(b.vault || ''), paths: b.paths, commit: String(b.commit || ''), profileId: String(b.profile_id || '') });
       },
       'POST /api/github/pull-candidates': async (b) => {
         const cfg = await loadConfig(file);
-        const ctx = createContext(cfg, { env: { ...env, BRAINLINK_SEMANTIC: '0' } });
+        const ctx = localContext(cfg, { ...env, BRAINLINK_SEMANTIC: '0' });
         return listGitHubPullCandidates({ ctx, repoPath: String(b.repository || ''), vaultName: String(b.vault || ''), profileId: String(b.profile_id || '') });
       },
       'POST /api/github/import-selected': async (b) => {
         const cfg = await loadConfig(file);
-        const ctx = createContext(cfg, { env: { ...env, BRAINLINK_SEMANTIC: '0' } });
+        const ctx = localContext(cfg, { ...env, BRAINLINK_SEMANTIC: '0' });
         return importGitHubSelectedNotes({ ctx, repoPath: String(b.repository || ''), vaultName: String(b.vault || ''), paths: b.paths, profileId: String(b.profile_id || '') });
       },
     'POST /api/github/save-conflict-copies': async (b) => {
       const cfg = await loadConfig(file);
-      const ctx = createContext(cfg, { env: { ...env, BRAINLINK_SEMANTIC: '0' } });
+      const ctx = localContext(cfg, { ...env, BRAINLINK_SEMANTIC: '0' });
       return saveGitHubConflictCopies({ ctx, repoPath: String(b.repository || ''), vaultName: String(b.vault || ''), paths: b.paths, profileId: String(b.profile_id || '') });
     },
     'POST /api/agent': async (b) => {
@@ -827,13 +834,13 @@ export async function startSetup(opts = {}) {
     // ---- 3D notes graph: nodes/edges plus one note's panel (Markdown, tags, links) ----
     'POST /api/graph3d': async (b) => {
       const cfg = await loadConfig(file);
-      const ctx = createContext(cfg, { env: { ...env, BRAINLINK_SEMANTIC: '0' } });
+      const ctx = localContext(cfg, { ...env, BRAINLINK_SEMANTIC: '0' });
       if (!ctx.enabled.length) return { nodes: [], links: [], shown: 0, total: 0 };
       return buildGraph3D(ctx, b.vault && ctx.enabled.includes(b.vault) ? b.vault : undefined);
     },
     'POST /api/graph3d/note': async (b) => {
       const cfg = await loadConfig(file);
-      const ctx = createContext(cfg, { env: { ...env, BRAINLINK_SEMANTIC: '0' } });
+      const ctx = localContext(cfg, { ...env, BRAINLINK_SEMANTIC: '0' });
       if (!b.vault || !ctx.enabled.includes(b.vault)) throw new Error('Unknown vault.');
       const detail = await noteDetail3D(ctx, b.vault, String(b.path || ''));
       const raw = await readFile(safeJoin(vaultRoot(ctx, b.vault), detail.path), 'utf8');
@@ -841,7 +848,7 @@ export async function startSetup(opts = {}) {
     },
     'POST /api/graph3d/note/save': async (b) => {
       const cfg = await loadConfig(file);
-      const ctx = createContext(cfg, { env: { ...env, BRAINLINK_SEMANTIC: '0' } });
+      const ctx = localContext(cfg, { ...env, BRAINLINK_SEMANTIC: '0' });
       if (!b.vault || !ctx.enabled.includes(b.vault)) throw new Error('Unknown vault.');
       const vault = ctx.byName.get(b.vault);
       if (ctx.readOnly || vault.writes !== 'on') throw new Error('This vault does not allow direct edits.');
@@ -912,7 +919,7 @@ export async function startSetup(opts = {}) {
     'POST /api/sessions/filing-folders': async (b) => {
       const cfg = await loadConfig(file);
       const vaultName = String(b.vault || '');
-      const ctx = createContext(cfg, { env: { ...env, BRAINLINK_AI_PLATFORM: 'BrainLink Local' } });
+      const ctx = localContext(cfg, { ...env, BRAINLINK_AI_PLATFORM: 'BrainLink Local' });
       const session = await sessions.read({ id: b.id, include_private: true });
       const destination = ctx.byName.get(vaultName);
       if (!destination || destination.writes === 'off') throw new Error('Choose a writable destination vault.');
@@ -924,7 +931,7 @@ export async function startSetup(opts = {}) {
     'POST /api/sessions/file': async (b) => {
       if (b.confirm !== true && b.confirm !== false) throw new Error('Choose preview or confirm.');
       const cfg = await loadConfig(file);
-      const ctx = createContext(cfg, { env: { ...env, BRAINLINK_AI_PLATFORM: 'BrainLink Local' } });
+      const ctx = localContext(cfg, { ...env, BRAINLINK_AI_PLATFORM: 'BrainLink Local' });
       const session = await sessions.read({ id: b.id, include_private: true });
       const folder = typeof b.folder === 'string' ? b.folder : undefined;
       const result = await fileSessionSummary(ctx, session, String(b.vault || ''), b.confirm, {}, folder);
@@ -956,7 +963,7 @@ export async function startSetup(opts = {}) {
     // the later handoff (if any) that acks it via `ack_of` to know whether it was picked up.
     'POST /api/handoffs': async (b) => {
       const cfg = await loadConfig(file);
-      const ctx = createContext(cfg, { env: { ...env, BRAINLINK_SEMANTIC: '0' } });
+      const ctx = localContext(cfg, { ...env, BRAINLINK_SEMANTIC: '0' });
       if (!cfg.handoff || !ctx.enabled.includes(cfg.handoff.vault)) return { enabled: false, receipts: [] };
       const list = await listHandoffs(ctx, { limit: b.limit || 30 });
       // listHandoffs is newest-first, so the first update for a target is its current state.
@@ -1013,7 +1020,7 @@ export async function startSetup(opts = {}) {
       const cfg = await loadConfig(file);
       const next = { ...cfg, ingestion: validateIngestionSchedule(b, cfg.ingestion) };
       if (next.ingestion.enabled) {
-        const ctx = createContext(next, { env: { ...env, BRAINLINK_SEMANTIC: '0' } });
+        const ctx = localContext(next, { ...env, BRAINLINK_SEMANTIC: '0' });
         await ingestionQueue(ctx, next.ingestion.vault, next.ingestion.folder, { limit: 1 });
       }
       await saveConfig(next, file);
@@ -1033,7 +1040,7 @@ export async function startSetup(opts = {}) {
     },
     'POST /api/test': async (b) => {
       const cfg = normalize(await loadConfig(file));
-      const ctx = createContext(cfg, { env: { ...env, BRAINLINK_AI_PLATFORM: '' } });
+      const ctx = localContext(cfg, { ...env, BRAINLINK_AI_PLATFORM: '' });
       if (!ctx.enabled.length) throw new Error('Add a vault first.');
       const v = b.vault && ctx.enabled.includes(b.vault) ? b.vault : ctx.enabled[0];
       return { vault: v, results: (await search(ctx, v, String(b.query || 'goal'), 5)).map((r) => ({ title: r.title, path: r.path, heading: r.heading, score: r.score })) };
@@ -1042,7 +1049,7 @@ export async function startSetup(opts = {}) {
     // reshaped for a one-paragraph answer with clickable source chips (/api/note opens each one).
     'POST /api/ask': async (b) => {
       const cfg = normalize(await loadConfig(file));
-      const ctx = createContext(cfg, { env: { ...env, BRAINLINK_AI_PLATFORM: '' } });
+      const ctx = localContext(cfg, { ...env, BRAINLINK_AI_PLATFORM: '' });
       if (!ctx.enabled.length) throw new Error('Add a vault first.');
       const query = String(b.query || '').trim();
       if (!query) throw new Error('Ask a question first.');
@@ -1061,7 +1068,7 @@ export async function startSetup(opts = {}) {
     // real links, and a dead/private target must never be distinguishable from the other.
     'POST /api/note': async (b) => {
       const cfg = normalize(await loadConfig(file));
-      const ctx = createContext(cfg, { env: { ...env, BRAINLINK_AI_PLATFORM: '' } });
+      const ctx = localContext(cfg, { ...env, BRAINLINK_AI_PLATFORM: '' });
       if (!b.vault || !ctx.enabled.includes(b.vault)) throw new Error('Unknown vault.');
       const note = await readNote(ctx, b.vault, String(b.path || ''));
       const index = await loadVault(ctx, b.vault);

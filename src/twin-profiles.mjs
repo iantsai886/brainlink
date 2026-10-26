@@ -43,7 +43,10 @@ export function twinProfileStatus(cfg) {
 export function resolveTwinAgentScope(cfg, agent, tokenProvided = false) {
   const profiles = Array.isArray(cfg.twin_profiles) ? cfg.twin_profiles : [];
   if (!profiles.length) return { mode: 'legacy', profile_id: null, grants: [] };
-  if (!tokenProvided) return { mode: 'legacy', profile_id: null, grants: [] };
+  // Once the owner has configured Twin boundaries, an unidentified connector must never
+  // silently inherit the old all-vault scope. Local Setup/background work opts into its own
+  // trusted context; AI connections must present a registered token.
+  if (!tokenProvided) return { mode: 'unassigned', profile_id: null, grants: [] };
   if (!agent) return { mode: 'unassigned', profile_id: null, grants: [] };
   const matches = profiles.flatMap((profile) => (profile.agent_access || [])
     .filter((entry) => entry.agent_id === agent.id)

@@ -54,7 +54,7 @@ async function fixture() {
       github_repository: { remote: 'example/shared-brain', path: repo, vault: 'Company', whole_vault: true, confirmed_at: '2026-10-25T00:00:00.000Z' },
     }],
   });
-  const ctx = createContext(cfg, { env: { BRAINLINK_HOME: root, APPDATA: root, BRAINLINK_SEMANTIC: '0' } });
+  const ctx = createContext(cfg, { env: { BRAINLINK_HOME: root, APPDATA: root, BRAINLINK_SEMANTIC: '0' }, trustedLocal: true });
   return { root, vault, repo, cfg, ctx };
 }
 

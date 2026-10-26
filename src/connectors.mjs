@@ -50,7 +50,7 @@ const exists = (p) => stat(p).then(() => true, () => false);
 
 export function serverEntry(client, launch, extraEnv = {}) {
   const c = CLIENTS[client];
-  return { command: launch.command, args: [...launch.args], env: { BRAINLINK_AI_PLATFORM: c.platform, BRAINLINK_AGENT_ROLE: c.role, ...extraEnv } };
+  return { command: launch.command, args: [...launch.args], env: { BRAINLINK_AGENT_TOKEN: '', BRAINLINK_AI_PLATFORM: c.platform, BRAINLINK_AGENT_ROLE: c.role, ...extraEnv } };
 }
 
 // ChatGPT needs a public HTTPS MCP connector; it can't reach 127.0.0.1, so there is no config

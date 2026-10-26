@@ -147,6 +147,32 @@ test('profile-scoped agents see only granted vaults and only supported read tool
   assert.equal(unassigned.twinScope.mode, 'unassigned');
 });
 
+test('configured Twin profiles fail closed for preset and anonymous MCP connections', async () => {
+  const root = await mkdtemp(path.join(tmpdir(), 'brainlink-twin-anonymous-'));
+  const orgPath = path.join(root, 'org');
+  const privatePath = path.join(root, 'private');
+  await mkdir(orgPath);
+  await mkdir(privatePath);
+  await writeFile(path.join(orgPath, 'Public.md'), 'Fictional organisation information.');
+  await writeFile(path.join(privatePath, 'Private.md'), 'TWIN_UNASSIGNED_PRIVATE_CANARY');
+  const cfg = fixture(orgPath);
+  cfg.vaults.push({ name: 'Fictional Private', path: privatePath, private: true });
+
+  const ctx = createContext(cfg, { env: { BRAINLINK_AI_PLATFORM: 'Claude Desktop' } });
+  assert.equal(ctx.twinScope.mode, 'unassigned');
+  assert.deepEqual(ctx.enabled, []);
+  const mcp = createMcp(ctx);
+  const listed = await mcp.handle({ jsonrpc: '2.0', id: 1, method: 'tools/list' });
+  assert.deepEqual(listed.result.tools, []);
+  const denied = await mcp.handle({ jsonrpc: '2.0', id: 2, method: 'tools/call', params: { name: 'vault_search', arguments: { vault: 'Fictional Private', query: 'canary' } } });
+  assert.ok(denied.error || denied.result?.isError);
+  assert.doesNotMatch(JSON.stringify(denied), /TWIN_UNASSIGNED_PRIVATE_CANARY/);
+
+  const local = createContext(cfg, { env: {}, trustedLocal: true });
+  assert.equal(local.twinScope.mode, 'legacy');
+  assert.deepEqual(local.enabled, ['Fictional Org', 'Fictional Private']);
+});
+
 test('Twin memory policy blocks disabled types at tool, prompt and resource boundaries', async () => {
   const root = await mkdtemp(path.join(tmpdir(), 'brainlink-twin-memory-policy-'));
   const vaultPath = path.join(root, 'org');
@@ -371,6 +397,12 @@ test('authenticated local status exposes Twin scopes without returning agent cre
     assert.equal(state.twin_profiles.profiles[0].vaults[0].access, 'propose');
     assert.equal(state.twin_profiles.profiles[0].agents[0].vaults[0].access, 'read');
     assert.doesNotMatch(JSON.stringify(state.twin_profiles), /tokenHash|f{64}|Fictional company content/);
+    const presetHealth = await fetch(`${base}/api/client-health`, {
+      method: 'POST', headers: { 'X-BrainLink-Token': setup.token, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ client: 'claude-desktop' }),
+    }).then((response) => response.json());
+    assert.equal(presetHealth.ok, false);
+    assert.match(presetHealth.message, /no Twin profile permission/);
   } finally { setup.server.close(); }
 });
 

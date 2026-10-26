@@ -725,7 +725,7 @@ test('connectors: JSON clients keep other servers and get a backup; bad JSON is 
   const j = JSON.parse(await readFile(file, 'utf8'));
   assert.equal(j.mcpServers.other.command, 'x');
   assert.equal(j.theme, 'dark');
-  assert.deepEqual(j.mcpServers.brainlink, { command: '/opt/BrainLink/node', args: ['/opt/BrainLink/cli.mjs', 'serve'], env: { BRAINLINK_AI_PLATFORM: 'Claude', BRAINLINK_AGENT_ROLE: 'Claude Desktop' } });
+  assert.deepEqual(j.mcpServers.brainlink, { command: '/opt/BrainLink/node', args: ['/opt/BrainLink/cli.mjs', 'serve'], env: { BRAINLINK_AGENT_TOKEN: '', BRAINLINK_AI_PLATFORM: 'Claude', BRAINLINK_AGENT_ROLE: 'Claude Desktop' } });
   assert.ok(r.backup && JSON.parse(await readFile(r.backup, 'utf8')).mcpServers.brainlink === undefined);
   assert.equal((await detect(opts))['claude-desktop'].connected, true);
   await disconnectClient('claude-desktop', opts);

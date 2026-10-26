@@ -59,13 +59,13 @@ async function fixture({ assign = true } = {}) {
     twin_profiles: PROFILES.map((p) => ({ ...declaration(p), ...(assign ? { github_repository: assignment(f, p) } : {}) })),
   });
   f.cfg = cfg;
-  f.ctx = createContext(cfg, { env: { BRAINLINK_SEMANTIC: '0' } });
+  f.ctx = createContext(cfg, { env: { BRAINLINK_SEMANTIC: '0' }, trustedLocal: true });
   return f;
 }
 const withCfg = (f, mutate) => {
   const cfg = structuredClone(f.cfg);
   mutate(cfg);
-  return { cfg, ctx: createContext(cfg, { env: { BRAINLINK_SEMANTIC: '0' } }) };
+  return { cfg, ctx: createContext(cfg, { env: { BRAINLINK_SEMANTIC: '0' }, trustedLocal: true }) };
 };
 const P = Object.fromEntries(PROFILES.map((p) => [p.id, p]));
 
