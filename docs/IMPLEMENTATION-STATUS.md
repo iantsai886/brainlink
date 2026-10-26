@@ -326,3 +326,7 @@ The local handoff receipt now detects multiple newest replies with the same time
 ### Encrypted restore from a fresh BrainLink install (2026-10-27)
 
 Added an integration test that creates an encrypted fictional backup on one BrainLink app home, then restores through the authenticated Setup API running with a separate app-data home and no local recovery key. A wrong supplied key is rejected without writing into the empty target; the exported correct key restores the private fixture. Focused test passed 1/1. This verifies the second-install recovery flow locally, not a physical second computer, native folder picker, or disaster-recovery readiness.
+
+### Shared Twin-vault note-access guard (2026-10-27)
+
+Configuration now rejects granting note search, read, or write operations on the same vault to multiple Personal, Organisation, or Client Twin profiles. A vault can still be shared as the handoff mailbox when each profile has only explicit handoff operations there. Twin Setup's regression fixture now uses a separate Personal vault and verifies the shared-note grant is refused. The targeted profile/config/GitHub assignment run passed 24/25 before a test fixture correction; the corrected targeted guard tests passed 2/2. Final Windows `npm run test:all`: core 407 tests (401 passed, 0 failed, 6 platform/privilege skips), UI 29/29. The six skips require symlink privileges or platform behavior unavailable on this Windows host. This is local automated evidence; live client connections, hosted GitHub Actions, and packaged-app acceptance remain unverified.

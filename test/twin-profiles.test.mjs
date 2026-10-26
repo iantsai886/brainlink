@@ -44,6 +44,13 @@ test('Twin profile declarations validate references and prevent permission escal
   const duplicateAgent = structuredClone(cfg);
   duplicateAgent.twin_profiles.push({ ...structuredClone(cfg.twin_profiles[0]), id: 'second_profile', mode: 'personal' });
   assert.match(validate(duplicateAgent).join('; '), /only one Twin profile/);
+  const sharedNotes = structuredClone(cfg);
+  sharedNotes.ai_agents.push({ id: 'agent_personal', name: 'Fictional Personal agent', kind: 'local', tokenHash: hashToken('fictional-personal-token'), connected: true });
+  sharedNotes.twin_profiles.push({
+    ...structuredClone(cfg.twin_profiles[0]), id: 'personal_profile', name: 'Fictional Personal Twin', mode: 'personal', owner: 'fictional-person',
+    agent_access: [{ agent_id: 'agent_personal', vaults: [{ name: 'Fictional Org', access: 'read', operations: ['search', 'read_note'] }] }],
+  });
+  assert.match(validate(sharedNotes).join('; '), /cannot grant note access to multiple Twin profiles/);
   const revoked = structuredClone(cfg);
   revoked.ai_agents[0].revoked = true;
   assert.match(validate(revoked).join('; '), /unknown or revoked/);
@@ -583,11 +590,15 @@ test('Setup creates a validated Twin from explicit vault, agent, action and memo
   const env = { BRAINLINK_HOME: path.join(home, 'app') };
   const cfg = fixture(vaultPath);
   cfg.ai_agents.push({ id: 'agent_personal', name: 'Fictional Personal Agent', kind: 'local', tokenHash: hashToken('fictional-second-agent-token'), connected: false, revoked: false });
+  const personalVault = path.join(root, 'personal-vault');
   const otherVault = path.join(root, 'other-vault');
+  await mkdir(personalVault);
   await mkdir(otherVault);
+  cfg.vaults.push({ name: 'Fictional Personal', path: personalVault, private: false });
   cfg.vaults.push({ name: 'Fictional Other', path: otherVault, private: false });
-  cfg.vaults.push({ name: 'Fictional Private', path: path.join(root, 'private'), private: true });
-  await mkdir(cfg.vaults[2].path);
+  const privateVault = path.join(root, 'private');
+  await mkdir(privateVault);
+  cfg.vaults.push({ name: 'Fictional Private', path: privateVault, private: true });
   await saveConfig(cfg, path.join(env.BRAINLINK_HOME, 'config.json'));
   const setup = await startSetup({ env, home, os: 'linux', port: 0, useCli: false });
   const base = `http://127.0.0.1:${setup.port}`;
@@ -598,9 +609,9 @@ test('Setup creates a validated Twin from explicit vault, agent, action and memo
   try {
     const request = {
       name: 'Fictional Personal Twin', mode: 'personal', owner: 'fictional-owner',
-      vaults: [{ name: 'Fictional Org', access: 'propose' }, { name: 'Fictional Other', access: 'read' }],
+      vaults: [{ name: 'Fictional Personal', access: 'propose' }, { name: 'Fictional Other', access: 'read' }],
       agent_access: [{ agent_id: 'agent_personal', vaults: [
-        { name: 'Fictional Org', operations: ['search', 'read_note', 'propose_note'] },
+        { name: 'Fictional Personal', operations: ['search', 'read_note', 'propose_note'] },
         { name: 'Fictional Other', operations: ['search'] },
       ] }],
       memory_policy: { working: true, semantic: true, procedural: false, episodic: true },
@@ -609,27 +620,35 @@ test('Setup creates a validated Twin from explicit vault, agent, action and memo
     const created = await api(request);
     assert.equal(created.status, 200, created.body.error);
     assert.equal(created.body.profile.mode, 'personal');
-    assert.deepEqual(created.body.profile.vaults, [{ name: 'Fictional Org', access: 'propose' }, { name: 'Fictional Other', access: 'read' }]);
+    assert.deepEqual(created.body.profile.vaults, [{ name: 'Fictional Personal', access: 'propose' }, { name: 'Fictional Other', access: 'read' }]);
     assert.deepEqual(created.body.profile.memory_policy, request.memory_policy);
     assert.deepEqual(created.body.profile.allowed_actions.sort(), ['propose_note', 'read_note', 'search']);
     assert.equal(created.body.profile.agents[0].name, 'Fictional Personal Agent');
     assert.deepEqual(created.body.profile.agents[0].vaults, [
-      { name: 'Fictional Org', access: 'propose', operations: ['search', 'read_note', 'propose_note'] },
+      { name: 'Fictional Personal', access: 'propose', operations: ['search', 'read_note', 'propose_note'] },
       { name: 'Fictional Other', access: 'read', operations: ['search'] },
     ]);
     assert.doesNotMatch(JSON.stringify(created.body), /fictional-second-agent-token|tokenHash/);
 
-    const privateVault = await api({ ...request, name: 'Should Refuse', vaults: [{ name: 'Fictional Private', access: 'read' }], agent_access: [] });
-    assert.equal(privateVault.status, 400);
-    assert.match(privateVault.body.error, /non-private vaults/);
+    const sharedAgentId = 'agent_shared_vault_probe';
+    const savedForSharedProbe = JSON.parse(await readFile(path.join(env.BRAINLINK_HOME, 'config.json'), 'utf8'));
+    savedForSharedProbe.ai_agents.push({ id: sharedAgentId, name: 'Fictional Shared Vault Probe', kind: 'local', tokenHash: hashToken('fictional-shared-vault-token'), connected: false, revoked: false });
+    await saveConfig(savedForSharedProbe, path.join(env.BRAINLINK_HOME, 'config.json'));
+    const sharedOrgVault = await api({ ...request, name: 'Should Refuse Shared Notes', vaults: [{ name: 'Fictional Org', access: 'read' }], agent_access: [{ agent_id: sharedAgentId, vaults: [{ name: 'Fictional Org', operations: ['search', 'read_note'] }] }] });
+    assert.equal(sharedOrgVault.status, 400);
+    assert.match(sharedOrgVault.body.error, /cannot grant note access to multiple Twin profiles/);
+
+    const privateVaultResponse = await api({ ...request, name: 'Should Refuse', vaults: [{ name: 'Fictional Private', access: 'read' }], agent_access: [] });
+    assert.equal(privateVaultResponse.status, 400);
+    assert.match(privateVaultResponse.body.error, /non-private vaults/);
     const unsupported = await api({ ...request, name: 'Should Refuse Too', agent_access: [{ agent_id: 'agent_personal', operations: ['write_note'] }] });
     assert.equal(unsupported.status, 400);
     assert.match(unsupported.body.error, /supported action/);
-    const disabledMemory = await api({ ...request, name: 'Should Refuse Disabled Memory', memory_policy: { ...request.memory_policy, semantic: false }, agent_access: [{ agent_id: 'agent_personal', vaults: [{ name: 'Fictional Org', operations: ['search'] }] }] });
+    const disabledMemory = await api({ ...request, name: 'Should Refuse Disabled Memory', memory_policy: { ...request.memory_policy, semantic: false }, agent_access: [{ agent_id: 'agent_personal', vaults: [{ name: 'Fictional Personal', operations: ['search'] }] }] });
     assert.equal(disabledMemory.status, 400);
     assert.match(disabledMemory.body.error, /Enable semantic memory/);
     const mixedSessionScope = await api({ ...request, name: 'Should Refuse Session Scope', agent_access: [{ agent_id: 'agent_personal', vaults: [
-      { name: 'Fictional Org', operations: ['read_session'] },
+      { name: 'Fictional Personal', operations: ['read_session'] },
       { name: 'Fictional Other', operations: ['search'] },
     ] }] });
     assert.equal(mixedSessionScope.status, 400);

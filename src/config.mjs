@@ -158,6 +158,25 @@ export function validate(cfg) {
       }
     }
   }
+  // A vault may be listed by more than one profile only when the shared access is
+  // limited to the handoff mailbox. Shared note access would let one Twin read or
+  // change another Twin's content because scope is enforced at the vault boundary.
+  const vaultReaders = new Map();
+  for (const profile of Array.isArray(cfg.twin_profiles) ? cfg.twin_profiles : []) {
+    for (const agent of Array.isArray(profile?.agent_access) ? profile.agent_access : []) {
+      for (const grant of Array.isArray(agent?.vaults) ? agent.vaults : []) {
+        if (!grant?.name || !Array.isArray(grant.operations)) continue;
+        const contentOps = grant.operations.filter((operation) => ['search', 'read_note', 'propose_note', 'write_note'].includes(operation));
+        if (!contentOps.length) continue;
+        const owners = vaultReaders.get(grant.name) || new Set();
+        owners.add(profile.id);
+        vaultReaders.set(grant.name, owners);
+      }
+    }
+  }
+  for (const [vaultName, owners] of vaultReaders) {
+    if (owners.size > 1) errors.push(`vault "${vaultName}" cannot grant note access to multiple Twin profiles; share it only for handoff actions`);
+  }
   errors.push(...validateGitHubAssignments(cfg));
   if (cfg.handoff && (!names.has(cfg.handoff.vault) || !cfg.handoff.folder)) errors.push('handoff needs an existing vault and a folder');
   if (cfg.timezone) { try { new Intl.DateTimeFormat('en', { timeZone: cfg.timezone }); } catch { errors.push(`unknown timezone "${cfg.timezone}"`); } }
