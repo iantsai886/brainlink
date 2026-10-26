@@ -109,6 +109,10 @@ Setup can run either of two built-in fictional retrieval suites for an RSI idea 
 
 On the Windows development checkout at base commit `97e4ac4`, the serialized core suite passed 332 tests, with 0 failures and 6 platform/privilege-dependent skips; the UI suite passed 28/28. The first default parallel run showed transient backup and first-run CLI failures and stopped making progress. Those cases passed when isolated or run serially. To avoid test-load interference and orphaning a CLI server after a readiness timeout, `npm test` now runs one core test file at a time and the CLI UI test helper cleans up a child process when startup fails. This is test-run reliability work, not a product feature. This receipt does not verify live Claude Code ↔ Codex handoff, live GitHub access, a signed installer, installation on Ian's computer, or commercial readiness.
 
+### Version visibility and current connected runtime (2026-10-26)
+
+Setup now displays the running package version in its header, localized in English, Traditional Chinese, and Portuguese. The version comes from the same API state value as the runtime, not a separately maintained UI string. Focused CLI UI checks passed 4/4, locale checks 2/2, the UI-model suite passed 28/28, and the serialized core suite on this working tree passed 332 tests (0 failures, 6 platform/privilege skips). The connected BrainLink MCP reported version `1.2.6` during this review; the repository branch is `1.2.8`. The connected service has not been updated or accepted against this code. A version label improves visibility but does not update the installed service.
+
 ## Next engineering sequence
 
 1. Validate the append-only handoff lifecycle with a live Claude Code ↔ Codex handoff and retain receipts for pickup, updates, completion, and private-note non-disclosure. Claude Code CLI is not installed in the current environment.

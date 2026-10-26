@@ -54,11 +54,13 @@ test('`brainlink demo`: serves ui/index.html, pre-populated with the sample vaul
   try {
     const page = await (await fetch(s.base + `/?t=${s.token}`, { headers: { 'X-BrainLink-Token': s.token } })).text();
     assert.match(page, /BrainLink Setup/, 'serves ui/index.html, not ui\/app\'s boot stub');
+    assert.match(page, /id="app-version"/, 'the product version has a visible location in the header');
     assert.match(page, /id="sessions-panel"/);
     assert.match(page, /id="s-sync"/);
     assert.doesNotMatch(page, /brainlinkHost/, 'must not be ui/app\'s RPC bridge page');
 
     const st = await (await s.api('GET', '/api/state')).json();
+    assert.match(st.version, /^\d+\.\d+\.\d+$/);
     assert.deepEqual(st.vaults.map((v) => v.name), ['Acme Studio']);
     assert.deepEqual(st.agents.map((a) => a.name), ['Chief of Staff']);
     assert.ok(!st.config_path.startsWith(home), 'demo config must be isolated from the real BrainLink home');

@@ -1,5 +1,6 @@
 {
   "header.done": "Done — close setup",
+  "header.version": "Version {version}",
   "header.langLabel": "Language",
   "boot.loading": "Loading your brain…",
   "boot.errorTitle": "Could not load BrainLink.",

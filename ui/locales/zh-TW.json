@@ -1,5 +1,6 @@
 {
   "header.done": "完成 — 關閉設定",
+  "header.version": "版本 {version}",
   "header.langLabel": "語言",
   "boot.loading": "正在載入你的大腦…",
   "boot.errorTitle": "無法載入 BrainLink。",

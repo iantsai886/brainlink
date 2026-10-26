@@ -1,5 +1,6 @@
 {
   "header.done": "Concluído — fechar configuração",
+  "header.version": "Versão {version}",
   "header.langLabel": "Idioma",
   "boot.loading": "A carregar o seu cérebro…",
   "boot.errorTitle": "Não foi possível carregar o BrainLink.",

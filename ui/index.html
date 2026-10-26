@@ -113,7 +113,7 @@ ol.todo li { padding-left: 4px; }
 <link rel="stylesheet" href="share.css">
 </head>
 <body>
-<header><h1>BrainLink</h1><select id="lang" aria-label="Language" style="margin-left:auto"></select><button class="link" id="done" data-i18n="header.done"></button></header>
+<header><h1>BrainLink</h1><span id="app-version" class="pill" aria-label="BrainLink version"></span><select id="lang" aria-label="Language" style="margin-left:auto"></select><button class="link" id="done" data-i18n="header.done"></button></header>
 <div id="boot-loading" role="status" data-i18n="boot.loading"></div>
 <div id="boot-error" hidden role="alert"><b data-i18n="boot.errorTitle"></b> <span id="boot-error-msg"></span> <button id="boot-retry" data-i18n="boot.retry"></button></div>
 <main>
@@ -920,6 +920,7 @@ document.addEventListener('click', (e) => {
 async function load() {
   S = await api('GET', '/api/state');
   await ensureLocale(S.locale);
+  $('app-version').textContent = t('header.version', { version: S.version });
   const hasVault = S.vaults.length > 0;
   const onboardingSync = hasVault && pendingSyncOnboarding;
   $('start').hidden = hasVault;
