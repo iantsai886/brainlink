@@ -192,6 +192,7 @@ test('Setup exposes the RSI ledger only through authenticated local APIs', async
     const sampleMonitoring = { monitored_commit_sha: 'c'.repeat(40), window_start: '2026-10-25', window_end: '2026-10-26', test_set_version: 'fictional-monitor-v1', sample_count: 12, decision: 'regression', primary_metric: { name: 'task success', baseline: 0.9, observed: 0.7 }, guardrail_status: 'fail', guardrails: ['task success fell'], results: 'Synthetic regression signal.', reviewer: 'Reviewer', evidence_ref: '' };
     assert.equal((await post('/api/rsi/ideas/monitor', { id: idea.id, expected_revision: idea.revision, monitoring: sampleMonitoring }, 'wrong-token')).status, 401);
     const monitor = await post('/api/rsi/ideas/monitor', { id: idea.id, expected_revision: idea.revision, monitoring: sampleMonitoring }).then(r => r.json());
+    assert.equal(monitor.error, undefined, JSON.stringify(monitor));
     assert.equal(monitor.idea.monitoring.length, 1);
     assert.equal(monitor.idea.status, 'accepted', 'the service records evidence but does not roll back automatically');
     assert.doesNotMatch(JSON.stringify(monitor), /RSI_PRIVATE_CANARY_9D7|Acquisition Budget\.md|Northwind Coffee\.md/);

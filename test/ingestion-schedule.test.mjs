@@ -59,7 +59,8 @@ test('failed scheduled scan retries once the source folder returns, without logg
     for (let i = 0; i < 100; i++) {
       await delay(15);
       state = await getState();
-      if (state.ingestion.status?.ok && state.ingestion.status.trigger === 'schedule') break;
+      const cfg = JSON.parse(await readFile(path.join(appHome, 'config.json'), 'utf8'));
+      if (state.ingestion.status?.ok && state.ingestion.status.trigger === 'schedule' && cfg.ingestion.retry_after === null) break;
     }
     assert.equal(state.ingestion.status.ok, true);
     assert.equal(state.ingestion.status.queued_total, 1);

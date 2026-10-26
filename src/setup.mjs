@@ -229,18 +229,18 @@ export async function startSetup(opts = {}) {
   let githubAutoRunning = false;
   let githubAutoTickRunning = false;
   async function saveGitHubAutoState(value) {
-    githubAutoState = value;
     await mkdir(path.dirname(githubAutoStateFile), { recursive: true });
     const temp = `${githubAutoStateFile}.${randomBytes(5).toString('hex')}.tmp`;
     await writeFile(temp, JSON.stringify(value, null, 2) + '\n', { flag: 'wx', mode: 0o600 });
     await rename(temp, githubAutoStateFile);
+    githubAutoState = value;
   }
   async function saveGitHubAutoStatus(value) {
-    githubAutoStatus = value;
     await mkdir(path.dirname(githubAutoStatusFile), { recursive: true });
     const temp = `${githubAutoStatusFile}.${randomBytes(5).toString('hex')}.tmp`;
     await writeFile(temp, JSON.stringify(value, null, 2) + '\n', { flag: 'wx', mode: 0o600 });
     await rename(temp, githubAutoStatusFile);
+    githubAutoStatus = value;
   }
   const interruptedSyncs = Object.entries(githubAutoStatus).filter(([, status]) => status?.running);
   if (interruptedSyncs.length) {
@@ -307,11 +307,11 @@ export async function startSetup(opts = {}) {
   let briefStatus = await readFile(briefStateFile, 'utf8').then((raw) => JSON.parse(raw)).catch(() => ({ ok: null, at: null, trigger: null, vault: null, result: null, error: null }));
   let briefRunning = false;
   async function saveBriefStatus(status) {
-    briefStatus = status;
     await mkdir(path.dirname(briefStateFile), { recursive: true });
     const temp = `${briefStateFile}.${randomBytes(5).toString('hex')}.tmp`;
     await writeFile(temp, JSON.stringify(status, null, 2) + '\n', { flag: 'wx' });
     await rename(temp, briefStateFile);
+    briefStatus = status;
   }
   async function runBrief(cfg, { trigger = 'manual', vaultName = cfg.brief?.vault } = {}) {
     if (briefRunning) throw new Error('A brief is already running.');
@@ -349,11 +349,11 @@ export async function startSetup(opts = {}) {
     touch();
   }
   async function saveIngestionStatus(status) {
-    ingestionStatus = status;
     await mkdir(path.dirname(ingestionStateFile), { recursive: true });
     const temp = `${ingestionStateFile}.${randomBytes(5).toString('hex')}.tmp`;
     await writeFile(temp, JSON.stringify(status, null, 2) + '\n', { flag: 'wx' });
     await rename(temp, ingestionStateFile);
+    ingestionStatus = status;
   }
   async function runIngestion(cfg, { trigger = 'manual', targets = cfg.ingestion?.targets?.length ? cfg.ingestion.targets : [{ vault: cfg.ingestion?.vault, folder: cfg.ingestion?.folder }] } = {}) {
     if (ingestionRunning) throw new Error('A source scan is already running.');

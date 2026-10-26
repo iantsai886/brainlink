@@ -97,6 +97,26 @@ test('verified backup restores to an empty folder without touching the original'
   await assert.rejects(restoreBackupToEmpty(made.folder, recovered), /must be empty/);
 });
 
+test('failed restore removes its partial staging copy and keeps the chosen destination empty', async () => {
+  const root = await tmp('restore-failure-source');
+  const dest = await tmp('restore-failure-backup');
+  const recovered = await tmp('restore-failure-output');
+  await writeFile(path.join(root, 'Private.md'), 'private original');
+  const made = await backupOnce([{ name: 'Personal', path: root }], dest);
+  const manifestPath = path.join(made.folder, 'manifest.json');
+  const manifest = JSON.parse(await readFile(manifestPath, 'utf8'));
+  manifest.files.push({ ...manifest.files[0] });
+  await writeFile(manifestPath, JSON.stringify(manifest, null, 2) + '\n');
+  assert.equal((await verifyBackup(made.folder)).ok, true, 'the duplicate entry has valid source bytes and hashes');
+
+  await assert.rejects(restoreBackupToEmpty(made.folder, recovered), /EEXIST|already exists/i);
+  assert.deepEqual(await readdir(recovered), [], 'a failed restore must not leave a partial-looking result');
+  const parentEntries = await readdir(path.dirname(recovered));
+  const restorePrefix = `.${path.basename(recovered)}.brainlink-restore-`;
+  const placeholderPrefix = `.${path.basename(recovered)}.brainlink-empty-`;
+  assert.equal(parentEntries.some((entry) => entry.startsWith(restorePrefix) || entry.startsWith(placeholderPrefix)), false, 'temporary restore folders are cleaned up');
+});
+
 test('verified backup includes and restores the BrainLink RSI ledger artifact', async () => {
   const root = await tmp('artifact-source'), dest = await tmp('artifact-backup'), recovered = await tmp('artifact-restore');
   await writeFile(path.join(root, 'Note.md'), 'fictional note');

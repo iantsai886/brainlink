@@ -45,6 +45,10 @@ test('every native installer bundles all production dependencies and portable Br
     assert.match(job, /skills\/brainlink-session-closeout\/SKILL\.md/, `${jobName} must smoke-test the packaged Agent Skill`);
     assert.match(job, /connectors\.mjs/, `${jobName} must smoke-test the packaged YAML connector runtime`);
   }
+  assert.match(workflow, /Install, run and uninstall Windows package/, 'Windows CI must exercise install and uninstall');
+  assert.match(workflow, /Install and smoke-test macOS package/, 'macOS CI must install and run the packaged app');
+  assert.match(workflow, /Remove macOS smoke-test installation/, 'macOS CI must clean up its installed package');
+  assert.match(workflow, /test ! -e \/opt\/brainlink/, 'Linux CI must verify package removal');
 });
 
 test('the staged connector loads with the bundled YAML package outside the checkout', async () => {

@@ -298,6 +298,8 @@ export async function restoreBackupToEmpty(backupDir, destination, encryptionKey
   if ((await readdir(targetRoot)).length) throw new Error('Restore destination must be empty.');
   const encrypted = await isEncryptedBackup(source);
   const manifest = await readBackupManifest(source, encryptionKey);
+  const stagingRoot = path.join(path.dirname(targetRoot), `.${path.basename(targetRoot)}.brainlink-restore-${randomBytes(8).toString('hex')}`);
+  const placeholderRoot = path.join(path.dirname(targetRoot), `.${path.basename(targetRoot)}.brainlink-empty-${randomBytes(8).toString('hex')}`);
   const folders = new Map();
   for (const v of manifest.vaults) {
     if (typeof v.name !== 'string' || typeof v.folder !== 'string' || !/^\d+-[a-zA-Z0-9_-]+$/.test(v.folder) || folders.has(v.name)) throw new Error('Invalid vault mapping in backup.');
@@ -313,19 +315,60 @@ export async function restoreBackupToEmpty(backupDir, destination, encryptionKey
   for (const artifact of manifest.artifacts || []) {
     if (typeof artifact.path !== 'string' || artifact.path.split('/').some(part => !part || part === '.' || part === '..' || part.includes('\\')) || (encrypted ? !/^objects\/[a-f0-9]{32}\.bin$/.test(artifact.stored) : artifact.stored !== 'artifacts/' + artifact.path)) throw new Error('Invalid backup artifact mapping.');
   }
-  for (const file of manifest.files) {
-    const raw = await readFile(path.join(source, ...file.stored.split('/')));
-    const data = encrypted ? decryptBackupData(raw, encryptionKey) : raw;
-    const target = path.join(targetRoot, folders.get(file.vault), ...file.path.split('/'));
-    await mkdir(path.dirname(target), { recursive: true });
-    await writeFile(target, data, { flag: 'wx' });
-  }
-  for (const artifact of manifest.artifacts || []) {
-    const raw = await readFile(path.join(source, ...artifact.stored.split('/')));
-    const data = encrypted ? decryptBackupData(raw, encryptionKey) : raw;
-    const target = path.join(targetRoot, 'BrainLink', ...artifact.path.split('/'));
-    await mkdir(path.dirname(target), { recursive: true });
-    await writeFile(target, data, { flag: 'wx' });
+  await mkdir(stagingRoot);
+  let placeholderMoved = false;
+  try {
+    const restored = [];
+    for (const file of manifest.files) {
+      const raw = await readFile(path.join(source, ...file.stored.split('/')));
+      const data = encrypted ? decryptBackupData(raw, encryptionKey) : raw;
+      const target = path.join(stagingRoot, folders.get(file.vault), ...file.path.split('/'));
+      await mkdir(path.dirname(target), { recursive: true });
+      await writeFile(target, data, { flag: 'wx' });
+      restored.push({ target, bytes: file.bytes, sha256: file.sha256 });
+    }
+    for (const artifact of manifest.artifacts || []) {
+      const raw = await readFile(path.join(source, ...artifact.stored.split('/')));
+      const data = encrypted ? decryptBackupData(raw, encryptionKey) : raw;
+      const target = path.join(stagingRoot, 'BrainLink', ...artifact.path.split('/'));
+      await mkdir(path.dirname(target), { recursive: true });
+      await writeFile(target, data, { flag: 'wx' });
+      restored.push({ target, bytes: artifact.bytes, sha256: artifact.sha256 });
+    }
+    for (const file of restored) {
+      const data = await readFile(file.target);
+      if (data.length !== file.bytes || hash(data) !== file.sha256) throw new Error('Restored copy failed verification.');
+    }
+
+    // Publish only after every recovered file has been read back and hash-checked. Move the
+    // user's original empty folder aside first so the final rename is atomic on one volume.
+    const current = await lstat(destination);
+    if (!current.isDirectory() || current.isSymbolicLink() || await realpath(destination) !== targetRoot) {
+      throw new Error('Restore destination changed during recovery.');
+    }
+    if ((await readdir(targetRoot)).length) throw new Error('Restore destination must stay empty until recovery finishes.');
+    await rename(targetRoot, placeholderRoot);
+    placeholderMoved = true;
+    if ((await readdir(placeholderRoot)).length) throw new Error('Restore destination changed during recovery.');
+    try {
+      await rename(stagingRoot, targetRoot);
+    } catch (error) {
+      try {
+        await rename(placeholderRoot, targetRoot);
+        placeholderMoved = false;
+      } catch {
+        throw new Error('Could not publish the restored copy or return the original empty folder. The original folder is preserved beside the destination.');
+      }
+      throw error;
+    }
+    await rm(placeholderRoot, { recursive: false, force: true }).catch(() => {});
+    placeholderMoved = false;
+  } finally {
+    await rm(stagingRoot, { recursive: true, force: true }).catch(() => {});
+    if (placeholderMoved) {
+      // Preserve the original empty folder if a concurrent change interrupted publication.
+      await rename(placeholderRoot, targetRoot).catch(() => {});
+    }
   }
   return { folder: targetRoot, vault_count: check.vault_count, file_count: check.file_count };
 }

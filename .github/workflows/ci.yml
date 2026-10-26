@@ -125,6 +125,21 @@ jobs:
           test -f "$app_root/skills/brainlink-session-closeout/SKILL.md"
           (cd "$app_root" && "$resources/node/bin/node" --input-type=module -e "await import('./src/connectors.mjs')")
 
+      - name: Install and smoke-test macOS package
+        run: |
+          version="$(node -p "require('./package.json').version")"
+          sudo installer -allowUntrusted -pkg "dist/BrainLink-$version.pkg" -target /
+          test "$(/usr/local/bin/brainlink --version)" = "$version"
+          test -f "/Applications/BrainLink.app/Contents/Resources/app/skills/brainlink-session-closeout/SKILL.md"
+          "/Applications/BrainLink.app/Contents/Resources/node/bin/node" --input-type=module -e "await import('/Applications/BrainLink.app/Contents/Resources/app/src/connectors.mjs')"
+
+      - name: Remove macOS smoke-test installation
+        if: always()
+        run: |
+          sudo rm -f /usr/local/bin/brainlink
+          sudo rm -rf /Applications/BrainLink.app
+          sudo pkgutil --forget com.iango.brainlink.pkg >/dev/null 2>&1 || true
+
       - name: Upload installer artifact
         uses: actions/upload-artifact@v4
         with:
@@ -155,7 +170,11 @@ jobs:
           /opt/brainlink/node/bin/node --input-type=module -e "await import('/opt/brainlink/app/src/connectors.mjs')"
           mkdir -p "$RUNNER_TEMP/brainlink-smoke-vault"
           BRAINLINK_HOME="$RUNNER_TEMP/brainlink-smoke-home" brainlink init --vault "$RUNNER_TEMP/brainlink-smoke-vault" --name Smoke
+          test -f "$RUNNER_TEMP/brainlink-smoke-home/config.json"
           sudo dpkg -r brainlink
+          test ! -e /opt/brainlink
+          test ! -e /usr/bin/brainlink
+          test -f "$RUNNER_TEMP/brainlink-smoke-home/config.json"
 
       - name: Upload Linux artifacts
         uses: actions/upload-artifact@v4
