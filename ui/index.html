@@ -1032,6 +1032,7 @@ async function load() {
     });
     document.querySelectorAll('[data-twin-operation]').forEach((input) => { input.checked = grantsByAgent.get(input.dataset.twinOperation)?.get(input.dataset.vaultName)?.has(input.value) || false; });
     document.querySelectorAll('[data-twin-memory]').forEach((input) => { input.checked = editingProfile.memory_policy[input.dataset.twinMemory] === true; });
+    updateTwinPermissionControls();
     $('twin-create').textContent = t('twinProfiles.saveChanges');
     $('twin-edit-cancel').hidden = false;
   } else {
@@ -1483,6 +1484,17 @@ document.addEventListener('click', async (event) => {
   }
 });
 $('twin-edit-cancel').onclick = async () => { editingTwinId = null; await load(); };
+function updateTwinPermissionControls() {
+  const enabled = Object.fromEntries([...document.querySelectorAll('[data-twin-memory]')].map((input) => [input.dataset.twinMemory, input.checked]));
+  const required = { search: 'semantic', read_note: 'semantic', read_session: 'episodic', propose_note: 'episodic', handoff_read: 'working', write_handoff: 'working' };
+  document.querySelectorAll('[data-twin-operation]').forEach((input) => {
+    const allowed = enabled[required[input.value]] === true
+      && (input.value !== 'propose_note' || enabled.semantic === true);
+    input.disabled = !allowed;
+    if (!allowed) input.checked = false;
+  });
+}
+$('twin-new-memory').addEventListener('change', updateTwinPermissionControls);
 $('twin-new-agents').addEventListener('change', (event) => {
   const agent = event.target.closest('[data-twin-agent]');
   if (agent) {

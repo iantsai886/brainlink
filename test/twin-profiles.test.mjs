@@ -80,6 +80,9 @@ test('Twin setup creates profiles from local UI choices and escapes every profil
   assert.match(html, /data-twin-agent/);
   assert.match(html, /data-twin-agent-vault/);
   assert.match(html, /data-twin-memory/);
+  assert.match(html, /function updateTwinPermissionControls\(\)/);
+  assert.match(html, /input\.disabled = !allowed;\s+if \(!allowed\) input\.checked = false;/);
+  assert.match(html, /twin-new-memory'\)\.addEventListener\('change', updateTwinPermissionControls\)/);
   assert.match(html, /POST', '\/api\/twins\/create'/);
   assert.match(html, /confirm\(t\('twinProfiles\.confirmCreate'/);
   assert.match(html, /esc\(p\.name\)/);
@@ -88,6 +91,27 @@ test('Twin setup creates profiles from local UI choices and escapes every profil
   assert.match(html, /data-sess-profile/);
   assert.match(html, /data-sess-assign/);
   assert.match(html, /sessions\.twinPrivate/);
+});
+
+test('Twin permission controls disable and clear actions when their memory type is off', async () => {
+  const html = await readFile(new URL('../ui/index.html', import.meta.url), 'utf8');
+  const start = html.indexOf('function updateTwinPermissionControls() {');
+  const end = html.indexOf("$('twin-new-memory').addEventListener", start);
+  assert.ok(start >= 0 && end > start, 'permission helper is connected to memory changes');
+  const memories = ['semantic', 'episodic', 'working', 'procedural'].map((key) => ({ dataset: { twinMemory: key }, checked: key === 'episodic' || key === 'procedural' }));
+  const operations = ['search', 'read_note', 'read_session', 'propose_note', 'handoff_read', 'write_handoff'].map((value) => ({ value, checked: true, disabled: false }));
+  const document = { querySelectorAll: (selector) => selector === '[data-twin-memory]' ? memories : operations };
+  const update = new Function('document', `${html.slice(start, end)}; return updateTwinPermissionControls;`)(document);
+  update();
+  assert.deepEqual(operations.map(({ disabled, checked }) => ({ disabled, checked })), [
+    { disabled: true, checked: false }, { disabled: true, checked: false },
+    { disabled: false, checked: true }, { disabled: true, checked: false },
+    { disabled: true, checked: false }, { disabled: true, checked: false },
+  ]);
+  memories.find((item) => item.dataset.twinMemory === 'semantic').checked = true;
+  memories.find((item) => item.dataset.twinMemory === 'working').checked = true;
+  update();
+  assert.deepEqual(operations.map(({ disabled }) => disabled), [false, false, false, false, false, false]);
 });
 
 test('profile-scoped agents see only granted vaults and only supported read tools', async () => {
