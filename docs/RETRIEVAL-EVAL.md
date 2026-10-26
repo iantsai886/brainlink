@@ -70,6 +70,10 @@ Evaluator v2 returned `quality_regression` for `compact-coverage-v1`: baseline t
 
 Evaluator v3 now compares the actual compact MCP projection against full diagnostic results on the frozen 30-case set. On Windows/Node.js 24.22.1, the clean-commit run on source commit `c1d26c6513d9ff420957c5d9787085aba27ab186` preserved task success at 17/30, source recall at 1.000, and zero privacy violations; mean estimated result tokens fell from 497 to 427 (about 14%). The result is `eligible_for_review`, which means only that the lossless formatting change reduced estimated context without worsening this source/context proxy. It does not prove generated-answer quality, billed token savings, or customer results. The machine-readable receipt is `samples/evaluation/reports/retrieval-independent-windows-v2.json`.
 
+### Current-commit reproducibility check (2026-10-27)
+
+The same frozen fixture was rerun on clean source commit `bb71426ee9d5d4a008f954dc9e89649b4ff80ba9` using Windows/Node.js 24.22.1. Results remained 17/30 deterministic task proxy success, source recall 1.000, and zero privacy violations; estimated context stayed 497 baseline versus 427 compact (about 14% lower). The exact receipt is `samples/evaluation/reports/retrieval-independent-windows-v3.json`, with the same fixture SHA-256. This confirms reproducibility at the current pre-receipt commit; the report adds no claim about model-generated answers, provider-billed tokens, live customer work, or cross-client behavior.
+
 ## Session filing evaluation (read-only RSI evidence)
 
 Run `node bin/brainlink.mjs eval-filing --fixture ABSOLUTE_PATH_TO_JSON` after configuring the fixture's vault. This evaluates where BrainLink would suggest filing a completed session, against labelled destinations and a baseline that always selects the configured intake folder. Folder labels must exist and be selectable in the enabled vault. A `null` expected destination labels a deliberate abstention. Optional `forbidden_folders` label privacy-sensitive destinations that must never be proposed for that case.
