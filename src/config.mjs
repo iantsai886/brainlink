@@ -44,7 +44,7 @@ export const AGENT_KINDS = ['local', 'remote'];
 export const CONFIG_SCHEMA_VERSION = 2;
 
 export function emptyConfig() {
-  return { version: CONFIG_SCHEMA_VERSION, timezone: null, locale: null, vaults: [], agents: [], ai_agents: [], twin_profiles: [], handoff: null, platforms: DEFAULT_PLATFORMS, http: { port: 8765, token: null }, connections: {}, sessions: { shareSummaries: false, shareFullText: false }, session_filing: { projectVaults: {}, projectFolders: {} }, backup: { enabled: false, folder: null, intervalHours: 24 }, ingestion: { enabled: false, vault: null, folder: null, time: '02:00' } };
+  return { version: CONFIG_SCHEMA_VERSION, timezone: null, locale: null, vaults: [], agents: [], ai_agents: [], twin_profiles: [], handoff: null, platforms: DEFAULT_PLATFORMS, http: { port: 8765, token: null }, connections: {}, sessions: { shareSummaries: false, shareFullText: false }, session_filing: { projectVaults: {}, projectFolders: {} }, backup: { enabled: false, folder: null, intervalHours: 24, keepCount: 0 }, ingestion: { enabled: false, vault: null, folder: null, time: '02:00' } };
 }
 
 // Fill defaults so the rest of the code never checks for missing keys.
@@ -59,7 +59,7 @@ export function normalize(raw = {}) {
   cfg.twin_profiles = raw.twin_profiles ?? [];
   cfg.http = { port: 8765, token: null, ...(raw.http || {}) };
   cfg.connections = raw.connections || {};
-  cfg.backup = { enabled: false, folder: null, intervalHours: 24, ...(raw.backup || {}) };
+  cfg.backup = { enabled: false, folder: null, intervalHours: 24, keepCount: 0, ...(raw.backup || {}) };
   cfg.ingestion = { enabled: false, vault: null, folder: null, time: '02:00', ...(raw.ingestion || {}) };
   cfg.session_filing = { projectVaults: {}, projectFolders: {}, ...(raw.session_filing || {}) };
   if (!cfg.session_filing.projectVaults || typeof cfg.session_filing.projectVaults !== 'object' || Array.isArray(cfg.session_filing.projectVaults)) cfg.session_filing.projectVaults = {};
@@ -163,6 +163,7 @@ export function validate(cfg) {
   if (typeof cfg.backup.enabled !== 'boolean') errors.push('backup.enabled must be a boolean');
   if (cfg.backup.enabled && (!cfg.backup.folder || !path.isAbsolute(cfg.backup.folder))) errors.push('backup.folder must be an absolute path when enabled');
   if (!Number.isInteger(cfg.backup.intervalHours) || cfg.backup.intervalHours < 1 || cfg.backup.intervalHours > 168) errors.push('backup.intervalHours must be 1–168');
+  if (!Number.isInteger(cfg.backup.keepCount) || cfg.backup.keepCount < 0 || cfg.backup.keepCount > 365) errors.push('backup.keepCount must be 0 (unlimited) or 1–365');
   if (cfg.sync) errors.push(...validateSync(cfg.sync));
   return errors;
 }

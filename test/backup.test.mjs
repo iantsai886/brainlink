@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { mkdtemp, mkdir, writeFile, readFile, readdir, symlink } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
-import { backupOnce, verifyBackup, restoreBackupToEmpty, loadBackupStatus, saveBackupStatus } from '../src/backup.mjs';
+import { backupOnce, verifyBackup, restoreBackupToEmpty, loadBackupStatus, saveBackupStatus, pruneBackups } from '../src/backup.mjs';
 import { normalize, saveConfig } from '../src/config.mjs';
 import { startSetup } from '../src/setup.mjs';
 
@@ -76,6 +76,28 @@ test('a failed backup removes only its partial staging folder and keeps prior ba
   assert.equal((await verifyBackup(first.folder)).ok, true);
 });
 
+test('retention removes only older verified BrainLink copies and preserves damaged or unknown folders', async () => {
+  const root = await tmp('retention-source'), dest = await tmp('retention-destination');
+  await writeFile(path.join(root, 'Note.md'), 'fictional note');
+  const oldest = await backupOnce([{ name: 'Workspace', path: root }], dest, new Date('2026-10-20T00:00:00Z'));
+  const middle = await backupOnce([{ name: 'Workspace', path: root }], dest, new Date('2026-10-21T00:00:00Z'));
+  const newest = await backupOnce([{ name: 'Workspace', path: root }], dest, new Date('2026-10-22T00:00:00Z'));
+  const damaged = await backupOnce([{ name: 'Workspace', path: root }], dest, new Date('2026-10-23T00:00:00Z'));
+  await writeFile(path.join(damaged.folder, 'vaults', '1-Workspace', 'Note.md'), 'changed');
+  const unknown = path.join(dest, 'BrainLink-Backup-not-a-backup');
+  await mkdir(unknown);
+
+  const result = await pruneBackups(dest, 2, newest.folder);
+  assert.equal(result.removed_count, 1);
+  assert.equal(result.retained_count, 2);
+  assert.equal(await readdir(oldest.folder).then(() => true, () => false), false);
+  assert.equal((await verifyBackup(middle.folder)).ok, true);
+  assert.equal((await verifyBackup(newest.folder)).ok, true);
+  assert.equal(await readdir(damaged.folder).then(() => true, () => false), true, 'damaged copy is preserved for recovery investigation');
+  assert.equal(await readdir(unknown).then(() => true, () => false), true, 'unknown folder is untouched');
+  await assert.rejects(pruneBackups(dest, 366), /retention/);
+});
+
 test('backup rejects symlinked files when the host permits symlinks', async (t) => {
   const root = await tmp('symlink');
   const dest = await tmp('symlink-destination');
@@ -124,13 +146,14 @@ test('authenticated Setup enables scheduled backup only after a verified first c
       method: 'POST', headers: { 'Content-Type': 'application/json', 'X-BrainLink-Token': app.token },
       body: JSON.stringify({ topics: ['agent memory'], signals: ['Agents lose context after handoff and repeat retrieval searches.'] }),
     });
-    const response = await api('/api/backup', { enabled: true, folder: dest, intervalHours: 24 });
+    const response = await api('/api/backup', { enabled: true, folder: dest, intervalHours: 24, keepCount: 30 });
     assert.equal(response.status, 200);
     const result = await response.json();
     assert.equal(result.backup.status.ok, true);
     assert.equal((await verifyBackup(result.backup.status.folder)).ok, true);
     const state = await fetch(`http://127.0.0.1:${app.port}/api/state`, { headers: { 'X-BrainLink-Token': app.token } }).then((r) => r.json());
     assert.equal(state.backup.enabled, true);
+    assert.equal(state.backup.keepCount, 30);
     assert.equal(state.backup.status.file_count, 2, 'backup includes the vault note and RSI discovery settings');
     let secondVerified = false;
     for (let i = 0; i < 120 && !secondVerified; i++) {
@@ -169,6 +192,7 @@ test('restore UI provides separate localized folder pickers and retains explicit
     const catalog = JSON.parse(await readFile(new URL(`../ui/locales/${locale}.json`, import.meta.url), 'utf8'));
     assert.ok(catalog['backup.restorePickSource'], `${locale} source picker label`);
     assert.ok(catalog['backup.restorePickDestination'], `${locale} destination picker label`);
+    assert.ok(catalog['backup.retentionHint'], `${locale} retention policy explanation`);
   }
 });
 

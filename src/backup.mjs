@@ -145,6 +145,59 @@ export async function verifyBackup(backupDir) {
   return { ok: errors.length === 0, vault_count: manifest.vaults.length, file_count: manifest.files.length + (manifest.artifacts || []).length, errors };
 }
 
+// Retention is opt-in (keepCount=0 means unlimited). Delete only older, complete,
+// hash-verified BrainLink backups directly inside the chosen destination. Unknown,
+// damaged, symlinked, and partial folders are never counted or removed.
+export async function pruneBackups(destination, keepCount = 0, newestFolder = null) {
+  if (!Number.isInteger(keepCount) || keepCount < 0 || keepCount > 365) throw new Error('Backup retention must be 0 (unlimited) or 1–365.');
+  if (keepCount === 0) return { retained_count: null, removed_count: 0, warning: null };
+  const destStat = await lstat(destination);
+  if (!destStat.isDirectory() || destStat.isSymbolicLink()) throw new Error('Backup destination must be a real directory.');
+  const dest = await realpath(destination);
+  const valid = [];
+  const warnings = [];
+  for (const entry of await readdir(dest, { withFileTypes: true })) {
+    if (!entry.name.startsWith('BrainLink-Backup-')) continue;
+    const full = path.join(dest, entry.name);
+    try {
+      const stat = await lstat(full);
+      if (!stat.isDirectory() || stat.isSymbolicLink() || !within(dest, await realpath(full))) continue;
+      const checked = await verifyBackup(full);
+      if (!checked.ok) continue;
+      const manifest = JSON.parse(await readFile(path.join(full, 'manifest.json'), 'utf8'));
+      const created = Date.parse(manifest.created_at);
+      if (!Number.isFinite(created)) continue;
+      valid.push({ full, created, name: entry.name });
+    } catch {
+      // An unreadable or malformed candidate is preserved and excluded from retention.
+    }
+  }
+  valid.sort((a, b) => b.created - a.created || b.name.localeCompare(a.name));
+  const pinned = newestFolder ? path.resolve(newestFolder) : null;
+  const keep = new Set(valid.slice(0, keepCount).map((item) => item.full));
+  if (pinned && valid.some((item) => item.full === pinned) && !keep.has(pinned)) {
+    const oldestKept = [...keep].map((full) => valid.find((item) => item.full === full)).filter(Boolean).sort((a, b) => a.created - b.created)[0];
+    if (oldestKept) keep.delete(oldestKept.full);
+    keep.add(pinned);
+  }
+  let removed = 0;
+  for (const item of valid) {
+    if (keep.has(item.full)) continue;
+    try {
+      // Re-check immediately before removal. A changed backup is preserved.
+      const stat = await lstat(item.full);
+      if (!stat.isDirectory() || stat.isSymbolicLink() || !within(dest, await realpath(item.full))) continue;
+      const checked = await verifyBackup(item.full);
+      if (!checked.ok) continue;
+      await rm(item.full, { recursive: true, force: false });
+      removed++;
+    } catch (error) {
+      warnings.push(`Could not remove an old verified backup: ${error.message || String(error)}`);
+    }
+  }
+  return { retained_count: valid.length - removed, removed_count: removed, warning: warnings.length ? warnings.join('; ') : null };
+}
+
 // Recovery is deliberately constrained to a new empty directory. Never restore in place or
 // overwrite a live vault; the user can inspect the copy before switching any config paths.
 export async function restoreBackupToEmpty(backupDir, destination) {

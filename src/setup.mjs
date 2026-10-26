@@ -27,7 +27,7 @@ import { addAgent, renameAgent, removeAgent, revokeAgent, markConnected, findAge
 import { buildGraph3D, noteDetail3D } from './graph3d.mjs';
 import { snapshotSettings, chooseSnapshot, suggestSnapshotFolder, clearSnapshot, startSnapshotWatcher, writeSnapshotOnce, loadSnapshotStatus, saveSnapshotStatus } from './snapshot.mjs';
 import { listHandoffs } from './writes.mjs';
-import { backupOnce, verifyBackup, restoreBackupToEmpty, loadBackupStatus, saveBackupStatus } from './backup.mjs';
+import { backupOnce, verifyBackup, restoreBackupToEmpty, loadBackupStatus, saveBackupStatus, pruneBackups } from './backup.mjs';
 import { fileSessionSummary } from './sessions/filing.mjs';
 import { isStartupEnabled, setStartupEnabled } from './startup.mjs';
 import { recommendSessionVault } from './sessions/routing.mjs';
@@ -226,7 +226,8 @@ export async function startSetup(opts = {}) {
       const result = await backupOnce(cfg.vaults, cfg.backup.folder, new Date(), await rsiBackupArtifacts());
       const check = await verifyBackup(result.folder);
       if (!check.ok) throw new Error(`Backup verification failed: ${check.errors.join('; ')}`);
-      backupStatus = { ok: true, ...result, at: new Date().toISOString() };
+      const retention = await pruneBackups(cfg.backup.folder, cfg.backup.keepCount ?? 0, result.folder);
+      backupStatus = { ok: true, ...result, ...retention, at: new Date().toISOString() };
       await saveBackupStatus(backupStateFile, backupStatus);
       return backupStatus;
     } catch (error) {
@@ -1135,7 +1136,7 @@ export async function startSetup(opts = {}) {
     'POST /api/backup/restore/pick-destination': async () => { const p = await pickRestoreDestinationFolder(); return p === undefined ? { path: null, unavailable: true } : { path: p }; },
     'POST /api/backup': async (b) => {
       const cfg = await loadConfig(file);
-      const next = { ...cfg, backup: { enabled: Boolean(b.enabled), folder: b.folder || null, intervalHours: Number(b.intervalHours || 24) } };
+      const next = { ...cfg, backup: { enabled: Boolean(b.enabled), folder: b.folder || null, intervalHours: Number(b.intervalHours || 24), keepCount: Number(b.keepCount ?? cfg.backup.keepCount ?? 0) } };
       if (next.backup.enabled) await runBackup(next); // verify before enabling the schedule
       await saveConfig(next, file);
       refreshBackupTimer(next);
