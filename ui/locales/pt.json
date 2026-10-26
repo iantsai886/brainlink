@@ -299,7 +299,7 @@
   "github.pullConflictCopy": "Guardar cópia do conflito remoto",
   "github.pullChecking": "A obter e verificar a privacidade das notas partilhadas…",
   "github.pullFound": "Encontradas {count} notas remotas seguras em {branch}. Novas selecionadas; atualizações seguras precisam da sua seleção; conflitos podem ser guardados como cópias separadas.",
-  "github.confirmImport": "Aplicar estas {count} notas selecionadas? Novas serão adicionadas. Atualizações só substituem cópias iguais ao último recibo de importação do BrainLink. Conflitos nunca são substituídos.\n\n{paths}",
+  "github.confirmImport": "Aplicar estas {count} notas selecionadas? Novas serão adicionadas. Atualizações só substituem cópias locais que ainda correspondem ao último recibo de importação do BrainLink. Conflitos nunca são substituídos.\n\n{paths}",
   "github.confirmConflictCopy": "Guardar as versões remotas destas {count} notas em conflito como cópias identificadas no caderno? As notas locais existentes permanecerão inalteradas.\n\n{paths}",
   "github.savingConflictCopy": "A verificar novamente os conflitos e a guardar cópias remotas…",
   "github.conflictCopiesSaved": "Guardadas {count} cópias remotas de conflito; {unchanged} cópias idênticas já existiam. As notas locais foram preservadas.",
