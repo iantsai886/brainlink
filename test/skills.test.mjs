@@ -77,9 +77,9 @@ test('portable session-closeout Skill is identical across clients and preserves 
   const contents = await Promise.all(skillPaths.map((file) => readFile(path.join(ROOT, file), 'utf8')));
   assert.equal(new Set(contents).size, 1, 'canonical skill and client copies must stay byte-identical');
   const { fields, body } = parseSkill(contents[0], skillPaths[0]);
-  assert.equal(fields.metadata.version, '1.0.0');
+  assert.equal(fields.metadata.version, '1.1.0');
   assert.match(fields.metadata['applicable-clients'], /Any AI client/);
-  for (const tool of ['brainlink_guide', 'session_close']) assert.ok(fields.compatibility.includes(tool) || fields.metadata['required-tools'].includes(tool), tool);
+  for (const tool of ['brainlink_guide', 'session_close', 'vault_search', 'vault_read_note', 'propose_note']) assert.ok(fields.compatibility.includes(tool) || fields.metadata['required-tools'].includes(tool), tool);
   assert.match(body, /session_close/);
   assert.match(body, /confirm=false/);
   assert.match(body, /confirm=true/);
@@ -87,4 +87,12 @@ test('portable session-closeout Skill is identical across clients and preserves 
   assert.match(body, /Never read a transcript just because a hook provides its path/);
   assert.match(body, /both the `written` and `session_saved` fields/);
   assert.match(body, /Do not promote an AI-reported outcome to verified semantic knowledge/);
+  assert.match(body, /Working:/);
+  assert.match(body, /Episodic:/);
+  assert.match(body, /Semantic:/);
+  assert.match(body, /Procedural:/);
+  assert.match(body, /Do not create a duplicate episode note/);
+  assert.match(body, /at most three strong semantic or procedural candidates/);
+  assert.match(body, /saving a session does not authorize these additional durable notes/i);
+  assert.match(body, /If no durable candidate qualifies, say none was proposed/);
 });
