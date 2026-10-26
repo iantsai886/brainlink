@@ -107,6 +107,14 @@ ol.todo li { padding-left: 4px; }
 #boot-loading, #boot-error { max-width: 860px; margin: 8px auto 0; padding: 10px 20px; font-size: 14px; color: var(--muted); }
 #boot-error { color: #fff; background: var(--bad); border-radius: 8px; margin: 8px 20px; }
 #boot-error button { background: transparent; border-color: rgba(255,255,255,.6); color: #fff; }
+#main-nav { position: sticky; top: 0; z-index: 40; max-width: 860px; margin: 0 auto; padding: 8px 20px; display: flex; gap: 6px; overflow-x: auto; background: var(--bg); border-bottom: 1px solid var(--line); scrollbar-width: none; }
+#main-nav::-webkit-scrollbar { display: none; }
+#main-nav[hidden] { display: none; }
+#main-nav a { flex: none; border: 1px solid transparent; border-radius: 999px; padding: 5px 11px; color: var(--muted); font-size: 13px; text-decoration: none; white-space: nowrap; }
+#main-nav a:hover, #main-nav a:focus-visible { color: var(--accent); border-color: var(--line); background: var(--panel); }
+#main-nav a:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+main [id="ready"], main [id="ask-panel"], main [id="brain-panel"], main [id="sessions-panel"], main [id="s-connect"], main [id="s-backup"], main [id="rsi-panel"] { scroll-margin-top: 64px; }
+@media (prefers-reduced-motion: no-preference) { html { scroll-behavior: smooth; } }
 </style>
 <link rel="stylesheet" href="agents.css">
 <link rel="stylesheet" href="notes3d.css">
@@ -114,6 +122,15 @@ ol.todo li { padding-left: 4px; }
 </head>
 <body>
 <header><h1>BrainLink</h1><span id="app-version" class="pill" aria-label="BrainLink version"></span><select id="lang" aria-label="Language" style="margin-left:auto"></select><button class="link" id="done" data-i18n="header.done"></button></header>
+<nav id="main-nav" aria-label="BrainLink sections" hidden>
+  <a href="#ready" data-main-nav="ready" data-i18n="nav.home"></a>
+  <a href="#ask-panel" data-main-nav="ask-panel" data-i18n="nav.ask"></a>
+  <a href="#brain-panel" data-main-nav="brain-panel" data-i18n="nav.notes"></a>
+  <a href="#sessions-panel" data-main-nav="sessions-panel" data-i18n="nav.sessions"></a>
+  <a href="#s-connect" data-main-nav="s-connect" data-i18n="nav.connect"></a>
+  <a href="#s-backup" data-main-nav="s-backup" data-i18n="nav.backup"></a>
+  <a href="#rsi-panel" data-main-nav="rsi-panel" data-i18n="nav.improve"></a>
+</nav>
 <div id="boot-loading" role="status" data-i18n="boot.loading"></div>
 <div id="boot-error" hidden role="alert"><b data-i18n="boot.errorTitle"></b> <span id="boot-error-msg"></span> <button id="boot-retry" data-i18n="boot.retry"></button></div>
 <main>
@@ -574,6 +591,14 @@ async function ensureLocale(saved) {
   await setLocale(SUPPORTED_LOCALES.includes(saved) ? saved : detectLocale(), { persist: !saved });
   resolveLocaleBooted();
 }
+$('main-nav').addEventListener('click', (event) => {
+  const link = event.target.closest('a[data-main-nav]');
+  if (!link) return;
+  const target = $(link.dataset.mainNav);
+  if (!target || target.hidden) { event.preventDefault(); return; }
+  const settings = target.closest('details.settings');
+  if (settings) settings.open = true;
+});
 $('lang').onchange = () => act(() => setLocale($('lang').value));
 
 function choiceHtml(cls, title, sub, go, attrs) { return `<button class="choice ${cls}" ${attrs}><span><b>${esc(title)}</b>${sub ? `<small>${esc(sub)}</small>` : ''}</span><span class="go">${esc(go)}</span></button>`; }
@@ -1062,6 +1087,7 @@ async function load() {
   $('app-version').textContent = t('header.version', { version: S.version });
   const hasVault = S.vaults.length > 0;
   const onboardingSync = hasVault && pendingSyncOnboarding;
+  $('main-nav').hidden = !hasVault || onboardingSync;
   $('start').hidden = hasVault;
   $('sync-onboarding').hidden = !onboardingSync;
   if (onboardingSync) renderSyncOnboarding();
