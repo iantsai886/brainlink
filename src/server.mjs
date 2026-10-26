@@ -5,6 +5,7 @@ import { createServer as createHttpServer } from 'node:http';
 import { readFile } from 'node:fs/promises';
 import { createRequire } from 'node:module';
 import { timingSafeEqual } from 'node:crypto';
+import { compactSearchResponse } from './search-projection.mjs';
 import { search, searchWithVerdict, readNote, related, vaultRoot, safeJoin, semanticStatus } from './core.mjs';
 import { proposeNote, sendHandoff, listHandoffs, remember, appendDaily } from './writes.mjs';
 import { recentNotes, openLoops, vaultHealth, brief } from './insights.mjs';
@@ -25,12 +26,6 @@ const SUPPORTED_PROTOCOLS = ['2025-06-18', '2025-03-26', '2024-11-05'];
 const RO = { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: false };
 const WR = { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: false };
 const obsidianUrl = (v, p) => `obsidian://open?vault=${encodeURIComponent(v)}&file=${encodeURIComponent(p.replace(/\.md$/, ''))}`;
-const COMPACT_SEARCH_FIELDS = ['path', 'title', 'date', 'status', 'historical', 'superseded_by', 'match', 'heading', 'snippet'];
-function compactSearchResponse(response) {
-  const { results = [], ...summary } = response;
-  return { ...summary, results: results.map((result) => Object.fromEntries(COMPACT_SEARCH_FIELDS.filter((key) => Object.hasOwn(result, key)).map((key) => [key, result[key]]))) };
-}
-
 export function createMcp(ctx, { onCall = () => {} } = {}) {
   const { cfg } = ctx;
   const connectorVaults = ctx.enabled.filter((v) => !ctx.byName.get(v).private || ctx.connectorPrivate);

@@ -78,12 +78,13 @@ test('independent frozen retrieval set reports quality, abstention, context, lat
   assert.equal(report.schema, 2);
   assert.equal(report.case_count, 30);
   assert.equal(report.fixture_sha256, createHashForTest(fixtureBytes));
-  assert.equal(report.evaluator_version, 'retrieval-eval-v2');
+  assert.equal(report.evaluator_version, 'retrieval-eval-v3');
   assert.equal(report.source_commit, 'fixture-test-commit');
   assert.equal(report.baseline.privacy_violations, 0);
   assert.equal(report.candidate.privacy_violations, 0);
   assert.equal(report.candidate_policy.tuned_on_fixture, false);
-  assert.equal(report.candidate_policy.estimated_token_budget, 350);
+  assert.equal(report.candidate_policy.id, 'compact-search-v1');
+  assert.equal(report.candidate_policy.selected_sources_preserved, true);
   assert.ok(report.baseline.mean_latency_ms >= 0);
   assert.ok(report.candidate.mean_latency_ms >= 0);
   assert.ok(report.baseline.context.mean_estimated_tokens > report.candidate.context.mean_estimated_tokens);
@@ -91,7 +92,11 @@ test('independent frozen retrieval set reports quality, abstention, context, lat
   assert.equal(report.candidate.task_success.total, 30);
   assert.ok(report.baseline.abstention.expected >= 5);
   assert.equal(report.baseline.source_correctness.source_recall, 1);
-  assert.equal(report.candidate.source_correctness.source_recall, 0.8);
+  assert.equal(report.candidate.source_correctness.source_recall, 1);
+  assert.equal(report.candidate.task_success.count, report.baseline.task_success.count);
+  assert.ok(report.candidate.abstention.false <= report.baseline.abstention.false);
+  assert.ok(report.candidate.abstention.missed <= report.baseline.abstention.missed);
+  assert.equal(report.decision, 'eligible_for_review');
   assert.ok(Array.isArray(report.candidate.failures));
   assert.doesNotMatch(output, /INDEPENDENT_PRIVATE_CANARY_7C91|INDEPENDENT_FOREIGN_PROFILE_CANARY_A04F|INDEPENDENT_EXCLUDED_CANARY_28BD|SL-661|88421|Personal Budget\.md|Private Handoff\.md|Archive Record\.md|Silver Larch/);
   for (const marker of ['INDEPENDENT_PRIVATE_CANARY_7C91', 'INDEPENDENT_FOREIGN_PROFILE_CANARY_A04F', 'INDEPENDENT_EXCLUDED_CANARY_28BD']) {
@@ -139,7 +144,7 @@ test('independent retrieval CLI accepts an explicit fictional vault and emits an
   });
   const report = JSON.parse(stdout);
   assert.equal(report.fixture_sha256, createHashForTest(fixtureBytes));
-  assert.equal(report.evaluator_version, 'retrieval-eval-v2');
+  assert.equal(report.evaluator_version, 'retrieval-eval-v3');
   assert.equal(report.case_count, 30);
   assert.equal(report.environment.node, process.version);
   assert.equal(report.source_commit, execFileSync('git', ['rev-parse', 'HEAD'], { encoding: 'utf8' }).trim());

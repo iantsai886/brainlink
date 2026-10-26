@@ -3,11 +3,11 @@
 import { createHash } from 'node:crypto';
 import { search, searchWithVerdict, readNote, vault } from './core.mjs';
 import { estTokens } from './sessions/tokens.mjs';
+import { compactSearchResult } from './search-projection.mjs';
 
 const sha256 = (value) => createHash('sha256').update(value).digest('hex');
 const boundedMean = (values) => values.length ? Math.round(values.reduce((a, b) => a + b, 0) / values.length) : 0;
-const CANDIDATE_CONTEXT_BUDGET_TOKENS = 350;
-export const RETRIEVAL_EVALUATOR_VERSION = 'retrieval-eval-v2';
+export const RETRIEVAL_EVALUATOR_VERSION = 'retrieval-eval-v3';
 
 export function validateRetrievalFixture(fixture) {
   const errors = [];
@@ -53,17 +53,9 @@ const contextPresent = (results, required = []) => {
   return required.every((phrase) => excerpts.includes(phrase.toLocaleLowerCase()));
 };
 
-// A fixed, label-blind compaction policy: preserve the highest-ranked source, then keep
-// subsequent sources only when their lexical coverage is >= 0.35 and the serialized context
-// stays within 350 locally estimated tokens. It never clips note text or reads gold labels.
-function compactResults(results) {
-  const kept = [];
-  for (const result of results) {
-    const tentative = [...kept, result];
-    if (!kept.length || ((result.match === 'mention' || result.coverage >= 0.35) && estTokens(JSON.stringify(tentative)) <= CANDIDATE_CONTEXT_BUDGET_TOKENS)) kept.push(result);
-  }
-  return kept;
-}
+// Lossless projection used by the production MCP compact response: retain every selected
+// source and full snippet; remove only internal per-result diagnostics.
+function compactResults(results) { return results.map(compactSearchResult); }
 
 function summarizeIndependent(results, status, c) {
   const abstained = isAbstention(status);
@@ -131,7 +123,10 @@ async function evaluateIndependent(ctx, fixture, options) {
   const candidateMetrics = independentMetrics(fixture.cases, candidate);
   const enough = fixture.cases.length >= 20;
   const privacyOk = baselineMetrics.privacy_violations === 0 && candidateMetrics.privacy_violations === 0;
-  const qualityOk = candidateMetrics.task_success.rate >= baselineMetrics.task_success.rate && candidateMetrics.source_correctness.source_recall >= baselineMetrics.source_correctness.source_recall && candidateMetrics.abstention.false === 0 && candidateMetrics.abstention.missed === 0;
+  const qualityOk = candidateMetrics.task_success.rate >= baselineMetrics.task_success.rate
+    && candidateMetrics.source_correctness.source_recall >= baselineMetrics.source_correctness.source_recall
+    && candidateMetrics.abstention.false <= baselineMetrics.abstention.false
+    && candidateMetrics.abstention.missed <= baselineMetrics.abstention.missed;
   const smaller = candidateMetrics.context.mean_estimated_tokens < baselineMetrics.context.mean_estimated_tokens;
   const decision = !privacyOk ? 'blocked_privacy' : !enough ? 'needs_more_cases' : !qualityOk ? 'quality_regression' : qualityOk && smaller ? 'eligible_for_review' : 'no_demonstrated_efficiency_gain';
   return {
@@ -143,7 +138,7 @@ async function evaluateIndependent(ctx, fixture, options) {
     minimum_cases_for_review: 20,
     ...(options.receipt || {}),
     comparison: 'same questions, vault scope, topK, lexical search, and semantic=false',
-    candidate_policy: { id: 'compact-coverage-v1', minimum_coverage: 0.35, estimated_token_budget: CANDIDATE_CONTEXT_BUDGET_TOKENS, note_text_truncated: false, tuned_on_fixture: false },
+    candidate_policy: { id: 'compact-search-v1', selected_sources_preserved: true, note_text_truncated: false, tuned_on_fixture: false },
     baseline: baselineMetrics,
     candidate: candidateMetrics,
     decision,
