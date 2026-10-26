@@ -629,6 +629,8 @@
   "rsi.confidenceShort": "可信度",
   "rsi.baselineVersion": "基準版本",
   "rsi.candidateVersion": "候選版本",
+  "rsi.promotionCommit": "合併後的 Git commit SHA",
+  "rsi.promotionCommitHint": "接受改進時必填。BrainLink 只檢查格式，不會向 GitHub 驗證此 commit。",
   "rsi.testSetVersion": "測試集版本",
   "rsi.reviewer": "審查者",
   "rsi.results": "測量結果",

@@ -25,16 +25,22 @@ test('RSI ledger appends proposals, enforces transitions and optimistic revision
   assert.equal((await readFile(ledger.file, 'utf8')).trim().split(/\r?\n/).length, 3);
 });
 
-test('RSI acceptance requires recorded experiment evidence, reviewer and rollback', async () => {
+test('RSI acceptance requires recorded evidence, reviewer, promotion commit and rollback', async () => {
   const ledger = createRsiLedger({ home: await temp('accept') });
   const idea = await ledger.create(validIdea);
   let current = idea;
   for (const status of ['triaged', 'proposed', 'testing', 'review']) current = await ledger.update({ id: idea.id, expected_revision: current.revision, status });
   await assert.rejects(ledger.update({ id: idea.id, expected_revision: current.revision, status: 'accepted' }), /requires baseline/);
+  const evidence = {
+    baseline_version: 'commit:base123', candidate_version: 'release:1.2.9', test_set_version: 'fictional-v1', results: 'Task success held; measured read count fell in this fixture.', metrics: ['task success: unchanged', 'reads: lower'], guardrails: ['no privacy leak'], reviewer: 'Independent reviewer', decision_and_reason: 'Accept within stated fixture limits.', rollback: 'Revert commit abc123.',
+  };
+  await assert.rejects(ledger.update({ id: idea.id, expected_revision: current.revision, status: 'accepted', fields: evidence }), /promotion commit SHA/);
+  await assert.rejects(ledger.update({ id: idea.id, expected_revision: current.revision, fields: { promotion_commit_sha: 'abc123' } }), /full 40-character Git commit SHA/);
   const accepted = await ledger.update({ id: idea.id, expected_revision: current.revision, status: 'accepted', fields: {
-    baseline_version: 'commit:base123', candidate_version: 'commit:abc123', test_set_version: 'fictional-v1', results: 'Task success held; measured read count fell in this fixture.', metrics: ['task success: unchanged', 'reads: lower'], guardrails: ['no privacy leak'], reviewer: 'Independent reviewer', decision_and_reason: 'Accept within stated fixture limits.', rollback: 'Revert commit abc123.',
+    ...evidence, promotion_commit_sha: 'a'.repeat(40),
   } });
   assert.equal(accepted.status, 'accepted');
+  assert.equal(accepted.fields.promotion_commit_sha, 'a'.repeat(40));
   await assert.rejects(ledger.update({ id: idea.id, expected_revision: accepted.revision, status: 'rolled_back' }), /why/);
   const rolledBack = await ledger.update({ id: idea.id, expected_revision: accepted.revision, status: 'rolled_back', note: 'Regression in a fresh test set.' });
   assert.equal(rolledBack.status, 'rolled_back');
@@ -114,6 +120,12 @@ test('RSI Setup panel has unique ids and one render/submit path', async () => {
   const html = await readFile(new URL('../ui/index.html', import.meta.url), 'utf8');
   assert.equal((html.match(/id="rsi-panel"/g) || []).length, 1);
   assert.equal((html.match(/id="rsi-idea-form"/g) || []).length, 1);
+  assert.match(html, /data-rsi-field="promotion_commit_sha"/);
+  for (const locale of ['en', 'zh-TW', 'pt']) {
+    const catalog = JSON.parse(await readFile(new URL(`../ui/locales/${locale}.json`, import.meta.url), 'utf8'));
+    assert.ok(catalog['rsi.promotionCommit'], `${locale} promotion commit label`);
+    assert.ok(catalog['rsi.promotionCommitHint'], `${locale} promotion commit limitation`);
+  }
   assert.equal((html.match(/async function loadRsi\(\)/g) || []).length, 1);
   const scripts = [...html.matchAll(/<script>([\s\S]*?)<\/script>/g)];
   assert.ok(scripts.length);

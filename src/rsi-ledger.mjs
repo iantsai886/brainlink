@@ -18,7 +18,7 @@ const TRANSITIONS = {
   review: new Set(['accepted', 'rejected', 'testing', 'deferred']),
   accepted: new Set(['rolled_back']), rejected: new Set(), deferred: new Set(['triaged', 'rejected']), rolled_back: new Set(['testing', 'rejected']),
 };
-const FIELDS = ['title', 'user_problem', 'hypothesis', 'memory_types', 'sources', 'baseline_version', 'candidate_version', 'test_set_version', 'metrics', 'guardrails', 'privacy_scope', 'cost_cap', 'results', 'reviewer', 'decision_and_reason', 'rollback'];
+const FIELDS = ['title', 'user_problem', 'hypothesis', 'memory_types', 'sources', 'baseline_version', 'candidate_version', 'promotion_commit_sha', 'test_set_version', 'metrics', 'guardrails', 'privacy_scope', 'cost_cap', 'results', 'reviewer', 'decision_and_reason', 'rollback'];
 const MAX_TEXT = 1200;
 const clean = (v, max = MAX_TEXT) => typeof v === 'string' ? v.trim().slice(0, max) : '';
 const canonical = (v) => JSON.stringify(v);
@@ -111,11 +111,15 @@ function validatePayload(input, { partial = false } = {}) {
       if (value === undefined && partial) continue;
       const maximum = key === 'title' ? 160 : MAX_TEXT;
       if (typeof value !== 'string' || value.length > maximum) throw new Error(`${key} must be text up to ${maximum} characters.`);
+      if (key === 'promotion_commit_sha' && value.trim() && !/^[a-f0-9]{40}$/i.test(value.trim())) throw new Error('promotion_commit_sha must be a full 40-character Git commit SHA.');
       out[key] = value.trim();
     }
   }
   if (!partial && (!out.title || !out.user_problem)) throw new Error('title and user_problem are required.');
-  const text = JSON.stringify(out);
+  // A full Git commit SHA is a public content identifier, not a credential. It is separately
+  // constrained above to exactly 40 hex characters; keep every free-text field in secret scan.
+  const scanFields = { ...out, ...(out.promotion_commit_sha ? { promotion_commit_sha: '' } : {}) };
+  const text = JSON.stringify(scanFields);
   if (findSecrets(text).length) throw new Error('Potential secret detected; remove it before saving an RSI idea.');
   if (/<(?:script|iframe)\b/i.test(text)) throw new Error('HTML markup is not allowed in RSI idea fields.');
   return out;
@@ -241,7 +245,7 @@ export function createRsiLedger({ home, now = () => new Date() }) {
       const fields = changes ? validatePayload(changes, { partial: true }) : {};
       if (status !== undefined && (!STATUSES.has(status) || !TRANSITIONS[row.status]?.has(status))) throw new Error(`Status cannot move from ${row.status} to ${status}.`);
       const merged = { ...row.fields, ...fields };
-      if (status === 'accepted' && ['baseline_version', 'candidate_version', 'test_set_version', 'results', 'reviewer', 'decision_and_reason', 'rollback'].some(key => !clean(merged[key]))) throw new Error('Acceptance requires baseline and candidate versions, test set, measured results, reviewer, decision rationale, and rollback instructions.');
+      if (status === 'accepted' && ['baseline_version', 'candidate_version', 'promotion_commit_sha', 'test_set_version', 'results', 'reviewer', 'decision_and_reason', 'rollback'].some(key => !clean(merged[key]))) throw new Error('Acceptance requires baseline and candidate versions, a promotion commit SHA, test set, measured results, reviewer, decision rationale, and rollback instructions.');
       if (status === 'accepted' && (!merged.metrics?.length || !merged.guardrails?.length)) throw new Error('Acceptance requires measured metrics and guardrail results.');
       const safeNote = clean(note, 500);
       if (status === 'rolled_back' && !safeNote) throw new Error('Record why the accepted change was rolled back.');

@@ -231,3 +231,7 @@ Setup now offers a daily brief for one explicitly selected, existing vault at a 
 ### Local Personal-vault briefs (2026-10-26)
 
 Daily Brief now allows an explicit choice of any configured, existing vault, including a private Personal vault. This is limited to authenticated local Setup and the local scheduled job; connected agents receive no brief. Note-level `private: true` content stays excluded from changed-note summaries, open loops, and saved status. The UI marks private vaults and explains that results remain on this computer. Focused schedule, API, private-canary, UI, and locale tests passed 5/5. Full Windows Node.js 24.22.1 `npm run test:all` passed: core 380 tests (374 passed, 0 failed, 6 platform/privilege skips) and UI 28/28. The skipped tests require OS/symlink privileges unavailable on this machine. Cross-device sharing and native desktop acceptance are still unverified.
+
+### RSI promotion linked to Git revision (2026-10-26)
+
+An RSI idea cannot enter `accepted` unless its record includes a full 40-character Git commit SHA for the promoted change, in addition to its baseline/candidate versions, test set, measured results, reviewer, decision, guardrails, and rollback. The append-only ledger records the SHA, and the local UI explains that format validation does not verify the commit on GitHub. Focused tests cover missing/malformed commit IDs, a successful synthetic acceptance record, and all shipped locales. This improves traceability; it does not verify that a commit exists, passed CI, or was deployed.

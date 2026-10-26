@@ -629,6 +629,8 @@
   "rsi.confidenceShort": "confiança",
   "rsi.baselineVersion": "Versão de referência",
   "rsi.candidateVersion": "Versão candidata",
+  "rsi.promotionCommit": "SHA do commit integrado",
+  "rsi.promotionCommitHint": "Obrigatório para aceitar. O BrainLink valida apenas o formato, não confirma o commit no GitHub.",
   "rsi.testSetVersion": "Versão do conjunto de testes",
   "rsi.reviewer": "Revisor",
   "rsi.results": "Resultados medidos",
