@@ -316,6 +316,7 @@ ol.todo li { padding-left: 4px; }
       <label><span data-i18n="sync.where"></span><select id="sync-provider"></select></label>
       <label><span data-i18n="sync.device"></span><input id="sync-device" data-i18n-placeholder="sync.devicePlaceholder"></label>
     </div>
+    <div id="sync-vault-row" style="margin-top:10px" hidden><label><span data-i18n="sync.vault"></span><select id="sync-vault"></select></label></div>
     <div id="sync-folder-row" class="grid2" style="margin-top:10px" hidden>
       <label><span data-i18n="sync.syncedFolder"></span><input id="sync-folder" class="mono" data-i18n-placeholder="sync.folderPlaceholder"></label>
       <div id="sync-suggestions" class="muted" style="font-size:13px;align-self:end"></div>
@@ -976,6 +977,10 @@ async function load() {
   $('packs').innerHTML = S.packs.map((p) => `<label class="pack ${p.id === pack ? 'sel' : ''}"><span><input type="radio" name="pack" value="${p.id}" ${p.id === pack ? 'checked' : ''}><b>${esc(p.title)}</b></span><small>${esc(p.description)}</small></label>`).join('');
   const SY = S.sync;
   $('sync-provider').innerHTML = SY.providers.map((p) => `<option value="${esc(p)}" ${p === SY.provider ? 'selected' : ''}>${esc(t('sync.provider.' + p))}</option>`).join('');
+  const syncVaults = S.vaults.filter((v) => !v.private && v.exists);
+  const syncVaultChoice = SY.vault || (syncVaults.some((v) => v.name === 'brain') ? 'brain' : syncVaults.length === 1 ? syncVaults[0].name : '');
+  $('sync-vault').innerHTML = `<option value="">${esc(t('sync.chooseVault'))}</option>` + syncVaults.map((v) => `<option value="${esc(v.name)}" ${v.name === syncVaultChoice ? 'selected' : ''}>${esc(v.name)}</option>`).join('');
+  $('sync-vault-row').hidden = SY.provider === 'local';
   const shareableVaults = S.vaults.filter((v) => !v.private && v.exists);
   $('github-vault').innerHTML = shareableVaults.map((v) => `<option value="${esc(v.name)}">${esc(v.name)}</option>`).join('');
   $('github-load').disabled = !shareableVaults.length;
@@ -1156,15 +1161,15 @@ $('sess-share-full').onchange = () => act(async () => {
   S.sessions_sharing = r.sessions;
   toast(t('sessions.shareToastSaved'));
 });
-$('sync-provider').onchange = () => { const p = $('sync-provider').value; $('sync-folder-row').hidden = p === 'local'; renderSyncSuggestions(p, S.sync.suggested_folders); };
+$('sync-provider').onchange = () => { const p = $('sync-provider').value; $('sync-folder-row').hidden = p === 'local'; $('sync-vault-row').hidden = p === 'local'; renderSyncSuggestions(p, S.sync.suggested_folders); };
 $('sync-save').onclick = () => act(async () => {
   const provider = $('sync-provider').value;
-  const r = await api('POST', '/api/sync', { provider, folder: provider === 'local' ? null : $('sync-folder').value, device: $('sync-device').value });
+  const r = await api('POST', '/api/sync', { provider, folder: provider === 'local' ? null : $('sync-folder').value, vault: provider === 'local' ? null : $('sync-vault').value, device: $('sync-device').value });
   toast(provider === 'local' ? t('sync.localToast') : t('sync.providerToast', { folder: r.sync.folder }));
 });
 $('sync-run').onclick = () => act(async () => {
   const provider = $('sync-provider').value;
-  await api('POST', '/api/sync', { provider, folder: provider === 'local' ? null : $('sync-folder').value, device: $('sync-device').value });
+  await api('POST', '/api/sync', { provider, folder: provider === 'local' ? null : $('sync-folder').value, vault: provider === 'local' ? null : $('sync-vault').value, device: $('sync-device').value });
   const { result } = await api('POST', '/api/sync/run', {});
   if (result.status === 'ok' || result.status === 'local-only') toast(t('sync.runDone', { pushed: result.pushed.length, pulled: result.pulled.length, conflicts: result.conflicts.length }));
   else toast(t('sync.runStatus', { status: result.status }));

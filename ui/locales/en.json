@@ -238,6 +238,8 @@
   "sync.provider.gdrive": "Drive snapshot",
   "sync.provider.icloud": "iCloud folder",
   "sync.provider.dropbox": "Dropbox folder",
+  "sync.vault": "Vault to sync",
+  "sync.chooseVault": "Choose a public vault",
   "sync.device": "This device",
   "sync.devicePlaceholder": "e.g. laptop",
   "sync.syncedFolder": "Synced folder",

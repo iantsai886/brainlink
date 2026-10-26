@@ -238,6 +238,8 @@
   "sync.provider.gdrive": "Snapshot do Drive",
   "sync.provider.icloud": "Pasta do iCloud",
   "sync.provider.dropbox": "Pasta do Dropbox",
+  "sync.vault": "Caderno para sincronizar",
+  "sync.chooseVault": "Escolha um caderno público",
   "sync.device": "Este dispositivo",
   "sync.devicePlaceholder": "por exemplo, portátil",
   "sync.syncedFolder": "Pasta sincronizada",

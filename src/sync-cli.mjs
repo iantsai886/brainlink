@@ -17,11 +17,12 @@ function containsPath(parent, child) {
 export async function runSync(cfg, env = process.env) {
   const settings = syncSettings(cfg);
   const eligibleVaults = (cfg.vaults || []).filter((v) => !v.private);
-  const brain = eligibleVaults.find((v) => v.name === SYNC_VAULT)
-    || (eligibleVaults.length === 1 ? eligibleVaults[0] : null);
+  const brain = settings.vault
+    ? eligibleVaults.find((v) => v.name === settings.vault)
+    : eligibleVaults.find((v) => v.name === SYNC_VAULT) || (eligibleVaults.length === 1 ? eligibleVaults[0] : null);
   if (settings.provider !== 'local') {
     if (!brain) {
-      const status = eligibleVaults.length ? 'vault-ambiguous' : 'vault-required';
+      const status = settings.vault ? 'vault-unavailable' : eligibleVaults.length ? 'vault-ambiguous' : 'vault-required';
       await logActivity(env, { tool: 'sync', ok: false, status });
       return { status, pushed: [], pulled: [], conflicts: [], snapshot: null, sessions: 0, provider: settings.provider };
     }

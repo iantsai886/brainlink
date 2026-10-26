@@ -28,6 +28,14 @@ test('local only is the default and syncs nothing', async () => {
   assert.throws(() => chooseSync({}, { provider: 'gdrive', folder: 'rel/path' }));
 });
 
+test('sync settings accept a named public vault and refuse an unknown or private vault', () => {
+  const cfg = { vaults: [{ name: 'Work', private: false }, { name: 'Personal', private: true }] };
+  const folder = path.resolve('Drive');
+  assert.equal(chooseSync(cfg, { provider: 'gdrive', folder, vault: 'Work' }).sync.vault, 'Work');
+  assert.throws(() => chooseSync(cfg, { provider: 'gdrive', folder, vault: 'Missing' }), /existing public vault/);
+  assert.throws(() => chooseSync(cfg, { provider: 'gdrive', folder, vault: 'Personal' }), /existing public vault/);
+});
+
 for (const p of ['gdrive', 'icloud', 'dropbox']) test(`${p}: push then pull round trip`, async () => {
   const f = await tmp(), store = freshStore();
   await store.write({ vault: 'brain', path: 'P/a.md', body: 'hello', frontmatter: { tags: ['t'] } }, { expected_etag: '' });

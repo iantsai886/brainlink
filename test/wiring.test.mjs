@@ -70,6 +70,22 @@ test('runSync: sends and receives real Markdown through the configured public va
   assert.equal(await readFile(path.join(vault, 'Local note.md'), 'utf8'), '# Local note\nSaved in the actual vault.\n', 'the source file remains intact');
 });
 
+test('runSync: explicit vault choice selects one public vault and leaves other vaults untouched', async () => {
+  const env = { BRAINLINK_HOME: await tmp('sync-selected-home') };
+  const personal = await tmp('sync-selected-personal'); const work = await tmp('sync-selected-work');
+  const folder = await tmp('sync-selected-target');
+  await writeFile(path.join(personal, 'Personal.md'), 'private to the personal vault');
+  await writeFile(path.join(work, 'Work.md'), 'belongs to the selected work vault');
+  const cfg = normalize({
+    vaults: [{ name: 'Personal', path: personal }, { name: 'Work', path: work }],
+    sync: { provider: 'gdrive', folder, vault: 'Work', device: 'laptop' },
+  });
+  const r = await runSync(cfg, env);
+  assert.equal(r.status, 'ok');
+  assert.deepEqual(r.pushed, ['Work.md']);
+  await assert.rejects(readFile(path.join(folder, 'BrainLink', 'notes', 'Personal.md')));
+});
+
 test('runSync: refuses an ambiguous vault and a target inside the selected vault', async () => {
   const env = { BRAINLINK_HOME: await tmp('sync-guard-home') };
   const one = await tmp('sync-guard-one'); const two = await tmp('sync-guard-two');

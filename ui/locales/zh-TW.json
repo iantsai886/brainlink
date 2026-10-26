@@ -238,6 +238,8 @@
   "sync.provider.gdrive": "Drive 快照",
   "sync.provider.icloud": "iCloud 資料夾",
   "sync.provider.dropbox": "Dropbox 資料夾",
+  "sync.vault": "要同步的資料庫",
+  "sync.chooseVault": "選擇一個公開資料庫",
   "sync.device": "這台裝置",
   "sync.devicePlaceholder": "例如：筆電",
   "sync.syncedFolder": "同步資料夾",

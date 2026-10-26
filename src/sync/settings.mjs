@@ -18,7 +18,7 @@ export const PROVIDER_LABELS_I18N = {
 };
 export function providerLabel(provider, locale = 'en') { return (PROVIDER_LABELS_I18N[locale] || PROVIDER_LABELS_I18N.en)[provider] || provider; }
 
-export function defaultSync() { return { provider: 'local', folder: null, device: hostname().split('.')[0] || 'device' }; }
+export function defaultSync() { return { provider: 'local', folder: null, vault: null, device: hostname().split('.')[0] || 'device' }; }
 
 export function syncSettings(cfg = {}) { return { ...defaultSync(), ...(cfg.sync || {}) }; }
 
@@ -43,10 +43,11 @@ export function suggestFolders(home = homedir()) {
 }
 
 // First-run / settings choice. Returns a new config; caller saves it with saveConfig().
-export function chooseSync(cfg, { provider = 'local', folder = null, device } = {}) {
-  const s = { ...syncSettings(cfg), provider, folder: provider === 'local' ? null : folder, ...(device ? { device } : {}) };
+export function chooseSync(cfg, { provider = 'local', folder = null, vault, device } = {}) {
+  const s = { ...syncSettings(cfg), provider, folder: provider === 'local' ? null : folder, ...(vault !== undefined ? { vault: vault || null } : {}), ...(device ? { device } : {}) };
   const errors = validateSync(s);
   if (errors.length) throw new Error(errors.join('; '));
+  if (s.vault && !(cfg.vaults || []).some((v) => v.name === s.vault && !v.private)) throw new Error('sync.vault must name an existing public vault');
   return { ...cfg, sync: s };
 }
 
