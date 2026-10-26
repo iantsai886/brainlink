@@ -46,6 +46,9 @@ jobs:
       - name: Check out repository
         uses: actions/checkout@v4
 
+      - name: Install production dependencies
+        run: npm ci --omit=dev
+
       - name: Install Inno Setup
         run: choco install innosetup --yes --no-progress
 
@@ -58,8 +61,13 @@ jobs:
         run: |
           $node = Join-Path $PWD 'build/windows/stage/node/node.exe'
           $app = Join-Path $PWD 'build/windows/stage/app/bin/brainlink.mjs'
+          $appRoot = Join-Path $PWD 'build/windows/stage/app'
           $version = & $node $app --version
           if ($version -ne (Get-Content package.json | ConvertFrom-Json).version) { throw "Staged runtime failed: $version" }
+          if (-not (Test-Path (Join-Path $appRoot 'skills/brainlink-session-closeout/SKILL.md'))) { throw 'Staged portable skill is missing' }
+          Push-Location $appRoot
+          try { & $node --input-type=module -e "await import('./src/connectors.mjs')"; if ($LASTEXITCODE -ne 0) { throw 'Staged connector could not load its YAML runtime' } }
+          finally { Pop-Location }
 
       - name: Install, run and uninstall Windows package
         shell: pwsh
@@ -99,6 +107,9 @@ jobs:
       - name: Check out repository
         uses: actions/checkout@v4
 
+      - name: Install production dependencies
+        run: npm ci --omit=dev
+
       - name: Build universal package with pinned Node.js
         run: bash packaging/macos/build-pkg.sh
 
@@ -110,6 +121,9 @@ jobs:
           test -n "$app"
           resources="${app%/app/bin/brainlink.mjs}"
           test "$("$resources/node/bin/node" "$app" --version)" = "$(node -p "require('./package.json').version")"
+          app_root="${app%/bin/brainlink.mjs}"
+          test -f "$app_root/skills/brainlink-session-closeout/SKILL.md"
+          (cd "$app_root" && "$resources/node/bin/node" --input-type=module -e "await import('./src/connectors.mjs')")
 
       - name: Upload installer artifact
         uses: actions/upload-artifact@v4
@@ -127,6 +141,9 @@ jobs:
       - name: Check out repository
         uses: actions/checkout@v4
 
+      - name: Install production dependencies
+        run: npm ci --omit=dev
+
       - name: Build x64 and arm64 packages with pinned Node.js
         run: bash packaging/linux/build-linux.sh
 
@@ -134,6 +151,8 @@ jobs:
         run: |
           sudo dpkg -i dist/brainlink_*_amd64.deb
           test "$(brainlink --version)" = "$(node -p "require('./package.json').version")"
+          test -f /opt/brainlink/app/skills/brainlink-session-closeout/SKILL.md
+          /opt/brainlink/node/bin/node --input-type=module -e "await import('/opt/brainlink/app/src/connectors.mjs')"
           mkdir -p "$RUNNER_TEMP/brainlink-smoke-vault"
           BRAINLINK_HOME="$RUNNER_TEMP/brainlink-smoke-home" brainlink init --vault "$RUNNER_TEMP/brainlink-smoke-vault" --name Smoke
           sudo dpkg -r brainlink

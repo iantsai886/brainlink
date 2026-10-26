@@ -29,6 +29,22 @@ test('every native installer bundles all production dependencies and portable Br
   const macZipTest = await read('packaging/macos/test-zip.sh');
   assert.match(macZipTest, /app\/node_modules\/yaml\/dist\/index\.js/, 'the macOS package smoke test must check a loadable YAML runtime');
   assert.match(macZipTest, /app\/skills\/brainlink-session-closeout\/SKILL\.md/, 'the macOS package smoke test must check a shipped skill');
+
+  const workflow = await read('.github/workflows/ci.yml');
+  const packageJobs = ['windows-package:', 'macos-package:', 'linux-package:'];
+  for (const jobName of packageJobs) {
+    const jobStart = workflow.indexOf(`  ${jobName}`);
+    assert.notEqual(jobStart, -1, `CI workflow must include ${jobName}`);
+    const nextJob = packageJobs
+      .filter((candidate) => candidate !== jobName)
+      .map((candidate) => workflow.indexOf(`\n  ${candidate}`, jobStart + 2))
+      .filter((index) => index !== -1)
+      .sort((a, b) => a - b)[0] ?? -1;
+    const job = workflow.slice(jobStart, nextJob === -1 ? undefined : nextJob);
+    assert.match(job, /npm ci --omit=dev/, `${jobName} must install production runtime dependencies before building`);
+    assert.match(job, /skills\/brainlink-session-closeout\/SKILL\.md/, `${jobName} must smoke-test the packaged Agent Skill`);
+    assert.match(job, /connectors\.mjs/, `${jobName} must smoke-test the packaged YAML connector runtime`);
+  }
 });
 
 test('the staged connector loads with the bundled YAML package outside the checkout', async () => {
