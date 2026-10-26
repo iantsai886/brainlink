@@ -28,6 +28,7 @@ import { buildGraph3D, noteDetail3D } from './graph3d.mjs';
 import { snapshotSettings, chooseSnapshot, suggestSnapshotFolder, clearSnapshot, startSnapshotWatcher, writeSnapshotOnce, loadSnapshotStatus, saveSnapshotStatus } from './snapshot.mjs';
 import { listHandoffs } from './writes.mjs';
 import { backupOnce, verifyBackup, restoreBackupToEmpty, loadBackupStatus, saveBackupStatus, pruneBackups } from './backup.mjs';
+import { createOrReadBackupRecoveryKey, requireBackupKey } from './backup-key.mjs';
 import { fileSessionSummary } from './sessions/filing.mjs';
 import { isStartupEnabled, setStartupEnabled } from './startup.mjs';
 import { recommendSessionVault } from './sessions/routing.mjs';
@@ -223,13 +224,14 @@ export async function startSetup(opts = {}) {
     if (!cfg.backup?.folder) throw new Error('Choose a backup destination first.');
     backupRunning = true;
     try {
-      const result = await backupOnce(cfg.vaults, cfg.backup.folder, new Date(), await rsiBackupArtifacts());
-      const check = await verifyBackup(result.folder);
+      const encryptionKey = cfg.backup.encrypted ? await requireBackupKey(env) : null;
+      const result = await backupOnce(cfg.vaults, cfg.backup.folder, new Date(), await rsiBackupArtifacts(), { encryptionKey });
+      const check = await verifyBackup(result.folder, encryptionKey);
       if (!check.ok) throw new Error(`Backup verification failed: ${check.errors.join('; ')}`);
       let retention;
-      try { retention = await pruneBackups(cfg.backup.folder, cfg.backup.keepCount ?? 0, result.folder); }
+      try { retention = await pruneBackups(cfg.backup.folder, cfg.backup.keepCount ?? 0, result.folder, encryptionKey); }
       catch { retention = { retained_count: null, removed_count: 0, warning: 'The new backup is verified, but old copies could not be cleaned up.' }; }
-      backupStatus = { ok: true, ...result, ...retention, at: new Date().toISOString() };
+      backupStatus = { ok: true, ...result, encrypted: Boolean(encryptionKey), ...retention, at: new Date().toISOString() };
       await saveBackupStatus(backupStateFile, backupStatus);
       return backupStatus;
     } catch (error) {
@@ -1134,11 +1136,13 @@ export async function startSetup(opts = {}) {
       return { ok: true };
     },
     'POST /api/backup/pick-folder': async () => { const p = await pickBackupFolder(); return p === undefined ? { path: null, unavailable: true } : { path: p }; },
+    'POST /api/backup/encryption-key': async () => createOrReadBackupRecoveryKey(env),
     'POST /api/backup/restore/pick-source': async () => { const p = await pickRestoreSourceFolder(); return p === undefined ? { path: null, unavailable: true } : { path: p }; },
     'POST /api/backup/restore/pick-destination': async () => { const p = await pickRestoreDestinationFolder(); return p === undefined ? { path: null, unavailable: true } : { path: p }; },
     'POST /api/backup': async (b) => {
       const cfg = await loadConfig(file);
-      const next = { ...cfg, backup: { enabled: Boolean(b.enabled), folder: b.folder || null, intervalHours: Number(b.intervalHours || 24), keepCount: Number(b.keepCount ?? cfg.backup.keepCount ?? 0) } };
+      const next = { ...cfg, backup: { enabled: Boolean(b.enabled), folder: b.folder || null, intervalHours: Number(b.intervalHours || 24), keepCount: Number(b.keepCount ?? cfg.backup.keepCount ?? 0), encrypted: Boolean(b.encrypted) } };
+      if (next.backup.encrypted && !await requireBackupKey(env)) throw new Error('Create a recovery key before enabling encrypted backups.');
       if (next.backup.enabled) await runBackup(next); // verify before enabling the schedule
       await saveConfig(next, file);
       refreshBackupTimer(next);
@@ -1168,7 +1172,8 @@ export async function startSetup(opts = {}) {
     'POST /api/startup': async (b) => ({ ok: true, enabled: await setStartupEnabled(Boolean(b.enabled), { env, home, os }) }),
     'POST /api/backup/restore': async (b) => {
       if (b.confirm !== true) throw new Error('Confirm restoring into an empty folder first.');
-      return { ok: true, ...(await restoreBackupToEmpty(String(b.backupFolder || ''), String(b.destination || ''))) };
+      const recoveryKey = b.recoveryKey ? String(b.recoveryKey) : await requireBackupKey(env).catch(() => null);
+      return { ok: true, ...(await restoreBackupToEmpty(String(b.backupFolder || ''), String(b.destination || ''), recoveryKey)) };
     },
     'POST /api/test': async (b) => {
       const cfg = normalize(await loadConfig(file));

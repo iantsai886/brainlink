@@ -1,13 +1,40 @@
 // Local vault backup, deliberately separate from the filtered cloud-sharing snapshot.
 // Never follows symlinks, overwrites an earlier backup, or writes inside a source vault.
-import { createHash, randomBytes } from 'node:crypto';
+import { createCipheriv, createDecipheriv, createHash, randomBytes } from 'node:crypto';
 import { lstat, realpath, readdir, readFile, writeFile, mkdir, rename, unlink, rm } from 'node:fs/promises';
 import { setTimeout as delay } from 'node:timers/promises';
 import path from 'node:path';
+import { parseBackupKey } from './backup-key.mjs';
 
 const hash = (data) => createHash('sha256').update(data).digest('hex');
 const within = (parent, child) => child === parent || child.startsWith(parent + path.sep);
 const safeName = (name) => String(name).replace(/[^a-zA-Z0-9_-]+/g, '-').replace(/^-+|-+$/g, '').slice(0, 50) || 'vault';
+
+function encryptBackupData(data, key) {
+  const iv = randomBytes(12);
+  const cipher = createCipheriv('aes-256-gcm', parseBackupKey(key), iv);
+  const encrypted = Buffer.concat([cipher.update(data), cipher.final()]);
+  return Buffer.concat([Buffer.from('BLG1'), iv, cipher.getAuthTag(), encrypted]);
+}
+
+function decryptBackupData(data, key) {
+  if (data.length < 32 || data.subarray(0, 4).toString('ascii') !== 'BLG1') throw new Error('Encrypted backup data is incomplete or uses an unsupported format.');
+  try {
+    const decipher = createDecipheriv('aes-256-gcm', parseBackupKey(key), data.subarray(4, 16));
+    decipher.setAuthTag(data.subarray(16, 32));
+    return Buffer.concat([decipher.update(data.subarray(32)), decipher.final()]);
+  } catch { throw new Error('Could not unlock the encrypted backup. Check the recovery key or backup file.'); }
+}
+
+async function isEncryptedBackup(root) {
+  try { const stat = await lstat(path.join(root, 'manifest.enc')); return stat.isFile() && !stat.isSymbolicLink(); }
+  catch { return false; }
+}
+
+async function readBackupManifest(root, encryptionKey) {
+  if (await isEncryptedBackup(root)) return JSON.parse(decryptBackupData(await readFile(path.join(root, 'manifest.enc')), encryptionKey).toString('utf8'));
+  return JSON.parse(await readFile(path.join(root, 'manifest.json'), 'utf8'));
+}
 
 export async function loadBackupStatus(file) {
   try {
@@ -52,7 +79,8 @@ async function filesUnder(root, dir = root, out = []) {
   return out;
 }
 
-export async function backupOnce(vaults, destination, now = new Date(), artifacts = []) {
+export async function backupOnce(vaults, destination, now = new Date(), artifacts = [], options = {}) {
+  const encryptionKey = options.encryptionKey ? parseBackupKey(options.encryptionKey) : null;
   if (!Array.isArray(vaults) || !vaults.length) throw new Error('Choose at least one vault to back up.');
   if (!destination || !path.isAbsolute(destination)) throw new Error('Choose an absolute backup destination.');
   const destStat = await lstat(destination);
@@ -85,23 +113,25 @@ export async function backupOnce(vaults, destination, now = new Date(), artifact
       manifest.vaults.push({ name: v.name, folder });
       for (const file of await filesUnder(v.root)) {
         const data = await readFile(file.full);
-        const target = path.join(stagingDir, 'vaults', folder, ...file.rel.split('/'));
+        const stored = encryptionKey ? `objects/${randomBytes(16).toString('hex')}.bin` : `vaults/${folder}/${file.rel}`;
+        const target = path.join(stagingDir, ...stored.split('/'));
         await mkdir(path.dirname(target), { recursive: true });
-        await writeFile(target, data, { flag: 'wx' });
-        manifest.files.push({ vault: v.name, path: file.rel, bytes: data.length, sha256: hash(data), stored: `vaults/${folder}/${file.rel}` });
+        await writeFile(target, encryptionKey ? encryptBackupData(data, encryptionKey) : data, { flag: 'wx' });
+        manifest.files.push({ vault: v.name, path: file.rel, bytes: data.length, sha256: hash(data), stored });
       }
     }
     for (const artifact of artifacts) {
       const name = String(artifact?.name || '');
       const data = Buffer.isBuffer(artifact.data) ? artifact.data : Buffer.from(String(artifact.data ?? ''));
-      const stored = 'artifacts/' + name;
+      const stored = encryptionKey ? `objects/${randomBytes(16).toString('hex')}.bin` : 'artifacts/' + name;
       const target = path.resolve(stagingDir, ...stored.split('/'));
       if (!within(stagingDir, target)) throw new Error('Invalid backup artifact path.');
       await mkdir(path.dirname(target), { recursive: true });
-      await writeFile(target, data, { flag: 'wx' });
+      await writeFile(target, encryptionKey ? encryptBackupData(data, encryptionKey) : data, { flag: 'wx' });
       manifest.artifacts.push({ path: name, bytes: data.length, sha256: hash(data), stored });
     }
-    await writeFile(path.join(stagingDir, 'manifest.json'), JSON.stringify(manifest, null, 2) + '\n', { flag: 'wx' });
+    const manifestData = Buffer.from(JSON.stringify(manifest, null, 2) + '\n');
+    await writeFile(path.join(stagingDir, encryptionKey ? 'manifest.enc' : 'manifest.json'), encryptionKey ? encryptBackupData(manifestData, encryptionKey) : manifestData, { flag: 'wx' });
     await rename(stagingDir, backupDir);
   } catch (error) {
     // The staging path is a random, direct child of the already-verified destination.
@@ -109,16 +139,17 @@ export async function backupOnce(vaults, destination, now = new Date(), artifact
     if (path.dirname(stagingDir) === dest && within(dest, stagingDir)) await rm(stagingDir, { recursive: true, force: true }).catch(() => {});
     throw error;
   }
-  return { folder: backupDir, vault_count: manifest.vaults.length, file_count: manifest.files.length + manifest.artifacts.length };
+  return { folder: backupDir, vault_count: manifest.vaults.length, file_count: manifest.files.length + manifest.artifacts.length, encrypted: Boolean(encryptionKey) };
 }
 
-export async function verifyBackup(backupDir) {
-  const manifest = JSON.parse(await readFile(path.join(backupDir, 'manifest.json'), 'utf8'));
-  if (manifest.format !== 'brainlink-backup-v1' || !Array.isArray(manifest.files)) throw new Error('Unrecognized backup manifest.');
+export async function verifyBackup(backupDir, encryptionKey = null) {
   const root = await realpath(backupDir);
+  const encrypted = await isEncryptedBackup(root);
+  const manifest = await readBackupManifest(root, encryptionKey);
+  if (manifest.format !== 'brainlink-backup-v1' || !Array.isArray(manifest.files)) throw new Error('Unrecognized backup manifest.');
   const errors = [];
   for (const file of manifest.files) {
-    if (!file.stored || path.isAbsolute(file.stored) || file.stored.split('/').some((part) => !part || part === '.' || part === '..')) {
+    if (!file.stored || path.isAbsolute(file.stored) || file.stored.split('/').some((part) => !part || part === '.' || part === '..') || (encrypted ? !/^objects\/[a-f0-9]{32}\.bin$/.test(file.stored) : !file.stored.startsWith('vaults/'))) {
       errors.push('Invalid backup file path'); continue;
     }
     const full = path.resolve(root, ...file.stored.split('/'));
@@ -127,18 +158,20 @@ export async function verifyBackup(backupDir) {
       const st = await lstat(full);
       if (!st.isFile() || st.isSymbolicLink()) { errors.push(`Unsafe file: ${file.stored}`); continue; }
       if (!within(root, await realpath(full))) { errors.push(`Unsafe file: ${file.stored}`); continue; }
-      const data = await readFile(full);
+      const raw = await readFile(full);
+      const data = encrypted ? decryptBackupData(raw, encryptionKey) : raw;
       if (data.length !== file.bytes || hash(data) !== file.sha256) errors.push(`Hash mismatch: ${file.stored}`);
     } catch { errors.push(`Missing file: ${file.stored}`); }
   }
   for (const artifact of manifest.artifacts || []) {
-    if (typeof artifact.path !== 'string' || artifact.path.split('/').some(part => !part || part === '.' || part === '..' || part.includes('\\')) || artifact.stored !== 'artifacts/' + artifact.path) { errors.push('Invalid backup artifact path'); continue; }
+    if (typeof artifact.path !== 'string' || artifact.path.split('/').some(part => !part || part === '.' || part === '..' || part.includes('\\')) || (encrypted ? !/^objects\/[a-f0-9]{32}\.bin$/.test(artifact.stored) : artifact.stored !== 'artifacts/' + artifact.path)) { errors.push('Invalid backup artifact path'); continue; }
     const full = path.resolve(root, ...artifact.stored.split('/'));
     if (!within(root, full)) { errors.push('Invalid backup artifact path'); continue; }
     try {
       const st = await lstat(full);
       if (!st.isFile() || st.isSymbolicLink() || !within(root, await realpath(full))) { errors.push('Unsafe backup artifact'); continue; }
-      const data = await readFile(full);
+      const raw = await readFile(full);
+      const data = encrypted ? decryptBackupData(raw, encryptionKey) : raw;
       if (data.length !== artifact.bytes || hash(data) !== artifact.sha256) errors.push('Backup artifact hash mismatch: ' + artifact.path);
     } catch { errors.push('Missing backup artifact: ' + artifact.path); }
   }
@@ -146,7 +179,7 @@ export async function verifyBackup(backupDir) {
 }
 
 async function containsOnlyManifestFiles(root, manifest) {
-  const files = new Set(['manifest.json', ...manifest.files.map((file) => file.stored), ...(manifest.artifacts || []).map((file) => file.stored)]);
+  const files = new Set([(await isEncryptedBackup(root)) ? 'manifest.enc' : 'manifest.json', ...manifest.files.map((file) => file.stored), ...(manifest.artifacts || []).map((file) => file.stored)]);
   const directories = new Set();
   for (const file of files) {
     let parent = path.posix.dirname(file);
@@ -170,7 +203,7 @@ async function containsOnlyManifestFiles(root, manifest) {
 // Retention is opt-in (keepCount=0 means unlimited). Delete only older, complete,
 // hash-verified BrainLink backups directly inside the chosen destination. Unknown,
 // damaged, symlinked, and partial folders are never counted or removed.
-export async function pruneBackups(destination, keepCount = 0, newestFolder = null) {
+export async function pruneBackups(destination, keepCount = 0, newestFolder = null, encryptionKey = null) {
   if (!Number.isInteger(keepCount) || keepCount < 0 || keepCount > 365) throw new Error('Backup retention must be 0 (unlimited) or 1–365.');
   if (keepCount === 0) return { retained_count: null, removed_count: 0, warning: null };
   const destStat = await lstat(destination);
@@ -184,9 +217,9 @@ export async function pruneBackups(destination, keepCount = 0, newestFolder = nu
     try {
       const stat = await lstat(full);
       if (!stat.isDirectory() || stat.isSymbolicLink() || !within(dest, await realpath(full))) continue;
-      const checked = await verifyBackup(full);
+      const checked = await verifyBackup(full, encryptionKey);
       if (!checked.ok) continue;
-      const manifest = JSON.parse(await readFile(path.join(full, 'manifest.json'), 'utf8'));
+      const manifest = await readBackupManifest(full, encryptionKey);
       if (!await containsOnlyManifestFiles(full, manifest)) continue;
       const created = Date.parse(manifest.created_at);
       if (!Number.isFinite(created)) continue;
@@ -210,9 +243,9 @@ export async function pruneBackups(destination, keepCount = 0, newestFolder = nu
       // Re-check immediately before removal. A changed backup is preserved.
       const stat = await lstat(item.full);
       if (!stat.isDirectory() || stat.isSymbolicLink() || !within(dest, await realpath(item.full))) continue;
-      const checked = await verifyBackup(item.full);
+      const checked = await verifyBackup(item.full, encryptionKey);
       if (!checked.ok) continue;
-      const manifest = JSON.parse(await readFile(path.join(item.full, 'manifest.json'), 'utf8'));
+      const manifest = await readBackupManifest(item.full, encryptionKey);
       if (!await containsOnlyManifestFiles(item.full, manifest)) continue;
       await rm(item.full, { recursive: true, force: false });
       removed++;
@@ -225,8 +258,8 @@ export async function pruneBackups(destination, keepCount = 0, newestFolder = nu
 
 // Recovery is deliberately constrained to a new empty directory. Never restore in place or
 // overwrite a live vault; the user can inspect the copy before switching any config paths.
-export async function restoreBackupToEmpty(backupDir, destination) {
-  const check = await verifyBackup(backupDir);
+export async function restoreBackupToEmpty(backupDir, destination, encryptionKey = null) {
+  const check = await verifyBackup(backupDir, encryptionKey);
   if (!check.ok) throw new Error(`Backup failed verification: ${check.errors.join('; ')}`);
   const source = await realpath(backupDir);
   const stat = await lstat(destination);
@@ -234,7 +267,8 @@ export async function restoreBackupToEmpty(backupDir, destination) {
   const targetRoot = await realpath(destination);
   if (within(source, targetRoot) || within(targetRoot, source)) throw new Error('Restore destination must be separate from the backup.');
   if ((await readdir(targetRoot)).length) throw new Error('Restore destination must be empty.');
-  const manifest = JSON.parse(await readFile(path.join(source, 'manifest.json'), 'utf8'));
+  const encrypted = await isEncryptedBackup(source);
+  const manifest = await readBackupManifest(source, encryptionKey);
   const folders = new Map();
   for (const v of manifest.vaults) {
     if (typeof v.name !== 'string' || typeof v.folder !== 'string' || !/^\d+-[a-zA-Z0-9_-]+$/.test(v.folder) || folders.has(v.name)) throw new Error('Invalid vault mapping in backup.');
@@ -245,19 +279,21 @@ export async function restoreBackupToEmpty(backupDir, destination) {
     if (!folder || typeof file.path !== 'string' || path.isAbsolute(file.path) ||
         file.path.split('/').some((part) => !part || part === '.' || part === '..' || part.includes('\\'))) throw new Error('Invalid file path in backup.');
     const expected = `vaults/${folder}/${file.path}`;
-    if (file.stored !== expected) throw new Error('Backup file mapping does not match its vault.');
+    if (encrypted ? !/^objects\/[a-f0-9]{32}\.bin$/.test(file.stored) : file.stored !== expected) throw new Error('Backup file mapping does not match its vault.');
   }
   for (const artifact of manifest.artifacts || []) {
-    if (typeof artifact.path !== 'string' || artifact.path.split('/').some(part => !part || part === '.' || part === '..' || part.includes('\\')) || artifact.stored !== 'artifacts/' + artifact.path) throw new Error('Invalid backup artifact mapping.');
+    if (typeof artifact.path !== 'string' || artifact.path.split('/').some(part => !part || part === '.' || part === '..' || part.includes('\\')) || (encrypted ? !/^objects\/[a-f0-9]{32}\.bin$/.test(artifact.stored) : artifact.stored !== 'artifacts/' + artifact.path)) throw new Error('Invalid backup artifact mapping.');
   }
   for (const file of manifest.files) {
-    const data = await readFile(path.join(source, ...file.stored.split('/')));
+    const raw = await readFile(path.join(source, ...file.stored.split('/')));
+    const data = encrypted ? decryptBackupData(raw, encryptionKey) : raw;
     const target = path.join(targetRoot, folders.get(file.vault), ...file.path.split('/'));
     await mkdir(path.dirname(target), { recursive: true });
     await writeFile(target, data, { flag: 'wx' });
   }
   for (const artifact of manifest.artifacts || []) {
-    const data = await readFile(path.join(source, ...artifact.stored.split('/')));
+    const raw = await readFile(path.join(source, ...artifact.stored.split('/')));
+    const data = encrypted ? decryptBackupData(raw, encryptionKey) : raw;
     const target = path.join(targetRoot, 'BrainLink', ...artifact.path.split('/'));
     await mkdir(path.dirname(target), { recursive: true });
     await writeFile(target, data, { flag: 'wx' });

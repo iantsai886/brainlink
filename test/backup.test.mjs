@@ -5,6 +5,7 @@ import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { backupOnce, verifyBackup, restoreBackupToEmpty, loadBackupStatus, saveBackupStatus, pruneBackups } from '../src/backup.mjs';
 import { normalize, saveConfig } from '../src/config.mjs';
+import { createOrReadBackupRecoveryKey } from '../src/backup-key.mjs';
 import { startSetup } from '../src/setup.mjs';
 
 const tmp = (name) => mkdtemp(path.join(tmpdir(), `bl-backup-${name}-`));
@@ -31,6 +32,37 @@ test('backup rejects a destination within a vault', async () => {
   const nested = path.join(root, 'Backups');
   await mkdir(nested);
   await assert.rejects(backupOnce([{ name: 'Personal', path: root }], nested), /outside every vault/);
+});
+
+test('encrypted backups hide file names and contents, verify the key, and restore with the recovery key', async () => {
+  const root = await tmp('encrypted-source'), dest = await tmp('encrypted-destination'), recovered = await tmp('encrypted-restore');
+  await writeFile(path.join(root, 'Private Name — secret.md'), 'UNIQUE_PRIVATE_CONTENT_7kL4');
+  const key = (await createOrReadBackupRecoveryKey({ BRAINLINK_HOME: await tmp('encrypted-key-home') })).key;
+  const result = await backupOnce([{ name: 'Personal Vault', path: root }], dest, new Date('2026-10-24T00:00:00Z'), [], { encryptionKey: key });
+  assert.equal(result.encrypted, true);
+  assert.deepEqual((await readdir(result.folder)).sort(), ['manifest.enc', 'objects']);
+  const serialized = (await readFile(path.join(result.folder, 'manifest.enc'))).toString('utf8') + JSON.stringify(await readdir(path.join(result.folder, 'objects')));
+  assert.doesNotMatch(serialized, /Private Name|UNIQUE_PRIVATE_CONTENT|Personal Vault/);
+  await assert.rejects(verifyBackup(result.folder), /recovery key/);
+  const wrongKey = (await createOrReadBackupRecoveryKey({ BRAINLINK_HOME: await tmp('wrong-backup-key-home') })).key;
+  await assert.rejects(verifyBackup(result.folder, wrongKey), /recovery key/);
+  assert.equal((await verifyBackup(result.folder, key)).ok, true);
+  const restored = await restoreBackupToEmpty(result.folder, recovered, key);
+  assert.equal(restored.file_count, 1);
+  assert.equal(await readFile(path.join(recovered, '1-Personal-Vault', 'Private Name — secret.md'), 'utf8'), 'UNIQUE_PRIVATE_CONTENT_7kL4');
+});
+
+test('encrypted retention needs the local key and preserves encrypted copies when the key is wrong', async () => {
+  const root = await tmp('encrypted-retention-source'), dest = await tmp('encrypted-retention-dest');
+  await writeFile(path.join(root, 'Private.md'), 'fixture');
+  const key = (await createOrReadBackupRecoveryKey({ BRAINLINK_HOME: await tmp('encrypted-retention-key') })).key;
+  const one = await backupOnce([{ name: 'Personal', path: root }], dest, new Date('2026-10-20T00:00:00Z'), [], { encryptionKey: key });
+  const two = await backupOnce([{ name: 'Personal', path: root }], dest, new Date('2026-10-21T00:00:00Z'), [], { encryptionKey: key });
+  const wrongKey = (await createOrReadBackupRecoveryKey({ BRAINLINK_HOME: await tmp('wrong-encrypted-retention-key') })).key;
+  assert.equal((await pruneBackups(dest, 1, two.folder, wrongKey)).removed_count, 0);
+  assert.equal((await readdir(one.folder)).length, 2);
+  assert.equal((await pruneBackups(dest, 1, two.folder, key)).removed_count, 1);
+  assert.equal((await verifyBackup(two.folder, key)).ok, true);
 });
 
 test('verified backup restores to an empty folder without touching the original', async () => {
@@ -141,6 +173,7 @@ test('authenticated Setup enables scheduled backup only after a verified first c
   });
   try {
     assert.equal((await api('/api/backup', { enabled: true, folder: dest, intervalHours: 24 }, 'wrong')).status, 401);
+    assert.equal((await api('/api/backup/encryption-key', {}, 'wrong')).status, 401);
     assert.equal((await api('/api/backup/restore/pick-source', {}, 'wrong')).status, 401);
     assert.equal((await api('/api/backup/restore/pick-destination', {}, 'wrong')).status, 401);
     assert.deepEqual(await api('/api/backup/restore/pick-source').then((r) => r.json()), { path: 'C:\\Fictional\\BrainLink-Backup' });
@@ -149,21 +182,30 @@ test('authenticated Setup enables scheduled backup only after a verified first c
       method: 'POST', headers: { 'Content-Type': 'application/json', 'X-BrainLink-Token': app.token },
       body: JSON.stringify({ topics: ['agent memory'], signals: ['Agents lose context after handoff and repeat retrieval searches.'] }),
     });
-    const response = await api('/api/backup', { enabled: true, folder: dest, intervalHours: 24, keepCount: 30 });
+    const missingKey = await api('/api/backup', { enabled: true, folder: dest, intervalHours: 24, encrypted: true });
+    assert.equal(missingKey.status, 400, 'encryption cannot be enabled until the recovery key is created');
+    const keyResponse = await api('/api/backup/encryption-key');
+    assert.equal(keyResponse.status, 200);
+    const recoveryKey = (await keyResponse.json()).key;
+    assert.equal(recoveryKey.length, 43);
+    assert.equal((await api('/api/backup/encryption-key').then((r) => r.json())).created, false, 'the recovery key stays stable for scheduled backups');
+    const response = await api('/api/backup', { enabled: true, folder: dest, intervalHours: 24, keepCount: 30, encrypted: true });
     assert.equal(response.status, 200);
     const result = await response.json();
     assert.equal(result.backup.status.ok, true);
-    assert.equal((await verifyBackup(result.backup.status.folder)).ok, true);
+    assert.equal(result.backup.status.encrypted, true);
+    assert.equal((await verifyBackup(result.backup.status.folder, recoveryKey)).ok, true);
     const state = await fetch(`http://127.0.0.1:${app.port}/api/state`, { headers: { 'X-BrainLink-Token': app.token } }).then((r) => r.json());
     assert.equal(state.backup.enabled, true);
     assert.equal(state.backup.keepCount, 30);
+    assert.equal(state.backup.encrypted, true);
     assert.equal(state.backup.status.file_count, 2, 'backup includes the vault note and RSI discovery settings');
     let secondVerified = false;
     for (let i = 0; i < 120 && !secondVerified; i++) {
       for (const folder of await readdir(dest)) {
         const full = path.join(dest, folder);
         if (full === result.backup.status.folder) continue;
-        secondVerified = await verifyBackup(full).then((r) => r.ok, () => false);
+        secondVerified = await verifyBackup(full, recoveryKey).then((r) => r.ok, () => false);
         if (secondVerified) break;
       }
       if (!secondVerified) await new Promise((resolve) => setTimeout(resolve, 25));
@@ -172,7 +214,7 @@ test('authenticated Setup enables scheduled backup only after a verified first c
     await new Promise((resolve) => setTimeout(resolve, 650));
     assert.equal((await fetch(`http://127.0.0.1:${app.port}/health`)).status, 200, 'scheduled backup keeps the app running while idle');
     assert.equal((await api('/api/backup/restore', { backupFolder: result.backup.status.folder, destination: restore })).status, 400);
-    const restored = await api('/api/backup/restore', { backupFolder: result.backup.status.folder, destination: restore, confirm: true });
+    const restored = await api('/api/backup/restore', { backupFolder: result.backup.status.folder, destination: restore, confirm: true, recoveryKey });
     assert.equal(restored.status, 200);
     assert.match(await readFile(path.join(restore, '1-Personal', 'Private.md'), 'utf8'), /private fixture/);
     const discoveryCopy = JSON.parse(await readFile(path.join(restore, 'BrainLink', 'rsi', 'discovery.json'), 'utf8'));
@@ -190,12 +232,17 @@ test('restore UI provides separate localized folder pickers and retains explicit
   }
   assert.match(html, /\/api\/backup\/restore\/pick-source/);
   assert.match(html, /\/api\/backup\/restore\/pick-destination/);
+  assert.match(html, /\/api\/backup\/encryption-key/);
+  assert.match(html, /recoveryKey: \$\('backup-restore-key'\)\.value/);
+  assert.match(html, /encrypted: \$\('backup-encrypted'\)\.checked/);
   assert.match(html, /if \(!confirm\(t\('backup\.restoreConfirm'\)\)\) return/);
   for (const locale of ['en', 'zh-TW', 'pt']) {
     const catalog = JSON.parse(await readFile(new URL(`../ui/locales/${locale}.json`, import.meta.url), 'utf8'));
     assert.ok(catalog['backup.restorePickSource'], `${locale} source picker label`);
     assert.ok(catalog['backup.restorePickDestination'], `${locale} destination picker label`);
     assert.ok(catalog['backup.retentionHint'], `${locale} retention policy explanation`);
+    assert.ok(catalog['backup.encryptHint'], `${locale} encryption key warning`);
+    assert.ok(catalog['backup.keyCreated'], `${locale} recovery key receipt`);
   }
 });
 
