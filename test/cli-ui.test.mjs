@@ -21,15 +21,28 @@ async function launch(cmd, env) {
   // full URL) would.
   const child = spawn(process.execPath, [CLI, cmd, '--no-open'], { env: { ...env, BRAINLINK_SHOW_TOKEN: '1' } });
   let buf = '';
-  const url = await new Promise((resolve, reject) => {
-    child.stdout.on('data', (d) => {
-      buf += d;
-      const m = buf.match(/http:\/\/127\.0\.0\.1:(\d+)\/\?t=(\S+)/);
-      if (m) resolve({ port: m[1], token: m[2] });
+  let timer;
+  let url;
+  try {
+    url = await new Promise((resolve, reject) => {
+      child.stdout.on('data', (d) => {
+        buf += d;
+        const m = buf.match(/http:\/\/127\.0\.0\.1:(\d+)\/\?t=(\S+)/);
+        if (m) resolve({ port: m[1], token: m[2] });
+      });
+      child.once('error', reject);
+      child.once('exit', (code) => reject(new Error(`exited ${code} before printing a URL: ${buf}`)));
+      timer = setTimeout(() => reject(new Error(`no URL after 30s: ${buf}`)), 30_000);
     });
-    child.on('exit', (code) => reject(new Error(`exited ${code} before printing a URL: ${buf}`)));
-    setTimeout(() => reject(new Error(`no URL after 5s: ${buf}`)), 5000);
-  });
+  } catch (error) {
+    // A failed readiness check must not leave a hidden server running and interfere with later
+    // tests or a developer's next attempt. On Windows, wait for the spawned CLI to exit too.
+    if (!child.killed) child.kill();
+    await Promise.race([new Promise((resolve) => child.once('exit', resolve)), new Promise((resolve) => setTimeout(resolve, 1000))]);
+    throw error;
+  } finally {
+    clearTimeout(timer);
+  }
   const base = `http://127.0.0.1:${url.port}`;
   const api = (method, p, body) => fetch(base + p, { method, headers: { 'X-BrainLink-Token': url.token, 'Content-Type': 'application/json' }, body: body && JSON.stringify(body) });
   return { base, token: url.token, api, stop: () => child.kill() };

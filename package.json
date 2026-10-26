@@ -7,7 +7,7 @@
   "bin": { "brainlink": "bin/brainlink.mjs" },
   "dependencies": { "brainlink-store": "file:./vendor/brainlink-store" },
   "scripts": {
-    "test": "node --import ./test/_preload.mjs --test \"test/*.test.mjs\"",
+    "test": "node --import ./test/_preload.mjs --test --test-concurrency=1 \"test/*.test.mjs\"",
     "test:ui": "node --import ./test/_preload.mjs --test \"ui/app/test/*.test.mjs\"",
     "test:all": "npm test && npm run test:ui",
     "setup": "node bin/brainlink.mjs setup",

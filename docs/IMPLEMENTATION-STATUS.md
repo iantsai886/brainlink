@@ -105,6 +105,10 @@ Setup can run either of two built-in fictional retrieval suites for an RSI idea 
 
 `send_handoff` accepts an optional, checked Git checkpoint and shows it in the preview and saved handoff. The mailbox reader returns it as `reported`; the sender's checkout is not visible to BrainLink. The shared handoff Skill instructs the receiving agent to inspect its own repo, branch and dirty state, and never switch branches automatically. Local fictional tests reject URLs, paths, unsafe branch names, invalid SHAs, and out-of-range ahead counts. Live client pickup remains unverified.
 
+### Current verification and test-run reliability (2026-10-26)
+
+On the Windows development checkout at base commit `97e4ac4`, the serialized core suite passed 332 tests, with 0 failures and 6 platform/privilege-dependent skips; the UI suite passed 28/28. The first default parallel run showed transient backup and first-run CLI failures and stopped making progress. Those cases passed when isolated or run serially. To avoid test-load interference and orphaning a CLI server after a readiness timeout, `npm test` now runs one core test file at a time and the CLI UI test helper cleans up a child process when startup fails. This is test-run reliability work, not a product feature. This receipt does not verify live Claude Code ↔ Codex handoff, live GitHub access, a signed installer, installation on Ian's computer, or commercial readiness.
+
 ## Next engineering sequence
 
 1. Validate the append-only handoff lifecycle with a live Claude Code ↔ Codex handoff and retain receipts for pickup, updates, completion, and private-note non-disclosure. Claude Code CLI is not installed in the current environment.
