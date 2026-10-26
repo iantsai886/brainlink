@@ -145,6 +145,28 @@ export async function verifyBackup(backupDir) {
   return { ok: errors.length === 0, vault_count: manifest.vaults.length, file_count: manifest.files.length + (manifest.artifacts || []).length, errors };
 }
 
+async function containsOnlyManifestFiles(root, manifest) {
+  const files = new Set(['manifest.json', ...manifest.files.map((file) => file.stored), ...(manifest.artifacts || []).map((file) => file.stored)]);
+  const directories = new Set();
+  for (const file of files) {
+    let parent = path.posix.dirname(file);
+    while (parent !== '.') { directories.add(parent); parent = path.posix.dirname(parent); }
+  }
+  async function walk(dir, prefix = '') {
+    for (const entry of await readdir(dir, { withFileTypes: true })) {
+      const relative = prefix ? `${prefix}/${entry.name}` : entry.name;
+      const full = path.join(dir, entry.name);
+      const stat = await lstat(full);
+      if (stat.isSymbolicLink()) return false;
+      if (stat.isDirectory()) {
+        if (!directories.has(relative) || !await walk(full, relative)) return false;
+      } else if (!stat.isFile() || !files.has(relative)) return false;
+    }
+    return true;
+  }
+  return walk(root);
+}
+
 // Retention is opt-in (keepCount=0 means unlimited). Delete only older, complete,
 // hash-verified BrainLink backups directly inside the chosen destination. Unknown,
 // damaged, symlinked, and partial folders are never counted or removed.
@@ -165,6 +187,7 @@ export async function pruneBackups(destination, keepCount = 0, newestFolder = nu
       const checked = await verifyBackup(full);
       if (!checked.ok) continue;
       const manifest = JSON.parse(await readFile(path.join(full, 'manifest.json'), 'utf8'));
+      if (!await containsOnlyManifestFiles(full, manifest)) continue;
       const created = Date.parse(manifest.created_at);
       if (!Number.isFinite(created)) continue;
       valid.push({ full, created, name: entry.name });
@@ -189,6 +212,8 @@ export async function pruneBackups(destination, keepCount = 0, newestFolder = nu
       if (!stat.isDirectory() || stat.isSymbolicLink() || !within(dest, await realpath(item.full))) continue;
       const checked = await verifyBackup(item.full);
       if (!checked.ok) continue;
+      const manifest = JSON.parse(await readFile(path.join(item.full, 'manifest.json'), 'utf8'));
+      if (!await containsOnlyManifestFiles(item.full, manifest)) continue;
       await rm(item.full, { recursive: true, force: false });
       removed++;
     } catch (error) {

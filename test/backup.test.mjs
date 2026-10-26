@@ -80,9 +80,11 @@ test('retention removes only older verified BrainLink copies and preserves damag
   const root = await tmp('retention-source'), dest = await tmp('retention-destination');
   await writeFile(path.join(root, 'Note.md'), 'fictional note');
   const oldest = await backupOnce([{ name: 'Workspace', path: root }], dest, new Date('2026-10-20T00:00:00Z'));
+  const userEdited = await backupOnce([{ name: 'Workspace', path: root }], dest, new Date('2026-10-20T12:00:00Z'));
   const middle = await backupOnce([{ name: 'Workspace', path: root }], dest, new Date('2026-10-21T00:00:00Z'));
   const newest = await backupOnce([{ name: 'Workspace', path: root }], dest, new Date('2026-10-22T00:00:00Z'));
   const damaged = await backupOnce([{ name: 'Workspace', path: root }], dest, new Date('2026-10-23T00:00:00Z'));
+  await writeFile(path.join(userEdited.folder, 'user-added.txt'), 'do not delete this');
   await writeFile(path.join(damaged.folder, 'vaults', '1-Workspace', 'Note.md'), 'changed');
   const unknown = path.join(dest, 'BrainLink-Backup-not-a-backup');
   await mkdir(unknown);
@@ -91,6 +93,7 @@ test('retention removes only older verified BrainLink copies and preserves damag
   assert.equal(result.removed_count, 1);
   assert.equal(result.retained_count, 2);
   assert.equal(await readdir(oldest.folder).then(() => true, () => false), false);
+  assert.equal(await readFile(path.join(userEdited.folder, 'user-added.txt'), 'utf8'), 'do not delete this', 'a folder with user-added files is preserved');
   assert.equal((await verifyBackup(middle.folder)).ok, true);
   assert.equal((await verifyBackup(newest.folder)).ok, true);
   assert.equal(await readdir(damaged.folder).then(() => true, () => false), true, 'damaged copy is preserved for recovery investigation');

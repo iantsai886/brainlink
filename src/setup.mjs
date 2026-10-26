@@ -226,7 +226,9 @@ export async function startSetup(opts = {}) {
       const result = await backupOnce(cfg.vaults, cfg.backup.folder, new Date(), await rsiBackupArtifacts());
       const check = await verifyBackup(result.folder);
       if (!check.ok) throw new Error(`Backup verification failed: ${check.errors.join('; ')}`);
-      const retention = await pruneBackups(cfg.backup.folder, cfg.backup.keepCount ?? 0, result.folder);
+      let retention;
+      try { retention = await pruneBackups(cfg.backup.folder, cfg.backup.keepCount ?? 0, result.folder); }
+      catch { retention = { retained_count: null, removed_count: 0, warning: 'The new backup is verified, but old copies could not be cleaned up.' }; }
       backupStatus = { ok: true, ...result, ...retention, at: new Date().toISOString() };
       await saveBackupStatus(backupStateFile, backupStatus);
       return backupStatus;
