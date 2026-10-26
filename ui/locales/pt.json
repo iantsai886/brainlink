@@ -673,6 +673,8 @@
   "twinProfiles.limits": "Estes limites aplicam-se apenas a tokens de agentes nomeados e atribuídos a um perfil. O acesso a sessões exige autorização explícita e o mesmo perfil; encerramentos exigem aprovação. Leitura e envio de transferências exigem permissões separadas. Escritas gerais de notas continuam bloqueadas. Outras conexões de IA mantêm o escopo atual.",
   "rsi.title": "Melhorar o BrainLink",
   "rsi.hint": "Registre ideias, evidências e experimentos. Salvar uma proposta não altera o comportamento atual.",
+  "rsi.export": "Baixar registro de revisão",
+  "rsi.exported": "Registro de revisão RSI baixado.",
   "rsi.observe.title": "Revisar sinais locais de uso",
   "rsi.observe.hint": "Analisa apenas nomes de ferramentas e contagens de sucesso/erro locais. Não lê notas nem altera o sistema.",
   "rsi.observe.run": "Analisar sinais locais",

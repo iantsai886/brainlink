@@ -421,6 +421,7 @@ test('Setup exposes discovery only through authenticated local APIs and runs the
   const post = (route, body = {}, token = app.token) => fetch(base + route, { method: 'POST', headers: { 'Content-Type': 'application/json', 'X-BrainLink-Token': token }, body: JSON.stringify(body) });
   try {
     assert.equal((await fetch(base + '/api/rsi/discovery', { headers: { 'X-BrainLink-Token': 'wrong-token' } })).status, 401);
+    assert.equal((await fetch(base + '/api/rsi/export', { headers: { 'X-BrainLink-Token': 'wrong-token' } })).status, 401, 'RSI export is authenticated');
     for (const route of ['/api/rsi/discovery/settings', '/api/rsi/discovery/pause', '/api/rsi/discovery/resume', '/api/rsi/discovery/run', '/api/rsi/discovery/refresh-source']) assert.equal((await post(route, settings, 'wrong-token')).status, 401, route);
     await delay(80);
     assert.equal(calls.length, 0, 'nothing is fetched while discovery is off');
@@ -450,6 +451,11 @@ test('Setup exposes discovery only through authenticated local APIs and runs the
     const ideas = await fetch(base + '/api/rsi', { headers: { 'X-BrainLink-Token': app.token } }).then(r => r.json());
     assert.equal(ideas.ideas.length, 1);
     assert.equal(ideas.ideas[0].origin, 'discovery');
+    const exported = await fetch(base + '/api/rsi/export', { headers: { 'X-BrainLink-Token': app.token } }).then(r => r.json());
+    assert.equal(exported.schema, 1);
+    assert.ok(exported.exported_at);
+    assert.equal(exported.ideas[0].id, ideas.ideas[0].id);
+    assert.equal(exported.ideas[0].discovery.source, 'arxiv');
     let freshness;
     for (let attempt = 0; attempt < 50 && !freshness; attempt++) {
       const response = await post('/api/rsi/discovery/refresh-source', { idea_id: ideas.ideas[0].id });

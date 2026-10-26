@@ -896,6 +896,7 @@ export async function startSetup(opts = {}) {
   const routes = {
     'GET /api/state': () => state(),
     'GET /api/rsi': async () => ({ ideas: await rsiLedger.list() }),
+    'GET /api/rsi/export': async () => ({ schema: 1, exported_at: new Date().toISOString(), ideas: await rsiLedger.list() }),
     'POST /api/rsi/observations/analyze': async () => ({ report: analyzeActivitySignals(await readActivity(env, 20000)) }),
     'GET /api/rsi/experiments': async () => ({ suites: rsiExperiments.suites() }),
     'POST /api/rsi/experiments/run': async (b) => {

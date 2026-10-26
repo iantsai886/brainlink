@@ -673,6 +673,8 @@
   "twinProfiles.limits": "這些限制只套用於指派給 Twin 的指定 Agent token。工作階段須有明確授權且屬於相同 profile；收尾需要確認。讀取與傳送交接各自需要明確授權；一般筆記寫入仍封鎖。其他 AI 連線仍使用原有權限。",
   "rsi.title": "持續改善 BrainLink",
   "rsi.hint": "記錄想法、證據與實驗。儲存提案不會改變目前的系統行為。",
+  "rsi.export": "下載審查紀錄",
+  "rsi.exported": "已下載 RSI 審查紀錄。",
   "rsi.observe.title": "檢查本機使用訊號",
   "rsi.observe.hint": "只分析本機工具名稱與成功／失敗次數，不讀取筆記內容，也不會改動系統。",
   "rsi.observe.run": "分析本機訊號",

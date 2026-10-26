@@ -301,6 +301,7 @@ main #ready, main #ask-panel, main #brain-panel, main #sessions-panel, main #s-c
       </form>
       <ol id="rsi-discovery-runs" class="muted" style="font-size:13px"></ol>
     </details>
+    <div class="row" style="margin-bottom:10px"><button type="button" id="rsi-export" data-i18n="rsi.export">Download review record</button></div>
     <div id="rsi-ideas" class="cards" aria-live="polite"></div>
   </section>
 
@@ -862,6 +863,16 @@ document.getElementById('rsi-observe-run').addEventListener('click', () => act(a
   finally { button.disabled = false; }
 }));
 async function loadDiscovery() { renderDiscovery((await api('GET', '/api/rsi/discovery')).discovery); }
+$('rsi-export').addEventListener('click', () => act(async () => {
+  const record = await api('GET', '/api/rsi/export');
+  const blob = new Blob([JSON.stringify(record, null, 2) + '\n'], { type: 'application/json' });
+  const link = document.createElement('a');
+  link.href = URL.createObjectURL(blob);
+  link.download = `brainlink-rsi-review-${new Date().toISOString().slice(0, 10)}.json`;
+  link.click();
+  setTimeout(() => URL.revokeObjectURL(link.href), 1000);
+  toast(t('rsi.exported'));
+}));
 const rsiLines = (value) => String(value || '').split(/\r?\n/).map(x => x.trim()).filter(Boolean);
 $('rsi-discovery-form').addEventListener('submit', (e) => act(async () => {
   e.preventDefault();

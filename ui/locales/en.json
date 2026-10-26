@@ -673,6 +673,8 @@
   "twinProfiles.limits": "These limits apply only to named agent tokens assigned to a profile. Session access requires an explicit grant and matching profile ownership; closeouts require approval. Handoff reading and sending each require a separate grant. General note writes remain blocked. Other AI connections keep their existing scope.",
   "rsi.title": "Improve BrainLink",
   "rsi.hint": "Capture ideas, evidence and experiments. Saving a proposal never changes live behavior.",
+  "rsi.export": "Download review record",
+  "rsi.exported": "RSI review record downloaded.",
   "rsi.observe.title": "Review local usage signals",
   "rsi.observe.hint": "Checks only local tool names and success/failure counts. It never reads note text or changes the system.",
   "rsi.observe.run": "Analyze local signals",
