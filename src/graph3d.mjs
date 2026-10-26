@@ -66,23 +66,25 @@ export async function buildGraph3D(ctx, vaultName, { limit = 2000 } = {}) {
 
 // A bounded, review-only queue for the local Setup UI. visibleVaults() applies the same enabled
 // vault and whole-private-vault boundary as the graph before any proposal is counted or returned.
-export async function listProposedTypedRelations(ctx, { limit = 100, vault } = {}) {
-  const vaults = await visibleVaults(ctx, vault);
+export async function listProposedTypedRelations(ctx, { limit = 100, vault, offset = 0 } = {}) {
+  const vaults = (await visibleVaults(ctx, vault)).sort((a, b) => a.name.localeCompare(b.name));
   const max = Math.max(1, Math.min(500, Number(limit) || 100));
+  const start = Math.max(0, Math.min(100_000, Number.isSafeInteger(offset) ? offset : 0));
   const proposals = [];
   let total = 0;
   for (const { name, index } of vaults) {
-    const pending = deriveProposedTypedRelations(index.notes);
-    total += pending.length;
+    const pending = deriveProposedTypedRelations(index.notes).sort((a, b) =>
+      index.notes[a.source].rel.localeCompare(index.notes[b.source].rel) || a.relation_index - b.relation_index);
     for (const edge of pending) {
-      if (proposals.length >= max) continue;
+      total++;
+      if (total <= start || proposals.length >= max) continue;
       const source = index.notes[edge.source];
       proposals.push({ vault: name, path: source.rel, title: source.title, relation_index: edge.relation_index,
         predicate: edge.predicate, target: summarize(index, edge.target), evidence: edge.evidence, confidence: edge.confidence,
         can_review: !ctx.readOnly && ctx.byName.get(name)?.writes === 'on' });
     }
   }
-  return { proposals, total, limited: total > proposals.length };
+  return { proposals, total, offset: start, limited: start + proposals.length < total };
 }
 
 // One note's panel data: rendered-ready Markdown body, tags, backlinks and outlinks (titles +

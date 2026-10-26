@@ -1291,7 +1291,9 @@ export async function startSetup(opts = {}) {
       const cfg = await loadConfig(file);
       const ctx = localContext(cfg, { ...env, BRAINLINK_SEMANTIC: '0' });
       if (b.vault && !ctx.enabled.includes(b.vault)) throw new Error('Unknown vault.');
-      return listProposedTypedRelations(ctx, { vault: b.vault });
+      const offset = b.offset === undefined ? 0 : b.offset;
+      if (!Number.isSafeInteger(offset) || offset < 0 || offset > 100_000) throw new Error('Review queue offset is invalid.');
+      return listProposedTypedRelations(ctx, { vault: b.vault, offset });
     },
     'POST /api/graph3d/note': async (b) => {
       const cfg = await loadConfig(file);

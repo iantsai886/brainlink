@@ -187,25 +187,28 @@
       if (query && !matches.length) status.textContent = tr('notes3d.browseEmpty');
     }
 
-    async function loadReviewQueue() {
+    async function loadReviewQueue({ append = false } = {}) {
       const list = document.getElementById('notes3d-review-list');
       const status = document.getElementById('notes3d-review-status');
       if (!list || !status) return;
       try {
-        const result = await api('/api/graph3d/reviews', {});
+        const offset = append ? (list._nextOffset || 0) : 0;
+        const result = await api('/api/graph3d/reviews', { offset });
+        const proposals = append ? [...(list._pendingReviews || []), ...result.proposals] : result.proposals;
+        list._pendingReviews = proposals;
+        list._nextOffset = result.offset + result.proposals.length;
         status.textContent = result.limited
-          ? tr('notes3d.reviewLimited', { shown: result.proposals.length, total: result.total })
+          ? tr('notes3d.reviewLimited', { shown: proposals.length, total: result.total })
           : tr('notes3d.reviewCount', { count: result.total });
-        list.innerHTML = result.proposals.map((item, i) => `<article class="card notes3d-review-item">
+        list.innerHTML = proposals.map((item, i) => `<article class="card notes3d-review-item">
           <b>${esc(item.title)}</b><span class="mono muted">${esc(item.vault)} · ${esc(item.path)}</span>
           <div>${esc(item.predicate)} → ${esc(item.target.title)}</div>
           <small class="muted">${esc(item.evidence)} · ${esc(tr('notes3d.confidence', { confidence: item.confidence }))}</small>
           ${item.can_review ? `<button type="button" class="chip" data-approve-queued="${i}">${esc(tr('notes3d.approveRelationship'))}</button>` : `<small class="muted">${esc(tr('notes3d.reviewReadOnly'))}</small>`}
-        </article>`).join('');
-        list._pendingReviews = result.proposals;
+        </article>`).join('') + (result.limited ? `<button type="button" class="chip" data-review-load-more>${esc(tr('notes3d.reviewLoadMore'))}</button>` : '');
       } catch (error) {
         status.textContent = tr('notes3d.reviewFailed', { error: error.message });
-        list.innerHTML = '';
+        if (!append) list.innerHTML = '';
       }
     }
 
@@ -217,6 +220,7 @@
     });
 
     root.addEventListener('click', (e) => {
+      if (e.target.closest('[data-review-load-more]')) { loadReviewQueue({ append: true }); return; }
       const graphNote = e.target.closest('[data-graph-note-id]');
       if (graphNote) { openById(graphNote.dataset.graphNoteId); return; }
       if (e.target.id === 'notes3d-edit-toggle') {

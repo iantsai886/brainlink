@@ -211,18 +211,24 @@ test('graph review queue returns bounded public proposals and excludes private n
     const fs = await import('node:fs/promises');
     await fs.writeFile(path.join(main, 'Team.md'), '---\ntype: team\nid: team.product\nscope: organisation\nstatus: current\n---\n# Product team\n');
     await fs.writeFile(path.join(main, 'Workflow.md'), '---\ntype: workflow\nid: workflow.collect\nscope: organisation\nstatus: proposed\nrelations:\n  - predicate: runs\n    target: team.product\n    review: proposed\n    source: "Public workflow evidence"\n    confidence: 0.8\n---\n# Collect questions\n');
+    await fs.writeFile(path.join(main, 'Workflow two.md'), '---\ntype: workflow\nid: workflow.collect-two\nscope: organisation\nstatus: proposed\nrelations:\n  - predicate: runs\n    target: team.product\n    review: proposed\n    source: "Second public workflow evidence"\n    confidence: 0.7\n---\n# Collect follow-ups\n');
     await fs.writeFile(path.join(main, 'Private source.md'), '---\nprivate: true\ntype: workflow\nid: workflow.secret\nscope: organisation\nstatus: proposed\nrelations:\n  - predicate: runs\n    target: team.product\n    review: proposed\n    source: "PRIVATE_QUEUE_CANARY"\n    confidence: 0.8\n---\n# Private source\n');
     await fs.writeFile(path.join(diary, 'Personal routine.md'), '---\ntype: workflow\nid: workflow.diary\nscope: personal\nstatus: proposed\nrelations:\n  - predicate: runs\n    target: routine.personal\n    review: proposed\n    source: "PRIVATE_VAULT_CANARY"\n    confidence: 0.8\n---\n# Personal routine\n');
     await fs.writeFile(path.join(diary, 'Personal task.md'), '---\ntype: dataset\nid: routine.personal\nscope: personal\nstatus: current\n---\n# Personal task\n');
     const result = await api('/api/graph3d/reviews', {});
-    assert.equal(result.total, 1, JSON.stringify(result));
-    assert.equal(result.proposals.length, 1);
-    assert.equal(result.proposals[0].path, 'Workflow.md');
+    assert.equal(result.total, 2, JSON.stringify(result));
+    assert.equal(result.proposals.length, 2);
+    assert.deepEqual(new Set(result.proposals.map((item) => item.path)), new Set(['Workflow.md', 'Workflow two.md']));
     assert.equal(result.proposals[0].target.title, 'Team');
     assert.equal(result.proposals[0].can_review, true);
     assert.doesNotMatch(JSON.stringify(result), /PRIVATE_QUEUE_CANARY|PRIVATE_VAULT_CANARY|Private source|Diary workflow/);
+    const nextPage = await api('/api/graph3d/reviews', { offset: 1 });
+    assert.equal(nextPage.offset, 1);
+    assert.equal(nextPage.proposals.length, 1);
+    assert.notEqual(nextPage.proposals[0].path, result.proposals[0].path);
+    assert.equal((await api('/api/graph3d/reviews', { offset: -1 })).error?.includes('offset'), true);
     const privateQueue = await api('/api/graph3d/reviews', { vault: 'Diary' });
-    assert.deepEqual(privateQueue, { proposals: [], total: 0, limited: false });
+    assert.deepEqual(privateQueue, { proposals: [], total: 0, offset: 0, limited: false });
   } finally { s.server.close(); }
 });
 
@@ -297,6 +303,7 @@ test('graph UI exposes a confirmation-gated action for reviewing a suggested rel
   assert.match(src, /notes3d\.saveSuggestionConfirm/);
   assert.match(src, /api\('\/api\/graph3d\/reviews'/, 'the graph loads a central review queue');
   assert.match(src, /data-approve-queued/, 'queued proposals can be approved from the central review list');
+  assert.match(src, /data-review-load-more/, 'the bounded review queue can load its next page');
   assert.match(src, /api\('\/api\/graph3d\/note',[\s\S]*?api\('\/api\/graph3d\/relationship\/approve'/, 'approval fetches a fresh note revision before writing');
 });
 
