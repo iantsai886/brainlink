@@ -28,7 +28,7 @@ import { addAgent, renameAgent, removeAgent, revokeAgent, markConnected, findAge
 import { buildGraph3D, noteDetail3D } from './graph3d.mjs';
 import { snapshotSettings, chooseSnapshot, suggestSnapshotFolder, clearSnapshot, startSnapshotWatcher, writeSnapshotOnce, loadSnapshotStatus, saveSnapshotStatus } from './snapshot.mjs';
 import { listHandoffs } from './writes.mjs';
-import { backupOnce, verifyBackup, restoreBackupToEmpty, loadBackupStatus, saveBackupStatus, pruneBackups } from './backup.mjs';
+import { backupOnce, verifyBackup, restoreBackupToEmpty, loadBackupStatus, saveBackupStatus, pruneBackups, listVerifiedBackups } from './backup.mjs';
 import { createOrReadBackupRecoveryKey, parseBackupKey, requireBackupKey } from './backup-key.mjs';
 import { fileSessionSummary } from './sessions/filing.mjs';
 import { isStartupEnabled, setStartupEnabled } from './startup.mjs';
@@ -1170,6 +1170,12 @@ export async function startSetup(opts = {}) {
       return { ok: true };
     },
     'POST /api/backup/pick-folder': async () => { const p = await pickBackupFolder(); return p === undefined ? { path: null, unavailable: true } : { path: p }; },
+    'POST /api/backup/history': async () => {
+      const cfg = await loadConfig(file);
+      if (!cfg.backup?.folder) throw new Error('Choose a backup folder first.');
+      const key = cfg.backup.encrypted ? await requireBackupKey(env).catch(() => null) : null;
+      return listVerifiedBackups(cfg.backup.folder, key);
+    },
     'POST /api/backup/encryption-key': async () => createOrReadBackupRecoveryKey(env),
     'POST /api/backup/restore/pick-source': async () => { const p = await pickRestoreSourceFolder(); return p === undefined ? { path: null, unavailable: true } : { path: p }; },
     'POST /api/backup/restore/pick-destination': async () => { const p = await pickRestoreDestinationFolder(); return p === undefined ? { path: null, unavailable: true } : { path: p }; },

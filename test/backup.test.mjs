@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { mkdtemp, mkdir, writeFile, readFile, readdir, symlink } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
-import { backupOnce, verifyBackup, restoreBackupToEmpty, loadBackupStatus, saveBackupStatus, pruneBackups } from '../src/backup.mjs';
+import { backupOnce, verifyBackup, restoreBackupToEmpty, loadBackupStatus, saveBackupStatus, pruneBackups, listVerifiedBackups } from '../src/backup.mjs';
 import { loadConfig, normalize, saveConfig } from '../src/config.mjs';
 import { createOrReadBackupRecoveryKey } from '../src/backup-key.mjs';
 import { startSetup } from '../src/setup.mjs';
@@ -25,6 +25,24 @@ test('backup preserves private and public files and verifies their hashes', asyn
   assert.match(await readFile(path.join(result.folder, ...privateFile.stored.split('/')), 'utf8'), /fictional-private-note/);
   await writeFile(path.join(result.folder, ...privateFile.stored.split('/')), 'corrupted');
   assert.deepEqual((await verifyBackup(result.folder)).errors, [`Hash mismatch: ${privateFile.stored}`]);
+});
+
+test('backup history lists only recent hash-verified backups without leaking manifest paths', async () => {
+  const root = await tmp('history-source'), dest = await tmp('history-destination');
+  await writeFile(path.join(root, 'Private Name.md'), 'private history fixture');
+  const older = await backupOnce([{ name: 'Private Vault Name', path: root }], dest, new Date('2026-10-20T00:00:00Z'));
+  const newer = await backupOnce([{ name: 'Private Vault Name', path: root }], dest, new Date('2026-10-21T00:00:00Z'));
+  const manifest = JSON.parse(await readFile(path.join(newer.folder, 'manifest.json'), 'utf8'));
+  await writeFile(path.join(newer.folder, ...manifest.files[0].stored.split('/')), 'tampered');
+  const listed = await listVerifiedBackups(dest);
+  assert.deepEqual(listed.backups.map((item) => item.folder), [older.folder]);
+  assert.equal(listed.backups[0].created_at, '2026-10-20T00:00:00.000Z');
+  assert.equal(listed.backups[0].file_count, 1);
+  assert.equal(listed.invalid_count, 1);
+  assert.equal(JSON.stringify(listed).includes('Private Vault Name'), false);
+  assert.equal(JSON.stringify(listed).includes('Private Name.md'), false);
+  assert.equal((await listVerifiedBackups(dest, null, 1)).truncated, true);
+  await assert.rejects(listVerifiedBackups(dest, null, 0), /between 1 and 100/);
 });
 
 test('backup rejects a destination within a vault', async () => {
@@ -176,6 +194,7 @@ test('authenticated Setup enables scheduled backup only after a verified first c
     assert.equal((await api('/api/backup/encryption-key', {}, 'wrong')).status, 401);
     assert.equal((await api('/api/backup/restore/pick-source', {}, 'wrong')).status, 401);
     assert.equal((await api('/api/backup/restore/pick-destination', {}, 'wrong')).status, 401);
+    assert.equal((await api('/api/backup/history', {}, 'wrong')).status, 401);
     assert.deepEqual(await api('/api/backup/restore/pick-source').then((r) => r.json()), { path: 'C:\\Fictional\\BrainLink-Backup' });
     assert.deepEqual(await api('/api/backup/restore/pick-destination').then((r) => r.json()), { path: 'D:\\Fictional\\Recovery' });
     await fetch(`http://127.0.0.1:${app.port}/api/rsi/discovery/settings`, {
@@ -202,6 +221,10 @@ test('authenticated Setup enables scheduled backup only after a verified first c
     assert.equal(result.backup.status.ok, true);
     assert.equal(result.backup.status.encrypted, true);
     assert.equal((await verifyBackup(result.backup.status.folder, recoveryKey)).ok, true);
+    const history = await api('/api/backup/history');
+    assert.equal(history.status, 200);
+    const historyBody = await history.json();
+    assert.ok(historyBody.backups.some((item) => item.folder === result.backup.status.folder && item.encrypted && item.file_count === 2));
     const state = await fetch(`http://127.0.0.1:${app.port}/api/state`, { headers: { 'X-BrainLink-Token': app.token } }).then((r) => r.json());
     assert.equal(state.backup.enabled, true);
     assert.equal(state.backup.keepCount, 30);
@@ -232,11 +255,12 @@ test('authenticated Setup enables scheduled backup only after a verified first c
   } finally { app.server.close(); }
 });
 
-test('restore UI provides separate localized folder pickers and retains explicit restore confirmation', async () => {
+test('restore UI provides verified history, localized pickers and explicit restore confirmation', async () => {
   const html = await readFile(new URL('../ui/index.html', import.meta.url), 'utf8');
-  for (const id of ['backup-schedule-mode', 'backup-interval-wrap', 'backup-hours', 'backup-time-wrap', 'backup-time', 'backup-restore-source', 'backup-restore-destination', 'backup-restore-pick-source', 'backup-restore-pick-destination', 'backup-restore']) {
+  for (const id of ['backup-schedule-mode', 'backup-interval-wrap', 'backup-hours', 'backup-time-wrap', 'backup-time', 'backup-history-refresh', 'backup-history', 'backup-history-status', 'backup-restore-source', 'backup-restore-destination', 'backup-restore-pick-source', 'backup-restore-pick-destination', 'backup-restore']) {
     assert.equal((html.match(new RegExp(`id="${id}"`, 'g')) || []).length, 1, id);
   }
+  assert.match(html, /\/api\/backup\/history/);
   assert.match(html, /\/api\/backup\/restore\/pick-source/);
   assert.match(html, /\/api\/backup\/restore\/pick-destination/);
   assert.match(html, /\/api\/backup\/encryption-key/);
@@ -259,6 +283,7 @@ test('restore UI provides separate localized folder pickers and retains explicit
     assert.ok(catalog['backup.scheduleInterval'], `${locale} interval option`);
     assert.ok(catalog['backup.scheduleDaily'], `${locale} daily option`);
     assert.ok(catalog['backup.time'], `${locale} daily local time label`);
+    for (const key of ['backup.historyRefresh', 'backup.historyEmpty', 'backup.historyFiles', 'backup.historyEncrypted', 'backup.historyFound', 'backup.historyMore', 'backup.historyNone']) assert.ok(catalog[key], `${locale} ${key}`);
   }
 });
 

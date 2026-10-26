@@ -409,6 +409,8 @@ ol.todo li { padding-left: 4px; }
     <p class="hint" data-i18n="startup.hint"></p>
     <details><summary data-i18n="backup.restoreTitle"></summary>
       <p class="hint" data-i18n="backup.restoreHint"></p>
+      <div class="row"><button id="backup-history-refresh" data-i18n="backup.historyRefresh"></button><select id="backup-history" aria-label="Verified backups" style="flex:1"><option value="" data-i18n="backup.historyEmpty"></option></select></div>
+      <p id="backup-history-status" class="muted" role="status"></p>
       <div class="grid2"><div><label><span data-i18n="backup.restoreSource"></span><input id="backup-restore-source" class="mono"></label><button id="backup-restore-pick-source" data-i18n="backup.restorePickSource"></button></div>
       <div><label><span data-i18n="backup.restoreDestination"></span><input id="backup-restore-destination" class="mono"></label><button id="backup-restore-pick-destination" data-i18n="backup.restorePickDestination"></button></div></div>
       <label><span data-i18n="backup.recoveryKey"></span><input id="backup-restore-key" type="password" autocomplete="off" data-i18n-placeholder="backup.keyOptional"></label>
@@ -1598,6 +1600,18 @@ $('backup-restore-pick-source').onclick = async () => {
     else if (r.unavailable) toast(t('backup.pickerUnavailable'), true);
   } catch (e) { toast(e.message, true); }
 };
+$('backup-history-refresh').onclick = () => act(async () => {
+  const result = await api('POST', '/api/backup/history', {});
+  const history = $('backup-history');
+  history.innerHTML = `<option value="">${esc(t('backup.historyEmpty'))}</option>` + result.backups.map((item) => {
+    const label = `${new Date(item.created_at).toLocaleString(LOCALE)} · ${item.file_count} ${t('backup.historyFiles')}${item.encrypted ? ` · ${t('backup.historyEncrypted')}` : ''}`;
+    return `<option value="${esc(item.folder)}">${esc(label)}</option>`;
+  }).join('');
+  $('backup-history-status').textContent = result.backups.length
+    ? t('backup.historyFound', { count: result.backups.length, invalid: result.invalid_count, more: result.truncated ? t('backup.historyMore') : '' })
+    : t('backup.historyNone', { invalid: result.invalid_count });
+});
+$('backup-history').onchange = () => { if ($('backup-history').value) $('backup-restore-source').value = $('backup-history').value; };
 $('backup-restore-pick-destination').onclick = async () => {
   try {
     const r = await api('POST', '/api/backup/restore/pick-destination');

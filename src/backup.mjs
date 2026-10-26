@@ -178,6 +178,35 @@ export async function verifyBackup(backupDir, encryptionKey = null) {
   return { ok: errors.length === 0, vault_count: manifest.vaults.length, file_count: manifest.files.length + (manifest.artifacts || []).length, errors };
 }
 
+// Show only recent, complete backups after checking every file hash. The returned records
+// contain no vault names or file paths from the manifest, which may reveal private structure.
+export async function listVerifiedBackups(destination, encryptionKey = null, limit = 20) {
+  if (!Number.isInteger(limit) || limit < 1 || limit > 100) throw new Error('Backup history limit must be between 1 and 100.');
+  const stat = await lstat(destination);
+  if (!stat.isDirectory() || stat.isSymbolicLink()) throw new Error('Backup destination must be a real directory.');
+  const root = await realpath(destination);
+  const names = (await readdir(root, { withFileTypes: true }))
+    .filter((entry) => entry.name.startsWith('BrainLink-Backup-'))
+    .sort((a, b) => b.name.localeCompare(a.name));
+  const candidates = names.slice(0, limit);
+  const backups = [];
+  let invalid_count = 0;
+  for (const entry of candidates) {
+    const folder = path.join(root, entry.name);
+    try {
+      const candidate = await lstat(folder);
+      if (!candidate.isDirectory() || candidate.isSymbolicLink() || !within(root, await realpath(folder))) { invalid_count++; continue; }
+      const checked = await verifyBackup(folder, encryptionKey);
+      if (!checked.ok) { invalid_count++; continue; }
+      const manifest = await readBackupManifest(folder, encryptionKey);
+      if (manifest.format !== 'brainlink-backup-v1' || !Number.isFinite(Date.parse(manifest.created_at))) { invalid_count++; continue; }
+      backups.push({ folder, created_at: manifest.created_at, file_count: checked.file_count, vault_count: checked.vault_count, encrypted: await isEncryptedBackup(folder) });
+    } catch { invalid_count++; }
+  }
+  backups.sort((a, b) => Date.parse(b.created_at) - Date.parse(a.created_at) || b.folder.localeCompare(a.folder));
+  return { backups, invalid_count, truncated: names.length > limit, checked_count: candidates.length };
+}
+
 async function containsOnlyManifestFiles(root, manifest) {
   const files = new Set([(await isEncryptedBackup(root)) ? 'manifest.enc' : 'manifest.json', ...manifest.files.map((file) => file.stored), ...(manifest.artifacts || []).map((file) => file.stored)]);
   const directories = new Set();
