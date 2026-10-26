@@ -39,6 +39,12 @@ test('session episode corrections keep a dated changelog and withdrawal preserve
  await h.open(created.id);assert.equal(await h.withdrawEpisode(new Date('2031-03-05T12:00:00Z')),true);
  note=await store.read(created.id);assert.equal(note.frontmatter.status,'withdrawn');assert.equal(note.frontmatter.private,true);assert.equal(note.frontmatter.source,'BrainLink session s_test');assert.match(note.body,/Corrected summary/);assert.match(note.body,/2031-03-05 — Proposal withdrawn/);
 });
+test('session episode metadata changes get a dated, value-free audit entry',async()=>{
+ const store=await makeStore(),api=createApi({store}),h=useNotes(api);
+ const created=await store.write({vault:'Journal',path:'Knowledge Intake/Metadata.md',frontmatter:{type:'episode',status:'proposed',private:true,source:'BrainLink session s_metadata'},body:'# Session\n\nSummary.\n'},{expected_etag:''});
+ await h.load();await h.open(created.id);const original=(await store.read(created.id)).frontmatter;h.changeMeta(JSON.stringify({...original,status:'accepted',customerEmail:'private@example.test'},null,2));assert.equal(await h.save(),true);
+ const saved=await store.read(created.id);assert.equal(saved.frontmatter.status,'accepted');assert.match(saved.body,/Metadata updated \(fields: status\)/);assert.doesNotMatch(saved.body,/accepted|customerEmail|private@example\.test/);
+});
 test('Notes shows the withdrawal action only for a private proposed BrainLink episode',async()=>{
  const api=createApi({store:await makeStore()});
  const item={id:'ep1',title:'Session',vault:'Journal',path:'Session.md',frontmatter:{type:'episode',status:'proposed',private:true,source:'BrainLink session s1'},body:'Summary',version:1,etag:'e1'};

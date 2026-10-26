@@ -13,7 +13,15 @@ export function useNotes(api) {
     const marker = /^## Changelog\s*$/im;
     return marker.test(body) ? body.replace(marker, (heading) => `${heading}\n\n${entry}`) : `${body.trimEnd()}\n\n## Changelog\n\n${entry}\n`;
   }
-  async function save() { const s=h.get(); if(!s.note) return false; try { const frontmatter=JSON.parse(s.frontmatter); if(!frontmatter || typeof frontmatter !== 'object' || Array.isArray(frontmatter)) throw Error('Frontmatter must be a JSON object'); let body=s.body; if(isEpisode(s.note) && body !== s.note.body) body=history(body,'Summary corrected'); await api.writeNote({id:s.note.id,vault:s.note.vault,path:s.note.path,body,frontmatter},s.note.etag); const note=await api.readNote(s.note.id); h.set({note,body:note.body,frontmatter:JSON.stringify(note.frontmatter||{},null,2),dirty:false,editing:false,error:null,message:'Saved'}); await load(); return true; } catch(e) { h.set({error:e.code==='E_CONFLICT' ? 'E_CONFLICT: This note was changed elsewhere. Copy your edits before reloading.' : errText(e)}); return false; } }
+  function metadataAudit(before = {}, after = {}) {
+    const keys = [...new Set([...Object.keys(before), ...Object.keys(after)])].filter((key) => JSON.stringify(before[key]) !== JSON.stringify(after[key]));
+    if (!keys.length) return null;
+    const safe = new Set(['agent_or_role','ai_platform','confidence','created','folder','owner','private','project','scope','session_or_task_id','source','status','tags','type','updated','vault']);
+    const fields = keys.filter((key) => safe.has(key)).sort();
+    const detail = fields.length ? `fields: ${fields.join(', ')}` : `${keys.length} field${keys.length === 1 ? '' : 's'} (names omitted)`;
+    return `Metadata updated (${detail})`;
+  }
+  async function save() { const s=h.get(); if(!s.note) return false; try { const frontmatter=JSON.parse(s.frontmatter); if(!frontmatter || typeof frontmatter !== 'object' || Array.isArray(frontmatter)) throw Error('Frontmatter must be a JSON object'); let body=s.body; const episode=isEpisode(s.note)||isEpisode(s.note,frontmatter); if(episode){if(body !== s.note.body) body=history(body,'Summary corrected');const audit=metadataAudit(s.note.frontmatter||{},frontmatter);if(audit)body=history(body,audit);} await api.writeNote({id:s.note.id,vault:s.note.vault,path:s.note.path,body,frontmatter},s.note.etag); const note=await api.readNote(s.note.id); h.set({note,body:note.body,frontmatter:JSON.stringify(note.frontmatter||{},null,2),dirty:false,editing:false,error:null,message:'Saved'}); await load(); return true; } catch(e) { h.set({error:e.code==='E_CONFLICT' ? 'E_CONFLICT: This note was changed elsewhere. Copy your edits before reloading.' : errText(e)}); return false; } }
   async function withdrawEpisode(now = new Date()) {
     const s=h.get(), n=s.note, fm=n?.frontmatter || {};
     if (!n || !isEpisode(n, fm) || String(fm.status || '').toLowerCase() !== 'proposed' || fm.private !== true) {
