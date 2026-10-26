@@ -95,6 +95,11 @@
         <input id="notes3d-search" type="search" data-i18n-placeholder="notes3d.browsePlaceholder" autocomplete="off">
         <p id="notes3d-browse-status" class="muted" role="status" aria-live="polite"></p>
         <div id="notes3d-node-list" class="notes3d-node-list" role="list"></div>
+      </details>
+      <details class="notes3d-browse" id="notes3d-review-queue">
+        <summary data-i18n="notes3d.reviewQueue"></summary>
+        <p id="notes3d-review-status" class="muted" role="status" aria-live="polite"></p>
+        <div id="notes3d-review-list"></div>
       </details>`);
   }
 
@@ -182,6 +187,28 @@
       if (query && !matches.length) status.textContent = tr('notes3d.browseEmpty');
     }
 
+    async function loadReviewQueue() {
+      const list = document.getElementById('notes3d-review-list');
+      const status = document.getElementById('notes3d-review-status');
+      if (!list || !status) return;
+      try {
+        const result = await api('/api/graph3d/reviews', {});
+        status.textContent = result.limited
+          ? tr('notes3d.reviewLimited', { shown: result.proposals.length, total: result.total })
+          : tr('notes3d.reviewCount', { count: result.total });
+        list.innerHTML = result.proposals.map((item, i) => `<article class="card notes3d-review-item">
+          <b>${esc(item.title)}</b><span class="mono muted">${esc(item.vault)} · ${esc(item.path)}</span>
+          <div>${esc(item.predicate)} → ${esc(item.target.title)}</div>
+          <small class="muted">${esc(item.evidence)} · ${esc(tr('notes3d.confidence', { confidence: item.confidence }))}</small>
+          ${item.can_review ? `<button type="button" class="chip" data-approve-queued="${i}">${esc(tr('notes3d.approveRelationship'))}</button>` : `<small class="muted">${esc(tr('notes3d.reviewReadOnly'))}</small>`}
+        </article>`).join('');
+        list._pendingReviews = result.proposals;
+      } catch (error) {
+        status.textContent = tr('notes3d.reviewFailed', { error: error.message });
+        list.innerHTML = '';
+      }
+    }
+
     root.addEventListener('input', (e) => { if (e.target.id === 'notes3d-search') renderNodeList(); });
     window.addEventListener('brainlink:locale-changed', () => {
       root.querySelectorAll('[data-i18n]').forEach((el) => { el.textContent = tr(el.dataset.i18n); });
@@ -234,6 +261,17 @@
           .catch((err) => { review.disabled = false; toast(err.message, true); });
         return;
       }
+      const queuedReview = e.target.closest('[data-approve-queued]');
+      if (queuedReview) {
+        const item = document.getElementById('notes3d-review-list')._pendingReviews?.[Number(queuedReview.dataset.approveQueued)];
+        if (!item || !window.confirm(tr('notes3d.approveConfirm'))) return;
+        queuedReview.disabled = true;
+        api('/api/graph3d/note', { vault: item.vault, path: item.path })
+          .then((detail) => api('/api/graph3d/relationship/approve', { vault: item.vault, path: item.path, etag: detail.etag, relation_index: item.relation_index }))
+          .then(() => { toast(tr('notes3d.approvedToast')); return refreshGraph(); })
+          .catch((err) => { queuedReview.disabled = false; toast(err.message, true); loadReviewQueue(); });
+        return;
+      }
       const suggestion = e.target.closest('[data-save-suggestion]');
       if (suggestion) {
         if (!currentDetail || !window.confirm(tr('notes3d.saveSuggestionConfirm'))) return;
@@ -266,6 +304,7 @@
       nodesById = g.nodes;
       byTitle = new Map(g.nodes.map((n) => [n.title.toLowerCase(), n]));
       renderNodeList();
+      await loadReviewQueue();
       if (!g.nodes.length) {
         if (graphInstance) graphInstance.graphData({ nodes: [], links: [] });
         else canvas.innerHTML = '<p class="muted">No notes yet — once you add some, their links show up here.</p>';

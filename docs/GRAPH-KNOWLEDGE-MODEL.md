@@ -1,6 +1,6 @@
 # Typed knowledge graph: BrainLink design review
 
-Status: typed relationship candidates can now be included in an attributed `propose_note` call. BrainLink stores typed records as `status: proposed` and all candidate edges as `review: proposed`, regardless of caller-supplied status, so they remain outside graph retrieval until a person reviews and verifies the Markdown. Local tests cover proposal validation and the explicit promotion boundary. AI-assisted extraction accuracy, an ontology editor, live-client workflow, and token savings are not yet proven.
+Status: typed relationship candidates can now be included in an attributed `propose_note` call. BrainLink stores typed records as `status: proposed` and all candidate edges as `review: proposed`, regardless of caller-supplied status, so they remain outside graph retrieval until a person reviews and verifies the Markdown. A local Setup review queue lists bounded proposals from enabled non-private vaults, shows source evidence and target, and rechecks the source revision at approval. AI-assisted extraction accuracy, an ontology editor, live-client workflow, and token savings are not yet proven.
 
 ## Executive conclusion
 
@@ -107,8 +107,8 @@ Minimum acceptance gates:
 
 Add typed entities, workflows, and relationships to BrainLink's architecture as an optional semantic layer above the existing Markdown link graph. Preserve simple note links. Start with fictional company data and a narrow set of workflows; do not build an open-ended ontology editor or autonomous graph rewriting yet.
 
-Implemented first slice: parse a bounded allowlist of entity types and predicates from explicit Markdown frontmatter; materialize only verified edges with evidence, confidence, current records, unique IDs, and matching scope inside the same authorized vault; include the edges in graph-aware ranking; and render typed labels in the existing graph and note details. Fictional tests cover valid relations and fail-closed cases. AI clients can now create proposed typed metadata through `propose_note`; there is still no dedicated review editor or automatic extraction quality evaluation.
+Implemented first slice: parse a bounded allowlist of entity types and predicates from explicit Markdown frontmatter; materialize only verified edges with evidence, confidence, current records, unique IDs, and matching scope inside the same authorized vault; include the edges in graph-aware ranking; and render typed labels in the existing graph and note details. Fictional tests cover valid relations and fail-closed cases. AI clients can now create proposed typed metadata through `propose_note`; users can review proposals in the graph panel or through the central queue. Automatic extraction quality evaluation is still missing.
 
-Next: add a dedicated UI review/edit affordance and evaluate relation proposals on a frozen retrieval set with privacy canaries. Then measure token and task-quality changes; until that work is complete, token savings remain unproven.
+Next: evaluate relation proposals on a frozen retrieval set with privacy canaries. Then measure token and task-quality changes; until that work is complete, token savings remain unproven.
 
 Source: user-provided Reel transcript with keyframes at 00:00, 00:12, 00:30, 00:45, 01:00, 01:30, 02:00, and 02:30. Speaker credentials and promotional claims were not independently checked or used as evidence.

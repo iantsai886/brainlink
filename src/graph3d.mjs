@@ -64,6 +64,27 @@ export async function buildGraph3D(ctx, vaultName, { limit = 2000 } = {}) {
   return { vault: vaultName || null, nodes, links, shown: nodes.length, total };
 }
 
+// A bounded, review-only queue for the local Setup UI. visibleVaults() applies the same enabled
+// vault and whole-private-vault boundary as the graph before any proposal is counted or returned.
+export async function listProposedTypedRelations(ctx, { limit = 100, vault } = {}) {
+  const vaults = await visibleVaults(ctx, vault);
+  const max = Math.max(1, Math.min(500, Number(limit) || 100));
+  const proposals = [];
+  let total = 0;
+  for (const { name, index } of vaults) {
+    const pending = deriveProposedTypedRelations(index.notes);
+    total += pending.length;
+    for (const edge of pending) {
+      if (proposals.length >= max) continue;
+      const source = index.notes[edge.source];
+      proposals.push({ vault: name, path: source.rel, title: source.title, relation_index: edge.relation_index,
+        predicate: edge.predicate, target: summarize(index, edge.target), evidence: edge.evidence, confidence: edge.confidence,
+        can_review: !ctx.readOnly && ctx.byName.get(name)?.writes === 'on' });
+    }
+  }
+  return { proposals, total, limited: total > proposals.length };
+}
+
 // One note's panel data: rendered-ready Markdown body, tags, backlinks and outlinks (titles +
 // ids matching the same vault's buildGraph3D() so a backlink click can focus that node).
 export async function noteDetail3D(ctx, vaultName, rel) {

@@ -27,7 +27,7 @@ import { githubAssignmentProjection } from './sync/github-assignment.mjs';
 import { runGitHubAutoSync } from './sync/github-auto-sync.mjs';
 import { sessionsService } from './host.mjs';
 import { addAgent, renameAgent, removeAgent, revokeAgent, markConnected, findAgentByToken, publicAgent, localAgentSnippet, remoteAgentSnippet, generateAgentToken, hashToken } from './mcp-agents.mjs';
-import { buildGraph3D, noteDetail3D } from './graph3d.mjs';
+import { buildGraph3D, noteDetail3D, listProposedTypedRelations } from './graph3d.mjs';
 import { deriveProposedTypedRelations, discoverTypedRelationshipCandidates, appendTypedRelationProposal, approveTypedRelation } from './typed-graph.mjs';
 import { snapshotSettings, chooseSnapshot, suggestSnapshotFolder, clearSnapshot, startSnapshotWatcher, writeSnapshotOnce, loadSnapshotStatus, saveSnapshotStatus } from './snapshot.mjs';
 import { listHandoffs } from './writes.mjs';
@@ -1286,6 +1286,12 @@ export async function startSetup(opts = {}) {
       const ctx = localContext(cfg, { ...env, BRAINLINK_SEMANTIC: '0' });
       if (!ctx.enabled.length) return { nodes: [], links: [], shown: 0, total: 0 };
       return buildGraph3D(ctx, b.vault && ctx.enabled.includes(b.vault) ? b.vault : undefined);
+    },
+    'POST /api/graph3d/reviews': async (b) => {
+      const cfg = await loadConfig(file);
+      const ctx = localContext(cfg, { ...env, BRAINLINK_SEMANTIC: '0' });
+      if (b.vault && !ctx.enabled.includes(b.vault)) throw new Error('Unknown vault.');
+      return listProposedTypedRelations(ctx, { vault: b.vault });
     },
     'POST /api/graph3d/note': async (b) => {
       const cfg = await loadConfig(file);

@@ -195,6 +195,37 @@ test('typed relationship review requires a current note revision and adds only t
   } finally { s.server.close(); }
 });
 
+test('graph review queue returns bounded public proposals and excludes private notes and vaults', async () => {
+  const home = await tmp('graph3d-review-queue');
+  const main = path.join(home, 'main');
+  const diary = path.join(home, 'diary');
+  await mkdir(main, { recursive: true }); await mkdir(diary, { recursive: true });
+  const env = { BRAINLINK_HOME: path.join(home, 'app'), BRAINLINK_SEMANTIC: '0' };
+  const s = await startSetup({ env, home, os: 'linux', port: 0, useCli: false });
+  const base = `http://127.0.0.1:${s.port}`;
+  const api = (p, body) => fetch(base + p, { method: 'POST', headers: { 'X-BrainLink-Token': s.token, 'Content-Type': 'application/json' }, body: JSON.stringify(body || {}) }).then((r) => r.json());
+  try {
+    assert.equal((await api('/api/vault', { path: main, name: 'Main', pack: 'simple', scaffold: false })).ok, true);
+    assert.equal((await api('/api/vault', { path: diary, name: 'Diary', pack: 'simple', scaffold: false, private: true })).ok, true);
+    await new Promise((resolve) => setTimeout(resolve, 350));
+    const fs = await import('node:fs/promises');
+    await fs.writeFile(path.join(main, 'Team.md'), '---\ntype: team\nid: team.product\nscope: organisation\nstatus: current\n---\n# Product team\n');
+    await fs.writeFile(path.join(main, 'Workflow.md'), '---\ntype: workflow\nid: workflow.collect\nscope: organisation\nstatus: proposed\nrelations:\n  - predicate: runs\n    target: team.product\n    review: proposed\n    source: "Public workflow evidence"\n    confidence: 0.8\n---\n# Collect questions\n');
+    await fs.writeFile(path.join(main, 'Private source.md'), '---\nprivate: true\ntype: workflow\nid: workflow.secret\nscope: organisation\nstatus: proposed\nrelations:\n  - predicate: runs\n    target: team.product\n    review: proposed\n    source: "PRIVATE_QUEUE_CANARY"\n    confidence: 0.8\n---\n# Private source\n');
+    await fs.writeFile(path.join(diary, 'Personal routine.md'), '---\ntype: workflow\nid: workflow.diary\nscope: personal\nstatus: proposed\nrelations:\n  - predicate: runs\n    target: routine.personal\n    review: proposed\n    source: "PRIVATE_VAULT_CANARY"\n    confidence: 0.8\n---\n# Personal routine\n');
+    await fs.writeFile(path.join(diary, 'Personal task.md'), '---\ntype: dataset\nid: routine.personal\nscope: personal\nstatus: current\n---\n# Personal task\n');
+    const result = await api('/api/graph3d/reviews', {});
+    assert.equal(result.total, 1, JSON.stringify(result));
+    assert.equal(result.proposals.length, 1);
+    assert.equal(result.proposals[0].path, 'Workflow.md');
+    assert.equal(result.proposals[0].target.title, 'Team');
+    assert.equal(result.proposals[0].can_review, true);
+    assert.doesNotMatch(JSON.stringify(result), /PRIVATE_QUEUE_CANARY|PRIVATE_VAULT_CANARY|Private source|Diary workflow/);
+    const privateQueue = await api('/api/graph3d/reviews', { vault: 'Diary' });
+    assert.deepEqual(privateQueue, { proposals: [], total: 0, limited: false });
+  } finally { s.server.close(); }
+});
+
 test('graph finds text-backed relationship candidates, saves them unapproved, then requires separate approval', async () => {
   const home = await tmp('graph3d-discovery-home');
   const vaultPath = path.join(home, 'vault');
@@ -264,6 +295,9 @@ test('graph UI exposes a confirmation-gated action for reviewing a suggested rel
   assert.match(src, /api\('\/api\/graph3d\/relationship\/approve'/);
   assert.match(src, /api\('\/api\/graph3d\/relationship\/propose'/);
   assert.match(src, /notes3d\.saveSuggestionConfirm/);
+  assert.match(src, /api\('\/api\/graph3d\/reviews'/, 'the graph loads a central review queue');
+  assert.match(src, /data-approve-queued/, 'queued proposals can be approved from the central review list');
+  assert.match(src, /api\('\/api\/graph3d\/note',[\s\S]*?api\('\/api\/graph3d\/relationship\/approve'/, 'approval fetches a fresh note revision before writing');
 });
 
 test('ui/notes3d.js: hover label is escaped, and the selected node is visibly highlighted', async () => {
