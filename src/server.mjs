@@ -15,7 +15,7 @@ import { openSessionStore, importAll } from './sessions/index.mjs';
 import { sessionList, sessionRead, sessionLog } from './sessions/mcp.mjs';
 import { closeSession } from './sessions/close.mjs';
 import { listSessionFilingFolders } from './sessions/folders.mjs';
-import { twinToolAuthorization, twinToolListed, twinToolVaultChoices } from './twin-profiles.mjs';
+import { twinMemoryAllowed, twinToolAuthorization, twinToolListed, twinToolVaultChoices } from './twin-profiles.mjs';
 import { ingestionQueue, recordIngestion } from './ingestion.mjs';
 
 const require = createRequire(import.meta.url);
@@ -34,7 +34,7 @@ function compactSearchResponse(response) {
 export function createMcp(ctx, { onCall = () => {} } = {}) {
   const { cfg } = ctx;
   const connectorVaults = ctx.enabled.filter((v) => !ctx.byName.get(v).private || ctx.connectorPrivate);
-  const agents = ctx.agents;
+  const agents = twinMemoryAllowed(ctx, 'procedural') ? ctx.agents : [];
   const hasHandoff = Boolean(cfg.handoff && ctx.enabled.includes(cfg.handoff.vault));
   const scopedSessionRead = ctx.twinScope?.mode === 'scoped' && twinToolListed(ctx, 'session_list');
   const scopedSessionClose = ctx.twinScope?.mode === 'scoped' && twinToolListed(ctx, 'session_close') && twinToolListed(ctx, 'session_filing_folders');
@@ -90,7 +90,7 @@ export function createMcp(ctx, { onCall = () => {} } = {}) {
     ],
     templates: Object.fromEntries(Object.entries(TEMPLATES).map(([k, t]) => [k, { folder: t.folder, fields: t.fields }])),
     ...(guideHasHandoff ? { handoff_mailbox: `${cfg.handoff.vault}/${cfg.handoff.folder}` } : {}),
-    ...(ctx.twinScope?.mode === 'scoped' ? { twin_profile_scope: { profile_id: ctx.twinScope.profile_id, permitted_vaults: ctx.enabled, available_operations: [...new Set(ctx.twinScope.grants.flatMap((grant) => grant.operations))], writes_available: false, session_history_available: scopedSessionRead, session_close_available: scopedSessionClose, handoffs_available: scopedHandoffRead || scopedHandoffWrite } } : {}),
+    ...(ctx.twinScope?.mode === 'scoped' ? { twin_profile_scope: { profile_id: ctx.twinScope.profile_id, permitted_vaults: ctx.enabled, memory_policy: { ...ctx.twinScope.memory_policy }, available_operations: [...new Set(ctx.twinScope.grants.flatMap((grant) => grant.operations))], writes_available: false, session_history_available: scopedSessionRead, session_close_available: scopedSessionClose, handoffs_available: scopedHandoffRead || scopedHandoffWrite } } : {}),
   });
 
   const vaultProp = { type: 'string', enum: ctx.enabled, description: 'Which vault. Vaults are never mixed.' };
@@ -261,11 +261,13 @@ export function createMcp(ctx, { onCall = () => {} } = {}) {
   ].filter((t) => !(ctx.readOnly && t.annotations === WR));
 
   const resources = () => {
+    if (!twinMemoryAllowed(ctx, 'procedural')) return [];
     const out = [{ uri: 'brainlink://guide', name: 'BrainLink guide', mimeType: 'application/json', description: 'Vaults, agents, identity and write rules' }];
     for (const v of ctx.enabled) for (const f of ctx.byName.get(v).read_first) out.push({ uri: `brainlink://vault/${encodeURIComponent(v)}/${encodeURIComponent(f)}`, name: `${v}: ${f}`, mimeType: 'text/markdown' });
     return out;
   };
   const readResource = async (uri) => {
+    if (!twinMemoryAllowed(ctx, 'procedural')) throw new Error('Twin profile policy does not allow procedural memory access.');
     if (uri === 'brainlink://guide') return { uri, mimeType: 'application/json', text: JSON.stringify(guide(), null, 1) };
     const m = String(uri).match(/^brainlink:\/\/vault\/([^/]+)\/(.+)$/);
     if (!m) throw new Error(`Unknown resource ${uri}`);

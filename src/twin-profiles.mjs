@@ -15,12 +15,13 @@ export function twinProfileStatus(cfg) {
       vaults: vaults.map(({ name, access, operations }) => ({ name, access, operations: [...operations] })),
     })),
     declaration_status: 'agent_profile_scope_active',
+    memory_policy_enforcement: 'tools_prompts_resources',
   }));
   return {
     schema: 1,
     enforcement: 'scoped_agent_read_only',
     profiles,
-    next_gate: 'Named AI-agent tokens use profile-scoped vault access. Session reads require an explicit read_session grant and exact profile_id match; private closeouts require propose_note plus filing-folder access and are approval-gated. Handoff read/send require separate grants and carry a profile owner; acknowledgements can target only an available handoff owned by the same Twin. General note writes and session logging remain unavailable; richer reply/update semantics are not implemented.',
+    next_gate: 'Named AI-agent tokens use profile-scoped vault and memory-type access. Working, semantic, procedural and episodic policies filter tools, prompts and resources. Session reads still require an explicit read_session grant and exact profile_id match; private closeouts require propose_note plus filing-folder access and are approval-gated. Handoff read/send require separate grants and carry a profile owner; acknowledgements can target only an available handoff owned by the same Twin. General note writes and session logging remain unavailable; richer reply/update semantics are not implemented.',
   };
 }
 
@@ -35,7 +36,27 @@ export function resolveTwinAgentScope(cfg, agent, tokenProvided = false) {
   if (matches.length !== 1) return { mode: 'unassigned', profile_id: null, grants: [] };
   const { profile, entry } = matches[0];
   const grants = (entry.vaults || []).map(({ name, access, operations }) => ({ name, access, operations: Array.isArray(operations) ? [...operations] : [] }));
-  return { mode: 'scoped', profile_id: profile.id, profile_name: profile.name, grants };
+  return { mode: 'scoped', profile_id: profile.id, profile_name: profile.name, memory_policy: { ...profile.memory_policy }, grants };
+}
+
+// Memory policy is enforced on the same boundary as vault and operation grants. This map
+// describes what each surface exposes; it does not change storage or require users to classify
+// every note. Unknown or undeclared types fail closed for scoped agents.
+const READ_TOOL_MEMORY = Object.freeze({
+  brainlink_guide: 'procedural', agent_connect: 'procedural',
+  vault_search: 'semantic', vault_read_note: 'semantic', vault_related: 'semantic', search: 'semantic', fetch: 'semantic',
+  vault_recent: 'semantic', open_loops: 'semantic', brain_brief: 'semantic', vault_health: 'semantic',
+  ingestion_queue: 'semantic', ingestion_record: 'semantic',
+  list_handoffs: 'working', send_handoff: 'working',
+  session_list: 'episodic', session_read: 'episodic', session_close: 'episodic', session_filing_folders: 'episodic',
+});
+
+export function twinMemoryAllowed(ctx, memoryType) {
+  const scope = ctx.twinScope || { mode: 'legacy' };
+  if (scope.mode === 'legacy') return true;
+  if (scope.mode !== 'scoped') return false;
+  return ['working', 'semantic', 'procedural', 'episodic'].includes(memoryType)
+    && scope.memory_policy?.[memoryType] === true;
 }
 
 const READ_TOOL_ACTION = Object.freeze({
@@ -62,6 +83,8 @@ export function twinToolAuthorization(ctx, name, args = {}) {
   if (scope.mode !== 'scoped') return { allowed: false, reason: 'This AI agent token is not assigned to an active Twin profile.' };
   const action = READ_TOOL_ACTION[name];
   if (!action) return { allowed: false, reason: `This operation is not available to profile-scoped agents yet: ${name}.` };
+  const memoryType = READ_TOOL_MEMORY[name];
+  if (!twinMemoryAllowed(ctx, memoryType)) return { allowed: false, reason: `Twin profile policy does not allow ${memoryType || 'unclassified'} memory access.` };
   if (HANDOFF_TOOLS.has(name)) return handoffGrant(ctx, action)
     ? { allowed: true }
     : { allowed: false, reason: `Twin profile scope does not allow ${action} in its handoff vault.` };
@@ -81,6 +104,7 @@ export function twinToolListed(ctx, name) {
   const scope = ctx.twinScope || { mode: 'legacy', grants: [] };
   if (scope.mode === 'legacy') return true;
   if (scope.mode !== 'scoped') return false;
+  if (!twinMemoryAllowed(ctx, READ_TOOL_MEMORY[name])) return false;
   const action = READ_TOOL_ACTION[name];
   if (!action) return false;
   if (HANDOFF_TOOLS.has(name)) return handoffGrant(ctx, action);

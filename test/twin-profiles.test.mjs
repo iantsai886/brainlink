@@ -53,6 +53,7 @@ test('Twin status shows limited runtime scope and never exposes agent credential
   const status = twinProfileStatus(fixture('C:\\fictional-vault'));
   assert.equal(status.enforcement, 'scoped_agent_read_only');
   assert.equal(status.profiles[0].declaration_status, 'agent_profile_scope_active');
+  assert.equal(status.profiles[0].memory_policy_enforcement, 'tools_prompts_resources');
   assert.equal(status.profiles[0].agents[0].name, 'Fictional Codex');
   assert.equal(status.profiles[0].agents[0].vaults[0].operations.includes('write_note'), false);
   assert.doesNotMatch(JSON.stringify(status), /tokenHash|f{64}/);
@@ -108,6 +109,7 @@ test('profile-scoped agents see only granted vaults and only supported read tool
   const guide = await mcp.handle({ jsonrpc: '2.0', id: 6, method: 'tools/call', params: { name: 'brainlink_guide', arguments: {} } });
   assert.equal(guide.result.structuredContent.twin_profile_scope.profile_id, 'org_twin_1');
   assert.equal(guide.result.structuredContent.twin_profile_scope.writes_available, false);
+  assert.deepEqual(guide.result.structuredContent.twin_profile_scope.memory_policy, cfg.twin_profiles[0].memory_policy);
   const deniedSessionPrompt = await mcp.handle({ jsonrpc: '2.0', id: 9, method: 'prompts/get', params: { name: 'close-session' } });
   assert.ok(deniedSessionPrompt.error);
   const deniedVault = await mcp.handle({ jsonrpc: '2.0', id: 2, method: 'tools/call', params: { name: 'vault_search', arguments: { vault: 'Fictional Personal', query: 'TWIN_PERSONAL_CANARY_77' } } });
@@ -127,6 +129,60 @@ test('profile-scoped agents see only granted vaults and only supported read tool
   const unassigned = createContext(cfg, { env: { BRAINLINK_AGENT_TOKEN: 'unknown-token' } });
   assert.deepEqual(unassigned.enabled, []);
   assert.equal(unassigned.twinScope.mode, 'unassigned');
+});
+
+test('Twin memory policy blocks disabled types at tool, prompt and resource boundaries', async () => {
+  const root = await mkdtemp(path.join(tmpdir(), 'brainlink-twin-memory-policy-'));
+  const vaultPath = path.join(root, 'org');
+  await mkdir(vaultPath, { recursive: true });
+  await writeFile(path.join(vaultPath, 'Public.md'), 'Fictional semantic content.');
+  await writeFile(path.join(vaultPath, 'Policy.md'), 'PROCEDURAL_POLICY_CANARY_61');
+
+  const cases = [
+    { type: 'working', tool: 'send_handoff' },
+    { type: 'semantic', tool: 'vault_search', prompt: 'brief', args: { vault: 'Fictional Org', query: 'Fictional semantic content' } },
+    { type: 'procedural', tool: 'brainlink_guide', resource: 'brainlink://vault/Fictional%20Org/Policy.md' },
+    { type: 'episodic', tool: 'session_list', prompt: 'close-session' },
+  ];
+  for (const item of cases) {
+    const cfg = fixture(vaultPath);
+    cfg.vaults[0].read_first = ['Policy.md'];
+    cfg.twin_profiles[0].memory_policy[item.type] = false;
+    if (item.type === 'working') {
+      cfg.handoff = { vault: 'Fictional Org', folder: 'Handoffs' };
+      cfg.twin_profiles[0].allowed_actions.push('write_handoff');
+      cfg.twin_profiles[0].agent_access[0].vaults[0].access = 'propose';
+      cfg.twin_profiles[0].agent_access[0].vaults[0].operations.push('write_handoff');
+    }
+    if (item.type === 'episodic') {
+      cfg.twin_profiles[0].allowed_actions.push('read_session');
+      cfg.twin_profiles[0].agent_access[0].vaults[0].operations.push('read_session');
+    }
+    assert.deepEqual(validate(cfg), [], `${item.type} policy fixture remains valid`);
+    const ctx = createContext(cfg, { env: { BRAINLINK_HOME: path.join(root, `app-${item.type}`), BRAINLINK_AGENT_TOKEN: 'fictional-agent-token', BRAINLINK_SEMANTIC: '0' } });
+    const mcp = createMcp(ctx);
+    const listed = await mcp.handle({ jsonrpc: '2.0', id: 1, method: 'tools/list' });
+    assert.ok(!listed.result.tools.some((tool) => tool.name === item.tool), `${item.type} tool is not advertised`);
+    const denied = await mcp.handle({ jsonrpc: '2.0', id: 2, method: 'tools/call', params: { name: item.tool, arguments: item.args || {} } });
+    assert.equal(denied.result.isError, true, `${item.type} call is denied even if sent directly`);
+    assert.match(denied.result.content[0].text, new RegExp(`does not allow ${item.type} memory`));
+    assert.doesNotMatch(JSON.stringify(denied), /Fictional semantic content|PROCEDURAL_POLICY_CANARY_61/);
+
+    if (item.prompt) {
+      const prompts = await mcp.handle({ jsonrpc: '2.0', id: 3, method: 'prompts/list' });
+      assert.ok(!prompts.result.prompts.some((prompt) => prompt.name === item.prompt), `${item.type} prompt is hidden`);
+    }
+
+    if (item.type === 'procedural') {
+      const resources = await mcp.handle({ jsonrpc: '2.0', id: 4, method: 'resources/list' });
+      assert.deepEqual(resources.result.resources, []);
+      const read = await mcp.handle({ jsonrpc: '2.0', id: 5, method: 'resources/read', params: { uri: item.resource } });
+      assert.match(read.error.message, /does not allow procedural memory/);
+      assert.doesNotMatch(JSON.stringify(read), /PROCEDURAL_POLICY_CANARY_61/);
+      const prompts = await mcp.handle({ jsonrpc: '2.0', id: 6, method: 'prompts/list' });
+      assert.ok(!prompts.result.prompts.some((prompt) => prompt.name.startsWith('connect-')));
+    }
+  }
 });
 
 test('profile-scoped session reads stay inside the profile and closeouts remain approval-gated', async () => {
