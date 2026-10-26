@@ -476,6 +476,7 @@ vaultEvents.addEventListener('vault-changed', () => window.dispatchEvent(new Eve
 const $ = (id) => document.getElementById(id);
 const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 let S = null, pack = 'founder-os', editingTwinId = null;
+let activeFiledSummary = null;
 let pendingSyncOnboarding = false; // set when a first-run vault pick just succeeded; cleared once the sync choice is saved
 let healthByClient = {}; // client id -> last /api/client-health (or /api/connect's health) result, kept across re-renders
 let pendingPresetClient = null;
@@ -1288,8 +1289,36 @@ document.addEventListener('click', (e) => {
     if ($('session-file-preview').dataset.vault !== vault || $('session-file-preview').dataset.folder !== folder) throw new Error(t('sessions.previewFirst'));
     const result = await api('POST', '/api/sessions/file', { id: d.fileConfirm, vault, folder, confirm: true, rememberDestination: Boolean($('session-remember-destination')?.checked) });
     if (!result.ok || !result.written) throw new Error((result.errors || []).join('; ') || result.next || 'Not saved.');
+    const prefix = `${vault}/`;
+    if (!String(result.path || '').startsWith(prefix)) throw new Error('The saved note path could not be confirmed.');
+    activeFiledSummary = { sessionId: d.fileConfirm, vault, path: result.path.slice(prefix.length), status: 'proposed' };
+    document.querySelector('[data-file-confirm]').hidden = true;
     toast(t('sessions.savedPrivate', { path: result.path }));
     if (result.destination_rule_saved) toast(t('sessions.destinationRemembered'));
+    $('session-detail').insertAdjacentHTML('beforeend', `<div class="row" style="margin-top:8px"><button class="secondary" data-filed-edit="1">${esc(t('sessions.editFiledSummary'))}</button></div><div id="filed-summary-editor"></div>`);
+  });
+  if (d.filedEdit) act(async () => {
+    if (!activeFiledSummary) throw new Error('Open the filed note from this session first.');
+    const note = await api('POST', '/api/sessions/filed-summary', { ...activeFiledSummary, action: 'read' });
+    activeFiledSummary = { ...activeFiledSummary, etag: note.etag, status: 'proposed' };
+    $('filed-summary-editor').innerHTML = `<div class="card"><label>${esc(t('sessions.correctSummary'))}<textarea id="filed-summary-text" rows="8" maxlength="20000">${esc(note.summary)}</textarea></label><div class="row"><button class="primary" data-filed-save="1">${esc(t('sessions.saveCorrection'))}</button><button class="secondary" data-filed-withdraw="1">${esc(t('sessions.withdrawProposal'))}</button></div></div>`;
+  });
+  if (d.filedSave) act(async () => {
+    if (!activeFiledSummary?.etag) throw new Error('Reload the filed summary before saving.');
+    const result = await api('POST', '/api/sessions/filed-summary', { ...activeFiledSummary, action: 'correct', summary: $('filed-summary-text').value });
+    activeFiledSummary = { ...activeFiledSummary, etag: result.etag };
+    toast(t('sessions.filingUpdated'));
+    const note = await api('POST', '/api/sessions/filed-summary', { ...activeFiledSummary, action: 'read' });
+    activeFiledSummary.etag = note.etag;
+    $('filed-summary-text').value = note.summary;
+  });
+  if (d.filedWithdraw) act(async () => {
+    if (!activeFiledSummary?.etag) throw new Error('Reload the filed summary before withdrawing it.');
+    if (!confirm(t('sessions.withdrawConfirm'))) return;
+    const result = await api('POST', '/api/sessions/filed-summary', { ...activeFiledSummary, action: 'withdraw' });
+    activeFiledSummary = { ...activeFiledSummary, etag: result.etag, status: result.status };
+    document.querySelector('[data-filed-edit]').hidden = true;
+    $('filed-summary-editor').innerHTML = `<p class="notice">${esc(t('sessions.proposalWithdrawn'))}</p>`;
   });
   if (d.sessToggle) act(() => api('POST', '/api/sessions/private', { id: d.sessToggle, private: !d.sessPrivate }));
   if (d.sessAssign) act(async () => {

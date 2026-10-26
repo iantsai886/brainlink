@@ -2,6 +2,10 @@
 // model inference, or cross-vault matching occurs here; the user selects the destination vault.
 import { proposeNote } from '../writes.mjs';
 import { listSessionFilingFolders } from './folders.mjs';
+import { isPrivateMeta, parseFrontmatter, findSecrets, safeJoin, vaultRoot, isExcludedPath } from '../core.mjs';
+import { createHash, randomBytes } from 'node:crypto';
+import { lstat, readFile, writeFile, rename, unlink } from 'node:fs/promises';
+import path from 'node:path';
 
 export function filingFields(session, vaultName, identity = {}, folder) {
   if (!session?.id || !session?.summary?.trim()) throw new Error('This session has no summary to file. Review it manually first.');
@@ -25,4 +29,91 @@ export async function fileSessionSummary(ctx, session, vaultName, confirm = fals
     if (!allowed.some((item) => item.path === folder)) return { ok: false, errors: ['Choose an existing, writable folder in the selected vault.'] };
   }
   return proposeNote(ctx, { ...filingFields(session, vaultName, identity, folder), confirm });
+}
+
+function metadataValue(meta, name) {
+  const key = Object.keys(meta || {}).find((item) => item.toLowerCase() === name);
+  return key === undefined ? '' : String(meta[key]).trim();
+}
+
+function validateFiledEpisode(raw, sessionId) {
+  const parsed = parseFrontmatter(raw);
+  if (metadataValue(parsed.meta, 'type').toLowerCase() !== 'episode'
+    || metadataValue(parsed.meta, 'source') !== `BrainLink session ${sessionId}`
+    || !isPrivateMeta(parsed.meta)
+    || metadataValue(parsed.meta, 'status').toLowerCase() !== 'proposed') {
+    throw new Error('This is not an editable private session-summary proposal.');
+  }
+  return parsed;
+}
+
+function appendFilingHistory(body, message, date) {
+  const entry = `- ${date} — ${message}\n`;
+  const marker = /^## Changelog\s*\r?$/im;
+  return marker.test(body) ? body.replace(marker, (heading) => `${heading}\n\n${entry}`) : `${body.trimEnd()}\n\n## Changelog\n\n${entry}`;
+}
+
+async function openFiledEpisode(ctx, { vaultName, rel, sessionId, etag }) {
+  if (!ctx.enabled.includes(vaultName)) throw new Error('Choose an enabled destination vault.');
+  const vault = ctx.byName.get(vaultName);
+  if (!vault) throw new Error('Choose an enabled destination vault.');
+  if (typeof rel !== 'string' || !rel.toLowerCase().endsWith('.md') || rel.length > 3000 || rel.startsWith('/') || rel.includes('\\') || rel.split('/').some((part) => !part || part === '.' || part === '..')) throw new Error('Invalid note path.');
+  if (typeof sessionId !== 'string' || !/^[a-zA-Z0-9_-]{1,160}$/.test(sessionId)) throw new Error('Invalid session reference.');
+  const root = vaultRoot(ctx, vaultName);
+  if (await isExcludedPath(root, rel)) throw new Error('This note is unavailable.');
+  const full = safeJoin(root, rel);
+  let current = root;
+  for (const part of rel.split('/')) {
+    current = path.join(current, part);
+    const info = await lstat(current);
+    if (info.isSymbolicLink()) throw new Error('This note is unavailable.');
+  }
+  if (!(await lstat(full)).isFile()) throw new Error('This note is unavailable.');
+  const raw = await readFile(full, 'utf8');
+  const parsed = validateFiledEpisode(raw, sessionId);
+  const digest = createHash('sha256').update(raw).digest('hex');
+  if (etag !== undefined && (typeof etag !== 'string' || etag !== digest)) throw new Error('This note changed since it was opened. Reload before saving.');
+  const start = /^## Session summary\s*\r?\n/im.exec(parsed.body);
+  const end = /^## Provenance\s*$/im.exec(parsed.body);
+  if (!start || !end || end.index <= start.index) throw new Error('The expected summary section is missing.');
+  const summary = parsed.body.slice(start.index + start[0].length, end.index).trim();
+  return { vault, root, full, raw, parsed, etag: digest, summary };
+}
+
+export async function readFiledSessionSummary(ctx, input) {
+  const opened = await openFiledEpisode(ctx, input);
+  return { ok: true, vault: input.vaultName, path: input.rel, etag: opened.etag, summary: opened.summary };
+}
+
+export async function updateFiledSessionSummary(ctx, { vaultName, rel, sessionId, etag, action, summary, now = new Date() }) {
+  const opened = await openFiledEpisode(ctx, { vaultName, rel, sessionId, etag });
+  const { vault, full, raw, parsed } = opened;
+  if (ctx.readOnly || vault.writes !== 'on') throw new Error('This vault does not allow edits.');
+  const date = now.toISOString().slice(0, 10);
+  let next;
+  if (action === 'correct') {
+    if (typeof summary !== 'string' || !summary.trim() || summary.length > 20000) throw new Error('Enter a summary under 20,000 characters.');
+    if (findSecrets(summary).length) throw new Error('This summary looks like it may contain a secret. Remove it before saving.');
+    const body = parsed.body;
+    const start = /^## Session summary\s*\r?\n/im.exec(body);
+    const end = /^## Provenance\s*$/im.exec(body);
+    if (!start || !end || end.index <= start.index) throw new Error('The expected summary section is missing; no changes were made.');
+    const before = body.slice(0, start.index);
+    const summaryHeading = body.slice(start.index, start.index + start[0].length);
+    const after = body.slice(end.index);
+    const revised = `${before}${summaryHeading}${summary.trim()}\n\n${after}`;
+    const bodyWithHistory = appendFilingHistory(revised, 'Summary corrected by user.', date);
+    next = raw.slice(0, raw.length - parsed.body.length) + bodyWithHistory;
+  } else if (action === 'withdraw') {
+    const front = /^---[^\S\r\n]*\r?\n[\s\S]*?\r?\n---[^\S\r\n]*\r?\n?/.exec(raw)?.[0];
+    if (!front || !/^status:\s*['"]?proposed['"]?\s*$/im.test(front)) throw new Error('The proposal status cannot be safely updated.');
+    const updatedFront = front.replace(/^(status:\s*)['"]?proposed['"]?\s*$/im, '$1withdrawn');
+    const bodyWithHistory = appendFilingHistory(parsed.body, 'Proposal withdrawn by user.', date);
+    next = updatedFront + bodyWithHistory;
+  } else throw new Error('Choose correct or withdraw.');
+
+  const tmp = `${full}.brainlink-${randomBytes(6).toString('hex')}.tmp`;
+  try { await writeFile(tmp, next, 'utf8'); await rename(tmp, full); }
+  catch (error) { try { await unlink(tmp); } catch {} throw error; }
+  return { ok: true, etag: createHash('sha256').update(next).digest('hex'), status: action === 'withdraw' ? 'withdrawn' : 'proposed' };
 }

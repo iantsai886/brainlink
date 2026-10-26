@@ -159,6 +159,9 @@ test('local filing API requires its token and writes a private note only after c
   const call = (body, token = app.token) => fetch(`http://127.0.0.1:${app.port}/api/sessions/file`, {
     method: 'POST', headers: { 'Content-Type': 'application/json', 'X-BrainLink-Token': token }, body: JSON.stringify(body),
   });
+  const manageFiled = (body, token = app.token) => fetch(`http://127.0.0.1:${app.port}/api/sessions/filed-summary`, {
+    method: 'POST', headers: { 'Content-Type': 'application/json', 'X-BrainLink-Token': token }, body: JSON.stringify(body),
+  });
   const recommend = (id) => fetch(`http://127.0.0.1:${app.port}/api/sessions/recommend`, {
     method: 'POST', headers: { 'Content-Type': 'application/json', 'X-BrainLink-Token': app.token }, body: JSON.stringify({ id }),
   }).then((r) => r.json());
@@ -178,7 +181,30 @@ test('local filing API requires its token and writes a private note only after c
     const written = await (await call({ id: saved.id, vault: 'Company', folder: 'Projects/fictional-project', confirm: true, rememberDestination: true })).json();
     assert.equal(written.written, true);
     assert.equal(written.destination_rule_saved, true);
-    assert.match(await readFile(path.join(vault, ...written.path.slice('Company/'.length).split('/')), 'utf8'), /private: true/);
+    const rel = written.path.slice('Company/'.length);
+    const file = path.join(vault, ...rel.split('/'));
+    assert.match(await readFile(file, 'utf8'), /private: true/);
+    const filedRef = { sessionId: saved.id, vault: 'Company', path: rel };
+    assert.equal((await manageFiled({ ...filedRef, action: 'read' }, 'wrong')).status, 401);
+    const opened = await (await manageFiled({ ...filedRef, action: 'read' })).json();
+    assert.equal(opened.summary, 'Draft decision for a made-up product.', JSON.stringify(opened));
+    assert.match((await (await manageFiled({ ...filedRef, sessionId: next.id, action: 'read' })).json()).error, /not an editable private session-summary proposal/);
+    assert.match((await (await manageFiled({ ...filedRef, etag: opened.etag, action: 'correct', summary: 'credential sk-abcdefghijklmnopqrstuvwxyz123' })).json()).error, /may contain a secret/);
+    const corrected = await (await manageFiled({ ...filedRef, etag: opened.etag, action: 'correct', summary: 'Corrected made-up product decision.' })).json();
+    assert.equal(corrected.status, 'proposed');
+    assert.match((await (await manageFiled({ ...filedRef, etag: opened.etag, action: 'correct', summary: 'stale write' })).json()).error, /changed since it was opened/, 'stale edits are refused');
+    const afterCorrection = await (await manageFiled({ ...filedRef, action: 'read' })).json();
+    assert.equal(afterCorrection.summary, 'Corrected made-up product decision.');
+    const correctedRaw = await readFile(file, 'utf8');
+    assert.match(correctedRaw, /private: true/);
+    assert.match(correctedRaw, /Summary corrected by user/);
+    assert.doesNotMatch(correctedRaw, /private raw turn marker/);
+    const withdrawn = await (await manageFiled({ ...filedRef, etag: afterCorrection.etag, action: 'withdraw' })).json();
+    assert.equal(withdrawn.status, 'withdrawn');
+    const withdrawnRaw = await readFile(file, 'utf8');
+    assert.match(withdrawnRaw, /status: withdrawn/);
+    assert.match(withdrawnRaw, /Proposal withdrawn by user/);
+    assert.match(withdrawnRaw, /Corrected made-up product decision/);
     assert.deepEqual(await recommend(next.id), { vault: 'Company', reason: 'Suggested from your saved choice for this exact project.', project: 'fictional-project', remember_available: true });
     const folderSuggestion = await folders(next.id, 'Company');
     assert.equal(folderSuggestion.suggested_folder, 'Projects/fictional-project');

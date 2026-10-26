@@ -32,7 +32,7 @@ import { snapshotSettings, chooseSnapshot, suggestSnapshotFolder, clearSnapshot,
 import { listHandoffs } from './writes.mjs';
 import { backupOnce, verifyBackup, restoreBackupToEmpty, loadBackupStatus, saveBackupStatus, pruneBackups, listVerifiedBackups } from './backup.mjs';
 import { createOrReadBackupRecoveryKey, parseBackupKey, requireBackupKey } from './backup-key.mjs';
-import { fileSessionSummary } from './sessions/filing.mjs';
+import { fileSessionSummary, readFiledSessionSummary, updateFiledSessionSummary } from './sessions/filing.mjs';
 import { isStartupEnabled, setStartupEnabled } from './startup.mjs';
 import { recommendSessionVault } from './sessions/routing.mjs';
 import { listSessionEndCues, dismissSessionEndCue, sessionEndCueId, matchSessionEndCue } from './sessions/end-cue.mjs';
@@ -1291,6 +1291,16 @@ export async function startSetup(opts = {}) {
         } catch { result.destination_rule_saved = false; }
       }
       return result;
+    },
+    'POST /api/sessions/filed-summary': async (b) => {
+      const cfg = await loadConfig(file);
+      const ctx = localContext(cfg, { ...env, BRAINLINK_AI_PLATFORM: 'BrainLink Local' });
+      const sessionId = String(b.session_id || b.sessionId || '');
+      const session = await sessions.read({ id: sessionId, include_private: true });
+      if (!session?.id) throw new Error('Session not found.');
+      const input = { vaultName: String(b.vault || ''), rel: String(b.path || ''), sessionId };
+      if (b.action === 'read') return readFiledSessionSummary(ctx, input);
+      return updateFiledSessionSummary(ctx, { ...input, etag: b.etag, action: b.action, summary: b.summary });
     },
     'POST /api/sessions/private': (b) => sessions.setPrivate(b.id, b.private),
     // What connected AI apps (not this local UI) may see of imported/logged sessions. The user's
