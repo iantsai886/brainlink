@@ -1,7 +1,8 @@
 // Setup UI backend: a local-only web app (127.0.0.1, random session token) that picks the
 // vault folder, applies a rule pack and connects AI clients.
 import { createServer } from 'node:http';
-import { readFile, stat, lstat, cp, mkdir, writeFile, rename, unlink } from 'node:fs/promises';
+import { watch as watchFs } from 'node:fs';
+import { readFile, stat, lstat, cp, mkdir, writeFile, rename, unlink, readdir } from 'node:fs/promises';
 import { randomBytes, timingSafeEqual, createHash } from 'node:crypto';
 import { execFile } from 'node:child_process';
 import { setTimeout as delay } from 'node:timers/promises';
@@ -59,6 +60,69 @@ async function readUiStatic(rel) {
 
 const json = (res, code, body) => res.writeHead(code, { 'Content-Type': 'application/json', 'Cache-Control': 'no-store' }).end(JSON.stringify(body));
 const LOCALES_DIR = path.join(ROOT, 'ui', 'locales');
+
+async function markdownFingerprint(root) {
+  const rows = [];
+  async function walk(dir) {
+    for (const entry of await readdir(dir, { withFileTypes: true }).catch(() => [])) {
+      if (entry.name.startsWith('.') || ['node_modules', '.git'].includes(entry.name)) continue;
+      const full = path.join(dir, entry.name);
+      if (entry.isDirectory()) await walk(full);
+      else if (entry.isFile() && entry.name.toLowerCase().endsWith('.md')) {
+        const info = await stat(full).catch(() => null);
+        if (info) rows.push(`${path.relative(root, full).split(path.sep).join('/')}\0${info.size}\0${info.mtimeMs}`);
+      }
+    }
+  }
+  await walk(root);
+  rows.sort();
+  return rows.join('\n');
+}
+
+function startVaultChangeWatcher(vaults, onChange, { debounceMs = 300, pollMs = 10000 } = {}) {
+  let stopped = false, timer = null, pollRunning = false;
+  const watchers = [], fallback = [];
+  const notify = () => {
+    if (stopped) return;
+    clearTimeout(timer);
+    timer = setTimeout(() => { if (!stopped) onChange(); }, debounceMs);
+    timer.unref?.();
+  };
+  for (const vault of vaults) {
+    try {
+      const watcher = watchFs(vault.path, { recursive: true }, (_event, filename) => {
+        if (filename != null) {
+          const name = String(filename);
+          const ext = path.extname(name);
+          if (ext && ext.toLowerCase() !== '.md') return;
+          if (name.split(/[\\/]/).some((part) => part.startsWith('.'))) return;
+        }
+        notify();
+      });
+      watcher.on('error', () => {});
+      watchers.push(watcher);
+    } catch { fallback.push(vault); }
+  }
+  let fingerprints = new Map();
+  let pollTimer = null;
+  if (fallback.length) {
+    const initialize = Promise.all(fallback.map(async (vault) => fingerprints.set(vault.name, await markdownFingerprint(vault.path))));
+    pollTimer = setInterval(async () => {
+      if (stopped || pollRunning) return;
+      pollRunning = true;
+      try {
+        await initialize;
+        for (const vault of fallback) {
+          const next = await markdownFingerprint(vault.path);
+          if (next !== fingerprints.get(vault.name)) { fingerprints.set(vault.name, next); notify(); }
+        }
+      } catch { /* local file scan failures do not expose paths or contents */ }
+      finally { pollRunning = false; }
+    }, pollMs);
+    pollTimer.unref?.();
+  }
+  return { stop() { stopped = true; clearTimeout(timer); if (pollTimer) clearInterval(pollTimer); for (const watcher of watchers) { try { watcher.close(); } catch {} } } };
+}
 
 function assertTwinActionsMatchMemory(agentAccess, memoryPolicy) {
   const requiredMemory = {
@@ -450,6 +514,15 @@ export async function startSetup(opts = {}) {
   refreshIngestionSchedule(initialConfig);
   refreshBriefSchedule(initialConfig);
   refreshSyncSchedule(initialConfig);
+  const eventClients = new Set();
+  let vaultWatcher = null;
+  const refreshVaultWatcher = (cfg) => {
+    vaultWatcher?.stop();
+    vaultWatcher = startVaultChangeWatcher(cfg.vaults, () => {
+      for (const client of eventClients) { try { client.write('event: vault-changed\ndata: {}\n\n'); } catch { eventClients.delete(client); } }
+    }, { debounceMs: opts.vaultWatchDebounceMs ?? 300, pollMs: opts.vaultWatchPollMs ?? 10000 });
+  };
+  refreshVaultWatcher(initialConfig);
 
   async function state() {
     const cfg = await loadConfig(file);
@@ -678,6 +751,7 @@ export async function startSetup(opts = {}) {
       const next = mergePack(cfg, built);
       next.timezone ||= Intl.DateTimeFormat().resolvedOptions().timeZone;
       await saveConfig(next, file);
+      refreshVaultWatcher(next);
       await refreshMap(next, name, env);
     }
     const saved = await loadConfig(file);
@@ -746,6 +820,7 @@ export async function startSetup(opts = {}) {
       const next = mergePack(cfg, built);
       if (!next.timezone) next.timezone = Intl.DateTimeFormat().resolvedOptions().timeZone;
       await saveConfig(next, file);
+      refreshVaultWatcher(next);
       await refreshMap(next, name, env);
       return { ok: true, vault: name, created };
     },
@@ -754,6 +829,7 @@ export async function startSetup(opts = {}) {
       const next = { ...cfg, vaults: cfg.vaults.filter((v) => v.name !== b.name), agents: cfg.agents.filter((a) => a.vault !== b.name), handoff: cfg.handoff?.vault === b.name ? null : cfg.handoff };
       if (next.ingestion?.vault === b.name) next.ingestion = { ...next.ingestion, enabled: false };
       await saveConfig(next, file);
+      refreshVaultWatcher(next);
       refreshIngestionSchedule(next);
       // S5: the snapshot watcher was started from whatever vault list existed at launch (or the
       // last /api/snapshot call) and otherwise runs for the life of this process — removing a
@@ -1341,6 +1417,22 @@ export async function startSetup(opts = {}) {
     const url = new URL(req.url, `http://${host}`);
     touch();
     if (url.pathname === '/health') { json(res, 200, { app: 'brainlink', version: VERSION }); return; }
+    if (req.method === 'GET' && url.pathname === '/api/events') {
+      const given = Buffer.from(url.searchParams.get('t') || ''); const want = Buffer.from(token);
+      if (given.length !== want.length || !timingSafeEqual(given, want)) { res.writeHead(401).end(); return; }
+      res.writeHead(200, { 'Content-Type': 'text/event-stream; charset=utf-8', 'Cache-Control': 'no-store', Connection: 'keep-alive', 'X-Accel-Buffering': 'no' });
+      res.write(': connected\n\n'); eventClients.add(res);
+      res.on('close', () => eventClients.delete(res));
+      return;
+    }
+    if (req.method === 'GET' && url.pathname === '/api/events') {
+      const given = Buffer.from(url.searchParams.get('t') || ''); const want = Buffer.from(token);
+      if (given.length !== want.length || !timingSafeEqual(given, want)) { res.writeHead(401).end(); return; }
+      res.writeHead(200, { 'Content-Type': 'text/event-stream; charset=utf-8', 'Cache-Control': 'no-store', Connection: 'keep-alive', 'X-Accel-Buffering': 'no' });
+      res.write(': connected\n\n'); eventClients.add(res);
+      res.on('close', () => eventClients.delete(res));
+      return;
+    }
     if (req.method === 'GET' && /^\/locales\/[A-Za-z-]+\.json$/.test(url.pathname)) {
       const lang = url.pathname.slice('/locales/'.length, -'.json'.length);
       if (!LOCALES.includes(lang)) { res.writeHead(404).end(); return; }
@@ -1373,7 +1465,7 @@ export async function startSetup(opts = {}) {
     }
     try { json(res, 200, await route(body)); } catch (e) { json(res, 400, { error: String(e.message || e) }); }
   });
-  server.once('close', () => { snapshotWatcher?.stop(); clearInterval(discoveryTimer); clearInterval(ingestionTimer); if (backupTimer) { clearTimeout(backupTimer); clearInterval(backupTimer); } if (syncTimer) { clearTimeout(syncTimer); clearInterval(syncTimer); } });
+  server.once('close', () => { snapshotWatcher?.stop(); vaultWatcher?.stop(); for (const client of eventClients) client.end(); eventClients.clear(); clearInterval(discoveryTimer); clearInterval(ingestionTimer); if (backupTimer) { clearTimeout(backupTimer); clearInterval(backupTimer); } if (syncTimer) { clearTimeout(syncTimer); clearInterval(syncTimer); } });
   await new Promise((resolve, reject) => { server.once('error', reject); server.listen(port, '127.0.0.1', resolve); });
   port = server.address().port;
   touch();

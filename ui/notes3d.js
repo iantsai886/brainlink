@@ -109,7 +109,7 @@
     const brainPanel = document.getElementById('brain-panel');
     const root = document.getElementById('notes3d-root');
     if (!brainPanel || !root) return;
-    let graphInstance = null, nodesById = [], byTitle = new Map(), loaded = false, loadedOk = false, selectedId = null, currentDetail = null, currentNode = null;
+    let graphInstance = null, nodesById = [], byTitle = new Map(), loaded = false, loadedOk = false, selectedId = null, currentDetail = null, currentNode = null, pendingVaultRefresh = false;
 
     function stat(id, v) { const el = document.getElementById(id); if (el) el.textContent = v; }
 
@@ -203,6 +203,7 @@
         document.getElementById('notes3d-editor').hidden = true;
         document.getElementById('notes3d-editor-actions').hidden = true;
         document.getElementById('notes3d-body').hidden = false;
+        if (pendingVaultRefresh) { pendingVaultRefresh = false; refreshGraph(); }
         return;
       }
       if (e.target.id === 'notes3d-save') {
@@ -216,6 +217,7 @@
           document.getElementById('notes3d-editor').hidden = true;
           document.getElementById('notes3d-editor-actions').hidden = true;
           document.getElementById('notes3d-body').hidden = false;
+          pendingVaultRefresh = false;
           toast('Note saved.');
           return loadGraph();
         }).catch((err) => { document.getElementById('notes3d-save-status').textContent = err.message; }).finally(() => { button.disabled = false; });
@@ -235,17 +237,22 @@
 
     async function loadGraph() {
       const canvas = document.getElementById('notes3d-canvas');
-      canvas.innerHTML = '<p class="skeleton">Loading your 3D brain map…</p>';
+      if (!graphInstance) canvas.innerHTML = '<p class="skeleton">Loading your 3D brain map…</p>';
       let g;
       try { g = await api('/api/graph3d', {}); }
       catch (e) { canvas.innerHTML = `<p class="error-box">Could not load the map: ${esc(e.message)}</p>`; return; }
       try { const h = await api('/api/graph', {}); stat('st-notes', h.health?.notes ?? 0); stat('st-links', h.health?.links ?? 0); stat('st-orphans', h.health?.not_linked ?? 0); } catch {}
-      if (!g.nodes.length) { canvas.innerHTML = '<p class="muted">No notes yet — once you add some, their links show up here.</p>'; loadedOk = false; return; }
-      if (typeof ForceGraph3D !== 'function') { canvas.innerHTML = '<p class="error-box">Could not load the 3D map (missing viewer). Try reloading.</p>'; return; }
-      canvas.innerHTML = '';
       nodesById = g.nodes;
       byTitle = new Map(g.nodes.map((n) => [n.title.toLowerCase(), n]));
       renderNodeList();
+      if (!g.nodes.length) {
+        if (graphInstance) graphInstance.graphData({ nodes: [], links: [] });
+        else canvas.innerHTML = '<p class="muted">No notes yet — once you add some, their links show up here.</p>';
+        loadedOk = false; return;
+      }
+      if (graphInstance) { graphInstance.graphData({ nodes: g.nodes, links: g.links }); loadedOk = true; resizeToContainer(); return; }
+      if (typeof ForceGraph3D !== 'function') { canvas.innerHTML = '<p class="error-box">Could not load the 3D map (missing viewer). Try reloading.</p>'; return; }
+      canvas.innerHTML = '';
       const css = getComputedStyle(document.documentElement);
       const colorVars = ['c1', 'c2', 'c3', 'c4', 'c5', 'c6', 'c7', 'c8'];
       const counts = new Map();
@@ -271,6 +278,20 @@
       resizeToContainer();
     }
 
+    async function refreshGraph() {
+      if (brainPanel.hidden || !loaded) { pendingVaultRefresh = true; return; }
+      const editor = document.getElementById('notes3d-editor');
+      if (editor && !editor.hidden) { pendingVaultRefresh = true; return; }
+      const selected = currentNode && { vault: currentNode.vault, path: currentNode.path };
+      selectedId = null;
+      await loadGraph();
+      if (!selected) return;
+      const updated = nodesById.find((node) => node.vault === selected.vault && node.path === selected.path);
+      if (updated) openById(updated.id);
+      else { document.getElementById('notes3d-panel-detail').hidden = true; currentNode = null; currentDetail = null; }
+    }
+    window.addEventListener('brainlink:vault-changed', () => { pendingVaultRefresh = false; refreshGraph(); });
+
     // canvas.clientWidth/clientHeight can read 0 (or a stale pre-layout value) the instant
     // #brain-panel stops being hidden, so this is called once right after the graph is created,
     // again one frame later (requestAnimationFrame, after layout has definitely settled), and on
@@ -285,7 +306,11 @@
     const ro = new ResizeObserver(resizeToContainer);
     ro.observe(root);
 
-    function maybeLoad() { if (!brainPanel.hidden && !loaded) { loaded = true; loadGraph().then(() => requestAnimationFrame(resizeToContainer)); } }
+    function maybeLoad() {
+      if (brainPanel.hidden) return;
+      if (!loaded) { loaded = true; loadGraph().then(() => requestAnimationFrame(resizeToContainer)); }
+      else if (pendingVaultRefresh) { pendingVaultRefresh = false; refreshGraph(); }
+    }
     maybeLoad();
     new MutationObserver(maybeLoad).observe(brainPanel, { attributes: true, attributeFilter: ['hidden'] });
   }

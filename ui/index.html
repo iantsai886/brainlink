@@ -471,6 +471,8 @@ ol.todo li { padding-left: 4px; }
 <div id="toast" role="status" aria-live="polite"></div>
 <script>
 const T = new URLSearchParams(location.search).get('t') || '';
+const vaultEvents = new EventSource('/api/events?t=' + encodeURIComponent(T));
+vaultEvents.addEventListener('vault-changed', () => window.dispatchEvent(new Event('brainlink:vault-changed')));
 const $ = (id) => document.getElementById(id);
 const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 let S = null, pack = 'founder-os', editingTwinId = null;

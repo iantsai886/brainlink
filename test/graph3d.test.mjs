@@ -103,16 +103,36 @@ test('/api/graph3d and /api/graph3d/note: same exclusion guarantee over HTTP', a
   const home = await tmp('graph3d-api-home');
   const vaultPath = await buildVault(path.join(home, 'vault'));
   const env = { BRAINLINK_HOME: path.join(home, 'app'), BRAINLINK_SEMANTIC: '0' };
-  const s = await startSetup({ env, home, os: 'linux', port: 0, useCli: false });
+  const s = await startSetup({ env, home, os: 'linux', port: 0, useCli: false, vaultWatchPollMs: 25 });
   const base = `http://127.0.0.1:${s.port}`;
   const api = (p, body) => fetch(base + p, { method: 'POST', headers: { 'X-BrainLink-Token': s.token, 'Content-Type': 'application/json' }, body: JSON.stringify(body || {}) }).then((r) => r.json());
   try {
     const added = await api('/api/vault', { path: vaultPath, name: 'Main', pack: 'simple', scaffold: false });
     assert.equal(added.ok, true, JSON.stringify(added));
+    await new Promise((resolve) => setTimeout(resolve, 350)); // let the newly-added vault's initial Home map write settle
+
+    const denied = await fetch(`${base}/api/events?t=wrong-token`);
+    assert.equal(denied.status, 401);
+    const events = await fetch(`${base}/api/events?t=${encodeURIComponent(s.token)}`);
+    const reader = events.body.getReader();
+    await reader.read(); // connected comment
+    const fs = await import('node:fs/promises');
+    const publicText = 'public live refresh marker';
+    const privateText = 'ZQX_PRIVATE_WATCH_CANARY';
+    await fs.writeFile(path.join(vaultPath, 'External.md'), `# External\n\n${publicText}\n`);
+    await fs.writeFile(path.join(vaultPath, 'External Private.md'), `---\nprivate: true\n---\n# External Private\n\n${privateText}\n`);
+    const change = await Promise.race([
+      reader.read().then(({ value }) => new TextDecoder().decode(value)),
+      new Promise((resolve) => setTimeout(() => resolve('timeout'), 5000)),
+    ]);
+    assert.match(change, /event: vault-changed/);
+    assert.doesNotMatch(change, /External|public live|ZQX_PRIVATE/);
+    await reader.cancel();
 
     const g = await api('/api/graph3d', {});
     const titles = g.nodes.map((n) => n.title);
     assert.ok(!titles.includes('Hidden Note') && !titles.includes('Buried'), JSON.stringify(titles));
+    assert.ok(titles.includes('External') && !titles.includes('External Private'), JSON.stringify(titles));
 
     const note = await api('/api/graph3d/note', { vault: 'Main', path: 'Beta.md' });
     assert.match(note.body, /Backlinked from Alpha/);
@@ -152,6 +172,16 @@ test('ui/notes3d.js: clicking a node opens its note via the same path as a wikil
   const src = await readFile(new URL('../ui/notes3d.js', import.meta.url), 'utf8');
   assert.match(src, /\.onNodeClick\(\(n\) => openById\(n\.id\)\)/, 'node click must call openById, the same function wikilinks/chips use');
   assert.match(src, /function openById\(id\) \{[\s\S]*?openPanel\(node\);/, 'openById must open the detail panel (title, body, backlinks/outlinks)');
+});
+
+test('active Setup UI reloads the graph on vault events and keeps an open editor intact', async () => {
+  const { readFile } = await import('node:fs/promises');
+  const page = await readFile(new URL('../ui/index.html', import.meta.url), 'utf8');
+  const graph = await readFile(new URL('../ui/notes3d.js', import.meta.url), 'utf8');
+  assert.match(page, /new EventSource\('\/api\/events\?t=' \+ encodeURIComponent\(T\)\)/);
+  assert.match(page, /dispatchEvent\(new Event\('brainlink:vault-changed'\)\)/);
+  assert.match(graph, /addEventListener\('brainlink:vault-changed',[\s\S]*?refreshGraph\(\)/);
+  assert.match(graph, /if \(editor && !editor\.hidden\) \{ pendingVaultRefresh = true; return; \}/);
 });
 
 test('ui/notes3d.js: hover label is escaped, and the selected node is visibly highlighted', async () => {
