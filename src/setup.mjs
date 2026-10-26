@@ -636,12 +636,20 @@ export async function startSetup(opts = {}) {
       const agentIds = new Set();
       const agentAccess = rawAgents.map((entry) => {
         const agent = cfg.ai_agents.find((item) => item.id === entry?.agent_id && !item.revoked);
-        const operations = Array.isArray(entry?.operations) ? [...new Set(entry.operations)] : [];
-        if (!agent || agentIds.has(agent.id) || !operations.length || operations.some((operation) => !allowedOperations.has(operation))) throw new Error('Choose active AI agents and at least one supported permission for each.');
-        if (operations.includes('propose_note') && profileVaults.some((vault) => vault.access !== 'propose')) throw new Error('Choose propose access for every profile vault before granting an AI permission to propose notes.');
+        if (!agent || agentIds.has(agent.id)) throw new Error('Choose each active AI agent only once.');
+        const requestedGrants = Array.isArray(entry?.vaults) ? entry.vaults : profileVaults.map(({ name }) => ({ name, operations: entry?.operations }));
+        if (!requestedGrants.length) throw new Error('Choose at least one vault for each assigned AI agent.');
+        const grantNames = new Set();
+        const vaultGrants = requestedGrants.map((grant) => {
+          const profileVault = profileVaults.find((vault) => vault.name === grant?.name);
+          const operations = Array.isArray(grant?.operations) ? [...new Set(grant.operations)] : [];
+          if (!profileVault || grantNames.has(profileVault.name) || !operations.length || operations.some((operation) => !allowedOperations.has(operation))) throw new Error('Each AI permission must name a selected vault and at least one supported action.');
+          if (operations.includes('propose_note') && profileVault.access !== 'propose') throw new Error('Choose propose access for a vault before allowing an AI agent to propose notes there.');
+          grantNames.add(profileVault.name);
+          return { name: profileVault.name, access: operations.includes('propose_note') ? 'propose' : 'read', operations };
+        });
         agentIds.add(agent.id);
-        const access = operations.includes('propose_note') ? 'propose' : 'read';
-        return { agent_id: agent.id, vaults: profileVaults.map(({ name }) => ({ name, access, operations })) };
+        return { agent_id: agent.id, vaults: vaultGrants };
       });
       const memory = b.memory_policy || {};
       const memory_policy = Object.fromEntries(['working', 'semantic', 'procedural', 'episodic'].map((key) => [key, memory[key] === true]));
@@ -662,7 +670,7 @@ export async function startSetup(opts = {}) {
       const cfg = await loadConfig(file);
       const profile = cfg.twin_profiles.find((item) => item.id === String(b.profile_id || ''));
       if (!profile) throw new Error('Choose an existing Twin profile.');
-      if (!profileScopeEditable(profile)) throw new Error('This Twin has different AI access by vault. The simple Setup editor cannot safely change its permissions.');
+      if (!profileScopeEditable(profile)) throw new Error('This Twin has invalid or duplicate per-vault AI permissions. Review its saved configuration before editing.');
       const name = String(b.name || '').trim();
       const owner = String(b.owner || '').trim();
       const mode = String(b.mode || '');
@@ -684,12 +692,20 @@ export async function startSetup(opts = {}) {
       const agentIds = new Set();
       const agentAccess = rawAgents.map((entry) => {
         const agent = cfg.ai_agents.find((item) => item.id === entry?.agent_id && !item.revoked);
-        const operations = Array.isArray(entry?.operations) ? [...new Set(entry.operations)] : [];
-        if (!agent || agentIds.has(agent.id) || !operations.length || operations.some((operation) => !allowedOperations.has(operation))) throw new Error('Choose active AI agents and at least one supported permission for each.');
-        if (operations.includes('propose_note') && profileVaults.some((vault) => vault.access !== 'propose')) throw new Error('Choose propose access for every profile vault before granting an AI permission to propose notes.');
+        if (!agent || agentIds.has(agent.id)) throw new Error('Choose each active AI agent only once.');
+        const requestedGrants = Array.isArray(entry?.vaults) ? entry.vaults : profileVaults.map(({ name }) => ({ name, operations: entry?.operations }));
+        if (!requestedGrants.length) throw new Error('Choose at least one vault for each assigned AI agent.');
+        const grantNames = new Set();
+        const vaultGrants = requestedGrants.map((grant) => {
+          const profileVault = profileVaults.find((vault) => vault.name === grant?.name);
+          const operations = Array.isArray(grant?.operations) ? [...new Set(grant.operations)] : [];
+          if (!profileVault || grantNames.has(profileVault.name) || !operations.length || operations.some((operation) => !allowedOperations.has(operation))) throw new Error('Each AI permission must name a selected vault and at least one supported action.');
+          if (operations.includes('propose_note') && profileVault.access !== 'propose') throw new Error('Choose propose access for a vault before allowing an AI agent to propose notes there.');
+          grantNames.add(profileVault.name);
+          return { name: profileVault.name, access: operations.includes('propose_note') ? 'propose' : 'read', operations };
+        });
         agentIds.add(agent.id);
-        const access = operations.includes('propose_note') ? 'propose' : 'read';
-        return { agent_id: agent.id, vaults: profileVaults.map(({ name }) => ({ name, access, operations })) };
+        return { agent_id: agent.id, vaults: vaultGrants };
       });
       const memory = b.memory_policy || {};
       profile.name = name;

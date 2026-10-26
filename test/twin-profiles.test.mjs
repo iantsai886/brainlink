@@ -58,7 +58,7 @@ test('Twin status shows limited runtime scope and never exposes agent credential
   const scoped = fixture('C:\\fictional-vault');
   scoped.vaults.push({ name: 'Fictional Other', path: 'C:\\fictional-other' });
   scoped.twin_profiles[0].vaults.push({ name: 'Fictional Other', access: 'read' });
-  assert.equal(profileScopeEditable(scoped.twin_profiles[0]), false, 'an agent scoped to only one of two profile vaults cannot use the uniform-permission editor');
+  assert.equal(profileScopeEditable(scoped.twin_profiles[0]), true, 'the matrix editor supports an agent scoped to only one of several profile vaults');
   assert.equal(status.profiles[0].agents[0].name, 'Fictional Codex');
   assert.equal(status.profiles[0].agents[0].vaults[0].operations.includes('write_note'), false);
   assert.doesNotMatch(JSON.stringify(status), /tokenHash|f{64}/);
@@ -75,6 +75,7 @@ test('Twin setup creates profiles from local UI choices and escapes every profil
   assert.match(html, /twinProfiles\.identityHint/);
   assert.match(html, /data-twin-vault/);
   assert.match(html, /data-twin-agent/);
+  assert.match(html, /data-twin-agent-vault/);
   assert.match(html, /data-twin-memory/);
   assert.match(html, /POST', '\/api\/twins\/create'/);
   assert.match(html, /confirm\(t\('twinProfiles\.confirmCreate'/);
@@ -417,8 +418,11 @@ test('Setup creates a validated Twin from explicit vault, agent, action and memo
   const env = { BRAINLINK_HOME: path.join(home, 'app') };
   const cfg = fixture(vaultPath);
   cfg.ai_agents.push({ id: 'agent_personal', name: 'Fictional Personal Agent', kind: 'local', tokenHash: hashToken('fictional-second-agent-token'), connected: false, revoked: false });
+  const otherVault = path.join(root, 'other-vault');
+  await mkdir(otherVault);
+  cfg.vaults.push({ name: 'Fictional Other', path: otherVault, private: false });
   cfg.vaults.push({ name: 'Fictional Private', path: path.join(root, 'private'), private: true });
-  await mkdir(cfg.vaults[1].path);
+  await mkdir(cfg.vaults[2].path);
   await saveConfig(cfg, path.join(env.BRAINLINK_HOME, 'config.json'));
   const setup = await startSetup({ env, home, os: 'linux', port: 0, useCli: false });
   const base = `http://127.0.0.1:${setup.port}`;
@@ -429,18 +433,25 @@ test('Setup creates a validated Twin from explicit vault, agent, action and memo
   try {
     const request = {
       name: 'Fictional Personal Twin', mode: 'personal', owner: 'fictional-owner',
-      vaults: [{ name: 'Fictional Org', access: 'propose' }],
-      agent_access: [{ agent_id: 'agent_personal', operations: ['search', 'read_note', 'propose_note'] }],
+      vaults: [{ name: 'Fictional Org', access: 'propose' }, { name: 'Fictional Other', access: 'read' }],
+      agent_access: [{ agent_id: 'agent_personal', vaults: [
+        { name: 'Fictional Org', operations: ['search', 'read_note', 'propose_note'] },
+        { name: 'Fictional Other', operations: ['search'] },
+      ] }],
       memory_policy: { working: true, semantic: true, procedural: false, episodic: true },
     };
     assert.equal((await api(request, false)).status, 401, 'local Setup token is required');
     const created = await api(request);
     assert.equal(created.status, 200, created.body.error);
     assert.equal(created.body.profile.mode, 'personal');
-    assert.deepEqual(created.body.profile.vaults, [{ name: 'Fictional Org', access: 'propose' }]);
+    assert.deepEqual(created.body.profile.vaults, [{ name: 'Fictional Org', access: 'propose' }, { name: 'Fictional Other', access: 'read' }]);
     assert.deepEqual(created.body.profile.memory_policy, request.memory_policy);
     assert.deepEqual(created.body.profile.allowed_actions.sort(), ['propose_note', 'read_note', 'search']);
     assert.equal(created.body.profile.agents[0].name, 'Fictional Personal Agent');
+    assert.deepEqual(created.body.profile.agents[0].vaults, [
+      { name: 'Fictional Org', access: 'propose', operations: ['search', 'read_note', 'propose_note'] },
+      { name: 'Fictional Other', access: 'read', operations: ['search'] },
+    ]);
     assert.doesNotMatch(JSON.stringify(created.body), /fictional-second-agent-token|tokenHash/);
 
     const privateVault = await api({ ...request, name: 'Should Refuse', vaults: [{ name: 'Fictional Private', access: 'read' }], agent_access: [] });
@@ -448,7 +459,7 @@ test('Setup creates a validated Twin from explicit vault, agent, action and memo
     assert.match(privateVault.body.error, /non-private vaults/);
     const unsupported = await api({ ...request, name: 'Should Refuse Too', agent_access: [{ agent_id: 'agent_personal', operations: ['write_note'] }] });
     assert.equal(unsupported.status, 400);
-    assert.match(unsupported.body.error, /supported permission/);
+    assert.match(unsupported.body.error, /supported action/);
     const saved = JSON.parse(await readFile(path.join(env.BRAINLINK_HOME, 'config.json'), 'utf8'));
     assert.equal(saved.twin_profiles.length, 2, 'rejected requests do not alter the stored profiles');
     assert.deepEqual(validate(saved), []);
@@ -504,7 +515,7 @@ test('Setup edits a Twin without changing its identity or source policy and refu
   } finally { setup.server.close(); }
 });
 
-test('Setup refuses edits when a Twin has different AI access by vault', async () => {
+test('Setup edits each Twin agent vault grant independently without widening access', async () => {
   const root = await mkdtemp(path.join(tmpdir(), 'brainlink-twin-heterogeneous-edit-'));
   const home = path.join(root, 'home');
   const firstVault = path.join(root, 'first-vault');
@@ -524,16 +535,35 @@ test('Setup refuses edits when a Twin has different AI access by vault', async (
   };
   try {
     const status = await call('/api/state');
-    assert.equal(status.body.twin_profiles.profiles[0].editable_scope, false);
+    assert.equal(status.body.twin_profiles.profiles[0].editable_scope, true);
     const before = await readFile(path.join(env.BRAINLINK_HOME, 'config.json'), 'utf8');
-    const refused = await call('/api/twins/update', {
-      profile_id: 'org_twin_1', name: 'Must Not Broaden', mode: 'organisation', owner: 'fictional-owner',
+    const updated = await call('/api/twins/update', {
+      profile_id: 'org_twin_1', name: 'Vault-scoped Twin', mode: 'organisation', owner: 'fictional-owner',
       vaults: [{ name: 'Fictional Org', access: 'propose' }, { name: 'Fictional Other', access: 'read' }],
-      agent_access: [{ agent_id: 'agent_codex', operations: ['search', 'read_note'] }],
+      agent_access: [{ agent_id: 'agent_codex', vaults: [
+        { name: 'Fictional Org', operations: ['search', 'read_note', 'propose_note'] },
+        { name: 'Fictional Other', operations: ['search'] },
+      ] }],
+      memory_policy: { working: true, semantic: true, procedural: true, episodic: true },
+    });
+    assert.equal(updated.status, 200, updated.body.error);
+    assert.deepEqual(updated.body.profile.agents[0].vaults, [
+      { name: 'Fictional Org', access: 'propose', operations: ['search', 'read_note', 'propose_note'] },
+      { name: 'Fictional Other', access: 'read', operations: ['search'] },
+    ]);
+    assert.notEqual(await readFile(path.join(env.BRAINLINK_HOME, 'config.json'), 'utf8'), before);
+    const afterValidUpdate = await readFile(path.join(env.BRAINLINK_HOME, 'config.json'), 'utf8');
+    const refused = await call('/api/twins/update', {
+      profile_id: 'org_twin_1', name: 'Invalid proposal scope', mode: 'organisation', owner: 'fictional-owner',
+      vaults: [{ name: 'Fictional Org', access: 'propose' }, { name: 'Fictional Other', access: 'read' }],
+      agent_access: [{ agent_id: 'agent_codex', vaults: [
+        { name: 'Fictional Org', operations: ['search'] },
+        { name: 'Fictional Other', operations: ['search', 'propose_note'] },
+      ] }],
       memory_policy: { working: true, semantic: true, procedural: true, episodic: true },
     });
     assert.equal(refused.status, 400);
-    assert.match(refused.body.error, /different AI access by vault/);
-    assert.equal(await readFile(path.join(env.BRAINLINK_HOME, 'config.json'), 'utf8'), before);
+    assert.match(refused.body.error, /propose access for a vault/);
+    assert.equal(await readFile(path.join(env.BRAINLINK_HOME, 'config.json'), 'utf8'), afterValidUpdate);
   } finally { setup.server.close(); }
 });

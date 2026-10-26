@@ -3,9 +3,13 @@ export function profileScopeEditable(profile) {
   const profileVaults = new Set((profile?.vaults || []).map((item) => item.name));
   return (profile?.agent_access || []).every((agent) => {
     const grants = agent.vaults || [];
-    if (grants.length !== profileVaults.size || grants.some((grant) => !profileVaults.has(grant.name))) return false;
-    const scopes = new Set(grants.map((grant) => JSON.stringify([grant.access, [...(grant.operations || [])].sort()])));
-    return scopes.size <= 1;
+    const names = grants.map((grant) => grant.name);
+    return grants.length > 0
+      && new Set(names).size === names.length
+      && grants.every((grant) => profileVaults.has(grant.name)
+        && ['read', 'propose'].includes(grant.access)
+        && Array.isArray(grant.operations)
+        && grant.operations.length > 0);
   });
 }
 
