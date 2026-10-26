@@ -10,9 +10,21 @@ import { normalize, saveConfig } from '../src/config.mjs';
 import { createContext, loadVault, searchWithVerdict } from '../src/core.mjs';
 import { createMcp } from '../src/server.mjs';
 import { VectorStore, fillVectors } from '../src/embed.mjs';
-import { evaluateRetrieval, validateRetrievalFixture } from '../src/retrieval-eval.mjs';
+import { evaluateRetrieval, validateRetrievalFixture, decideIndependentComparison } from '../src/retrieval-eval.mjs';
 import { estTokens } from '../src/sessions/tokens.mjs';
 const execFileAsync = promisify(execFile);
+
+test('RSI comparison gates prioritize privacy, sample size, and quality before efficiency', () => {
+  const cases = [
+    [{ privacyOk: false, enoughCases: true, qualityOk: true, smallerContext: true }, 'blocked_privacy'],
+    [{ privacyOk: true, enoughCases: false, qualityOk: true, smallerContext: true }, 'needs_more_cases'],
+    [{ privacyOk: true, enoughCases: true, qualityOk: false, smallerContext: true }, 'quality_regression'],
+    [{ privacyOk: true, enoughCases: true, qualityOk: true, smallerContext: true }, 'eligible_for_review'],
+    [{ privacyOk: true, enoughCases: true, qualityOk: true, smallerContext: false }, 'no_demonstrated_efficiency_gain'],
+    [{ privacyOk: false, enoughCases: false, qualityOk: false, smallerContext: true }, 'blocked_privacy'],
+  ];
+  for (const [input, expected] of cases) assert.equal(decideIndependentComparison(input), expected);
+});
 
 test('retrieval experiment is scoped, privacy-safe, token-measured and never self-promotes on too few cases', async () => {
   const root = await mkdtemp(path.join(tmpdir(), 'bl-rsi-eval-'));

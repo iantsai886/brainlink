@@ -106,6 +106,15 @@ function independentMetrics(cases, observations) {
   };
 }
 
+// Keep the evidence gates in one pure function so the RSI decision policy can be
+// checked independently of retrieval behavior and fixture contents.
+export function decideIndependentComparison({ privacyOk, enoughCases, qualityOk, smallerContext }) {
+  if (!privacyOk) return 'blocked_privacy';
+  if (!enoughCases) return 'needs_more_cases';
+  if (!qualityOk) return 'quality_regression';
+  return smallerContext ? 'eligible_for_review' : 'no_demonstrated_efficiency_gain';
+}
+
 async function evaluateIndependent(ctx, fixture, options) {
   const errors = validateIndependentFixture(fixture);
   if (errors.length) throw new Error(errors.join('; '));
@@ -128,7 +137,7 @@ async function evaluateIndependent(ctx, fixture, options) {
     && candidateMetrics.abstention.false <= baselineMetrics.abstention.false
     && candidateMetrics.abstention.missed <= baselineMetrics.abstention.missed;
   const smaller = candidateMetrics.context.mean_estimated_tokens < baselineMetrics.context.mean_estimated_tokens;
-  const decision = !privacyOk ? 'blocked_privacy' : !enough ? 'needs_more_cases' : !qualityOk ? 'quality_regression' : qualityOk && smaller ? 'eligible_for_review' : 'no_demonstrated_efficiency_gain';
+  const decision = decideIndependentComparison({ privacyOk, enoughCases: enough, qualityOk, smallerContext: smaller });
   return {
     schema: 2,
     fixture_sha256: sha256(options.fixtureBytes ?? JSON.stringify(fixture)),
