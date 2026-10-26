@@ -1106,7 +1106,7 @@ async function load() {
   if (S.ingestion?.status?.running) $('ingestion-status').textContent = t('ingestion.running');
   $('ingestion-run').disabled = !S.vaults.some((v) => !v.private && v.exists);
   $('brief-enabled').checked = Boolean(S.brief?.enabled);
-  $('brief-vault').innerHTML = `<option value="">${esc(t('brief.chooseVault'))}</option>` + S.vaults.filter((v) => !v.private && v.exists).map((v) => `<option value="${esc(v.name)}" ${v.name === S.brief?.vault ? 'selected' : ''}>${esc(v.name)}</option>`).join('');
+  $('brief-vault').innerHTML = `<option value="">${esc(t('brief.chooseVault'))}</option>` + S.vaults.filter((v) => v.exists).map((v) => `<option value="${esc(v.name)}" ${v.name === S.brief?.vault ? 'selected' : ''}>${esc(v.name)}${v.private ? ` (${esc(t('vault.private'))})` : ''}</option>`).join('');
   $('brief-time').value = S.brief?.time || '08:00';
   $('brief-status').textContent = S.brief?.running ? t('brief.running') : S.brief?.status?.at
     ? (S.brief.status.ok ? t('brief.lastRun', { vault: S.brief.status.vault || '', at: new Date(S.brief.status.at).toLocaleString(LOCALE), trigger: t('brief.trigger.' + S.brief.status.trigger) }) : t('brief.failed', { error: S.brief.status.error || '' }))
@@ -1117,7 +1117,7 @@ async function load() {
     const list = (label, items, field) => items?.length ? `<div class="card"><b>${esc(label)}</b><ul>${items.slice(0, 8).map((item) => `<li>${esc(typeof item === 'string' ? item : item[field] || item.title || item.path || '')}</li>`).join('')}</ul></div>` : '';
     $('brief-output').innerHTML = `<div class="card"><b>${esc(t('brief.health'))}</b><p>${esc(t('brief.healthCounts', { notes: br.health.notes, links: br.health.links, unlinked: br.health.not_linked, broken: br.health.broken_links }))}</p></div>${list(t('brief.changed'), br.changed, 'title')}${list(t('brief.tasks'), br.open_loops.tasks, 'task')}${list(t('brief.next'), br.open_loops.next_actions, 'action')}${list(t('brief.decisions'), br.open_loops.decisions_waiting, 'decision')}${list(t('brief.questions'), br.open_loops.unresolved_questions, 'question')}`;
   }
-  $('brief-run').disabled = !S.vaults.some((v) => !v.private && v.exists);
+  $('brief-run').disabled = !S.vaults.some((v) => v.exists);
   $('startup-at-login').checked = Boolean(S.startup_at_login);
   $('backup-folder').value = S.backup?.folder || '';
   $('backup-hours').value = String(S.backup?.intervalHours || 24);

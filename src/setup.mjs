@@ -173,8 +173,8 @@ export async function startSetup(opts = {}) {
   }
   async function runBrief(cfg, { trigger = 'manual', vaultName = cfg.brief?.vault } = {}) {
     if (briefRunning) throw new Error('A brief is already running.');
-    const selected = cfg.vaults.find((item) => item.name === vaultName && !item.private);
-    if (!selected || !(await stat(selected.path).then((s) => s.isDirectory(), () => false))) throw new Error('Choose one existing public vault for the brief.');
+    const selected = cfg.vaults.find((item) => item.name === vaultName);
+    if (!selected || !(await stat(selected.path).then((s) => s.isDirectory(), () => false))) throw new Error('Choose one existing vault for the brief.');
     briefRunning = true;
     try {
       const result = await createBrief(localContext(cfg, { ...env, BRAINLINK_SEMANTIC: '0' }), vaultName, { days: 7 });
@@ -1278,8 +1278,8 @@ export async function startSetup(opts = {}) {
       const cfg = await loadConfig(file);
       const next = { ...cfg, brief: validateBriefSchedule(b, cfg.brief) };
       if (next.brief.enabled) {
-        const selected = next.vaults.find((item) => item.name === next.brief.vault && !item.private);
-        if (!selected || !(await stat(selected.path).then((s) => s.isDirectory(), () => false))) throw new Error('Choose an existing public vault before enabling scheduled briefs.');
+        const selected = next.vaults.find((item) => item.name === next.brief.vault);
+        if (!selected || !(await stat(selected.path).then((s) => s.isDirectory(), () => false))) throw new Error('Choose an existing vault before enabling scheduled briefs.');
       }
       await saveConfig(next, file);
       refreshBriefSchedule(next);

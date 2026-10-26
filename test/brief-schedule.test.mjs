@@ -11,8 +11,8 @@ import { localDateAndTime } from '../src/ingestion-schedule.mjs';
 
 const temp = (name) => mkdtemp(path.join(tmpdir(), `brainlink-brief-${name}-`));
 
-test('daily brief schedule validates a public vault and follows the selected local time', () => {
-  assert.throws(() => validateBriefSchedule({ enabled: true, vault: '', time: '08:00' }), /Choose one public vault/);
+test('daily brief schedule validates a selected vault and follows the selected local time', () => {
+  assert.throws(() => validateBriefSchedule({ enabled: true, vault: '', time: '08:00' }), /Choose one vault/);
   assert.throws(() => validateBriefSchedule({ enabled: false, vault: 'Team', time: '29:00' }), /valid daily brief time/);
   assert.deepEqual(validateBriefSchedule({ enabled: true, vault: 'Team', time: '08:15' }), { enabled: true, vault: 'Team', time: '08:15', last_scheduled_date: null });
   const at = new Date('2026-10-25T12:30:00.000Z');
@@ -23,7 +23,7 @@ test('daily brief schedule validates a public vault and follows the selected loc
   assert.equal(briefScheduleDue({ enabled: false, vault: 'Team', time: '00:00' }, at, 'UTC'), false);
 });
 
-test('Setup schedules and manually runs private-local briefs from one public vault only', async () => {
+test('Setup schedules local briefs for explicitly selected public or private vaults without exposing note-private content', async () => {
   const home = await temp('api');
   const appHome = path.join(home, 'app');
   const publicVault = path.join(home, 'public-vault');
@@ -33,7 +33,8 @@ test('Setup schedules and manually runs private-local briefs from one public vau
   await writeFile(path.join(publicVault, 'Project.md'), '# Project\n\nA public project note.');
   await writeFile(path.join(publicVault, 'Tasks.md'), '# Tasks\n\n- [ ] Finish public project\n');
   await writeFile(path.join(publicVault, 'Private.md'), '---\nprivate: true\n---\n# Private\n\nPRIVATE_BRIEF_CANARY_6184');
-  await writeFile(path.join(privateVault, 'Secret.md'), '# Secret\n\nPRIVATE_VAULT_BRIEF_CANARY_1139');
+  await writeFile(path.join(privateVault, 'Task.md'), '# Personal task\n\n- [ ] PERSONAL_TASK_CANARY_1139');
+  await writeFile(path.join(privateVault, 'Secret.md'), '---\nprivate: true\n---\n# Secret\n\nPRIVATE_VAULT_BRIEF_CANARY_1139');
   const before = await readdir(publicVault);
   const env = { BRAINLINK_HOME: appHome, HOME: home, BRAINLINK_SEMANTIC: '0' };
   await saveConfig(normalize({ timezone: 'UTC', vaults: [
@@ -53,16 +54,22 @@ test('Setup schedules and manually runs private-local briefs from one public vau
     }
     assert.equal(status.brief.status.trigger, 'schedule', `background brief runs at the configured local time: ${JSON.stringify(status.brief)}`);
     assert.ok(status.brief.status.result.open_loops.tasks.some((item) => item.task === 'Finish public project'));
-    assert.doesNotMatch(JSON.stringify(status.brief.status), /PRIVATE_BRIEF_CANARY_6184|PRIVATE_VAULT_BRIEF_CANARY_1139/);
-    assert.doesNotMatch(await readFile(path.join(appHome, 'brief-state.json'), 'utf8'), /PRIVATE_BRIEF_CANARY_6184|PRIVATE_VAULT_BRIEF_CANARY_1139/);
+    assert.doesNotMatch(JSON.stringify(status.brief.status), /PRIVATE_BRIEF_CANARY_6184|PRIVATE_VAULT_BRIEF_CANARY_1139|PERSONAL_TASK_CANARY_1139/);
+    assert.doesNotMatch(await readFile(path.join(appHome, 'brief-state.json'), 'utf8'), /PRIVATE_BRIEF_CANARY_6184|PRIVATE_VAULT_BRIEF_CANARY_1139|PERSONAL_TASK_CANARY_1139/);
     const manual = await post('/api/brief/run', { vault: 'Fictional Public' });
     assert.equal(manual.status, 200, await manual.clone().text());
     assert.equal((await manual.json()).trigger, 'manual');
-    const rejected = await post('/api/brief/settings', { enabled: true, vault: 'Fictional Private', time: '08:00' });
-    assert.equal(rejected.status, 400);
-    assert.match((await rejected.json()).error, /public vault/);
+    const privateSettings = await post('/api/brief/settings', { enabled: true, vault: 'Fictional Private', time: '08:00' });
+    assert.equal(privateSettings.status, 200, await privateSettings.clone().text());
+    const privateBrief = await post('/api/brief/run', { vault: 'Fictional Private' });
+    assert.equal(privateBrief.status, 200, await privateBrief.clone().text());
+    const privateResult = await privateBrief.json();
+    assert.equal(privateResult.vault, 'Fictional Private');
+    assert.ok(privateResult.result.open_loops.tasks.some((item) => item.task === 'PERSONAL_TASK_CANARY_1139'));
+    assert.doesNotMatch(JSON.stringify(privateResult), /PRIVATE_VAULT_BRIEF_CANARY_1139/);
+    assert.doesNotMatch(await readFile(path.join(appHome, 'brief-state.json'), 'utf8'), /PRIVATE_VAULT_BRIEF_CANARY_1139/);
     assert.deepEqual((await readdir(publicVault)).sort(), before.sort(), 'brief generation is read-only and does not create notes');
-    const saved = await post('/api/brief/settings', { enabled: false, vault: 'Fictional Public', time: '00:00' });
+    const saved = await post('/api/brief/settings', { enabled: false, vault: 'Fictional Private', time: '00:00' });
     assert.equal(saved.status, 200);
     assert.equal((await saved.json()).brief.enabled, false);
   } finally { app.server.close(); }

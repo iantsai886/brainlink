@@ -5,7 +5,7 @@ export function validateBriefSchedule(input, current = {}) {
   const vault = String(input?.vault || '').trim() || null;
   const time = String(input?.time || '08:00');
   if (!/^\d{2}:\d{2}$/.test(time) || Number(time.slice(0, 2)) > 23 || Number(time.slice(3)) > 59) throw new Error('Choose a valid daily brief time in 24-hour format.');
-  if (enabled && !vault) throw new Error('Choose one public vault before enabling scheduled briefs.');
+  if (enabled && !vault) throw new Error('Choose one vault before enabling scheduled briefs.');
   return { enabled, vault, time, last_scheduled_date: current.last_scheduled_date || null };
 }
 
