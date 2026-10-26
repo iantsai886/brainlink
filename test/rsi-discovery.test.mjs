@@ -499,6 +499,10 @@ test('enabled discovery keeps the desktop process alive through its idle timeout
 
 test('RSI discovery UI has one form, selectable fixed sources, unique controls, and translated labels', async () => {
   const html = await readFile(new URL('../ui/index.html', import.meta.url), 'utf8');
+  assert.equal((html.match(/id="rsi-export"/g) || []).length, 1, 'review export has one visible control');
+  assert.match(html, /api\('GET', '\/api\/rsi\/export'\)/, 'download uses the authenticated local API helper');
+  assert.match(html, /URL\.createObjectURL\(blob\)/, 'export is downloaded as a file');
+  assert.match(html, /brainlink-rsi-review-/, 'export filename is recognizable and dated');
   for (const id of ['rsi-discovery', 'rsi-discovery-form', 'rsi-discovery-sources', 'rsi-discovery-run', 'rsi-discovery-pause', 'rsi-discovery-resume', 'rsi-discovery-runs', 'rsi-discovery-status']) assert.equal((html.match(new RegExp(`id="${id}"`, 'g')) || []).length, 1, id);
   assert.match(html, /data-rsi-refresh/);
   assert.match(html, /sources: \[\.\.\.f\.querySelectorAll\('input\[name="sources"\]:checked'\)\]/);
@@ -506,6 +510,8 @@ test('RSI discovery UI has one form, selectable fixed sources, unique controls, 
   const keys = [...html.matchAll(/t\('(rsi\.discovery\.[\w.]+)'/g), ...html.matchAll(/data-i18n="(rsi\.discovery\.[\w.]+)"/g)].map(m => m[1]).filter(key => !key.endsWith('.'));
   for (const locale of ['en', 'zh-TW', 'pt']) {
     const catalog = JSON.parse(await readFile(new URL(`../ui/locales/${locale}.json`, import.meta.url), 'utf8'));
+    assert.ok(catalog['rsi.export']);
+    assert.ok(catalog['rsi.exported']);
     for (const key of keys) assert.ok(catalog[key], `${locale} ${key}`);
     for (const key of ['sourceLabel', 'freshness.label', 'freshness.never', 'freshness.check', 'freshness.checked', 'freshness.unchanged', 'freshness.changed', 'freshness.not_found', 'freshness.unsafe', 'freshness.unavailable', 'freshness.paused', 'state.off', 'state.paused', 'state.running', 'state.on', 'trigger.manual', 'trigger.schedule', 'run.ok', 'run.partial', 'run.failed', 'run.paused']) assert.ok(catalog['rsi.discovery.' + key], `${locale} ${key}`);
   }
