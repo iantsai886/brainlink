@@ -827,7 +827,19 @@ function renderDiscovery(d) {
 }
 function renderObservationReport(report) {
   const percent = value => Number.isFinite(value) ? Math.round(value * 100) + '%' : t('rsi.observe.noRate');
-  $('rsi-observe-report').innerHTML = `<p class="muted">${esc(t('rsi.observe.window', { days: report.current_window_days, events: report.events_analyzed }))}</p>${report.categories.map(item => `<div class="row muted" style="font-size:13px;justify-content:space-between"><b>${esc(t('rsi.observe.group.' + item.id))}</b><span>${esc(t('rsi.observe.stats', { calls: item.current.calls, failures: item.current.failures, rate: percent(item.current.failure_rate) }))}</span><span class="pill">${esc(t('rsi.observe.signal.' + item.signal))}</span></div>`).join('')}${report.findings.length ? `<p>${esc(t('rsi.observe.findings', { count: report.findings.length }))}</p>` : `<p class="muted">${esc(t('rsi.observe.noFindings'))}</p>`}<p class="muted" style="font-size:12px">${esc(t('rsi.observe.generated', { when: new Date(report.generated_at).toLocaleString(LOCALE) }))}</p>`;
+  $('rsi-observe-report').innerHTML = `<p class="muted">${esc(t('rsi.observe.window', { days: report.current_window_days, events: report.events_analyzed }))}</p>${report.categories.map(item => `<div class="row muted" style="font-size:13px;justify-content:space-between"><b>${esc(t('rsi.observe.group.' + item.id))}</b><span>${esc(t('rsi.observe.stats', { calls: item.current.calls, failures: item.current.failures, rate: percent(item.current.failure_rate) }))}</span><span class="pill">${esc(t('rsi.observe.signal.' + item.signal))}</span>${item.signal.startsWith('review_') ? `<button type="button" class="secondary" data-rsi-observe-draft="${esc(item.id)}">${esc(t('rsi.observe.draft'))}</button>` : ''}</div>`).join('')}${report.findings.length ? `<p>${esc(t('rsi.observe.findings', { count: report.findings.length }))}</p>` : `<p class="muted">${esc(t('rsi.observe.noFindings'))}</p>`}<p class="muted" style="font-size:12px">${esc(t('rsi.observe.generated', { when: new Date(report.generated_at).toLocaleString(LOCALE) }))}</p>`;
+  $('rsi-observe-report').querySelectorAll('[data-rsi-observe-draft]').forEach(button => button.addEventListener('click', () => {
+    const item = report.categories.find(category => category.id === button.dataset.rsiObserveDraft);
+    if (!item || !item.signal.startsWith('review_')) return;
+    const form = $('rsi-idea-form'), area = t('rsi.observe.group.' + item.id);
+    form.elements.namedItem('title').value = t('rsi.observe.draft.title', { area });
+    form.elements.namedItem('user_problem').value = t('rsi.observe.draft.problem', { area, failures: item.current.failures, calls: item.current.calls });
+    form.elements.namedItem('hypothesis').value = t('rsi.observe.draft.hypothesis', { area });
+    const memoryType = ({ retrieval: ['semantic'], sessions: ['working', 'episodic'], filing: ['semantic', 'procedural'], handoff: ['working', 'episodic'] })[item.id] || [];
+    for (const option of form.querySelector('[name="memory_types"]').options) option.selected = memoryType.includes(option.value);
+    form.closest('details').open = true;
+    form.elements.namedItem('title').focus();
+  }));
 }
 document.getElementById('rsi-observe-run').addEventListener('click', () => act(async () => {
   const button = $('rsi-observe-run'); button.disabled = true;
