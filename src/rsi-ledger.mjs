@@ -143,10 +143,11 @@ function project(events) {
   const records = new Map();
   for (const event of events) {
     const row = records.get(event.idea_id);
-    if (event.kind === 'created') records.set(event.idea_id, { id: event.idea_id, status: 'discovered', revision: 1, created_at: event.at, updated_at: event.at, origin: event.origin || 'manual', ...(event.discovery ? { discovery: event.discovery } : {}), fields: event.fields, experiments: [], history: [{ status: 'discovered', at: event.at, note: event.origin === 'discovery' ? 'Found by opt-in discovery' : 'Created' }] });
+    if (event.kind === 'created') records.set(event.idea_id, { id: event.idea_id, status: 'discovered', revision: 1, created_at: event.at, updated_at: event.at, origin: event.origin || 'manual', ...(event.discovery ? { discovery: event.discovery } : {}), fields: event.fields, experiments: [], monitoring: [], history: [{ status: 'discovered', at: event.at, note: event.origin === 'discovery' ? 'Found by opt-in discovery' : 'Created' }] });
     else if (row) {
       if (event.fields) row.fields = { ...row.fields, ...event.fields };
       if (event.kind === 'experiment_run') row.experiments.push(event.receipt);
+      if (event.kind === 'monitoring') row.monitoring.push(event.receipt);
       if (event.status) { row.status = event.status; row.history.push({ status: event.status, at: event.at, note: event.note || '' }); }
       row.revision++; row.updated_at = event.at;
     }
@@ -270,6 +271,44 @@ export function createRsiLedger({ home, now = () => new Date() }) {
       if (text.length > 8000 || findSecrets(text).length) throw new Error('Experiment receipt contains disallowed fields or sensitive content.');
       const at = now().toISOString();
       await append({ kind: 'experiment_run', idea_id: id, at, receipt });
+      return project(await readEvents(file)).find(x => x.id === id);
+    }),
+    recordMonitoring: ({ id, expected_revision, monitoring }) => locked(async () => {
+      if (typeof id !== 'string' || !/^BL-RSI-\d{8}-[a-f0-9-]{8,36}$/.test(id)) throw new Error('Invalid RSI idea id.');
+      const row = project(await readEvents(file)).find(x => x.id === id);
+      if (!row) throw new Error('RSI idea not found.');
+      if (!Number.isInteger(expected_revision) || expected_revision !== row.revision) throw new Error('RSI idea changed; reload it before recording monitoring.');
+      if (row.status !== 'accepted') throw new Error('Only an accepted RSI change can be monitored.');
+      const input = monitoring;
+      if (!input || typeof input !== 'object' || Array.isArray(input)) throw new Error('Monitoring evidence must be an object.');
+      const keys = ['monitored_commit_sha', 'window_start', 'window_end', 'test_set_version', 'sample_count', 'decision', 'primary_metric', 'guardrail_status', 'guardrails', 'results', 'reviewer', 'evidence_ref'];
+      if (Object.keys(input).some(key => !keys.includes(key)) || keys.some(key => !(key in input))) throw new Error('Monitoring evidence has missing or unsupported fields.');
+      const sha = clean(input.monitored_commit_sha, 40);
+      if (!/^[a-f0-9]{40}$/i.test(sha) || sha.toLowerCase() !== String(row.fields.promotion_commit_sha || '').toLowerCase()) throw new Error('Monitoring must name the exact accepted promotion commit.');
+      const validDay = (value) => typeof value === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(value) && !Number.isNaN(Date.parse(`${value}T00:00:00.000Z`)) && new Date(`${value}T00:00:00.000Z`).toISOString().slice(0, 10) === value;
+      if (!validDay(input.window_start) || !validDay(input.window_end) || input.window_end < input.window_start) throw new Error('Monitoring window must be valid dates in ascending order.');
+      const recordedAt = now().toISOString();
+      if (input.window_end > recordedAt.slice(0, 10)) throw new Error('Monitoring window cannot end in the future.');
+      const testSet = clean(input.test_set_version, 160), reviewer = clean(input.reviewer, 160), results = clean(input.results, 1000), evidenceRef = clean(input.evidence_ref, 500);
+      if (!testSet || !reviewer || !results) throw new Error('Monitoring needs a test set, reviewer and results summary.');
+      if (!Number.isInteger(input.sample_count) || input.sample_count < 1 || input.sample_count > 100000) throw new Error('Monitoring sample count must be from 1 to 100000.');
+      if (!['stable', 'regression', 'inconclusive'].includes(input.decision)) throw new Error('Choose stable, regression or inconclusive.');
+      if (!['pass', 'fail', 'unknown'].includes(input.guardrail_status) || (input.decision === 'stable' && input.guardrail_status !== 'pass') || (input.decision === 'inconclusive' && input.guardrail_status !== 'unknown')) throw new Error('Monitoring decision and guardrail result do not agree.');
+      const metric = input.primary_metric;
+      if (!metric || typeof metric !== 'object' || Array.isArray(metric) || Object.keys(metric).length !== 3 || typeof metric.name !== 'string' || !metric.name.trim() || metric.name.length > 80 || ![metric.baseline, metric.observed].every(value => typeof value === 'number' && Number.isFinite(value) && Math.abs(value) <= 1e9)) throw new Error('Monitoring primary metric is invalid.');
+      if (!Array.isArray(input.guardrails) || input.guardrails.length < 1 || input.guardrails.length > 12 || input.guardrails.some(value => typeof value !== 'string' || !value.trim() || value.length > 160)) throw new Error('Monitoring guardrails must be a list of 1 to 12 short results.');
+      const receipt = {
+        schema: 1, monitoring_id: `BL-RSI-MON-${now().toISOString().slice(0, 10).replaceAll('-', '')}-${randomUUID().slice(0, 8)}`,
+        recorded_at: recordedAt, monitored_commit_sha: sha.toLowerCase(), window_start: input.window_start, window_end: input.window_end,
+        test_set_version: testSet, sample_count: input.sample_count, decision: input.decision,
+        primary_metric: { name: metric.name.trim(), baseline: metric.baseline, observed: metric.observed },
+        guardrail_status: input.guardrail_status, guardrails: input.guardrails.map(value => value.trim()),
+        results, reviewer, evidence_ref: evidenceRef,
+      };
+      const scanReceipt = { ...receipt, monitored_commit_sha: '' };
+      const text = JSON.stringify(scanReceipt);
+      if (text.length > 8000 || findSecrets(text).length || /<(?:script|iframe)\b/i.test(text)) throw new Error('Monitoring evidence contains disallowed or sensitive text.');
+      await append({ kind: 'monitoring', idea_id: id, at: receipt.recorded_at, receipt });
       return project(await readEvents(file)).find(x => x.id === id);
     }),
     file,

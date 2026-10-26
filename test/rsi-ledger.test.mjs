@@ -41,8 +41,22 @@ test('RSI acceptance requires recorded evidence, reviewer, promotion commit and 
   } });
   assert.equal(accepted.status, 'accepted');
   assert.equal(accepted.fields.promotion_commit_sha, 'a'.repeat(40));
-  await assert.rejects(ledger.update({ id: idea.id, expected_revision: accepted.revision, status: 'rolled_back' }), /why/);
-  const rolledBack = await ledger.update({ id: idea.id, expected_revision: accepted.revision, status: 'rolled_back', note: 'Regression in a fresh test set.' });
+  const monitoring = {
+    monitored_commit_sha: 'a'.repeat(40), window_start: '2026-10-25', window_end: '2026-10-26', test_set_version: 'fictional-post-release-v1', sample_count: 24,
+    decision: 'stable', primary_metric: { name: 'task success rate', baseline: 0.9, observed: 0.9 }, guardrail_status: 'pass',
+    guardrails: ['privacy canary: passed', 'source recall: unchanged'], results: 'No regression found in the reviewed sample.', reviewer: 'Independent reviewer', evidence_ref: 'https://example.org/monitor/receipt-1',
+  };
+  await assert.rejects(ledger.recordMonitoring({ id: idea.id, expected_revision: accepted.revision, monitoring: { ...monitoring, monitored_commit_sha: 'b'.repeat(40) } }), /exact accepted promotion commit/);
+  await assert.rejects(ledger.recordMonitoring({ id: idea.id, expected_revision: accepted.revision, monitoring: { ...monitoring, window_end: '2999-01-01' } }), /cannot end in the future/);
+  await assert.rejects(ledger.recordMonitoring({ id: idea.id, expected_revision: accepted.revision, monitoring: { ...monitoring, decision: 'stable', guardrail_status: 'fail' } }), /do not agree/);
+  const monitored = await ledger.recordMonitoring({ id: idea.id, expected_revision: accepted.revision, monitoring });
+  assert.equal(monitored.status, 'accepted', 'monitoring never changes promotion status');
+  assert.equal(monitored.monitoring.length, 1);
+  assert.equal(monitored.monitoring[0].decision, 'stable');
+  assert.match(monitored.monitoring[0].monitoring_id, /^BL-RSI-MON-\d{8}-[a-f0-9-]{8,36}$/);
+  await assert.rejects(ledger.recordMonitoring({ id: idea.id, expected_revision: accepted.revision, monitoring }), /changed/);
+  await assert.rejects(ledger.update({ id: idea.id, expected_revision: monitored.revision, status: 'rolled_back' }), /why/);
+  const rolledBack = await ledger.update({ id: idea.id, expected_revision: monitored.revision, status: 'rolled_back', note: 'Regression in a fresh test set.' });
   assert.equal(rolledBack.status, 'rolled_back');
 });
 
@@ -121,10 +135,12 @@ test('RSI Setup panel has unique ids and one render/submit path', async () => {
   assert.equal((html.match(/id="rsi-panel"/g) || []).length, 1);
   assert.equal((html.match(/id="rsi-idea-form"/g) || []).length, 1);
   assert.match(html, /data-rsi-field="promotion_commit_sha"/);
+  assert.match(html, /data-rsi-monitor-submit/);
   for (const locale of ['en', 'zh-TW', 'pt']) {
     const catalog = JSON.parse(await readFile(new URL(`../ui/locales/${locale}.json`, import.meta.url), 'utf8'));
     assert.ok(catalog['rsi.promotionCommit'], `${locale} promotion commit label`);
     assert.ok(catalog['rsi.promotionCommitHint'], `${locale} promotion commit limitation`);
+    for (const key of ['rsi.monitor.title', 'rsi.monitor.hint', 'rsi.monitor.start', 'rsi.monitor.end', 'rsi.monitor.testSet', 'rsi.monitor.samples', 'rsi.monitor.decision.stable', 'rsi.monitor.decision.regression', 'rsi.monitor.decision.inconclusive', 'rsi.monitor.guardrail.pass', 'rsi.monitor.guardrail.fail', 'rsi.monitor.guardrail.unknown', 'rsi.monitor.metricName', 'rsi.monitor.baseline', 'rsi.monitor.observed', 'rsi.monitor.reviewer', 'rsi.monitor.guardrails', 'rsi.monitor.results', 'rsi.monitor.evidenceRef', 'rsi.monitor.save', 'rsi.monitor.saved', 'rsi.monitor.history']) assert.ok(catalog[key], `${locale} ${key}`);
   }
   assert.equal((html.match(/async function loadRsi\(\)/g) || []).length, 1);
   const scripts = [...html.matchAll(/<script>([\s\S]*?)<\/script>/g)];
@@ -163,5 +179,14 @@ test('Setup exposes the RSI ledger only through authenticated local APIs', async
     assert.doesNotMatch(JSON.stringify(run), /RSI_PRIVATE_CANARY_9D7|Acquisition Budget\.md|Northwind Coffee\.md/);
     const unknownSuite = await post('/api/rsi/experiments/run', { idea_id: idea.id, suite: '../user-vault' }).then(r => r.json());
     assert.match(unknownSuite.error, /built-in fictional/);
+    idea = (await post('/api/rsi/ideas/update', { id: idea.id, expected_revision: run.idea.revision, status: 'review' }).then(r => r.json())).idea;
+    const approval = { baseline_version: '1.2.8', candidate_version: 'per-case-rephrasing-v1', promotion_commit_sha: 'c'.repeat(40), test_set_version: 'fictional-v1', results: 'Reviewed fixture evidence.', metrics: ['task success 0.9'], guardrails: ['privacy pass'], reviewer: 'Reviewer', decision_and_reason: 'Synthetic test only.', rollback: 'Revert commit.' };
+    idea = (await post('/api/rsi/ideas/update', { id: idea.id, expected_revision: idea.revision, status: 'accepted', fields: approval }).then(r => r.json())).idea;
+    const sampleMonitoring = { monitored_commit_sha: 'c'.repeat(40), window_start: '2026-10-25', window_end: '2026-10-26', test_set_version: 'fictional-monitor-v1', sample_count: 12, decision: 'regression', primary_metric: { name: 'task success', baseline: 0.9, observed: 0.7 }, guardrail_status: 'fail', guardrails: ['task success fell'], results: 'Synthetic regression signal.', reviewer: 'Reviewer', evidence_ref: '' };
+    assert.equal((await post('/api/rsi/ideas/monitor', { id: idea.id, expected_revision: idea.revision, monitoring: sampleMonitoring }, 'wrong-token')).status, 401);
+    const monitor = await post('/api/rsi/ideas/monitor', { id: idea.id, expected_revision: idea.revision, monitoring: sampleMonitoring }).then(r => r.json());
+    assert.equal(monitor.idea.monitoring.length, 1);
+    assert.equal(monitor.idea.status, 'accepted', 'the service records evidence but does not roll back automatically');
+    assert.doesNotMatch(JSON.stringify(monitor), /RSI_PRIVATE_CANARY_9D7|Acquisition Budget\.md|Northwind Coffee\.md/);
   } finally { app.server.close(); }
 });

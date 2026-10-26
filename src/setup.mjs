@@ -704,6 +704,7 @@ export async function startSetup(opts = {}) {
     'POST /api/rsi/ideas/check': async (b) => ({ similar: await rsiLedger.similar(b) }),
     'POST /api/rsi/ideas': async (b) => ({ idea: await rsiLedger.create(b) }),
     'POST /api/rsi/ideas/update': async (b) => ({ idea: await rsiLedger.update(b) }),
+    'POST /api/rsi/ideas/monitor': async (b) => ({ idea: await rsiLedger.recordMonitoring(b) }),
     'GET /api/rsi/discovery': async () => ({ discovery: await rsiDiscovery.status() }),
     'POST /api/rsi/discovery/settings': async (b) => { const discovery = await rsiDiscovery.configure(b); refreshDiscoveryIdlePolicy(discovery); return { discovery }; },
     'POST /api/rsi/discovery/pause': async () => { const discovery = await rsiDiscovery.pause(); refreshDiscoveryIdlePolicy(discovery); return { discovery }; },
