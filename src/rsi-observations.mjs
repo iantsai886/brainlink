@@ -1,8 +1,9 @@
 // Privacy-safe RSI observation. It consumes only BrainLink's local, content-free
 // tool/outcome activity log and returns aggregates; it never persists a report.
+import { isReadResponseSizeTool } from './response-metrics.mjs';
 const WINDOWS = Object.freeze({ current: 30, previous: 30 });
 const TOOL_GROUPS = Object.freeze({
-  retrieval: new Set(['vault_search', 'vault_related', 'vault_recent', 'vault_read_note', 'search', 'fetch', 'open_loops', 'brain_brief']),
+  retrieval: new Set(['brainlink_guide', 'vault_search', 'vault_related', 'vault_recent', 'vault_read_note', 'search', 'fetch', 'open_loops', 'brain_brief']),
   sessions: new Set(['session_list', 'session_read', 'session_close', 'session_filing_folders']),
   filing: new Set(['ingestion_queue', 'ingestion_record', 'propose_note', 'source_scan']),
   handoff: new Set(['list_handoffs', 'send_handoff']),
@@ -11,12 +12,13 @@ const TOOL_GROUPS = Object.freeze({
 
 function blank() { return { calls: 0, failures: 0, failure_rate: null }; }
 function finish(bucket) { return { ...bucket, failure_rate: bucket.calls ? Number((bucket.failures / bucket.calls).toFixed(3)) : null }; }
+function tokenSummary(values) { return { samples: values.length, mean_estimate: values.length ? Math.round(values.reduce((sum, value) => sum + value, 0) / values.length) : null }; }
 
 export function analyzeActivitySignals(entries, { now = new Date() } = {}) {
   const end = now instanceof Date ? now : new Date(now);
   const currentStart = end.getTime() - WINDOWS.current * 86400000;
   const previousStart = currentStart - WINDOWS.previous * 86400000;
-  const counts = Object.fromEntries(Object.keys(TOOL_GROUPS).map((key) => [key, { current: blank(), previous: blank() }]));
+  const counts = Object.fromEntries(Object.keys(TOOL_GROUPS).map((key) => [key, { current: blank(), previous: blank(), currentTokens: [], previousTokens: [] }]));
   let acceptedEvents = 0;
   for (const entry of Array.isArray(entries) ? entries.slice(-20000) : []) {
     if (!entry || typeof entry !== 'object' || typeof entry.tool !== 'string' || typeof entry.ok !== 'boolean') continue;
@@ -29,6 +31,9 @@ export function analyzeActivitySignals(entries, { now = new Date() } = {}) {
     const bucket = counts[category][window];
     bucket.calls++;
     if (!entry.ok) bucket.failures++;
+    if (isReadResponseSizeTool(entry.tool) && Number.isSafeInteger(entry.result_token_estimate) && entry.result_token_estimate >= 0 && entry.result_token_estimate <= 250_000) {
+      counts[category][window === 'current' ? 'currentTokens' : 'previousTokens'].push(entry.result_token_estimate);
+    }
     acceptedEvents++;
   }
   const categories = Object.entries(counts).map(([id, windows]) => {
@@ -39,7 +44,7 @@ export function analyzeActivitySignals(entries, { now = new Date() } = {}) {
       if (current.failures >= 3 && current.failure_rate >= 0.25) signal = 'review_failures';
       if (previous.calls >= 5 && current.failures >= 2 && current.failure_rate - previous.failure_rate >= 0.2) signal = 'review_increase';
     }
-    return { id, current, previous, signal };
+    return { id, current, previous, current_result_tokens: tokenSummary(windows.currentTokens), previous_result_tokens: tokenSummary(windows.previousTokens), signal };
   });
   const findings = categories.filter((item) => item.signal.startsWith('review_')).map((item) => ({
     category: item.id,
@@ -58,7 +63,7 @@ export function analyzeActivitySignals(entries, { now = new Date() } = {}) {
     events_analyzed: acceptedEvents,
     categories,
     findings,
-    privacy: { source: 'local_content_free_activity_log', note_content_read: false, raw_events_returned: false, report_saved: false },
-    limitations: ['Activity logs contain only observed tool calls; they do not show whether an answer was useful.', 'The activity log rotates, so older calls may be missing from a 60-day comparison.', 'No automatic proposal, code change, permission change, or promotion is made.'],
+    privacy: { source: 'local_content_free_activity_log', note_content_read: false, raw_events_returned: false, report_saved: false, read_response_content_persisted: false },
+    limitations: ['Activity logs contain only observed tool calls; they do not show whether an answer was useful.', 'Response token counts are rough estimates for selected read-only BrainLink tool results, not all conversation context or provider billing; averages can change when the tool mix changes.', 'The activity log rotates, so older calls may be missing from a 60-day comparison.', 'No automatic proposal, code change, permission change, or promotion is made.'],
   };
 }

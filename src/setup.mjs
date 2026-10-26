@@ -715,7 +715,7 @@ export async function startSetup(opts = {}) {
   // Live proof a just-connected client actually works: an in-process MCP round trip through the
   // exact same createMcp() a real `brainlink serve` process would run, using that client's own
   // platform/role env so the call looks identical to one the client would make. Logs through the
-  // normal activity log (content-free: tool name + ok/fail only) so it shows up in the call log too.
+  // normal content-free activity log; selected read-only calls may include a response-size estimate.
   async function clientHealthCheck(clientId, suppliedToken) {
     const c = CLIENTS[clientId];
     if (!c) throw new Error(`Unknown client "${clientId}".`);

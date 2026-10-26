@@ -22,7 +22,7 @@ export function launchSpec(env = process.env) {
 
 const LOG_MAX = 512 * 1024;
 
-// Tool name, outcome and platform only: never note content or arguments.
+// Tool name, outcome, platform, and bounded read-response size estimates only: never content or arguments.
 export async function logActivity(env, entry) {
   try {
     const dir = appHome(env);

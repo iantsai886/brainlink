@@ -18,6 +18,7 @@ import { closeSession } from './sessions/close.mjs';
 import { listSessionFilingFolders } from './sessions/folders.mjs';
 import { twinMemoryAllowed, twinToolAuthorization, twinToolListed, twinToolVaultChoices } from './twin-profiles.mjs';
 import { ingestionQueue, recordIngestion } from './ingestion.mjs';
+import { estimateReadResponseTokens } from './response-metrics.mjs';
 
 const require = createRequire(import.meta.url);
 export const VERSION = require('../package.json').version;
@@ -353,8 +354,10 @@ export function createMcp(ctx, { onCall = () => {} } = {}) {
             if (!authorization.allowed) throw new Error(authorization.reason);
             const out = await tool.run(args);
             const failed = out?.ok === false;
-            onCall({ tool: tool.name, ok: !failed, written: Boolean(out?.written), agent: ctx.mcpAgent?.name || null });
-            return ok({ content: [{ type: 'text', text: JSON.stringify(out, null, 1) }], structuredContent: Array.isArray(out) ? { items: out } : out, isError: failed });
+            const serialized = JSON.stringify(out, null, 1);
+            const resultTokenEstimate = failed ? null : estimateReadResponseTokens(tool.name, serialized);
+            onCall({ tool: tool.name, ok: !failed, written: Boolean(out?.written), agent: ctx.mcpAgent?.name || null, ...(resultTokenEstimate === null ? {} : { result_token_estimate: resultTokenEstimate }) });
+            return ok({ content: [{ type: 'text', text: serialized }], structuredContent: Array.isArray(out) ? { items: out } : out, isError: failed });
           } catch (e) {
             onCall({ tool: tool.name, ok: false, agent: ctx.mcpAgent?.name || null });
             return ok({ content: [{ type: 'text', text: String(e.message || e) }], isError: true });

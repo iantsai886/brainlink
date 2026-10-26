@@ -905,15 +905,21 @@ test('CLI: `brainlink serve` speaks MCP over stdio and logs content-free activit
   let buf = '';
   child.stdout.on('data', (d) => { buf += d; let i; while ((i = buf.indexOf('\n')) !== -1) { lines.push(JSON.parse(buf.slice(0, i))); buf = buf.slice(i + 1); } });
   child.stdin.write(JSON.stringify({ jsonrpc: '2.0', id: 1, method: 'initialize', params: {} }) + '\n');
-  child.stdin.write(JSON.stringify({ jsonrpc: '2.0', id: 2, method: 'tools/call', params: { name: 'vault_search', arguments: { vault: 'Acme Studio', query: 'secret pricing words' } } }) + '\n');
-  for (let i = 0; i < 100 && lines.length < 2; i++) await new Promise((r) => setTimeout(r, 50));
+  child.stdin.write(JSON.stringify({ jsonrpc: '2.0', id: 2, method: 'tools/call', params: { name: 'brainlink_guide', arguments: {} } }) + '\n');
+  child.stdin.write(JSON.stringify({ jsonrpc: '2.0', id: 3, method: 'tools/call', params: { name: 'vault_search', arguments: { vault: 'Acme Studio', query: 'secret pricing words' } } }) + '\n');
+  for (let i = 0; i < 100 && lines.length < 3; i++) await new Promise((r) => setTimeout(r, 50));
   for (let i = 0; i < 40; i++) { if (await readFile(path.join(home, 'activity.log'), 'utf8').then((t) => t.includes('vault_search'), () => false)) break; await new Promise((r) => setTimeout(r, 50)); }
   child.kill();
   assert.equal(lines[0].result.serverInfo.name, 'brainlink');
-  assert.equal(lines[1].result.isError, false); // every install searches, no licence needed
+  assert.equal(lines[1].result.isError, false);
+  assert.equal(lines[2].result.isError, false); // every install searches, no licence needed
   const log = await readFile(path.join(home, 'activity.log'), 'utf8');
   assert.match(log, /"tool":"vault_search"/);
   assert.match(log, /"platform":"Cursor"/);
+  const searchActivity = log.trim().split(/\r?\n/).map(JSON.parse).find((entry) => entry.tool === 'vault_search');
+  assert.ok(Number.isSafeInteger(searchActivity.result_token_estimate) && searchActivity.result_token_estimate > 0);
+  const guideActivity = log.trim().split(/\r?\n/).map(JSON.parse).find((entry) => entry.tool === 'brainlink_guide');
+  assert.ok(Number.isSafeInteger(guideActivity.result_token_estimate) && guideActivity.result_token_estimate > 0);
   assert.doesNotMatch(log, /secret pricing/);
 });
 
