@@ -195,3 +195,11 @@ When a user first enables encrypted backups, Setup now asks them to paste the di
 ### Windows recovery-key ACL check (2026-10-26)
 
 On the current Windows workstation, a temporary recovery key was created under an isolated Local AppData test folder and inspected with `icacls`. The key inherited the folder ACL, the current user had full access, and no `Everyone`, `BUILTIN\Users`, or `Authenticated Users` entry was present. The temporary key and folder were removed after inspection. This verifies the current workstation's inherited ACL path only; it does not establish the permissions on every Windows installation or user-modified Local AppData folder. Same-user processes can still read the key, as noted above.
+
+### Fixed local-time daily backup schedule (2026-10-26)
+
+Backup Settings now keeps the existing interval option and adds a fixed daily time in the configured local timezone. The scheduler checks the due date in the background, records one successful run per local day, avoids duplicate runs after restart, and retries failed copies after a 15-minute delay instead of marking the day complete. The initial setup copy is still verified before saving an enabled schedule. English, Traditional Chinese, and Portuguese controls are included. Focused schedule and backup validation: `node --import ./test/_preload.mjs --test --test-concurrency=1 test/backup-schedule.test.mjs test/backup.test.mjs` passed 18 tests (17 passed, 0 failed, 1 Windows symlink-privilege skip). Full Windows Node.js 24.22.1 `npm run test:all` passed: core 370 tests (364 passed, 0 failed, 6 platform/privilege skips) and UI 28 tests (28 passed, 0 failed). Native desktop acceptance and scheduled runs across sleep/wake, timezone changes, and real customer destinations remain open.
+
+### Cross-client test preflight (2026-10-26)
+
+Claude Code 2.1.310 and Codex CLI 0.164.0-alpha.11.1 are installed. The local auth-status checks found Codex signed in and Claude Code not signed in. No model calls were made. This means the live two-client continuation test is still unverified and needs Claude Code sign-in before it can run; the repository's fictional cross-client acceptance tests remain local automated evidence only.

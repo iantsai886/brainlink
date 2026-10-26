@@ -394,7 +394,9 @@ ol.todo li { padding-left: 4px; }
     <label class="muted" style="display:flex;flex-direction:row;gap:6px;align-items:center"><input type="checkbox" id="backup-enabled" style="width:auto"><span data-i18n="backup.enabled"></span></label>
     <div class="grid2" style="margin-top:10px">
       <label><span data-i18n="backup.folder"></span><input id="backup-folder" class="mono"></label>
-      <label><span data-i18n="backup.interval"></span><select id="backup-hours"><option value="6">6</option><option value="12">12</option><option value="24">24</option><option value="48">48</option><option value="168">168</option></select></label>
+      <label><span data-i18n="backup.scheduleMode"></span><select id="backup-schedule-mode"><option value="interval" data-i18n="backup.scheduleInterval"></option><option value="daily" data-i18n="backup.scheduleDaily"></option></select></label>
+      <label id="backup-interval-wrap"><span data-i18n="backup.interval"></span><select id="backup-hours"><option value="6">6</option><option value="12">12</option><option value="24">24</option><option value="48">48</option><option value="168">168</option></select></label>
+      <label id="backup-time-wrap" hidden><span data-i18n="backup.time"></span><input id="backup-time" type="time" value="02:00"></label>
       <label><span data-i18n="backup.retention"></span><select id="backup-keep"><option value="0" data-i18n="backup.keepUnlimited"></option><option value="5">5</option><option value="10">10</option><option value="30">30</option><option value="90">90</option></select><small class="hint" data-i18n="backup.retentionHint"></small></label>
     </div>
     <label class="muted" style="display:flex;flex-direction:row;gap:6px;align-items:center;margin-top:10px"><input type="checkbox" id="backup-encrypted" style="width:auto"><span data-i18n="backup.encrypt"></span></label>
@@ -1091,6 +1093,9 @@ async function load() {
   $('startup-at-login').checked = Boolean(S.startup_at_login);
   $('backup-folder').value = S.backup?.folder || '';
   $('backup-hours').value = String(S.backup?.intervalHours || 24);
+  $('backup-schedule-mode').value = S.backup?.scheduleMode || 'interval';
+  $('backup-time').value = S.backup?.time || '02:00';
+  renderBackupSchedule();
   $('backup-keep').value = String(S.backup?.keepCount ?? 0);
   $('backup-encrypted').checked = Boolean(S.backup?.encrypted);
   $('backup-key-confirm-wrap').hidden = Boolean(S.backup?.encrypted) || !$('backup-encrypted').checked;
@@ -1104,6 +1109,13 @@ async function load() {
   // stale "Add a vault first" state the moment a vault is picked/created here, with no reload.
   window.dispatchEvent(new CustomEvent('brainlink:state-updated', { detail: S }));
 }
+
+function renderBackupSchedule() {
+  const daily = $('backup-schedule-mode').value === 'daily';
+  $('backup-interval-wrap').hidden = daily;
+  $('backup-time-wrap').hidden = !daily;
+}
+$('backup-schedule-mode').onchange = renderBackupSchedule;
 
 function openForm(p) {
   $('vault-form').hidden = false;
@@ -1595,7 +1607,8 @@ $('backup-restore-pick-destination').onclick = async () => {
 };
 $('backup-save').onclick = () => act(async () => {
   const r = await api('POST', '/api/backup', { enabled: $('backup-enabled').checked,
-    folder: $('backup-folder').value, intervalHours: Number($('backup-hours').value), keepCount: Number($('backup-keep').value), encrypted: $('backup-encrypted').checked,
+    folder: $('backup-folder').value, scheduleMode: $('backup-schedule-mode').value, time: $('backup-time').value,
+    intervalHours: Number($('backup-hours').value), keepCount: Number($('backup-keep').value), encrypted: $('backup-encrypted').checked,
     recoveryKeyConfirmation: $('backup-key-confirm').value });
   $('backup-key-confirm').value = '';
   $('backup-key-confirm-wrap').hidden = true;

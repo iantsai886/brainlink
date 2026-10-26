@@ -19,6 +19,7 @@ import { resolveNoteWikilinks } from './links.mjs';
 import { VERSION, createMcp } from './server.mjs';
 import { findObsidianVaults, nestedVaults } from './obsidian.mjs';
 import { syncSettings, chooseSync, suggestFolders, PROVIDERS, PROVIDER_LABELS } from './sync/settings.mjs';
+import { backupScheduleDue, normalizeBackupSchedule } from './backup-schedule.mjs';
 import { runSync } from './sync-cli.mjs';
 import { listGitHubShareCandidates, previewGitHubRepository, commitGitHubSelectedNotes, pushGitHubSelectedNotes, listGitHubPullCandidates, importGitHubSelectedNotes, saveGitHubConflictCopies, inspectGitHubAssignment, githubAssignmentStatus } from './sync/github-preview.mjs';
 import { githubAssignmentProjection } from './sync/github-assignment.mjs';
@@ -219,7 +220,7 @@ export async function startSetup(opts = {}) {
     }
     return artifacts;
   }
-  async function runBackup(cfg) {
+  async function runBackup(cfg, trigger = 'manual') {
     if (backupRunning) throw new Error('A backup is already running.');
     if (!cfg.backup?.folder) throw new Error('Choose a backup destination first.');
     backupRunning = true;
@@ -231,11 +232,11 @@ export async function startSetup(opts = {}) {
       let retention;
       try { retention = await pruneBackups(cfg.backup.folder, cfg.backup.keepCount ?? 0, result.folder, encryptionKey); }
       catch { retention = { retained_count: null, removed_count: 0, warning: 'The new backup is verified, but old copies could not be cleaned up.' }; }
-      backupStatus = { ok: true, ...result, encrypted: Boolean(encryptionKey), ...retention, at: new Date().toISOString() };
+      backupStatus = { ok: true, ...result, trigger, encrypted: Boolean(encryptionKey), ...retention, at: new Date().toISOString() };
       await saveBackupStatus(backupStateFile, backupStatus);
       return backupStatus;
     } catch (error) {
-      backupStatus = { ok: false, error: error.message || String(error), at: new Date().toISOString() };
+      backupStatus = { ok: false, trigger, error: error.message || String(error), at: new Date().toISOString() };
       await saveBackupStatus(backupStateFile, backupStatus).catch(() => {});
       throw error;
     } finally { backupRunning = false; }
@@ -305,6 +306,39 @@ export async function startSetup(opts = {}) {
     backupEnabled = Boolean(cfg.backup?.enabled);
     touch(); // scheduled backups must survive the app's ordinary inactivity timeout
     if (!cfg.backup?.enabled) return;
+    if (cfg.backup.scheduleMode === 'daily') {
+      const tick = async () => {
+        if (backupTickRunning || backupRunning) return;
+        backupTickRunning = true;
+        try {
+          const latest = await loadConfig(file);
+          const now = new Date();
+          const today = localDateAndTime(now, latest.timezone).date;
+          if (backupStatus?.ok && backupStatus.trigger === 'schedule' && localDateAndTime(new Date(backupStatus.at), latest.timezone).date === today) {
+            if (latest.backup.last_scheduled_date !== today) {
+              latest.backup.last_scheduled_date = today;
+              await saveConfig(latest, file);
+            }
+            return;
+          }
+          if (!backupScheduleDue(latest.backup, now, latest.timezone)) return;
+          const lastAttempt = Date.parse(backupStatus?.at || '');
+          if (backupStatus?.trigger === 'schedule' && !backupStatus.ok && Number.isFinite(lastAttempt) && Date.now() - lastAttempt < (opts.backupRetryMs ?? 15 * 60e3)) return;
+          const receipt = await runBackup(latest, 'schedule');
+          if (receipt.ok) {
+            latest.backup.last_scheduled_date = localDateAndTime(new Date(receipt.at), latest.timezone).date;
+            await saveConfig(latest, file);
+          }
+        } catch (error) {
+          backupStatus = { ok: false, trigger: 'schedule', error: error.message || String(error), at: new Date().toISOString() };
+          await saveBackupStatus(backupStateFile, backupStatus).catch(() => {});
+        } finally { backupTickRunning = false; }
+      };
+      backupTimer = setInterval(tick, opts.backupTickMs ?? 30_000);
+      tick();
+      backupTimer.unref?.();
+      return;
+    }
     const interval = opts.backupIntervalMs ?? cfg.backup.intervalHours * 3600e3;
     const lastAttempt = Date.parse(backupStatus?.at || '');
     const firstDelay = Number.isFinite(lastAttempt) ? Math.max(0, interval - (Date.now() - lastAttempt)) : 0;
@@ -319,7 +353,7 @@ export async function startSetup(opts = {}) {
           await saveBackupStatus(backupStateFile, backupStatus).catch(() => {});
           return;
         }
-        if (latest.backup.enabled) await runBackup(latest); // runBackup saves its own success/failure receipt
+        if (latest.backup.enabled) await runBackup(latest, 'schedule'); // runBackup saves its own success/failure receipt
       } catch { // a failed scheduled copy is already recorded by runBackup
       } finally { backupTickRunning = false; }
     };
@@ -1141,7 +1175,12 @@ export async function startSetup(opts = {}) {
     'POST /api/backup/restore/pick-destination': async () => { const p = await pickRestoreDestinationFolder(); return p === undefined ? { path: null, unavailable: true } : { path: p }; },
     'POST /api/backup': async (b) => {
       const cfg = await loadConfig(file);
-      const next = { ...cfg, backup: { enabled: Boolean(b.enabled), folder: b.folder || null, intervalHours: Number(b.intervalHours || 24), keepCount: Number(b.keepCount ?? cfg.backup.keepCount ?? 0), encrypted: Boolean(b.encrypted) } };
+      const backupSchedule = normalizeBackupSchedule({
+        scheduleMode: b.scheduleMode, intervalHours: b.intervalHours === undefined ? cfg.backup.intervalHours : Number(b.intervalHours), time: b.time,
+      }, cfg.backup);
+      const scheduleChanged = backupSchedule.scheduleMode !== cfg.backup.scheduleMode || backupSchedule.time !== cfg.backup.time;
+      const next = { ...cfg, backup: { ...cfg.backup, ...backupSchedule, last_scheduled_date: scheduleChanged ? null : backupSchedule.last_scheduled_date,
+        enabled: Boolean(b.enabled), folder: b.folder || null, keepCount: Number(b.keepCount ?? cfg.backup.keepCount ?? 0), encrypted: Boolean(b.encrypted) } };
       if (next.backup.encrypted && !cfg.backup.encrypted) {
         const storedKey = await requireBackupKey(env);
         const confirmedKey = parseBackupKey(String(b.recoveryKeyConfirmation || ''));
@@ -1149,14 +1188,17 @@ export async function startSetup(opts = {}) {
       } else if (next.backup.encrypted) {
         await requireBackupKey(env);
       }
-      if (next.backup.enabled) await runBackup(next); // verify before enabling the schedule
+      if (next.backup.enabled) {
+        await runBackup(next, 'setup'); // verify before enabling the schedule
+        if (backupScheduleDue(next.backup, new Date(), next.timezone)) next.backup.last_scheduled_date = localDateAndTime(new Date(), next.timezone).date;
+      }
       await saveConfig(next, file);
       refreshBackupTimer(next);
       return { ok: true, backup: { ...next.backup, status: backupStatus } };
     },
     'POST /api/backup/run': async () => {
       const cfg = await loadConfig(file);
-      return runBackup(cfg);
+      return runBackup(cfg, 'manual');
     },
     'POST /api/ingestion/settings': async (b) => {
       const cfg = await loadConfig(file);

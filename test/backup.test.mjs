@@ -234,7 +234,7 @@ test('authenticated Setup enables scheduled backup only after a verified first c
 
 test('restore UI provides separate localized folder pickers and retains explicit restore confirmation', async () => {
   const html = await readFile(new URL('../ui/index.html', import.meta.url), 'utf8');
-  for (const id of ['backup-restore-source', 'backup-restore-destination', 'backup-restore-pick-source', 'backup-restore-pick-destination', 'backup-restore']) {
+  for (const id of ['backup-schedule-mode', 'backup-interval-wrap', 'backup-hours', 'backup-time-wrap', 'backup-time', 'backup-restore-source', 'backup-restore-destination', 'backup-restore-pick-source', 'backup-restore-pick-destination', 'backup-restore']) {
     assert.equal((html.match(new RegExp(`id="${id}"`, 'g')) || []).length, 1, id);
   }
   assert.match(html, /\/api\/backup\/restore\/pick-source/);
@@ -243,6 +243,7 @@ test('restore UI provides separate localized folder pickers and retains explicit
   assert.match(html, /recoveryKey: \$\('backup-restore-key'\)\.value/);
   assert.match(html, /encrypted: \$\('backup-encrypted'\)\.checked/);
   assert.match(html, /recoveryKeyConfirmation: \$\('backup-key-confirm'\)\.value/);
+  assert.match(html, /scheduleMode: \$\('backup-schedule-mode'\)\.value, time: \$\('backup-time'\)\.value/);
   assert.match(html, /id="backup-key-confirm-wrap" hidden/);
   assert.match(html, /if \(!confirm\(t\('backup\.restoreConfirm'\)\)\) return/);
   for (const locale of ['en', 'zh-TW', 'pt']) {
@@ -254,6 +255,10 @@ test('restore UI provides separate localized folder pickers and retains explicit
     assert.ok(catalog['backup.keyCreated'], `${locale} recovery key receipt`);
     assert.ok(catalog['backup.confirmRecoveryKey'], `${locale} recovery key confirmation label`);
     assert.ok(catalog['backup.confirmRecoveryKeyPlaceholder'], `${locale} recovery key confirmation placeholder`);
+    assert.ok(catalog['backup.scheduleMode'], `${locale} schedule type label`);
+    assert.ok(catalog['backup.scheduleInterval'], `${locale} interval option`);
+    assert.ok(catalog['backup.scheduleDaily'], `${locale} daily option`);
+    assert.ok(catalog['backup.time'], `${locale} daily local time label`);
   }
 });
 
