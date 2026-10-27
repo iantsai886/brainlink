@@ -627,6 +627,40 @@ test('agent_connect: private connect notes and private recent_dir entries never 
   assert.ok(r.recent_notes.some((p) => /Public/.test(p)));
 });
 
+test('agent_connect applies each Twin memory-type switch to its mixed connection packet', async () => {
+  const { cfg, company } = await fixture();
+  const office = 'Chief of Staff Office';
+  const workingFile = 'BrainLink/Working Canary.md';
+  await mkdir(path.dirname(path.join(company, workingFile)), { recursive: true });
+  await writeFile(path.join(company, workingFile), '# Working\n\nWORKING_MEMORY_CANARY');
+  await writeFile(path.join(company, 'BrainLink/Memories.md'), '# Memories\n\n- SEMANTIC_MEMORY_CANARY _(BrainLink memory; date: 2026-10-27; platform: "Test"; source: "fixture"; confidence: reported)_\n');
+  await writeFile(path.join(company, `${office}/2026-10-27 — Semantic Canary.md`), '# Semantic Canary\n\nRECENT_SEMANTIC_CANARY');
+  await writeFile(path.join(company, `${office}/Session Captures.md`), '## 2026-10-27 10:00 — Episode Canary\n\nEPISODIC_MEMORY_CANARY\n');
+  cfg.agents[0].tail_notes = [workingFile];
+
+  for (const disabled of ['working', 'semantic', 'episodic']) {
+    const ctx = ctxOf(cfg, { BRAINLINK_VAULTS: 'Acme Studio' });
+    ctx.twinScope = {
+      mode: 'scoped', profile_id: 'fictional-twin',
+      memory_policy: { working: true, semantic: true, procedural: true, episodic: true, [disabled]: false },
+      grants: [{ name: 'Acme Studio', operations: ['read_note', 'search'] }],
+    };
+    const mcp = createMcp(ctx);
+    const result = await mcp.handle({ jsonrpc: '2.0', id: 1, method: 'tools/call', params: { name: 'agent_connect', arguments: { agent: 'Chief of Staff' } } });
+    assert.equal(result.result.isError, false, JSON.stringify(result));
+    const packet = JSON.stringify(result.result.structuredContent);
+    const expected = {
+      working: 'WORKING_MEMORY_CANARY',
+      semantic: 'SEMANTIC_MEMORY_CANARY|RECENT_SEMANTIC_CANARY',
+      episodic: 'EPISODIC_MEMORY_CANARY',
+    };
+    for (const [type, canary] of Object.entries(expected)) {
+      if (type === disabled) assert.doesNotMatch(packet, new RegExp(canary), `${type} content must be omitted when its policy is off`);
+      else assert.match(packet, new RegExp(canary), `${type} content remains available when its policy is on`);
+    }
+  }
+});
+
 test('latestCaptures sorts by date, not file order', () => {
   const c = latestCaptures('## 2026-08-01 — a\n\nx\n\n## 2026-10-15 — c\n\nz\n\n## 2026-09-07 — b\n\ny');
   assert.deepEqual(c.map((x) => x.heading), ['2026-10-15 — c', '2026-09-07 — b']);
