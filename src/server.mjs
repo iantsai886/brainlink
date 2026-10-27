@@ -211,7 +211,7 @@ export function createMcp(ctx, { onCall = () => {} } = {}) {
         run: (a) => closeLoop(ctx, a) },
     ] : []),
     { name: 'remember', title: 'Remember a fact for every AI', annotations: WR,
-      description: 'Save a short durable fact or preference (e.g. "I prefer Traditional Chinese replies") to the vault\'s Memories note. Every agent sees memories when it connects. Duplicates are skipped.',
+      description: 'Save a short user-reported fact or preference (e.g. "I prefer Traditional Chinese replies") to the selected vault\'s Memories note. Include where the user stated it; BrainLink records it as reported, not independently verified. Agents see the compact fact when they connect. Duplicates are skipped.',
       inputSchema: { type: 'object', properties: { vault: vaultProp, fact: { type: 'string' }, facts: { type: 'array', items: { type: 'string' } }, source: { type: 'string' }, ...idProps } },
       run: (a) => remember(ctx, a) },
     { name: 'append_daily', title: 'Add to today\'s daily note', annotations: WR,

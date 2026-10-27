@@ -163,10 +163,20 @@ export async function appendTo(root, rel, text) {
 export const MEMORY_NOTE = 'BrainLink/Memories.md';
 const normFact = (s) => String(s).toLowerCase().replace(/[^\p{L}\p{N}]+/gu, ' ').trim();
 
+function memoryFact(line) {
+  if (!line.startsWith('- ')) return null;
+  const value = line.slice(2);
+  const suffixAt = value.lastIndexOf(' _(');
+  if (suffixAt < 0 || !value.endsWith(')_')) return value.trim();
+  const metadata = value.slice(suffixAt + 3, -2);
+  if (metadata.startsWith('BrainLink memory;') || /^\d{4}-\d{2}-\d{2}, /.test(metadata)) return value.slice(0, suffixAt).trimEnd();
+  return value.trim();
+}
+
 export async function readMemories(ctx, vaultName, limit = 30) {
   try {
     const raw = await readFile(safeJoin(vaultRoot(ctx, vaultName), MEMORY_NOTE), 'utf8');
-    return raw.split('\n').filter((l) => /^- /.test(l)).map((l) => l.replace(/^- /, '').replace(/\s*_\(.*\)_\s*$/, '').trim()).slice(-limit);
+    return raw.split('\n').map(memoryFact).filter(Boolean).slice(-limit);
   } catch { return []; }
 }
 
@@ -175,6 +185,9 @@ export async function remember(ctx, a, now = new Date()) {
   const root = vaultRoot(ctx, vaultName);
   const id = resolveIdentity(ctx, a);
   const errors = checkCommon(ctx, vaultName, { ...a, source: a.source || 'conversation' }, id);
+  if (a.source !== undefined && typeof a.source !== 'string') errors.push('source must be text');
+  const source = (typeof a.source === 'string' ? a.source : a.source ? '' : 'conversation').replace(/\s+/g, ' ').trim();
+  if (!source || source.length > 300) errors.push('source must be a short description of where the user stated this fact (at most 300 characters)');
   const facts = (Array.isArray(a.facts) ? a.facts : [a.fact]).map((f) => String(f || '').trim().replace(/\n+/g, ' ')).filter(Boolean);
   if (!facts.length) errors.push('fact is required (one short sentence the user wants remembered)');
   if (facts.some((f) => f.length > 300)) errors.push('keep each fact under 300 characters');
@@ -183,7 +196,9 @@ export async function remember(ctx, a, now = new Date()) {
   const fresh = facts.filter((f) => !known.has(normFact(f)));
   if (!fresh.length) return { ok: true, written: false, already_known: facts };
   const date = zonedNow(ctx.tz, now).slice(0, 10);
-  const text = fresh.map((f) => `- ${f} _(${date}, ${id.ai_platform})_`).join('\n') + '\n';
+  // A user-requested memory is user-reported, not independently verified. Preserve its origin
+  // beside the compact fact so later reviewers can trace it without retaining the conversation.
+  const text = fresh.map((f) => `- ${f} _(BrainLink memory; date: ${date}; platform: ${q(id.ai_platform)}; source: ${q(source)}; confidence: reported)_`).join('\n') + '\n';
   if (vault(ctx, vaultName).writes === 'proposal-only') return { ok: true, written: false, preview: text, next: 'This vault is proposal-only: show the memory to the user.' };
   if (!a.confirm) return { ok: true, written: false, path: `${vaultName}/${MEMORY_NOTE}`, preview: text, next: 'Confirm with the user (or their "remember this" already did), then call again with confirm=true.' };
   const full = safeJoin(root, MEMORY_NOTE);

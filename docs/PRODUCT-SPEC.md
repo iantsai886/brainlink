@@ -54,6 +54,8 @@ BrainLink is the memory, permissions, provenance and handoff layer; AI agents ar
 | Semantic | Durable notes, decisions and linked knowledge | Retrieve concise, cited context |
 | Procedural | Versioned skills, role instructions and repeatable workflows | Reuse validated ways of working |
 
+The `remember` command stores short, user-reported facts with their stated source and a `reported` confidence label. It does not mark a fact independently verified. Existing memory notes remain readable, and connected agents receive the compact fact text rather than the provenance suffix.
+
 For the raw-source → reviewed linked-knowledge flow, see [Raw-to-Wiki knowledge flow](RAW-WIKI-INGESTION-MODEL.md). Setup supports up to 20 explicit folder targets across public vaults, scanned manually or once daily at the user's chosen local time. Failed scheduled scans retry twice, 15 minutes apart, then wait until the next day; turning the schedule off pauses them. Scans prepare a review queue; they do not create knowledge notes unattended.
 
 Backup Settings lets users choose a destination and either an hour interval or a fixed daily local time. Daily backups run in the background, verify the new copy, and retry a failed run after a delay. The first verified backup is created when the schedule is saved; encrypted backups require recovery-key confirmation. Legacy configurations keep their interval schedule unless the user changes it.

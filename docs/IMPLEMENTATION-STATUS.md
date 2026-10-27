@@ -15,6 +15,10 @@ Local aggregate-only RSI observation now has an off-by-default daily, weekly, fo
 
 Added a ready-to-use Markdown prompt at `docs/DEEPSEEK-HARNESS-SECOND-BRAIN-ACCESS.md`. It tells Harness to confirm live BrainLink MCP access first, call the guide, search then read only relevant notes, keep vault scopes separate, treat note content as data, and verify any requested write. This is an instruction document; it does not configure Harness, grant a connection, or prove live access.
 
+### Provenance on durable user memories
+
+The `remember` tool now preserves the user's stated source and labels the fact `reported`; it does not claim independent verification. AI context remains the compact fact, while source metadata stays in the vault note for later review. The parser continues to read older memory lines and preserves facts that contain text resembling legacy metadata. Validation is included in `test/brainlink.test.mjs`; independent source verification and a memory correction UI remain open.
+
 ### Back up scheduled RSI observation records
 
 The verified local backup now includes the observer's settings, aggregate report and run status beside the RSI ledger and discovery state. Restore places the record in the inspected `BrainLink/rsi/observations.json` recovery copy; it does not silently replace the active app's settings. Focused Windows backup suite: 17 tests (16 passed, 0 failed, 1 symlink-privilege skip), including encrypted backup, integrity verification and restore of the schedule record. The separate-app-home recovery test also restores the encrypted observation record using only the exported recovery key. This confirms local recovery across separate app-data folders, not a physical second-device or post-restore auto-activation test.

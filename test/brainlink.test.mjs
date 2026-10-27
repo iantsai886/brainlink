@@ -1167,8 +1167,12 @@ test('remember, daily note, open loops, recent, health and brief', async () => {
   await writeFile(path.join(company, '.obsidian/daily-notes.json'), JSON.stringify({ folder: 'Journal/Daily', format: 'YYYY-MM-DD' }));
   await writeFile(path.join(company, 'Lonely.md'), '# Lonely\n\nNo links here, and a [[Missing Note]].');
   const ctx = ctxOf(cfg);
-  const m1 = await remember(ctx, { vault: 'Acme Studio', fact: 'Founder prefers short answers.', confirm: true }, NOW);
+  const m1 = await remember(ctx, { vault: 'Acme Studio', facts: ['Founder prefers short answers.', 'Founder uses markdown _(literal)_'], source: 'Ian stated this preference in planning', confirm: true }, NOW);
   assert.equal(m1.written, true);
+  const memoryNote = await readFile(path.join(company, 'BrainLink', 'Memories.md'), 'utf8');
+  assert.match(memoryNote, /source: "Ian stated this preference in planning"; confidence: reported/);
+  assert.equal((await remember(ctx, { vault: 'Acme Studio', fact: 'No source', source: { private: true }, confirm: true }, NOW)).ok, false);
+  assert.equal((await remember(ctx, { vault: 'Acme Studio', fact: 'No source', source: 'x'.repeat(301), confirm: true }, NOW)).ok, false);
   assert.equal((await remember(ctx, { vault: 'Acme Studio', fact: 'founder prefers short answers', confirm: true }, NOW)).written, false, 'duplicates skipped');
   const d = await appendDaily(ctx, { vault: 'Acme Studio', text: 'Called the printer', confirm: true }, NOW);
   assert.equal(d.path, 'Acme Studio/Journal/Daily/2026-10-18.md');
@@ -1184,6 +1188,7 @@ test('remember, daily note, open loops, recent, health and brief', async () => {
   assert.ok(b.changed.length && b.health.notes > 10 && 'open_loops' in b);
   const c = await connectAgent(ctx, { agent: 'Chief of Staff' });
   assert.ok(c.memories.includes('Founder prefers short answers.'));
+  assert.ok(c.memories.includes('Founder uses markdown _(literal)_'), 'metadata parsing preserves fact text that resembles a legacy metadata suffix');
   assert.ok(c.whats_new.length);
   assert.ok(c.open_loops.counts);
 });
