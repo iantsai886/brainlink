@@ -30,7 +30,9 @@ export function frontmatter(ctx, vaultName, id, f, now = new Date()) {
   const v = vault(ctx, vaultName);
   const ts = zonedNow(ctx.tz, now);
   const tags = `[${(f.tags || []).map((t) => String(t).replace(/[^\w㐀-鿿-]/g, '')).filter(Boolean).join(', ')}]`;
-  const extra = Object.entries(v.extra_fields || {}).map(([k, val]) => `${k}: ${q(val)}`);
+  const sourceSession = typeof f.source_session_id === 'string' && /^[A-Za-z0-9_-]{1,160}$/.test(f.source_session_id)
+    ? [`source_session_id: ${q(f.source_session_id)}`] : [];
+  const extra = Object.entries(v.extra_fields || {}).filter(([k]) => !(sourceSession.length && k.toLowerCase() === 'source_session_id')).map(([k, val]) => `${k}: ${q(val)}`);
   const typed = TYPED_ENTITY_TYPES.has(f.type) && f.entity_id && f.entity_scope;
   const typedFields = typed ? [`id: ${f.entity_id}`, `scope: ${f.entity_scope}`,
     ...(f.relations?.length ? ['relations:', ...f.relations.flatMap((r) => [
@@ -44,12 +46,12 @@ export function frontmatter(ctx, vaultName, id, f, now = new Date()) {
       `created_by_platform: ${slug(id.ai_platform)}`, `created_by_agent: ${slug(id.agent_or_role)}`, `created_session_or_task_id: ${q(id.session_or_task_id)}`, `created_date: ${date}`,
       `last_material_revision_by_platform: ${slug(id.ai_platform)}`, `last_material_revision_by_agent: ${slug(id.agent_or_role)}`,
       `last_material_revision_session_or_task_id: ${q(id.session_or_task_id)}`, `last_material_revision_date: ${date}`,
-      ...typedFields,
+      ...sourceSession, ...typedFields,
       `provenance_confidence: ${['verified', 'reported', 'inferred'].includes(f.confidence) ? f.confidence : 'unknown'}`, `source: ${q(f.source)}`, '---'].join('\n');
   }
   return ['---', `type: ${f.type || 'note'}`, `status: ${f.status || 'proposed'}`, `ai_platform: ${q(id.ai_platform)}`, `agent_or_role: ${q(id.agent_or_role)}`,
     ...(f.private ? ['private: true'] : []),
-    `session_or_task_id: ${q(id.session_or_task_id)}`, `written_at: ${ts}`, `source: ${q(f.source)}`, `confidence: ${q(f.confidence || 'proposed')}`, `tags: ${tags}`, ...extra, ...typedFields, '---'].join('\n');
+    `session_or_task_id: ${q(id.session_or_task_id)}`, `written_at: ${ts}`, `source: ${q(f.source)}`, `confidence: ${q(f.confidence || 'proposed')}`, `tags: ${tags}`, ...extra, ...sourceSession, ...typedFields, '---'].join('\n');
 }
 
 export function checkCommon(ctx, vaultName, a, id) {

@@ -57,6 +57,7 @@ test('MCP close previews, then saves one scoped private episode without exposing
   assert.match(note, /private: true/);
   assert.match(note, /Plan the fictional launch/);
   assert.match(note, /Imported BrainLink session s_fictional123/);
+  assert.match(note, /source_session_id: "s_fictional123"/);
   await assert.rejects(readNote(ctx, 'Company', rel), /private/i);
   assert.deepEqual((await call(mcp, 'session_list')).value.sessions, [], 'global import sharing cannot expose a closed private session');
   assert.equal((await call(mcp, 'session_read', { id: written.value.session_id })).value.private, true);

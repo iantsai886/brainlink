@@ -63,7 +63,7 @@ export async function closeSession(ctx, store, args, now = new Date(), { fileSum
       await sessionStore.readSession(sessionId, {});
       return { ok: false, errors: ['This task ID was already closed. Review the existing private session; do not overwrite its outcome.'], session_id: sessionId };
     } catch (error) { if (error.code !== 'E_NOT_FOUND') throw error; }
-    const session = { id: sessionId, client, profile_id: profileId, title: `${args.title} (${sessionId.slice(-6)})`, project: args.project || '', summary, updated_at: now.toISOString(), private: true };
+    const session = { id: sessionId, client, profile_id: profileId, title: `${args.title} (${sessionId.slice(-6)})`, project: args.project || '', summary, source_session_id: args.source_session_id, updated_at: now.toISOString(), private: true };
     const identity = { ...id, session_or_task_id: sourceId };
     let folderSuggestion = null;
     if (typeof args.folder !== 'string') {
