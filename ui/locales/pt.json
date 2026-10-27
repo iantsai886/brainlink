@@ -255,7 +255,7 @@
   "connect.notFoundHint": "Não encontrado neste computador — instale-o e recarregue esta página.",
   "connect.manualReady": "Pronto para configurar",
   "connect.manualHint": "Um clique adiciona o BrainLink às configurações MCP globais do Antigravity e faz uma cópia de segurança do arquivo anterior. Depois, recarregue os servidores MCP ou reinicie o Antigravity.",
-  "connect.deepseekHint": "Um clique faz backup e atualiza as configurações MCP compartilhadas do DeepSeek Harness. Use um agente BrainLink limitado ao Twin correto e reinicie ou recarregue o perfil do Harness.",
+  "connect.deepseekHint": "O BrainLink usa um arquivo de configuração e um token separados para cada perfil nomeado do Harness. Se houver uma conexão compartilhada antiga, desconecte-a primeiro e conecte cada perfil ao Twin correto.",
   "connect.none": "Ainda não foi reconhecido nenhum cliente de IA neste computador.",
   "connect.liveOk": "● ativo",
   "connect.liveFailed": "○ falhou",

@@ -10,7 +10,7 @@ import { homedir } from 'node:os';
 import path from 'node:path';
 import { loadConfig, saveConfig, configPath, normalize, validate, LOCALES, appHome } from './config.mjs';
 import { PACKS, buildPack, scaffold, mergePack } from './packs.mjs';
-import { CLIENTS, detect, connectClient, disconnectClient, readClientAgentToken, test } from './connectors.mjs';
+import { CLIENTS, resolveClient, detect, connectClient, disconnectClient, readClientAgentToken, test } from './connectors.mjs';
 import { createContext, search, searchWithVerdict, readNote, ensureDefaultIgnore, readExcludedFolders, writeExcludedFolders, DEFAULT_EXCLUDED_FOLDERS, SUGGESTED_EXCLUDED_FOLDERS, safeJoin, vaultRoot } from './core.mjs';
 import { ROOT, launchSpec, readActivity, refreshMap, logActivity } from './runtime.mjs';
 import { detectEmbedder } from './embed.mjs';
@@ -731,7 +731,7 @@ export async function startSetup(opts = {}) {
   // platform/role env so the call looks identical to one the client would make. Logs through the
   // normal content-free activity log; selected read-only calls may include a response-size estimate.
   async function clientHealthCheck(clientId, suppliedToken) {
-    const c = CLIENTS[clientId];
+    const c = resolveClient(clientId);
     if (!c) throw new Error(`Unknown client "${clientId}".`);
     const cfg = await loadConfig(file);
     const token = suppliedToken ?? await readClientAgentToken(clientId, clientOpts());
@@ -779,7 +779,7 @@ export async function startSetup(opts = {}) {
   // into that client's local MCP config; BrainLink stores its hash and never returns either in UI.
   async function connectPresetWithTwin(b) {
     const clientId = String(b.client || '');
-    const client = CLIENTS[clientId];
+    const client = resolveClient(clientId);
     if (!client) throw new Error('Choose a supported AI app.');
     const cfg = await loadConfig(file);
     const profileId = String(b.profile_id || '');

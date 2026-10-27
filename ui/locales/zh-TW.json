@@ -255,7 +255,7 @@
   "connect.notFoundHint": "這台電腦上找不到——先安裝它，再重新載入這個頁面。",
   "connect.manualReady": "可立即設定",
   "connect.manualHint": "按一下即可將 BrainLink 加入 Antigravity 的全域 MCP 設定，並先備份原檔。完成後請重新載入 MCP 伺服器或重啟 Antigravity。",
-  "connect.deepseekHint": "按一下即可備份並更新 DeepSeek Harness 共用的 MCP 設定。請使用只限正確 Twin 範圍的 BrainLink 代理，然後重新載入或重啟 Harness 設定檔。",
+  "connect.deepseekHint": "BrainLink 會為每個具名 Harness 設定檔使用獨立設定和存取權杖。如果畫面顯示舊的共用連線，請先中斷，再將各設定檔連到正確的 Twin。",
   "connect.none": "這台電腦上還沒有偵測到任何 AI 用戶端。",
   "connect.liveOk": "● 運作中",
   "connect.liveFailed": "○ 失敗",

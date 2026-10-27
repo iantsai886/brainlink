@@ -1,6 +1,6 @@
 // One-click "Connect AI": writes BrainLink into each AI client's MCP config, keeping a
 // timestamped backup of the previous file. Refuses to touch a config it cannot parse.
-import { readFile, writeFile, mkdir, copyFile, rename, stat, chmod } from 'node:fs/promises';
+import { readFile, writeFile, mkdir, copyFile, rename, stat, chmod, readdir } from 'node:fs/promises';
 import { existsSync } from 'node:fs';
 import { execFileSync } from 'node:child_process';
 import path from 'node:path';
@@ -68,8 +68,28 @@ export const CLIENTS = {
 
 const exists = (p) => stat(p).then(() => true, () => false);
 
+function deepSeekProfileId(name) { return `deepseek-harness@${name}`; }
+
+function deepSeekProfileClient(name) {
+  if (!/^[A-Za-z0-9_-]{1,64}$/.test(name)) return null;
+  const suffix = name.toLowerCase().replace(/[^a-z0-9_-]/g, '-').slice(0, 24);
+  return {
+    ...CLIENTS['deepseek-harness'],
+    title: `DeepSeek Harness · ${name}`,
+    note: `BrainLink access is limited to the “${name}” Harness profile. Restart or reload that profile, then confirm the BrainLink tools appear.`,
+    profile: name, entryId: `mcp-brainlink-${suffix}`, serverName: `brainlink-${suffix}`,
+    file: ({ home, env }) => path.join(env.DSH_HOME || path.join(home, '.dsh'), 'profiles', name, 'cordis.patch.yml'),
+  };
+}
+
+export function resolveClient(id) {
+  const prefix = 'deepseek-harness@';
+  if (String(id).startsWith(prefix)) return deepSeekProfileClient(String(id).slice(prefix.length));
+  return CLIENTS[id];
+}
+
 export function serverEntry(client, launch, extraEnv = {}) {
-  const c = CLIENTS[client];
+  const c = resolveClient(client);
   return { command: launch.command, args: [...launch.args], env: { BRAINLINK_AGENT_TOKEN: '', BRAINLINK_AI_PLATFORM: c.platform, BRAINLINK_AGENT_ROLE: c.role, ...extraEnv } };
 }
 
@@ -96,14 +116,22 @@ async function detectOne(id, c, opts) {
   let connected = false;
   if (await exists(file)) {
     const raw = await readFile(file, 'utf8');
-    connected = c.format === 'toml' ? /^\[mcp_servers\.brainlink\]/m.test(raw) : c.format === 'yaml' ? (() => { try { return Boolean(parseYaml(raw, file).value.mcp_servers?.[SERVER_KEY]); } catch { return false; } })() : c.format === 'dsh-yaml' ? (() => { try { return dshEntries(parseDocument(raw, { uniqueKeys: true })).some((entry) => entry.id === 'mcp-brainlink' && entry.name === '@deepseek-ai/dsh-mcp-client'); } catch { return false; } })() : (() => { try { return Boolean(JSON.parse(raw || '{}').mcpServers?.[SERVER_KEY]); } catch { return false; } })();
+    connected = c.format === 'toml' ? /^\[mcp_servers\.brainlink\]/m.test(raw) : c.format === 'yaml' ? (() => { try { return Boolean(parseYaml(raw, file).value.mcp_servers?.[SERVER_KEY]); } catch { return false; } })() : c.format === 'dsh-yaml' ? (() => { try { return dshEntries(parseDocument(raw, { uniqueKeys: true })).some((entry) => entry.id === (c.entryId || 'mcp-brainlink') && entry.name === '@deepseek-ai/dsh-mcp-client'); } catch { return false; } })() : (() => { try { return Boolean(JSON.parse(raw || '{}').mcpServers?.[SERVER_KEY]); } catch { return false; } })();
   }
   return { title: c.title, file, present, connected, canConnect: present || Boolean(c.manual), manual: Boolean(c.manual), note: c.note };
 }
 
 export async function detect(opts) {
   const out = {};
-  for (const [id, c] of Object.entries(CLIENTS)) out[id] = await detectOne(id, c, opts);
+  for (const [id, c] of Object.entries(CLIENTS)) if (id !== 'deepseek-harness') out[id] = await detectOne(id, c, opts);
+  const dshHome = opts.env.DSH_HOME || path.join(opts.home, '.dsh');
+  const profilesDir = path.join(dshHome, 'profiles');
+  const profiles = await readdir(profilesDir, { withFileTypes: true }).then((items) => items.filter((item) => item.isDirectory() && deepSeekProfileClient(item.name)).map((item) => item.name).sort(), () => []);
+  if (profiles.length) {
+    for (const profile of profiles) { const id = deepSeekProfileId(profile); out[id] = await detectOne(id, deepSeekProfileClient(profile), opts); }
+    const legacy = await detectOne('deepseek-harness', CLIENTS['deepseek-harness'], opts);
+    if (legacy.present || legacy.connected) out['deepseek-harness'] = { ...legacy, canConnect: false, note: 'Old shared Harness connection. Disconnect it before using profile-specific connections.' };
+  } else out['deepseek-harness'] = await detectOne('deepseek-harness', CLIENTS['deepseek-harness'], opts);
   for (const [id, c] of Object.entries(UNSUPPORTED)) out[id] = { title: c.title, file: null, present: false, connected: false, unsupported: true, note: c.note };
   return out;
 }
@@ -112,7 +140,7 @@ export async function detect(opts) {
 // credential from that client's MCP config; BrainLink stores only its hash. Never return this
 // value from Setup state or logs.
 export async function readClientAgentToken(id, opts) {
-  const c = CLIENTS[id];
+  const c = resolveClient(id);
   if (!c) throw new Error(`Unknown client "${id}"`);
   const file = c.file(opts);
   if (!(await exists(file))) return '';
@@ -134,7 +162,7 @@ export async function readClientAgentToken(id, opts) {
     catch { return ''; }
   }
   if (c.format === 'dsh-yaml') {
-    try { return String(dshEntries(parseDocument(raw, { uniqueKeys: true })).find((entry) => entry.id === 'mcp-brainlink')?.config?.env?.BRAINLINK_AGENT_TOKEN || ''); }
+    try { return String(dshEntries(parseDocument(raw, { uniqueKeys: true })).find((entry) => entry.id === (c.entryId || 'mcp-brainlink'))?.config?.env?.BRAINLINK_AGENT_TOKEN || ''); }
     catch { return ''; }
   }
   try { return String(JSON.parse(raw || '{}').mcpServers?.[SERVER_KEY]?.env?.BRAINLINK_AGENT_TOKEN || ''); }
@@ -159,7 +187,7 @@ function dshEntries(doc) {
   return entries;
 }
 
-function updateDshPatch(raw, entry) {
+function updateDshPatch(raw, entry, entryId = 'mcp-brainlink') {
   const doc = parseDocument(raw || '[]', { uniqueKeys: true });
   dshEntries(doc); // Validate the full document and every insert patch before changing anything.
   const rows = [];
@@ -168,7 +196,7 @@ function updateDshPatch(raw, entry) {
     if (!Array.isArray(patch?.items)) { rows.push(patch); continue; }
     const insertPair = patch.items.find((pair) => pair.key?.value === 'insert');
     if (!insertPair) { rows.push(patch); continue; }
-    insertPair.value.items = insertPair.value.items.filter((node) => node?.toJSON?.()?.id !== 'mcp-brainlink');
+    insertPair.value.items = insertPair.value.items.filter((node) => node?.toJSON?.()?.id !== entryId);
     rows.push(patch);
   }
   if (entry) {
@@ -221,7 +249,7 @@ function whichCli(name) {
 
 // opts: { home, os, env, launch: {command, args}, extraEnv, now, useCli }
 export async function connectClient(id, opts) {
-  const c = CLIENTS[id];
+  const c = resolveClient(id);
   if (!c) throw new Error(`Unknown client "${id}". Use one of: ${Object.keys(CLIENTS).join(', ')}`);
   // Refuse to write a config for an app this computer has never seen (no config file or folder
   // for it yet). Without this gate, connecting an app that was never installed still "succeeds":
@@ -241,7 +269,15 @@ export async function connectClient(id, opts) {
   const raw = (await exists(file)) ? await readFile(file, 'utf8') : '';
   let text;
   if (c.format === 'toml') text = codexToml(raw, entry);
-  else if (c.format === 'dsh-yaml') text = updateDshPatch(raw, { id: 'mcp-brainlink', name: '@deepseek-ai/dsh-mcp-client', config: { serverName: SERVER_KEY, transport: 'stdio', command: entry.command, args: entry.args, env: entry.env } });
+  else if (c.format === 'dsh-yaml') {
+    const entryId = c.entryId || 'mcp-brainlink';
+    if (c.profile) {
+      const sharedFile = CLIENTS['deepseek-harness'].file(opts);
+      const sharedRaw = await exists(sharedFile) ? await readFile(sharedFile, 'utf8') : '';
+      if (sharedRaw && dshEntries(parseDocument(sharedRaw, { uniqueKeys: true })).some((row) => row.id === 'mcp-brainlink')) throw new Error('Disconnect the old shared DeepSeek Harness connection before connecting named profiles. This prevents its shared access token from reaching every profile.');
+    }
+    text = updateDshPatch(raw, { id: entryId, name: '@deepseek-ai/dsh-mcp-client', config: { serverName: c.serverName || SERVER_KEY, transport: 'stdio', command: entry.command, args: entry.args, env: entry.env } }, entryId);
+  }
   else if (c.format === 'yaml') {
     const { doc, value } = parseYaml(raw, file);
     if (!value.mcp_servers) doc.set('mcp_servers', {});
@@ -261,7 +297,7 @@ export async function connectClient(id, opts) {
 }
 
 export async function disconnectClient(id, opts) {
-  const c = CLIENTS[id];
+  const c = resolveClient(id);
   if (!c) throw new Error(`Unknown client "${id}"`);
   const cli = c.cli && opts.useCli !== false ? whichCli(c.cli) : null;
   if (cli) { try { execFileSync(cli, ['mcp', 'remove', '-s', 'user', SERVER_KEY], { stdio: 'ignore' }); } catch {} return { client: id, removed: true }; }
@@ -272,8 +308,9 @@ export async function disconnectClient(id, opts) {
   if (c.format === 'toml') text = codexToml(raw, null);
   else if (c.format === 'dsh-yaml') {
     const doc = parseDocument(raw, { uniqueKeys: true });
-    if (!dshEntries(doc).some((entry) => entry.id === 'mcp-brainlink')) return { client: id, removed: false };
-    text = updateDshPatch(raw, null);
+    const entryId = c.entryId || 'mcp-brainlink';
+    if (!dshEntries(doc).some((entry) => entry.id === entryId)) return { client: id, removed: false };
+    text = updateDshPatch(raw, null, entryId);
   }
   else if (c.format === 'yaml') {
     const { doc, value } = parseYaml(raw, file);

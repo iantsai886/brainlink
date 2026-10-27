@@ -370,6 +370,48 @@ test('connectors: DeepSeek Harness refuses malformed patch YAML without overwrit
   assert.equal((await readdir(dshHome)).some((name) => name.includes('.brainlink-backup-')), false);
 });
 
+test('connectors: DeepSeek Harness named profiles get separate tokens and config files', async () => {
+  const home = await tmp('dsh-profile-scopes');
+  const dshHome = path.join(home, '.dsh');
+  const profileA = path.join(dshHome, 'profiles', 'web');
+  const profileB = path.join(dshHome, 'profiles', 'headless');
+  await mkdir(profileA, { recursive: true });
+  await mkdir(profileB, { recursive: true });
+  for (const folder of [profileA, profileB]) await writeFile(path.join(folder, 'cordis.patch.yml'), '[]\n');
+  const opts = { home, os: 'win32', env: { DSH_HOME: dshHome }, launch: { command: process.execPath, args: ['brainlink.mjs', 'serve'] }, useCli: false };
+  const detected = await detect(opts);
+  assert.equal(detected['deepseek-harness@web'].canConnect, true);
+  assert.equal(detected['deepseek-harness@headless'].canConnect, true);
+  assert.equal(detected['deepseek-harness'], undefined, 'do not offer a shared connection when named profiles exist');
+
+  const web = { ...opts, extraEnv: { BRAINLINK_AGENT_TOKEN: 'fictional-web-token' } };
+  const headless = { ...opts, extraEnv: { BRAINLINK_AGENT_TOKEN: 'fictional-headless-token' } };
+  assert.equal((await connect('deepseek-harness@web', web)).ok, true);
+  assert.equal((await connect('deepseek-harness@headless', headless)).ok, true);
+  assert.equal(await readClientAgentToken('deepseek-harness@web', opts), 'fictional-web-token');
+  assert.equal(await readClientAgentToken('deepseek-harness@headless', opts), 'fictional-headless-token');
+  const webRows = parse(await readFile(path.join(profileA, 'cordis.patch.yml'), 'utf8')).flatMap((patch) => patch.insert || []);
+  const headlessRows = parse(await readFile(path.join(profileB, 'cordis.patch.yml'), 'utf8')).flatMap((patch) => patch.insert || []);
+  assert.notEqual(webRows.find((row) => row.name === '@deepseek-ai/dsh-mcp-client').config.serverName, headlessRows.find((row) => row.name === '@deepseek-ai/dsh-mcp-client').config.serverName);
+  assert.equal((await detect(opts))['deepseek-harness@web'].connected, true);
+  await disconnect('deepseek-harness@web', opts);
+  assert.equal((await detect(opts))['deepseek-harness@web'].connected, false);
+  assert.equal((await detect(opts))['deepseek-harness@headless'].connected, true, 'disconnecting one profile must leave the other connected');
+});
+
+test('connectors: named Harness connection blocks an existing home-level shared token', async () => {
+  const home = await tmp('dsh-profile-block-shared');
+  const dshHome = path.join(home, '.dsh');
+  await mkdir(path.join(dshHome, 'profiles', 'web'), { recursive: true });
+  await writeFile(path.join(dshHome, 'cordis.patch.yml'), '- insert:\n    - id: mcp-brainlink\n      name: "@deepseek-ai/dsh-mcp-client"\n      config: { serverName: brainlink, transport: stdio, command: node, args: [], env: { BRAINLINK_AGENT_TOKEN: old-shared-token } }\n');
+  await writeFile(path.join(dshHome, 'profiles', 'web', 'cordis.patch.yml'), '[]\n');
+  const opts = { home, os: 'win32', env: { DSH_HOME: dshHome }, launch: { command: process.execPath, args: [] }, useCli: false };
+  const result = await connect('deepseek-harness@web', opts);
+  assert.equal(result.ok, false);
+  assert.match(result.message, /old shared DeepSeek Harness connection/);
+  assert.equal(await readFile(path.join(dshHome, 'profiles', 'web', 'cordis.patch.yml'), 'utf8'), '[]\n');
+});
+
 // ---- bin/brainlink.mjs: connect --all and sync ----
 
 test('CLI: `brainlink connect --all` connects every present client and skips the rest', async () => {
