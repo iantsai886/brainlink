@@ -585,3 +585,7 @@ Built `dist/BrainLink-Setup-1.2.8.exe` from source commit `3feb247` using Inno S
 ### Packaged Windows Setup launch smoke (2026-10-27)
 
 Launched the staged bundled runtime's built-in fictional demo on loopback with browser opening disabled. `GET /health` returned BrainLink 1.2.8; Setup returned HTTP 200 with page title `BrainLink Setup`; the staged graph-curation Skill was present. The test process was stopped. The demo created one synthetic directory, `brainlink-demo-7Cy5eD`, under the Windows temp folder. Cleanup was rejected by the automatic action policy; the demo files remain for manual removal. No configured vault or existing BrainLink app data was accessed. This verifies staged runtime startup and page serving, not installation, desktop shortcut behavior, or user acceptance.
+
+### Focused graph, Skill, and package regression checks (2026-10-27)
+
+On Windows with Node.js 24.22.1, `node --import ./test/_preload.mjs --test --test-concurrency=1 test/agent-skills.test.mjs test/skills.test.mjs test/typed-graph.test.mjs test/packaging-runtime.test.mjs` passed 29/29. This covers portable Skill discovery/install and parity, package inclusion, graph evidence and approval gates, and cross-scope/private target rejection. It is fixture-based automated verification; no live Codex or Claude model invocation, extraction accuracy, or token savings were tested. The earlier full suite at `47eb74c` remains the last full-suite result; this focused run includes changes after it.
