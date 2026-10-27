@@ -8,7 +8,7 @@ Latest full-suite verification: source commit `fe60d80`, recorded on the current
 
 ### Versioned RSI discovery-method provenance (2026-10-28)
 
-New discovery proposals now record `method_version: lexical-overlap-v1`; the ledger rejects missing, malformed, or path-like method labels. Existing discovery records remain readable. The focused RSI discovery and ledger suites passed 36/36, plus JavaScript syntax and `git diff --check`. This makes later method comparisons traceable; it does not prove that this method improves discovery. Full-suite verification is not yet repeated for this change. The next RSI engineering step is a held-out evaluation that compares discovery methods on relevance, false positives, and privacy guardrails.
+New discovery proposals record `method_version: lexical-overlap-v1`; the ledger rejects missing, malformed, or path-like method labels. The follow-up fixed synthetic evaluation now detects 3 false positives while blocking both hostile examples. It provides a reproducible baseline only. The next RSI step is to review the labels and build a separately held-out test set before attempting a new discovery method. Full-suite verification after the RSI additions is still pending.
 
 ### Windows installer build and isolated install/uninstall smoke test (2026-10-28)
 
