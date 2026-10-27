@@ -29,12 +29,12 @@ The profile's four booleans are runtime access controls for named agent tokens. 
 
 | Type | Scoped surfaces |
 |---|---|
-| Working | Inter-agent handoff mailbox |
-| Semantic | Durable note search/read/links, current summaries built from notes, and the source-ingestion queue |
+| Working | Inter-agent handoff mailbox and configured working-state tails in agent activation context |
+| Semantic | Durable note search/read/links, current summaries, recent notes, open loops, saved memories, and the source-ingestion queue |
 | Procedural | BrainLink guide, role activation, and published `read_first` instructions |
-| Episodic | Session list/read/closeout and session filing destinations |
+| Episodic | Session list/read/closeout, session filing destinations, and configured capture summaries in agent activation context |
 
-Vault grants and memory-type policy must both allow an operation. This mapping is a first implementation and still needs cross-client acceptance and checks for other data surfaces.
+Vault grants and memory-type policy must both allow an operation. `agent_connect` itself requires procedural access, but its mixed context packet checks the working, semantic, and episodic switches separately before reading those sections. This mapping is a first implementation and still needs cross-client acceptance and checks for other data surfaces.
 
 Example values are synthetic. They illustrate the declaration shape, not effective access:
 
