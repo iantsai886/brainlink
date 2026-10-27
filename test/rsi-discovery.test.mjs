@@ -73,6 +73,7 @@ test('discovery is off by default and refuses to run until topics and problem st
   const { discovery, fetchImpl } = await service(atom(entry()));
   const status = await discovery.status();
   assert.equal(status.settings.enabled, false);
+  assert.equal(status.settings.interval_hours, 24, 'new installs start with daily discovery checks');
   assert.deepEqual(status.sources.map(s => s.host), ['export.arxiv.org', 'api.crossref.org', 'api.github.com']);
   await assert.rejects(discovery.run(), /Turn discovery on/);
   await assert.rejects(discovery.configure({ enabled: true, topics: ['agent memory'] }), /at least one topic and one problem/);
@@ -639,7 +640,8 @@ test('RSI discovery UI has one form, selectable fixed sources, unique controls, 
   assert.match(html, /api\('GET', '\/api\/rsi\/export'\)/, 'download uses the authenticated local API helper');
   assert.match(html, /URL\.createObjectURL\(blob\)/, 'export is downloaded as a file');
   assert.match(html, /brainlink-rsi-review-/, 'export filename is recognizable and dated');
-  for (const id of ['rsi-discovery', 'rsi-discovery-form', 'rsi-discovery-sources', 'rsi-discovery-run', 'rsi-discovery-pause', 'rsi-discovery-resume', 'rsi-discovery-runs', 'rsi-discovery-status']) assert.equal((html.match(new RegExp(`id="${id}"`, 'g')) || []).length, 1, id);
+  for (const id of ['rsi-discovery', 'rsi-discovery-form', 'rsi-discovery-sources', 'rsi-discovery-run', 'rsi-discovery-background', 'rsi-discovery-background-status', 'rsi-discovery-pause', 'rsi-discovery-resume', 'rsi-discovery-runs', 'rsi-discovery-status']) assert.equal((html.match(new RegExp(`id="${id}"`, 'g')) || []).length, 1, id);
+  assert.match(html, /api\('POST', '\/api\/startup', \{ enabled: true \}\)/, 'background scheduling requires an explicit action');
   assert.match(html, /data-rsi-refresh/);
   assert.match(html, /name="refresh_existing"/);
   assert.match(html, /refresh_existing: f\.refresh_existing\.checked/);
@@ -652,6 +654,6 @@ test('RSI discovery UI has one form, selectable fixed sources, unique controls, 
     assert.ok(catalog['rsi.export']);
     assert.ok(catalog['rsi.exported']);
     for (const key of keys) assert.ok(catalog[key], `${locale} ${key}`);
-    for (const key of ['sourceLabel', 'refreshExisting', 'refreshSummary', 'freshness.label', 'freshness.never', 'freshness.check', 'freshness.checked', 'freshness.unchanged', 'freshness.changed', 'freshness.not_found', 'freshness.unsafe', 'freshness.unavailable', 'freshness.paused', 'state.off', 'state.paused', 'state.running', 'state.on', 'trigger.manual', 'trigger.schedule', 'run.ok', 'run.partial', 'run.failed', 'run.paused']) assert.ok(catalog['rsi.discovery.' + key], `${locale} ${key}`);
+    for (const key of ['sourceLabel', 'refreshExisting', 'refreshSummary', 'backgroundStart', 'backgroundHint', 'backgroundOn', 'backgroundUnsupported', 'freshness.label', 'freshness.never', 'freshness.check', 'freshness.checked', 'freshness.unchanged', 'freshness.changed', 'freshness.not_found', 'freshness.unsafe', 'freshness.unavailable', 'freshness.paused', 'state.off', 'state.paused', 'state.running', 'state.on', 'trigger.manual', 'trigger.schedule', 'run.ok', 'run.partial', 'run.failed', 'run.paused']) assert.ok(catalog['rsi.discovery.' + key], `${locale} ${key}`);
   }
 });

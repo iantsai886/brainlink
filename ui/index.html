@@ -310,8 +310,10 @@ main #ready, main #ask-panel, main #brain-panel, main #sessions-panel, main #s-c
           <label><span data-i18n="rsi.discovery.maxNew">New proposals per run (1-10)</span><input name="max_new_per_run" type="number" min="1" max="10" value="5"></label></div>
         <label class="muted" style="display:flex;flex-direction:row;gap:6px;align-items:center"><input type="checkbox" name="refresh_existing" style="width:auto"><span data-i18n="rsi.discovery.refreshExisting">Also recheck old saved sources (up to 3 each run)</span></label>
         <p class="muted" data-i18n="rsi.discovery.privacy"></p>
+        <p id="rsi-discovery-background-status" class="muted" aria-live="polite"></p>
         <div class="row"><button class="primary" type="submit" data-i18n="rsi.discovery.save">Save discovery settings</button>
           <button type="button" id="rsi-discovery-run" data-i18n="rsi.discovery.runNow">Run now</button>
+          <button type="button" id="rsi-discovery-background" data-i18n="rsi.discovery.backgroundStart" hidden>Start BrainLink quietly at sign-in</button>
           <button type="button" id="rsi-discovery-pause" data-i18n="rsi.discovery.pause">Pause</button>
           <button type="button" id="rsi-discovery-resume" data-i18n="rsi.discovery.resume" hidden>Resume</button></div>
       </form>
@@ -904,6 +906,9 @@ function renderDiscovery(d) {
   $('rsi-discovery-pause').hidden = s.paused || !s.enabled;
   $('rsi-discovery-resume').hidden = !s.paused;
   $('rsi-discovery-run').disabled = !s.enabled || s.paused || d.running;
+  const backgroundReady = s.enabled && !s.paused;
+  $('rsi-discovery-background').hidden = !backgroundReady || Boolean(S?.startup_at_login);
+  $('rsi-discovery-background-status').textContent = !backgroundReady ? '' : S?.startup_at_login ? t('rsi.discovery.backgroundOn') : t('rsi.discovery.backgroundHint');
   const state = !s.enabled ? 'off' : s.paused ? 'paused' : d.running ? 'running' : 'on';
   $('rsi-discovery-status').textContent = t('rsi.discovery.state.' + state) + ' · ' + t('rsi.discovery.sources', { sources: d.sources.filter(x => s.sources.includes(x.id)).map(x => x.label + ' (' + x.host + ')').join(', ') });
   $('rsi-discovery-runs').innerHTML = d.runs.map(r => '<li>' + esc(new Date(r.started_at).toLocaleString(LOCALE)) + ' · ' + esc(t('rsi.discovery.trigger.' + r.trigger)) + ' · ' + esc(t('rsi.discovery.run.' + r.status)) + ' · ' + esc(t('rsi.discovery.counts', { fetched: r.fetched, entries: r.entries, created: r.created.length, duplicates: r.duplicates, irrelevant: r.dropped.irrelevant, hostile: r.dropped.secret + r.dropped.instruction_like, invalid: r.dropped.invalid, over: r.dropped.over_limit })) + (r.source_refresh ? ' · ' + esc(t('rsi.discovery.refreshSummary', { checked: r.source_refresh.checked, deferred: r.source_refresh.deferred })) : '') + (r.errors.length ? '<br>' + r.errors.map(esc).join('<br>') : '') + '</li>').join('') || '<li>' + esc(t('rsi.discovery.noRuns')) + '</li>';
@@ -979,6 +984,12 @@ $('rsi-discovery-form').addEventListener('submit', (e) => act(async () => {
 }));
 $('rsi-discovery-pause').addEventListener('click', () => act(async () => { renderDiscovery((await api('POST', '/api/rsi/discovery/pause')).discovery); toast(t('rsi.discovery.pausedToast')); }));
 $('rsi-discovery-resume').addEventListener('click', () => act(async () => { renderDiscovery((await api('POST', '/api/rsi/discovery/resume')).discovery); toast(t('rsi.discovery.resumedToast')); }));
+$('rsi-discovery-background').addEventListener('click', () => act(async () => {
+  const result = await api('POST', '/api/startup', { enabled: true });
+  if (!result.enabled) throw new Error(t('rsi.discovery.backgroundUnsupported'));
+  await load();
+  toast(t('rsi.discovery.backgroundOn'));
+}));
 $('rsi-discovery-run').addEventListener('click', () => act(async () => {
   $('rsi-discovery-run').disabled = true;
   const { run, discovery } = await api('POST', '/api/rsi/discovery/run');

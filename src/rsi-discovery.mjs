@@ -39,7 +39,7 @@ const MAX_EVENTS_KEPT = 20;
 const GITHUB_OWNER = /^[A-Za-z0-9](?:[A-Za-z0-9-]{0,38})$/;
 const GITHUB_REPOSITORY = /^[A-Za-z0-9](?:[A-Za-z0-9_.-]{0,99})$/;
 
-export const DEFAULT_DISCOVERY = Object.freeze({ enabled: false, paused: false, refresh_existing: false, sources: ['arxiv'], topics: [], signals: [], interval_hours: 168, max_new_per_run: 5 });
+export const DEFAULT_DISCOVERY = Object.freeze({ enabled: false, paused: false, refresh_existing: false, sources: ['arxiv'], topics: [], signals: [], interval_hours: 24, max_new_per_run: 5 });
 const SOURCE_REFRESH_AGE_MS = 30 * 24 * 3600e3;
 const SOURCE_REFRESH_LIMIT = 3;
 
