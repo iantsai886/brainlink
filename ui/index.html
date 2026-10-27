@@ -703,7 +703,7 @@ async function showFiledSummaryEditor() {
 async function loadSessionEndCues() {
   try {
     const { cues } = await api('POST', '/api/sessions/end-cues', {});
-    const html = cues.length ? `<div class="card"><b>${esc(t('sessions.pendingCloseout'))}</b><p class="muted">${esc(t('sessions.pendingCloseoutHint'))}</p>${cues.map((cue) => `<div class="row"><span>${esc(clientLabel(cue.client))} · ${esc(new Date(cue.ended_at).toLocaleString(LOCALE))}</span>${cue.session_ref ? `<button class="link" data-sess-read="${esc(cue.session_ref)}" data-sess-private-read="1">${esc(t('sessions.reviewEndedSession'))}</button>` : `<span class="muted">${esc(t('sessions.endedSessionNotImported'))}</span>`}<button class="link" data-cue-dismiss="${esc(cue.id)}">${esc(t('sessions.dismissCue'))}</button></div>`).join('')}</div>` : '';
+    const html = cues.length ? `<div class="card"><b>${esc(t('sessions.pendingCloseout'))}</b><p class="muted">${esc(t('sessions.pendingCloseoutHint'))}</p>${cues.map((cue) => `<div class="row"><span>${esc(clientLabel(cue.client))} · ${esc(new Date(cue.ended_at).toLocaleString(LOCALE))}</span>${cue.session_ref ? `<button class="link" data-sess-read="${esc(cue.session_ref)}" data-sess-private-read="1">${esc(t('sessions.reviewEndedSession'))}</button><button class="link" data-cue-review-request="${esc(cue.session_ref)}">${esc(t('sessions.copyReviewRequest'))}</button>` : `<span class="muted">${esc(t('sessions.endedSessionNotImported'))}</span>`}<button class="link" data-cue-dismiss="${esc(cue.id)}">${esc(t('sessions.dismissCue'))}</button></div>`).join('')}</div>` : '';
     if ($('session-end-cues').innerHTML !== html) $('session-end-cues').innerHTML = html;
   } catch (e) { $('session-end-cues').innerHTML = `<p class="error-box">${esc(e.message)}</p>`; }
 }
@@ -1455,6 +1455,21 @@ document.addEventListener('click', (e) => {
   if (d.cueDismiss) act(async () => {
     await api('POST', '/api/sessions/end-cues/dismiss', { id: d.cueDismiss });
     await loadSessionEndCues();
+  });
+  if (d.cueReviewRequest) act(async () => {
+    const id = String(d.cueReviewRequest || '').trim();
+    if (!id || id.length > 200) throw new Error(t('sessions.copyRequestFailed'));
+    const request = `Use BrainLink to review this exact imported session ID ${JSON.stringify(id)}. Read only what my current BrainLink permissions allow. Prepare a concise private closeout with the outcome, decisions, corrections, open questions, next action, source, and confidence. Suggest the correct authorized vault and folder. Show me the exact preview, and do not save until I approve. If you cannot access this session through BrainLink, stop and tell me.`;
+    try { await navigator.clipboard.writeText(request); }
+    catch {
+      const field = document.createElement('textarea');
+      field.value = request; field.setAttribute('readonly', '');
+      field.style.position = 'fixed'; field.style.opacity = '0';
+      document.body.appendChild(field); field.select();
+      const copied = document.execCommand('copy'); field.remove();
+      if (!copied) throw new Error(t('sessions.copyRequestFailed'));
+    }
+    toast(t('sessions.copyRequestCopied'));
   });
   if (d.sessRead) (async (id) => {
     // Independent of whatever session is currently shown: proves any session can read any other.

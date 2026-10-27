@@ -639,3 +639,7 @@ Rebuilt `dist/BrainLink-Setup-1.2.8.exe` from source commit `923d58594b90d1a4d64
 ### Production dependency audit (2026-10-27)
 
 `npm audit --omit=dev --audit-level=moderate` on source commit `fd3774acfdff835db88780f1d2da5921efd006c4` completed successfully and reported zero production dependency vulnerabilities. This is an npm advisory-database scan of the locked production dependency tree; it is not a code audit, penetration test, or operating-system package review.
+
+### Copy request for AI-assisted session closeout (2026-10-28)
+
+Matched session-end reminders now offer a localized “Copy request for AI” action. It copies only the opaque imported session reference and instructions to read within current BrainLink permissions, prepare a private evidence-based closeout, show a preview, and wait for approval before saving. It does not copy transcript content, create a summary, or write to a vault. Focused Windows verification: `node --import ./test/_preload.mjs --test --test-concurrency=1 test/session-end-cue.test.mjs test/locales.test.mjs` passed 10/10; `git diff --check` passed. This is UI/template and local fixture evidence only; live cross-AI pickup and actual closeout remain unverified. The latest full-suite evidence predates this change.

@@ -11,6 +11,16 @@ import { startSetup } from '../src/setup.mjs';
 const temp = () => mkdtemp(path.join(tmpdir(), 'brainlink-end-cue-'));
 const hookEvent = (extra = {}) => JSON.stringify({ hook_event_name: 'SessionEnd', session_id: 'fictional-session-17', reason: 'other', cwd: 'C:\\Private\\Northwind', transcript_path: 'C:\\Private\\Northwind\\secret.jsonl', ...extra });
 
+test('pending session cue offers a safe copy request for an authorized AI', async () => {
+  const html = await readFile(new URL('../ui/index.html', import.meta.url), 'utf8');
+  assert.match(html, /data-cue-review-request="\$\{esc\(cue\.session_ref\)\}"/);
+  assert.match(html, /Use BrainLink to review this exact imported session ID \$\{JSON\.stringify\(id\)\}/);
+  assert.match(html, /Read only what my current BrainLink permissions allow/);
+  assert.match(html, /do not save until I approve/);
+  assert.match(html, /navigator\.clipboard\.writeText\(request\)/);
+  assert.doesNotMatch(html, /data-cue-review-request=[^>]*transcript/);
+});
+
 test('SessionEnd cue records only local metadata and never the transcript path or cwd', async () => {
   const dir = path.join(await temp(), 'end-cues');
   const recorded = await recordSessionEndCue({ input: hookEvent(), client: 'claude-code', dir, now: new Date('2026-10-24T03:00:00Z') });
