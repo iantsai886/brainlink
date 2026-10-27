@@ -15,7 +15,7 @@ Every local AI client config BrainLink writes now gets restrictive permissions b
 
 Follow-up security check: the Windows ACL test now rejects any extra partial-access grant as well as extra full-control grants, and the error for a missing user SID names BrainLink's agent token instead of one specific AI client. The focused Windows connector checks passed 2/2; syntax and diff checks passed. The full-suite receipt above predates this test-only assertion and generic error wording change.
 
-The Windows Inno Setup installer also compiled from commit `32a9ba527a49f247a336cf0f5d9cbdbce63d56ee` with Inno Setup 6.7.3. Artifact: `dist/BrainLink-Setup-1.2.8.exe`, SHA-256 `889DF9A80012B15F6A0ABAE8364F38C718C16635205E705FE7C07D87714E512C`. This is an unsigned local compile receipt; installation, upgrade, uninstall, signature, and customer acceptance remain unverified.
+The Windows Inno Setup installer also compiled from commit `32a9ba527a49f247a336cf0f5d9cbdbce63d56ee` with Inno Setup 6.7.3. Artifact: `dist/BrainLink-Setup-1.2.8.exe`, SHA-256 `889DF9A80012B15F6A0ABAE8364F38C718C16635205E705FE7C07D87714E512C`. The staged app was launched with its bundled Node runtime using a temporary `BRAINLINK_HOME`; `GET http://127.0.0.1:51988/health` returned `{"app":"brainlink","version":"1.2.8"}`, and the process was stopped afterward. This confirms a local package build and staged runtime smoke check, not an installed-package run. The installer is unsigned; installation, upgrade, uninstall, signature, and customer acceptance remain unverified.
 
 ### Reliable desktop Setup re-open
 
