@@ -18,7 +18,7 @@ export function filingFields(session, vaultName, identity = {}, folder) {
     ...(session.source_session_id ? { source_session_id: session.source_session_id } : {}),
     confidence: 'reported',
     ai_platform: identity.ai_platform || 'BrainLink Local', agent_or_role: identity.agent_or_role || 'session filing', session_or_task_id: identity.session_or_task_id || session.id,
-    body: `## Session summary\n\n${session.summary.trim()}\n\n## Provenance\n\n- Client: ${session.client || 'unknown'}\n- Session ID: ${session.id}\n- Project: ${session.project || 'not recorded'}\n- Updated: ${session.updated_at || 'not recorded'}\n\nThis is a private, unverified session summary. Review before promoting any claim to durable knowledge.`,
+    body: `## Session summary\n\n${session.summary.trim()}\n\n## Provenance\n\n- Client: ${session.client || 'unknown'}\n- Session ID: ${session.id}\n- Project: ${session.project || 'not recorded'}\n- Updated: ${session.updated_at || 'not recorded'}${session.local_summary_model ? `\n- Drafted locally with: ${session.local_summary_model}\n- Draft time: ${session.local_summary_generated_at || 'not recorded'}` : ''}\n\nThis is a private, unverified session summary. Review before promoting any claim to durable knowledge.`,
     // proposeNote builds links only from this explicitly selected vault's privacy-filtered index.
     // The links are visible in the preview, and are saved only after the same confirmation as the note.
     auto_link: true,

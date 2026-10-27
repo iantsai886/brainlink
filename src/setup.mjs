@@ -40,6 +40,7 @@ import { isStartupEnabled, setStartupEnabled } from './startup.mjs';
 import { recommendSessionVault } from './sessions/routing.mjs';
 import { listSessionEndCues, dismissSessionEndCue, sessionEndCueId, matchSessionEndCue } from './sessions/end-cue.mjs';
 import { listSessionFilingFolders, suggestedSessionFolder } from './sessions/folders.mjs';
+import { generateLocalSessionSummary, readLocalSummaryDraft, saveLocalSummaryDraft, validLocalModelName } from './sessions/local-summary.mjs';
 import { sessionHookStatus, setSessionHook } from './sessions/hooks.mjs';
 import { twinProfileStatus, profileScopeEditable } from './twin-profiles.mjs';
 import { createRsiLedger } from './rsi-ledger.mjs';
@@ -735,6 +736,7 @@ export async function startSetup(opts = {}) {
       obsidian_vaults: (await findObsidianVaults({ home, os, env })).filter((o) => !cfg.vaults.some((v) => path.resolve(v.path) === path.resolve(o.path))),
       sync: { ...syncSettings(cfg), providers: PROVIDERS, provider_labels: PROVIDER_LABELS, suggested_folders: suggestFolders(home), status: syncStatus, running: syncRunning },
       sessions_sharing: cfg.sessions,
+      sessions_local_summary: cfg.sessions.localSummary,
       // P1a: imported sessions default to private, and a private session is invisible to every
       // connected AI while sessions.shareSummaries is off -- regardless of the "Show private
       // sessions" checkbox below, which only controls what this local Setup UI displays. Peeking
@@ -1610,6 +1612,13 @@ export async function startSetup(opts = {}) {
       const cfg = await loadConfig(file);
       const ctx = localContext(cfg, { ...env, BRAINLINK_AI_PLATFORM: 'BrainLink Local' });
       const session = await sessions.read({ id: b.id, include_private: true });
+      if (b.useLocalDraft === true) {
+        const draft = await readLocalSummaryDraft(path.join(appHome(env), 'sessions', 'auto-summary'), String(b.id || ''));
+        if (!draft) throw new Error('No reviewed local summary draft is available for this session.');
+        session.summary = draft.summary;
+        session.local_summary_model = draft.model;
+        session.local_summary_generated_at = draft.generated_at;
+      }
       const folder = typeof b.folder === 'string' ? b.folder : undefined;
       const result = await fileSessionSummary(ctx, session, String(b.vault || ''), b.confirm, {}, folder);
       if (b.confirm === true && b.rememberDestination === true && result.written && session.project && session.project.length <= 1024) {
@@ -1645,9 +1654,28 @@ export async function startSetup(opts = {}) {
       const cfg = await loadConfig(file);
       const shareSummaries = typeof b.shareSummaries === 'boolean' ? b.shareSummaries : cfg.sessions.shareSummaries;
       const shareFullText = typeof b.shareFullText === 'boolean' ? b.shareFullText : cfg.sessions.shareFullText;
-      const next = { ...cfg, sessions: { shareSummaries, shareFullText: shareSummaries && shareFullText } };
+      const next = { ...cfg, sessions: { ...cfg.sessions, shareSummaries, shareFullText: shareSummaries && shareFullText } };
       await saveConfig(next, file);
       return { ok: true, sessions: next.sessions };
+    },
+    'POST /api/sessions/local-summary/settings': async (b) => {
+      const cfg = await loadConfig(file);
+      const enabled = typeof b.enabled === 'boolean' ? b.enabled : cfg.sessions.localSummary.enabled;
+      const model = typeof b.model === 'string' ? b.model.trim() : cfg.sessions.localSummary.model;
+      if (enabled && (!validLocalModelName(model) || !model)) throw new Error('Enter a valid local Ollama model name before enabling summaries.');
+      const next = { ...cfg, sessions: { ...cfg.sessions, localSummary: { enabled, model } } };
+      await saveConfig(next, file);
+      return { ok: true, settings: next.sessions.localSummary };
+    },
+    'POST /api/sessions/local-summary/generate': async (b) => {
+      const cfg = await loadConfig(file);
+      if (!cfg.sessions.localSummary.enabled) throw new Error('Turn on local summaries in Sessions settings first.');
+      const id = String(b.id || '');
+      const store = await sessions.store();
+      const { session, messages } = await store.readSession(id, { limit: 1000 });
+      const generated = await generateLocalSessionSummary(messages, cfg.sessions.localSummary.model, { fetchImpl: opts.localSummaryFetch || fetch });
+      const draft = await saveLocalSummaryDraft(path.join(appHome(env), 'sessions', 'auto-summary'), id, generated);
+      return { ok: true, draft: { summary: draft.summary, model: draft.model, generated_at: draft.generated_at, source: draft.source }, session: { id: session.id } };
     },
     // P0: two-AI handoff receipt -- who handed off, who picked it up (if anyone yet), and when.
     // listHandoffs() already drops anything under an excluded ("00 Home"-style) folder or marked

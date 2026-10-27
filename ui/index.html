@@ -241,6 +241,12 @@ main #ready, main #ask-panel, main #brain-panel, main #sessions-panel, main #s-c
       <label class="muted" style="display:flex;flex-direction:row;gap:6px;align-items:center;margin-top:6px"><input type="checkbox" id="sess-share-summaries" style="width:auto"><span data-i18n="sessions.shareSummariesLabel"></span></label>
       <label class="muted" style="display:flex;flex-direction:row;gap:6px;align-items:center;margin-top:6px"><input type="checkbox" id="sess-share-full" style="width:auto"><span data-i18n="sessions.shareFullTextLabel"></span></label>
     </div>
+    <div class="card" style="margin-bottom:10px">
+      <b data-i18n="sessions.localSummaryTitle"></b>
+      <p class="muted" data-i18n="sessions.localSummaryHint"></p>
+      <label class="muted" style="display:flex;flex-direction:row;gap:6px;align-items:center;margin-top:6px"><input type="checkbox" id="sess-local-summary-enabled" style="width:auto"><span data-i18n="sessions.localSummaryEnable"></span></label>
+      <div class="row" style="margin-top:6px"><label><span data-i18n="sessions.localSummaryModel"></span><input id="sess-local-summary-model" maxlength="160" placeholder="qwen2.5:3b"></label><button class="secondary" id="sess-local-summary-save" data-i18n="sessions.localSummarySave"></button></div>
+    </div>
     <div class="row" style="margin-bottom:10px"><label class="muted" style="display:flex;flex-direction:row;gap:6px;align-items:center"><input type="checkbox" id="sess-private" style="width:auto"><span data-i18n="sessions.showPrivate"></span></label></div>
     <div id="session-hook-settings" class="cards"></div>
     <div id="session-end-cues" class="cards" aria-live="polite"></div>
@@ -529,6 +535,7 @@ vaultEvents.addEventListener('vault-changed', () => window.dispatchEvent(new Eve
 const $ = (id) => document.getElementById(id);
 const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 let S = null, pack = 'founder-os', editingTwinId = null, ingestionTargetsDraft = null;
+const fileLocalDraftIds = new Set();
 let activeFiledSummary = null;
 let filedSummaryRefs = [];
 let pendingSyncOnboarding = false; // set when a first-run vault pick just succeeded; cleared once the sync choice is saved
@@ -703,7 +710,7 @@ async function showFiledSummaryEditor() {
 async function loadSessionEndCues() {
   try {
     const { cues } = await api('POST', '/api/sessions/end-cues', {});
-    const html = cues.length ? `<div class="card"><b>${esc(t('sessions.pendingCloseout'))}</b><p class="muted">${esc(t('sessions.pendingCloseoutHint'))}</p>${cues.map((cue) => `<div class="row"><span>${esc(clientLabel(cue.client))} · ${esc(new Date(cue.ended_at).toLocaleString(LOCALE))}</span>${cue.session_ref ? `<button class="primary" data-sess-file="${esc(cue.session_ref)}">${esc(t('sessions.fileSummary'))}</button><button class="link" data-cue-review-request="${esc(cue.session_ref)}">${esc(t('sessions.copyReviewRequest'))}</button>` : `<span class="muted">${esc(t('sessions.endedSessionNotImported'))}</span>`}<button class="link" data-cue-dismiss="${esc(cue.id)}">${esc(t('sessions.dismissCue'))}</button></div>`).join('')}</div>` : '';
+    const html = cues.length ? `<div class="card"><b>${esc(t('sessions.pendingCloseout'))}</b><p class="muted">${esc(t('sessions.pendingCloseoutHint'))}</p>${cues.map((cue) => `<div class="row"><span>${esc(clientLabel(cue.client))} · ${esc(new Date(cue.ended_at).toLocaleString(LOCALE))}</span>${cue.session_ref ? `${S.sessions_local_summary?.enabled ? `<button class="secondary" data-sess-summarize="${esc(cue.session_ref)}">${esc(t('sessions.localSummaryRun'))}</button>` : ''}<button class="primary" data-sess-file="${esc(cue.session_ref)}">${esc(t('sessions.fileSummary'))}</button><button class="link" data-cue-review-request="${esc(cue.session_ref)}">${esc(t('sessions.copyReviewRequest'))}</button>` : `<span class="muted">${esc(t('sessions.endedSessionNotImported'))}</span>`}<button class="link" data-cue-dismiss="${esc(cue.id)}">${esc(t('sessions.dismissCue'))}</button></div>`).join('')}</div>` : '';
     if ($('session-end-cues').innerHTML !== html) $('session-end-cues').innerHTML = html;
   } catch (e) { $('session-end-cues').innerHTML = `<p class="error-box">${esc(e.message)}</p>`; }
 }
@@ -733,6 +740,7 @@ function renderSessions(list) {
       </div>
       <div class="muted" style="font-size:14px">${esc(s.summary || t('sessions.noSummary'))}</div>
       <div class="row muted" style="font-size:13px">${esc(new Date(s.started_at).toLocaleString(LOCALE))} · ${s.turns} ${s.turns === 1 ? esc(t('sessions.messageOne')) : esc(t('sessions.messageMany'))}
+        ${S.sessions_local_summary?.enabled ? `<button class="secondary" data-sess-summarize="${esc(s.id)}">${esc(t('sessions.localSummaryRun'))}</button>` : ''}
         ${s.profile_id ? `<span class="pill">${esc(S.twin_profiles?.profiles?.find((p) => p.id === s.profile_id)?.name || s.profile_id)}</span>` : (assignableProfiles.length ? `<label><select aria-label="${esc(t('sessions.chooseTwin'))}" data-sess-profile="${esc(s.id)}"><option value="">${esc(t('sessions.chooseTwin'))}</option>${assignableProfiles.map((p) => `<option value="${esc(p.id)}">${esc(p.name)}</option>`).join('')}</select></label><button class="link" data-sess-assign="${esc(s.id)}">${esc(t('sessions.assignTwin'))}</button>` : `<span class="muted">${esc(t('sessions.noAuthorizedTwin'))}</span>`)}
         <button class="link" data-sess-read="${esc(s.id)}">${esc(t('sessions.open'))}</button>
         ${s.summary ? `<button class="link" data-sess-file="${esc(s.id)}">${esc(t('sessions.fileSummary'))}</button>` : ''}
@@ -744,7 +752,7 @@ function renderSessions(list) {
 async function previewSessionFile(id) {
   const vault = $('session-file-vault').value;
   const folder = $('session-file-folder').value;
-  const result = await api('POST', '/api/sessions/file', { id, vault, folder, confirm: false });
+  const result = await api('POST', '/api/sessions/file', { id, vault, folder, confirm: false, useLocalDraft: fileLocalDraftIds.has(id) });
   if (!result.ok) throw new Error((result.errors || []).join('; ') || t('sessions.previewFirst'));
   $('session-file-preview').textContent = result.preview || '';
   $('session-file-preview').dataset.vault = vault;
@@ -1237,6 +1245,9 @@ async function load() {
   $('sessions-hint').innerHTML = t('sessions.hint', { call: '<span class="mono">session_read</span>' });
   $('sess-share-summaries').checked = Boolean(S.sessions_sharing?.shareSummaries);
   $('sess-share-full').checked = Boolean(S.sessions_sharing?.shareFullText);
+  $('sess-local-summary-enabled').checked = Boolean(S.sessions_local_summary?.enabled);
+  $('sess-local-summary-model').value = S.sessions_local_summary?.model || '';
+  $('sess-local-summary-model').disabled = !$('sess-local-summary-enabled').checked;
   $('sess-share-full').disabled = !$('sess-share-summaries').checked;
   // P1a: sessions were imported (or logged) but stay invisible to every connected AI because
   // sharing is off -- say so plainly, with one button that turns the existing switch on, instead
@@ -1491,6 +1502,15 @@ document.addEventListener('click', (e) => {
         <div class="muted" style="font-size:13px">${s.project ? esc(s.project) + ' · ' : ''}${s.message_count} ${s.message_count === 1 ? esc(t('sessions.messageOne')) : esc(t('sessions.messageMany'))} · ${esc(new Date(s.started_at).toLocaleString(LOCALE))}${s.note_refs?.length ? ' · ' + esc(t('sessions.refs', { list: s.note_refs.join(', ') })) : ''}</div>${s.summary ? `<button class="link" data-sess-file="${esc(s.id)}">${esc(t('sessions.fileSummary'))}</button>` : ''}</div>`;
     } catch (e) { $('session-detail').innerHTML = `<p class="error-box">${esc(t('sessions.detailError', { msg: e.message }))}</p>`; }
   })(d.sessRead);
+  if (d.sessSummarize) act(async () => {
+    if (!S.sessions_local_summary?.enabled) throw new Error(t('sessions.localSummaryEnableFirst'));
+    const result = await api('POST', '/api/sessions/local-summary/generate', { id: d.sessSummarize });
+    fileLocalDraftIds.add(d.sessSummarize);
+    toast(t('sessions.localSummaryReady', { model: result.draft.model }));
+    const openButton = [...document.querySelectorAll('[data-sess-file]')].find((button) => button.dataset.sessFile === d.sessSummarize);
+    if (openButton) openButton.click();
+    else $('session-detail').innerHTML = `<div class="card"><b>${esc(t('sessions.localSummaryReadyTitle'))}</b><p class="muted">${esc(result.draft.model)} · ${esc(new Date(result.draft.generated_at).toLocaleString(LOCALE))}</p><pre style="white-space:pre-wrap;overflow-wrap:anywhere">${esc(result.draft.summary)}</pre><button class="primary" data-sess-file="${esc(d.sessSummarize)}">${esc(t('sessions.fileSummary'))}</button></div>`;
+  });
   if (d.sessFile) (async (id) => {
     const choices = (S.vaults || []).filter((v) => v.exists && v.writes !== 'off').map((v) => `<option value="${esc(v.name)}">${esc(v.name)}</option>`).join('');
     let recommendation = { vault: null, reason: '', project: null, remember_available: false };
@@ -1539,11 +1559,12 @@ document.addEventListener('click', (e) => {
     const vault = $('session-file-vault').value;
     const folder = $('session-file-folder').value;
     if ($('session-file-preview').dataset.vault !== vault || $('session-file-preview').dataset.folder !== folder) throw new Error(t('sessions.previewFirst'));
-    const result = await api('POST', '/api/sessions/file', { id: d.fileConfirm, vault, folder, confirm: true, rememberDestination: Boolean($('session-remember-destination')?.checked) });
+    const result = await api('POST', '/api/sessions/file', { id: d.fileConfirm, vault, folder, confirm: true, rememberDestination: Boolean($('session-remember-destination')?.checked), useLocalDraft: fileLocalDraftIds.has(d.fileConfirm) });
     if (!result.ok || !result.written) throw new Error((result.errors || []).join('; ') || result.next || 'Not saved.');
     const prefix = `${vault}/`;
     if (!String(result.path || '').startsWith(prefix)) throw new Error('The saved note path could not be confirmed.');
     activeFiledSummary = { sessionId: d.fileConfirm, vault, path: result.path.slice(prefix.length), status: 'proposed' };
+    fileLocalDraftIds.delete(d.fileConfirm);
     document.querySelector('[data-file-confirm]').hidden = true;
     toast(t('sessions.savedPrivate', { path: result.path }));
     if (result.destination_rule_saved) toast(t('sessions.destinationRemembered'));
@@ -1650,6 +1671,12 @@ $('sess-share-full').onchange = () => act(async () => {
   const r = await api('POST', '/api/sessions/sharing', { shareSummaries: $('sess-share-summaries').checked, shareFullText: $('sess-share-full').checked });
   S.sessions_sharing = r.sessions;
   toast(t('sessions.shareToastSaved'));
+});
+$('sess-local-summary-enabled').onchange = () => { $('sess-local-summary-model').disabled = !$('sess-local-summary-enabled').checked; };
+$('sess-local-summary-save').onclick = () => act(async () => {
+  const result = await api('POST', '/api/sessions/local-summary/settings', { enabled: $('sess-local-summary-enabled').checked, model: $('sess-local-summary-model').value });
+  S.sessions_local_summary = result.settings;
+  toast(t('sessions.localSummarySaved'));
 });
 $('sync-provider').onchange = () => { const p = $('sync-provider').value; $('sync-folder-row').hidden = p === 'local'; $('sync-vault-row').hidden = p === 'local'; $('sync-schedule-row').hidden = p === 'local'; renderSyncSuggestions(p, S.sync.suggested_folders); };
 $('sync-scheduled').onchange = () => { $('sync-interval-row').hidden = !$('sync-scheduled').checked; };
