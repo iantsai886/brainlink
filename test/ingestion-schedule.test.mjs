@@ -41,9 +41,10 @@ test('failed scheduled scan retries once the source folder returns, without logg
   const local = localDateAndTime(now, 'UTC');
   const pastMinute = `${local.time.slice(0, 2)}:${String(Math.max(0, Number(local.time.slice(3)) - 1)).padStart(2, '0')}`;
   await saveConfig(normalize({ timezone: 'UTC', vaults: [{ name: 'Fictional Team', path: vault }], ingestion: { enabled: true, vault: 'Fictional Team', folder: 'Raw', time: pastMinute } }), path.join(appHome, 'config.json'));
-  // Leave enough time for the fixture to recreate the source folder even on a slow full-suite
-  // run. A 60 ms retry could fire several times while this test process was under load.
-  const app = await startSetup({ env, home, os: 'linux', port: 0, useCli: false, ingestionTickMs: 20, ingestionRetryMs: 500 });
+  // Keep the retry safely in the future, then advance the fixture's persisted retry timestamp.
+  // This avoids a wall-clock race where a slow full-suite run can pass several short intervals
+  // before the test gets a chance to observe the first failure.
+  const app = await startSetup({ env, home, os: 'linux', port: 0, useCli: false, ingestionTickMs: 20, ingestionRetryMs: 60_000 });
   const base = `http://127.0.0.1:${app.port}`;
   const getState = () => fetch(base + '/api/state', { headers: { 'X-BrainLink-Token': app.token } }).then((r) => r.json());
   try {
@@ -58,6 +59,10 @@ test('failed scheduled scan retries once the source folder returns, without logg
     assert.ok(state.ingestion.status.retry_after);
     await mkdir(path.join(vault, 'Raw'), { recursive: true });
     await writeFile(path.join(vault, 'Raw', 'Source.md'), '# Source\n\nPrivate body must not enter scan status.');
+    const retryConfigPath = path.join(appHome, 'config.json');
+    const retryConfig = JSON.parse(await readFile(retryConfigPath, 'utf8'));
+    retryConfig.ingestion.retry_after = new Date(Date.now() - 1_000).toISOString();
+    await saveConfig(retryConfig, retryConfigPath);
     const retryDeadline = Date.now() + 10_000;
     while (Date.now() < retryDeadline) {
       await delay(25);
