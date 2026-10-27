@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtemp, mkdir, readFile, writeFile, stat, utimes } from 'node:fs/promises';
+import { mkdtemp, mkdir, readFile, writeFile, stat } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { normalize, validate, saveConfig } from '../src/config.mjs';
@@ -340,14 +340,16 @@ test('direct note read rechecks memory type after reading a stale-index file', a
   const cfg = fixture(vaultPath);
   const ctx = createContext(cfg, { env: { BRAINLINK_AGENT_TOKEN: 'fictional-agent-token' } });
   ctx.twinScope.memory_policy.episodic = false;
-  const original = await stat(notePath);
   await loadVault(ctx, 'Fictional Org');
+  const cachedFile = ctx.cache.get('Fictional Org').files.get('Mutable.md');
 
   await writeFile(notePath, `---\nmemory_type: episodic\n---\n# Mutable\n\n${canary}`);
-  await utimes(notePath, original.atimeMs / 1000, original.mtimeMs / 1000);
-  const unchangedFingerprint = await stat(notePath);
-  assert.equal(unchangedFingerprint.size, original.size, 'the fixture preserves file size so the index cache remains stale');
-  assert.equal(unchangedFingerprint.mtimeMs, original.mtimeMs, 'the fixture restores the cached modification time');
+  const changed = await stat(notePath);
+  assert.equal(changed.size, cachedFile.bytes, 'the fixture preserves file size so the index cache can be stale');
+  // Model a filesystem timestamp collision: the incremental index sees matching stat data and
+  // keeps its prior semantic note, while readNote still reads the current body from disk.
+  cachedFile.mtime = changed.mtimeMs;
+  cachedFile.bytes = changed.size;
 
   await assert.rejects(readNote(ctx, 'Fictional Org', 'Mutable.md'), /private/i);
 });

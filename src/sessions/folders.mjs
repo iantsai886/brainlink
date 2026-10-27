@@ -32,7 +32,9 @@ export async function listSessionFilingFolders(ctx, vaultName) {
   return folders.sort((a, b) => a.path.localeCompare(b.path));
 }
 
-export async function suggestedSessionFolder(ctx, session, vaultName) {
+export async function suggestedSessionFolder(ctx, session, vaultName, { allowContentSuggestions = true } = {}) {
+  const destinationVault = ctx.byName?.get(vaultName);
+  if (!destinationVault || !ctx.enabled.includes(vaultName) || destinationVault.writes !== 'on') return null;
   const project = String(session?.project || '').trim();
   const saved = project && ctx.cfg.session_filing?.projectFolders?.[project];
   const available = await listSessionFilingFolders(ctx, vaultName);
@@ -40,6 +42,7 @@ export async function suggestedSessionFolder(ctx, session, vaultName) {
     && available.some((item) => item.path === saved.folder)) {
     return { folder: saved.folder, source: 'saved', reason: 'Matches your saved choice for this exact project.' };
   }
+  if (!allowContentSuggestions) return null;
 
   // Conservative content-based fallback: only infer a folder from public, index-eligible notes
   // in this same selected vault. Exact note-title mentions outrank similarity; ambiguous folders

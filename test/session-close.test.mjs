@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtemp, mkdir, readdir, readFile, rm } from 'node:fs/promises';
+import { mkdtemp, mkdir, readdir, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { spawn } from 'node:child_process';
@@ -10,6 +10,7 @@ import { createContext, readNote } from '../src/core.mjs';
 import { createMcp } from '../src/server.mjs';
 import { openSessionStore } from '../src/sessions/index.mjs';
 import { closeSession } from '../src/sessions/close.mjs';
+import { hashToken } from '../src/mcp-agents.mjs';
 
 const call = async (mcp, name, args = {}) => {
   const response = await mcp.handle({ jsonrpc: '2.0', id: 1, method: 'tools/call', params: { name, arguments: args } });
@@ -76,6 +77,62 @@ test('MCP close rejects unsafe or incomplete outcomes before saving', async () =
   assert.equal((await call(mcp, 'session_close', { ...base, outcome: 'API key sk-abcdefghijklmnopqrstuvwxyz123' })).error, true);
   assert.equal((await call(mcp, 'session_close', { ...base, folder: '../Outside' })).error, true);
   assert.equal((await readdir(path.join(root, 'Inbox'))).length, 0);
+});
+
+test('MCP close suggests a strong same-vault folder in its preview and files there after confirmation', async () => {
+  const root = await mkdtemp(path.join(tmpdir(), 'bl-close-auto-folder-'));
+  const company = path.join(root, 'company');
+  const folder = path.join(company, 'Projects', 'Fictional Build');
+  await mkdir(path.join(company, 'Inbox'), { recursive: true });
+  await mkdir(folder, { recursive: true });
+  await writeFile(path.join(folder, 'Delivery Plan.md'), `# Delivery Plan\n\n${'Fictional delivery planning details and review status. '.repeat(5)}`);
+  const env = { BRAINLINK_HOME: path.join(root, 'app'), HOME: root, BRAINLINK_AI_PLATFORM: 'Codex' };
+  const cfg = normalize({ version: CONFIG_SCHEMA_VERSION, vaults: [{ name: 'Company', path: company }] });
+  const mcp = createMcp(createContext(cfg, { env }));
+  const args = { vault: 'Company', title: 'Fictional delivery check', project: 'fixture-build', goal: 'Review the delivery plan', outcome: 'Updated the Delivery Plan and left deployment for approval.', session_or_task_id: 'auto-folder-check' };
+
+  const preview = await call(mcp, 'session_close', args);
+  assert.equal(preview.error, false, JSON.stringify(preview.value));
+  assert.equal(preview.value.written, false);
+  assert.deepEqual(preview.value.folder_suggestion, {
+    folder: 'Projects/Fictional Build', source: 'related_note', reason: 'Matches an existing note mentioned in this session summary.',
+  });
+  assert.match(preview.value.path, /^Company\/Projects\/Fictional Build\//);
+  assert.equal((await readdir(folder)).length, 1, 'preview does not write the episode');
+
+  const saved = await call(mcp, 'session_close', { ...args, confirm: true });
+  assert.equal(saved.error, false);
+  assert.equal(saved.value.written, true);
+  assert.equal(saved.value.folder_suggestion.source, 'related_note');
+  assert.match(saved.value.path, /^Company\/Projects\/Fictional Build\//);
+  assert.equal((await readdir(path.join(company, 'Inbox'))).length, 0);
+});
+
+test('MCP close does not inspect semantic notes when this Twin cannot search them', async () => {
+  const root = await mkdtemp(path.join(tmpdir(), 'bl-close-no-semantic-routing-'));
+  const company = path.join(root, 'company');
+  await mkdir(path.join(company, 'Inbox'), { recursive: true });
+  await mkdir(path.join(company, 'Projects', 'Hidden Topic'), { recursive: true });
+  await writeFile(path.join(company, 'Projects', 'Hidden Topic', 'Secret Topic.md'), `# Secret Topic\n\n${'Restricted fictional planning details. '.repeat(6)}`);
+  const env = { BRAINLINK_HOME: path.join(root, 'app'), HOME: root, BRAINLINK_AGENT_TOKEN: 'fictional-close-agent-token', BRAINLINK_AI_PLATFORM: 'Fictional AI' };
+  const cfg = normalize({ version: CONFIG_SCHEMA_VERSION,
+    vaults: [{ name: 'Company', path: company }],
+    ai_agents: [{ id: 'close-agent', name: 'Fictional close agent', kind: 'local', tokenHash: hashToken(env.BRAINLINK_AGENT_TOKEN) }],
+    twin_profiles: [{
+      id: 'fictional-org', name: 'Fictional Organisation Twin', mode: 'organisation', owner: 'fictional-owner',
+      vaults: [{ name: 'Company', access: 'propose' }],
+      source_policy: { private_default: true, provenance_required: true, session_capture: 'summary-proposal' },
+      memory_policy: { working: true, semantic: false, procedural: true, episodic: true },
+      allowed_actions: ['search', 'read_note', 'propose_note'],
+      agent_access: [{ agent_id: 'close-agent', vaults: [{ name: 'Company', access: 'propose', operations: ['search', 'read_note', 'propose_note'] }] }],
+    }],
+  });
+  const mcp = createMcp(createContext(cfg, { env }));
+  const result = await call(mcp, 'session_close', { vault: 'Company', title: 'Fictional session', project: 'new-topic', goal: 'Review a document', outcome: 'Discussed Secret Topic but made no filing decision.', session_or_task_id: 'no-semantic-routing' });
+  assert.equal(result.error, false, JSON.stringify(result.value));
+  assert.equal(result.value.folder_suggestion, undefined, 'the closed profile must not route using semantic note content');
+  assert.match(result.value.path, /^Company\/Inbox\//, 'the safe configured intake folder is used');
+  assert.doesNotMatch(JSON.stringify(result.value), /Restricted fictional planning details/);
 });
 
 test('close reports a recoverable partial save when session storage succeeds but note filing fails', async () => {

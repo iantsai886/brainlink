@@ -5,6 +5,8 @@ import { vault } from '../core.mjs';
 import { checkCommon, resolveIdentity } from '../writes.mjs';
 import { clientIdFor } from './mcp.mjs';
 import { fileSessionSummary } from './filing.mjs';
+import { suggestedSessionFolder } from './folders.mjs';
+import { twinToolAuthorization } from '../twin-profiles.mjs';
 
 const lines = (value) => (Array.isArray(value) ? value : value ? [value] : []).map((x) => String(x).trim()).filter(Boolean);
 const section = (label, value) => {
@@ -61,9 +63,15 @@ export async function closeSession(ctx, store, args, now = new Date(), { fileSum
     } catch (error) { if (error.code !== 'E_NOT_FOUND') throw error; }
     const session = { id: sessionId, client, profile_id: profileId, title: `${args.title} (${sessionId.slice(-6)})`, project: args.project || '', summary, updated_at: now.toISOString(), private: true };
     const identity = { ...id, session_or_task_id: sourceId };
-    const folder = typeof args.folder === 'string' ? args.folder : undefined;
+    let folderSuggestion = null;
+    if (typeof args.folder !== 'string') {
+      const canSearchNotes = twinToolAuthorization(ctx, 'vault_search', { vault: args.vault }).allowed;
+      folderSuggestion = await suggestedSessionFolder(ctx, session, args.vault, { allowContentSuggestions: canSearchNotes });
+    }
+    const folder = typeof args.folder === 'string' ? args.folder : folderSuggestion?.folder;
+    const suggestionReceipt = folderSuggestion ? { folder_suggestion: folderSuggestion } : {};
     const draft = await fileSummary(ctx, session, args.vault, false, identity, folder);
-    if (!draft.ok || !args.confirm) return { ...draft, session_id: sessionId, session_saved: false };
+    if (!draft.ok || !args.confirm) return { ...draft, ...suggestionReceipt, session_id: sessionId, session_saved: false };
 
     const stored = await sessionStore.putSession({ client, source_id: sourceId, profile_id: profileId, project: session.project, title: session.title,
       summary, started_at: now.toISOString(), note_refs: [], private: true, messages: [] }, profileId ? { profile_id: profileId } : {});
@@ -80,6 +88,7 @@ export async function closeSession(ctx, store, args, now = new Date(), { fileSum
         session_id: stored.id,
         session_saved: true,
         filing_status: 'unknown',
+        ...suggestionReceipt,
         next: 'Open Sessions in BrainLink, review this saved session, then use File summary to finish filing it.',
       };
     }
@@ -92,10 +101,11 @@ export async function closeSession(ctx, store, args, now = new Date(), { fileSum
         session_id: stored.id,
         session_saved: true,
         filing_status: 'not_written',
+        ...suggestionReceipt,
         next: 'Open Sessions in BrainLink, review this saved session and choose a writable destination before using File summary.',
       };
     }
-    return { ...note, session_id: stored.id, session_saved: true };
+    return { ...note, ...suggestionReceipt, session_id: stored.id, session_saved: true };
   };
   return typeof store.withExclusive === 'function'
     ? store.withExclusive(close)
