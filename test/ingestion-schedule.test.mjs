@@ -41,7 +41,9 @@ test('failed scheduled scan retries once the source folder returns, without logg
   const local = localDateAndTime(now, 'UTC');
   const pastMinute = `${local.time.slice(0, 2)}:${String(Math.max(0, Number(local.time.slice(3)) - 1)).padStart(2, '0')}`;
   await saveConfig(normalize({ timezone: 'UTC', vaults: [{ name: 'Fictional Team', path: vault }], ingestion: { enabled: true, vault: 'Fictional Team', folder: 'Raw', time: pastMinute } }), path.join(appHome, 'config.json'));
-  const app = await startSetup({ env, home, os: 'linux', port: 0, useCli: false, ingestionTickMs: 20, ingestionRetryMs: 60 });
+  // Leave enough time for the fixture to recreate the source folder even on a slow full-suite
+  // run. A 60 ms retry could fire several times while this test process was under load.
+  const app = await startSetup({ env, home, os: 'linux', port: 0, useCli: false, ingestionTickMs: 20, ingestionRetryMs: 500 });
   const base = `http://127.0.0.1:${app.port}`;
   const getState = () => fetch(base + '/api/state', { headers: { 'X-BrainLink-Token': app.token } }).then((r) => r.json());
   try {
@@ -56,8 +58,9 @@ test('failed scheduled scan retries once the source folder returns, without logg
     assert.ok(state.ingestion.status.retry_after);
     await mkdir(path.join(vault, 'Raw'), { recursive: true });
     await writeFile(path.join(vault, 'Raw', 'Source.md'), '# Source\n\nPrivate body must not enter scan status.');
-    for (let i = 0; i < 100; i++) {
-      await delay(15);
+    const retryDeadline = Date.now() + 10_000;
+    while (Date.now() < retryDeadline) {
+      await delay(25);
       state = await getState();
       const cfg = JSON.parse(await readFile(path.join(appHome, 'config.json'), 'utf8'));
       if (state.ingestion.status?.ok && state.ingestion.status.trigger === 'schedule' && cfg.ingestion.retry_after === null) break;

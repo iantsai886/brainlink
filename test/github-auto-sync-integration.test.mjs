@@ -13,6 +13,15 @@ import { startSetup } from '../src/setup.mjs';
 const git = (cwd, ...args) => execFileSync('git', ['-C', cwd, ...args], { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'], windowsHide: true }).trim();
 const run = (cwd, ...args) => execFileSync('git', ['-C', cwd, ...args], { stdio: 'ignore', windowsHide: true });
 const canary = 'PRIVATE_REMOTE_CANARY_7912';
+async function removeTempTree(root) {
+  for (let attempt = 0; ; attempt++) {
+    try { await rm(root, { recursive: true, force: true }); return; }
+    catch (error) {
+      if (!['EBUSY', 'EPERM'].includes(error.code) || attempt >= 7) throw error;
+      await new Promise((resolve) => setTimeout(resolve, 50 * (attempt + 1)));
+    }
+  }
+}
 
 test('scheduled GitHub sync fetches, filters, imports and publishes through a local-only remote', async () => {
   const root = await mkdtemp(path.join(tmpdir(), 'brainlink-auto-gh-e2e-'));
@@ -72,7 +81,8 @@ test('scheduled GitHub sync fetches, filters, imports and publishes through a lo
     app = await startSetup({ env: { BRAINLINK_HOME: home, HOME: home, BRAINLINK_SEMANTIC: '0' }, home, os: 'linux', useCli: false, githubAutoTickMs: 15 });
 
     let receipt;
-    const deadline = Date.now() + 20_000;
+    // Git setup and scheduled sync can be slow under the serialized full suite on Windows.
+    const deadline = Date.now() + 60_000;
     while (Date.now() < deadline) {
       const response = await fetch(`http://127.0.0.1:${app.port}/api/state`, { headers: { 'X-BrainLink-Token': app.token } });
       const state = await response.json();
@@ -94,6 +104,6 @@ test('scheduled GitHub sync fetches, filters, imports and publishes through a lo
     await assert.rejects(readFile(path.join(vault, 'Outside', 'remote.md')), { code: 'ENOENT' }, 'remote notes outside the approved folder must not enter the vault');
   } finally {
     if (app) await new Promise((resolve) => app.server.close(resolve));
-    await rm(root, { recursive: true, force: true });
+    await removeTempTree(root);
   }
 });
