@@ -15,6 +15,8 @@ Every local AI client config BrainLink writes now gets restrictive permissions b
 
 Follow-up security check: the Windows ACL test now rejects any extra partial-access grant as well as extra full-control grants, and the error for a missing user SID names BrainLink's agent token instead of one specific AI client. The focused Windows connector checks passed 2/2; syntax and diff checks passed. The full-suite receipt above predates this test-only assertion and generic error wording change.
 
+The Windows Inno Setup installer also compiled from commit `32a9ba527a49f247a336cf0f5d9cbdbce63d56ee` with Inno Setup 6.7.3. Artifact: `dist/BrainLink-Setup-1.2.8.exe`, SHA-256 `889DF9A80012B15F6A0ABAE8364F38C718C16635205E705FE7C07D87714E512C`. This is an unsigned local compile receipt; installation, upgrade, uninstall, signature, and customer acceptance remain unverified.
+
 ### Reliable desktop Setup re-open
 
 The desktop launcher now saves the active Setup port in a small per-user runtime marker. Opening the desktop icon again checks that recorded port and reuses the existing Setup page, even if BrainLink had to choose a fallback port. The marker contains only port, process ID and app version; it is removed when that Setup server closes, and stale markers are cleared on the next launch. `node --import ./test/_preload.mjs --test --test-force-exit test/setup-instance.test.mjs` passed 1/1 on Windows. This covers local launcher reuse, not an installed-package shortcut or cross-user behavior.
