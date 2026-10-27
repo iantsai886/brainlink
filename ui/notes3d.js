@@ -228,21 +228,25 @@
       button.disabled = true;
       try {
         const offset = append ? (list._nextOffset || 0) : 0;
-        const result = await api('/api/graph3d/discover', { offset });
+        const result = await api('/api/graph3d/discover', { offset, scan_id: append ? list._scanId : undefined });
         const items = append ? [...(list._candidates || []), ...result.candidates] : result.candidates;
         list._candidates = items;
+        list._scanId = result.scan_id;
         list._nextOffset = result.next_offset;
         list._done = result.done;
         list.innerHTML = items.map((item, i) => `<article class="card notes3d-review-item">
           <b>${esc(item.title)}</b><span class="mono muted">${esc(item.vault)} · ${esc(item.path)}</span>
           <div>${esc(item.predicate)} → ${esc(item.target.title)}</div><small class="muted">${esc(item.evidence)} · ${esc(tr('notes3d.patternOnly'))}</small>
-          <div class="row"><button type="button" class="chip" data-discover-save="${i}">${esc(tr('notes3d.saveSuggestion'))}</button></div>
+          ${item.can_save ? `<div class="row"><button type="button" class="chip" data-discover-save="${i}">${esc(tr('notes3d.saveSuggestion'))}</button></div>` : `<small class="muted">${esc(tr('notes3d.discoverReadOnly'))}</small>`}
         </article>`).join('');
         status.textContent = result.done ? tr('notes3d.discoverDone', { count: items.length, scanned: result.next_offset, total: result.total_sources })
           : tr('notes3d.discoverProgress', { count: items.length, scanned: result.next_offset, total: result.total_sources });
         button.textContent = result.done ? tr('notes3d.discoverRun') : tr('notes3d.discoverMore');
       } catch (error) {
-        status.textContent = tr('notes3d.discoverFailed', { error: error.message });
+        if (/vault changed during this scan/i.test(error.message)) {
+          status.textContent = tr('notes3d.discoverChanged');
+          list._nextOffset = 0; list._done = true; list._candidates = []; list._scanId = null; list.innerHTML = ''; button.textContent = tr('notes3d.discoverRun');
+        } else status.textContent = tr('notes3d.discoverFailed', { error: error.message });
       } finally { button.disabled = false; }
     }
 

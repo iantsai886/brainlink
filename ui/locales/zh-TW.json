@@ -500,6 +500,8 @@
   "notes3d.discoverDone": "檢查 {scanned}/{total} 篇筆記，找到 {count} 個建議。",
   "notes3d.discoverProgress": "找到 {count} 個建議；已檢查 {scanned}/{total} 篇筆記。",
   "notes3d.discoverFailed": "無法掃描筆記：{error}",
+  "notes3d.discoverChanged": "掃描期間資料庫有變更。請重新開始，以使用最新筆記。",
+  "notes3d.discoverReadOnly": "此資料庫為唯讀，因此無法在此儲存建議。",
   "share.title": "與雲端代理人分享",
   "share.hint": "讓雲端 AI（例如只會讀取檔案的機器人）透過一個它已經能存取的資料夾，取得你筆記的唯讀副本。BrainLink 本身永遠不會自己連上網路。",
   "share.loading": "正在載入分享設定…",

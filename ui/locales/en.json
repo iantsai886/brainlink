@@ -500,6 +500,8 @@
   "notes3d.discoverDone": "Found {count} suggestions after checking {scanned} of {total} notes.",
   "notes3d.discoverProgress": "Found {count} suggestions; checked {scanned} of {total} notes.",
   "notes3d.discoverFailed": "Could not scan notes: {error}",
+  "notes3d.discoverChanged": "A vault changed during the scan. Start again to use the latest notes.",
+  "notes3d.discoverReadOnly": "This vault is read-only, so suggestions cannot be saved from here.",
   "share.title": "Share with cloud agents",
   "share.hint": "Give a cloud AI (for example a bot that only reads files) a read-only copy of your notes through a folder it can already reach. BrainLink never opens a network connection itself.",
   "share.loading": "Loading sharing settings…",

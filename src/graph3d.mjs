@@ -3,8 +3,9 @@
 // folders never reach the index at all (loadVault walks past .brainlinkignore, see src/core.mjs);
 // this module adds the one rule loadVault doesn't already enforce: private vaults and
 // frontmatter-flagged private notes are dropped before a single node is built.
+import { createHash } from 'node:crypto';
 import { loadVault, summarize } from './core.mjs';
-import { typedEntityMetadataMap, deriveProposedTypedRelations, deriveRejectedTypedRelations, discoverTypedRelationshipCandidates } from './typed-graph.mjs';
+import { typedEntityMetadataMap, deriveProposedTypedRelations, deriveRejectedTypedRelations, discoverTypedRelationshipCandidates, discoverTypedRelationshipCandidatesForSources } from './typed-graph.mjs';
 
 // n.private is already computed once, at index-build time, by core.mjs's isPrivateMeta — reusing
 // it here (rather than re-deriving private-ness from n.meta.private with a second, independent
@@ -89,7 +90,7 @@ export async function listProposedTypedRelations(ctx, { limit = 100, vault, offs
 
 // A bounded page of deterministic, same-scope graph candidates. Callers receive only public
 // vault indexes; candidates remain suggestions until explicitly saved and separately approved.
-export async function discoverVaultRelationshipCandidates(ctx, { vault, offset = 0, limit = 20 } = {}) {
+export async function discoverVaultRelationshipCandidates(ctx, { vault, offset = 0, limit = 20, scanId } = {}) {
   if (!Number.isSafeInteger(offset) || offset < 0 || offset > 100_000) throw new Error('Discovery offset is invalid.');
   const pageSize = Math.max(1, Math.min(50, Number.isSafeInteger(limit) ? limit : 20));
   const vaults = await visibleVaults(ctx, vault);
@@ -101,18 +102,29 @@ export async function discoverVaultRelationshipCandidates(ctx, { vault, offset =
       rows.push({ vault: name, path: note.rel, title: note.title, source, index });
     }
   }
+  const fingerprint = createHash('sha256');
+  for (const row of rows) fingerprint.update(`${row.vault}\0${row.path}\0${row.index.notes[row.source].mtime}\0${row.index.notes[row.source].raw.length}\n`);
+  const currentScanId = fingerprint.digest('hex');
+  if (offset > 0 && (typeof scanId !== 'string' || scanId !== currentScanId)) throw new Error('A vault changed during this scan. Start the scan again.');
   const page = rows.slice(offset, offset + pageSize);
   const candidates = [];
+  const byIndex = new Map();
   for (const row of page) {
-    for (const item of discoverTypedRelationshipCandidates(row.index.notes, row.source, { limit: 30 })) {
+    if (!byIndex.has(row.index)) byIndex.set(row.index, []);
+    byIndex.get(row.index).push(row);
+  }
+  for (const [index, sources] of byIndex) {
+    const detected = discoverTypedRelationshipCandidatesForSources(index.notes, sources.map((row) => row.source), { limit: 30 });
+    for (const row of sources) for (const item of detected.get(row.source) || []) {
       const target = row.index.notes[item.target_index];
       if (!target || isPrivateNote(target) || target.generated) continue;
       candidates.push({ vault: row.vault, path: row.path, title: row.title,
         target_id: item.target_id, predicate: item.predicate, evidence: item.evidence,
-        confidence: item.confidence, target: { title: target.title, path: target.rel } });
+        confidence: item.confidence, can_save: !ctx.readOnly && ctx.byName.get(row.vault)?.writes === 'on',
+        target: { title: target.title, path: target.rel } });
     }
   }
-  return { candidates, offset, next_offset: offset + page.length, done: offset + page.length >= rows.length,
+  return { candidates, scan_id: currentScanId, offset, next_offset: offset + page.length, done: offset + page.length >= rows.length,
     scanned: page.length, total_sources: rows.length };
 }
 

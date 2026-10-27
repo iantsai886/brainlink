@@ -136,14 +136,30 @@ export function deriveRejectedTypedRelations(notes) { return deriveTypedRelation
 // by the caller, requires a typed current source and a unique same-scope target, and stores one
 // short sentence as evidence. It never creates or verifies a relationship by itself.
 export function discoverTypedRelationshipCandidates(notes, sourceIndex, { limit = 12 } = {}) {
+  const entities = typedEntityMetadataMap(notes);
+  if (entities.size > 5000) return [];
+  const positions = new Map(notes.map((note, index) => [note, index]));
+  return discoverCandidatesWithIndex(notes, sourceIndex, entities, positions, limit);
+}
+
+// Same deterministic rules as the single-source helper, but builds the vault-wide entity and
+// position indexes once for a page of sources instead of once for every note in that page.
+export function discoverTypedRelationshipCandidatesForSources(notes, sourceIndices, { limit = 12 } = {}) {
+  const results = new Map();
+  const entities = typedEntityMetadataMap(notes);
+  if (entities.size > 5000) return results;
+  const positions = new Map(notes.map((note, index) => [note, index]));
+  for (const sourceIndex of sourceIndices) results.set(sourceIndex, discoverCandidatesWithIndex(notes, sourceIndex, entities, positions, limit));
+  return results;
+}
+
+function discoverCandidatesWithIndex(notes, sourceIndex, entities, positions, limit) {
   const sourceNote = notes[sourceIndex];
   if (!sourceNote || sourceNote.private || sourceNote.generated) return [];
   const sourceMeta = parseRecord(sourceNote.raw).meta;
   if (!ENTITY_TYPES.has(sourceMeta.type) || !ID.test(sourceMeta.id || '') || !SCOPES.has(sourceMeta.scope) || sourceMeta.status !== 'current') return [];
-  const entities = typedEntityMetadataMap(notes);
   const body = String(sourceNote.body || '');
   if (entities.size > 5000 || body.length > 200_000) return [];
-  const positions = new Map(notes.map((note, index) => [note, index]));
   if (!entities.has(sourceNote)) return [];
   const existing = new Set(parseRecord(sourceNote.raw).relations.map((r) => `${r.predicate}\0${r.target}`));
   const paragraphs = body.split(/\r?\n/).flatMap((line) => line.split(/(?<=[.!?])\s+/u));

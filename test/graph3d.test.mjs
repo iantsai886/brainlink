@@ -183,10 +183,18 @@ test('vault graph discovery is paged, scope-safe, excludes private records, and 
     assert.equal(first.done, false);
     assert.ok(first.candidates.some((c) => c.path === 'A Product Team.md' && c.target_id === 'team.data'), JSON.stringify(first));
     assert.doesNotMatch(JSON.stringify(first), /PRIVATE_CANARY|workflow\.client|team\.client|Client Team/);
-    const second = await api('/api/graph3d/discover', { offset: first.next_offset });
+    assert.equal(first.candidates.find((c) => c.path === 'A Product Team.md').can_save, true);
+    env.BRAINLINK_READ_ONLY = '1';
+    const readOnly = await api('/api/graph3d/discover', { offset: 0 });
+    assert.equal(readOnly.candidates.find((c) => c.path === 'A Product Team.md').can_save, false);
+    delete env.BRAINLINK_READ_ONLY;
+    const second = await api('/api/graph3d/discover', { offset: first.next_offset, scan_id: first.scan_id });
     assert.equal(second.done, true);
     assert.ok(second.next_offset > first.next_offset);
     assert.equal(first.total_sources, second.total_sources);
+    await writeFile(path.join(vaultPath, 'Added while scanning.md'), '# New note\n');
+    const stalePage = await api('/api/graph3d/discover', { offset: second.next_offset, scan_id: first.scan_id });
+    assert.match(stalePage.error, /vault changed during this scan/i);
     const badOffset = await api('/api/graph3d/discover', { offset: -1 });
     assert.match(badOffset.error, /offset is invalid/i);
     const candidate = first.candidates.find((c) => c.path === 'A Product Team.md');
@@ -455,7 +463,7 @@ test('3D graph has a searchable, keyboard-accessible note list in every supporte
   assert.match(src, /api\('\/api\/graph3d\/discover'/, 'vault-wide discovery must call its authenticated local API');
   assert.match(src, /data-discover-save/, 'each discovered link must be saved through the review flow');
   assert.match(css, /\.notes3d-node:focus-visible/);
-  const keys = ['notes3d.browseNotes', 'notes3d.browseSearch', 'notes3d.browsePlaceholder', 'notes3d.browseEmpty', 'notes3d.browseCount', 'notes3d.browseMore', 'notes3d.discoverVault', 'notes3d.discoverHint', 'notes3d.discoverRun', 'notes3d.discoverMore', 'notes3d.discoverDone', 'notes3d.discoverProgress', 'notes3d.discoverFailed'];
+  const keys = ['notes3d.browseNotes', 'notes3d.browseSearch', 'notes3d.browsePlaceholder', 'notes3d.browseEmpty', 'notes3d.browseCount', 'notes3d.browseMore', 'notes3d.discoverVault', 'notes3d.discoverHint', 'notes3d.discoverRun', 'notes3d.discoverMore', 'notes3d.discoverDone', 'notes3d.discoverProgress', 'notes3d.discoverFailed', 'notes3d.discoverChanged', 'notes3d.discoverReadOnly'];
   for (const locale of ['en', 'zh-TW', 'pt']) {
     const catalog = JSON.parse(await readFile(new URL(`../ui/locales/${locale}.json`, import.meta.url), 'utf8'));
     for (const key of keys) assert.ok(catalog[key], `${locale} ${key}`);

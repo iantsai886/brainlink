@@ -6,7 +6,7 @@ import path from 'node:path';
 import { normalize } from '../src/config.mjs';
 import { createContext, loadVault } from '../src/core.mjs';
 import { buildGraph3D, noteDetail3D } from '../src/graph3d.mjs';
-import { deriveTypedRelations, deriveRejectedTypedRelations, discoverTypedRelationshipCandidates, appendTypedRelationProposal, approveTypedRelation, rejectTypedRelation, reopenTypedRelation } from '../src/typed-graph.mjs';
+import { deriveTypedRelations, deriveRejectedTypedRelations, discoverTypedRelationshipCandidates, discoverTypedRelationshipCandidatesForSources, appendTypedRelationProposal, approveTypedRelation, rejectTypedRelation, reopenTypedRelation } from '../src/typed-graph.mjs';
 import { proposeNote } from '../src/writes.mjs';
 import { createMcp } from '../src/server.mjs';
 
@@ -130,6 +130,7 @@ test('deterministic relationship discovery proposes only explicit same-scope tex
   ];
   const candidates = discoverTypedRelationshipCandidates(notes, 0);
   assert.deepEqual(candidates.map(({ predicate, target_id, evidence }) => [predicate, target_id, evidence]), [['consumes', 'dataset.questions', 'Consumes [[Question data]] every morning.']]);
+  assert.deepEqual(discoverTypedRelationshipCandidatesForSources(notes, [0]).get(0), candidates, 'batch discovery must preserve single-source results');
 });
 
 test('workflow graph suggests explicit team communication links without auto-verifying them', () => {

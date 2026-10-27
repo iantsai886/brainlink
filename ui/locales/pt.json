@@ -500,6 +500,8 @@
   "notes3d.discoverDone": "Encontradas {count} sugestões após verificar {scanned} de {total} notas.",
   "notes3d.discoverProgress": "Encontradas {count} sugestões; {scanned} de {total} notas verificadas.",
   "notes3d.discoverFailed": "Não foi possível verificar as notas: {error}",
+  "notes3d.discoverChanged": "Um vault mudou durante a verificação. Comece novamente para usar as notas atuais.",
+  "notes3d.discoverReadOnly": "Este vault é somente leitura; não é possível salvar sugestões nele.",
   "share.title": "Compartilhar com agentes na nuvem",
   "share.hint": "Dê a uma IA na nuvem (por exemplo, um bot que só lê arquivos) uma cópia somente leitura das suas notas, por meio de uma pasta que ela já consegue alcançar. O BrainLink nunca abre uma conexão de rede por conta própria.",
   "share.loading": "Carregando as configurações de compartilhamento…",
