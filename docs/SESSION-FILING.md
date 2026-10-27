@@ -53,4 +53,4 @@ Validation: `test/session-hooks.test.mjs` checks merge/disable preservation, bac
 
 Official references checked 2026-10-24: [Claude Code hooks reference](https://code.claude.com/docs/en/hooks#sessionend) and [Codex hooks documentation](https://learn.chatgpt.com/docs/hooks).
 
-Remaining for the complete product: AI-assisted summary with review, stronger automatic destination recommendations, live hook and cross-client handoff verification, token/time measurement, and privacy evaluation across personal/company/client fixtures. A lifecycle cue or AI-reported summary alone is not a verified experience or long-term rule.
+Remaining for the complete product: BrainLink still does not generate a summary from an imported transcript itself. Connected AI clients must report the summary, while the local fallback selects a bounded excerpt and marks it unverified. Live hook lifecycle and Claude-to-Codex handoff acceptance, provider-measured token/time savings, and full Personal/Organisation/Client privacy acceptance also remain open. A lifecycle cue or AI-reported summary alone is not a verified experience or long-term rule.
