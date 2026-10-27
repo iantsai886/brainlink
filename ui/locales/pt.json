@@ -685,7 +685,7 @@
   "twinProfiles.operation.search": "Pesquisar notas",
   "twinProfiles.operation.read_note": "Abrir notas",
   "twinProfiles.operation.read_session": "Ler sessões autorizadas",
-  "twinProfiles.operation.propose_note": "Propor notas privadas",
+  "twinProfiles.operation.propose_note": "Propor novas notas",
   "twinProfiles.operation.handoff_read": "Ler as passagens deste Twin",
   "twinProfiles.operation.write_handoff": "Enviar passagens deste Twin",
   "twinProfiles.confirmCreate": "Criar {name} para estes cofres: {vaults}. Atribuir estes agentes de IA: {agents}. Tipos de memória ativos: {memory}. Os agentes escolhidos receberão somente o acesso marcado. Continuar?",

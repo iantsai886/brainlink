@@ -685,7 +685,7 @@
   "twinProfiles.operation.search": "搜尋筆記",
   "twinProfiles.operation.read_note": "開啟筆記",
   "twinProfiles.operation.read_session": "讀取已授權的工作階段",
-  "twinProfiles.operation.propose_note": "提議新增私人筆記",
+  "twinProfiles.operation.propose_note": "提議新增筆記",
   "twinProfiles.operation.handoff_read": "讀取此 Twin 的交接內容",
   "twinProfiles.operation.write_handoff": "以此 Twin 傳送交接內容",
   "twinProfiles.confirmCreate": "要為以下 Vault 建立 {name}：{vaults}，並指派這些 AI Agent：{agents} 嗎？啟用的記憶類型：{memory}。所選 Agent 只會取得勾選的權限。要繼續嗎？",

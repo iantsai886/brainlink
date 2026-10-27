@@ -106,13 +106,14 @@ test('Twin setup creates profiles from local UI choices and escapes every profil
 
 test('Twin permission controls disable and clear actions when their memory type is off', async () => {
   const html = await readFile(new URL('../ui/index.html', import.meta.url), 'utf8');
-  const start = html.indexOf('function updateTwinPermissionControls() {');
+  const start = html.indexOf('function twinActionMemoryAllowed(action, policy) {');
   const end = html.indexOf("$('twin-new-memory').addEventListener", start);
   assert.ok(start >= 0 && end > start, 'permission helper is connected to memory changes');
   const memories = ['semantic', 'episodic', 'working', 'procedural'].map((key) => ({ dataset: { twinMemory: key }, checked: key === 'episodic' || key === 'procedural' }));
   const operations = ['search', 'read_note', 'read_session', 'propose_note', 'handoff_read', 'write_handoff'].map((value) => ({ value, checked: true, disabled: false }));
   const document = { querySelectorAll: (selector) => selector === '[data-twin-memory]' ? memories : operations };
-  const update = new Function('document', `${html.slice(start, end)}; return updateTwinPermissionControls;`)(document);
+  const helpers = new Function('document', `${html.slice(start, end)}; return { updateTwinPermissionControls, twinActionMemoryAllowed };`)(document);
+  const update = helpers.updateTwinPermissionControls;
   update();
   assert.deepEqual(operations.map(({ disabled, checked }) => ({ disabled, checked })), [
     { disabled: true, checked: false }, { disabled: true, checked: false },
@@ -123,6 +124,11 @@ test('Twin permission controls disable and clear actions when their memory type 
   memories.find((item) => item.dataset.twinMemory === 'working').checked = true;
   update();
   assert.deepEqual(operations.map(({ disabled }) => disabled), [false, false, false, false, false, false]);
+  memories.find((item) => item.dataset.twinMemory === 'episodic').checked = false;
+  update();
+  assert.deepEqual(operations.map(({ disabled }) => disabled), [false, false, true, false, false, false], 'semantic note proposals remain available when episodic memory is off');
+  assert.equal(helpers.twinActionMemoryAllowed('propose_note', { semantic: true, episodic: false }), true);
+  assert.equal(helpers.twinActionMemoryAllowed('propose_note', { semantic: false, episodic: true }), false);
 });
 
 test('profile-scoped agents see only granted vaults and only supported read tools', async () => {

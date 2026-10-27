@@ -1557,13 +1557,13 @@ function renderPresetConnectOptions() {
   const profile = S?.twin_profiles?.profiles?.find((item) => item.id === $('preset-profile').value);
   if (!profile) { $('preset-vault-list').innerHTML = `<p class="muted">${esc(t('connect.noProfile'))}</p>`; $('preset-connect-submit').disabled = true; return; }
   const vaults = (profile.vaults || []).filter((grant) => S.vaults.some((vault) => vault.name === grant.name && vault.exists && !vault.private));
-  const labels = [['search','search','semantic'],['read_note','readNote','semantic'],['read_session','readSession','episodic'],['propose_note','sessionClose','episodic'],['handoff_read','readHandoffs','working'],['write_handoff','sendHandoffs','working']];
+  const labels = [['search','connect.search','semantic'],['read_note','connect.readNote','semantic'],['read_session','connect.readSession','episodic'],['propose_note','twinProfiles.operation.propose_note','semantic'],['handoff_read','connect.readHandoffs','working'],['write_handoff','connect.sendHandoffs','working']];
   $('preset-vault-list').innerHTML = vaults.length ? vaults.map((grant, index) => {
     const available = labels.filter(([action]) => !['handoff_read','write_handoff'].includes(action) || S.handoff?.vault === grant.name);
     return `<div class="card"><b>${esc(grant.name)}</b><div class="row" style="margin-top:7px">${available.map(([action,key,memory]) => {
       const needsPropose = ['propose_note','write_handoff'].includes(action);
-      const allowed = profile.memory_policy?.[memory] === true && (action !== 'propose_note' || profile.memory_policy?.semantic === true) && (!needsPropose || grant.access === 'propose');
-      return `<label class="muted" style="display:flex;flex-direction:row;align-items:center;gap:5px"><input type="checkbox" data-preset-vault="${esc(grant.name)}" value="${action}" ${index === 0 && ['search','read_note'].includes(action) ? 'checked' : ''} ${allowed ? '' : 'disabled'} style="width:auto">${esc(t('connect.' + key))}</label>`;
+      const allowed = twinActionMemoryAllowed(action, profile.memory_policy) && (!needsPropose || grant.access === 'propose');
+      return `<label class="muted" style="display:flex;flex-direction:row;align-items:center;gap:5px"><input type="checkbox" data-preset-vault="${esc(grant.name)}" value="${action}" ${index === 0 && ['search','read_note'].includes(action) ? 'checked' : ''} ${allowed ? '' : 'disabled'} style="width:auto">${esc(t(key))}</label>`;
     }).join('')}</div></div>`;
   }).join('') : `<p class="muted">${esc(t('connect.noVault'))}</p>`;
   $('preset-connect-summary').textContent = t('connect.permissionSummary');
@@ -1858,12 +1858,14 @@ document.addEventListener('click', async (event) => {
   }
 });
 $('twin-edit-cancel').onclick = async () => { editingTwinId = null; await load(); };
+function twinActionMemoryAllowed(action, policy) {
+  const required = { search: 'semantic', read_note: 'semantic', read_session: 'episodic', propose_note: 'semantic', handoff_read: 'working', write_handoff: 'working' };
+  return policy?.[required[action]] === true;
+}
 function updateTwinPermissionControls() {
   const enabled = Object.fromEntries([...document.querySelectorAll('[data-twin-memory]')].map((input) => [input.dataset.twinMemory, input.checked]));
-  const required = { search: 'semantic', read_note: 'semantic', read_session: 'episodic', propose_note: 'episodic', handoff_read: 'working', write_handoff: 'working' };
   document.querySelectorAll('[data-twin-operation]').forEach((input) => {
-    const allowed = enabled[required[input.value]] === true
-      && (input.value !== 'propose_note' || enabled.semantic === true);
+    const allowed = twinActionMemoryAllowed(input.value, enabled);
     input.disabled = !allowed;
     if (!allowed) input.checked = false;
   });

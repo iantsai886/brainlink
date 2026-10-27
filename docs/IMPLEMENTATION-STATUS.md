@@ -550,3 +550,7 @@ Added the `organize-sources` MCP prompt for clients that support prompts. It acc
 ### Twin proposal-permission guidance (2026-10-27)
 
 The `brainlink_guide` response now reports per-vault `note_proposals_available` and `proposal_vaults` separately from `writes_available`, which continues to mean general memory writes. It tells agents that `propose_note` requires a matching explicit grant and separate user approval. The `organize-sources` prompt is also hidden if its required procedural-memory guide is disabled. The affected MCP and Twin permission tests pass 3/3; `git diff --check` passes. The full 98-test two-file run passed immediately before this guide-only clarification; this newest change has focused-test coverage, not a new full-run result. Live client discovery and cross-client acceptance remain unverified.
+
+### Twin setup memory-action mapping (2026-10-27)
+
+Corrected the profile and built-in-app setup screens: `propose_note` now follows semantic memory, while session reads remain episodic. Previously, disabling episodic memory could incorrectly disable note proposals. The UI label is now “Propose new notes,” distinct from private session closeout. The Twin profile suite passed 21/21 and the UI suite passed 29/29; all shipped locale JSON files passed through the UI test suite. This confirms local UI behavior and fixtures, not live client pickup or end-to-end cross-AI use.

@@ -685,7 +685,7 @@
   "twinProfiles.operation.search": "Search notes",
   "twinProfiles.operation.read_note": "Open notes",
   "twinProfiles.operation.read_session": "Read approved sessions",
-  "twinProfiles.operation.propose_note": "Propose private notes",
+  "twinProfiles.operation.propose_note": "Propose new notes",
   "twinProfiles.operation.handoff_read": "Read this Twin's handoffs",
   "twinProfiles.operation.write_handoff": "Send handoffs from this Twin",
   "twinProfiles.confirmCreate": "Create {name} for these vaults: {vaults}. Assign these AI agents: {agents}. Enabled memory types: {memory}. Selected agents will receive only the checked access. Continue?",

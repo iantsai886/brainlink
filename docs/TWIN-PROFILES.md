@@ -4,6 +4,8 @@ Status: validated profile declarations and runtime scoping for explicitly assign
 
 The `brainlink_guide` response separates `writes_available` (general memory writes remain blocked) from `note_proposals_available` and `proposal_vaults` (per-vault `propose_note` grants). A proposal is still only a preview until the user separately approves saving it. The Raw-to-Wiki MCP prompt is exposed only when its guide, read, search, proposal, and filing-receipt tools are all granted and the related memory types are enabled.
 
+In Setup and the built-in AI connection dialog, `propose_note` is a semantic-memory action; `read_session` and private session closeout are episodic. Turning episodic memory off therefore does not hide an explicitly granted semantic note proposal. The UI says “Propose new notes” so this action is not confused with the separate private-session-closeout flow.
+
 ### Creating a profile in Setup
 
 The Twin section in local Setup lets a user choose a name, type, owner, available non-private vaults, maximum vault access, named AI agents, each agent's allowed operations, and the four memory switches. The app asks for confirmation before saving. The authenticated `POST /api/twins/create` endpoint rechecks every choice, rejects private or unavailable vaults and unsupported operations, validates the resulting full configuration, and returns only the public profile view. New profiles default to private-by-default sources, required provenance, and metadata-only session capture. Creating a profile does not connect an AI agent, assign a GitHub repository, grant access to private vaults, or prove isolation for clients outside the named-agent token path. The owner label defaults to the profile name if left blank.
