@@ -4,7 +4,11 @@ Status snapshot: 2026-10-28 (Asia/Taipei).
 GitHub repository: `iantsai886/brainlink`
 Branch: `integration/brainlink-retrieval-evaluation` (integrates profile-scoped GitHub, RSI discovery, and independent retrieval evaluation)
 Code baseline: development target `1.2.8`, with `package.json` as the canonical version source. The `v1.2.7` tag belongs to the separate `wip/v1.2.7` release line; this branch continues from the full-source `main` history and does not move or recreate that tag.
-Latest full-suite verification: source commit `35d15fde12b9000fd0a8d010ed2e68887d9f67db`. On Windows with Node.js 24.22.1, `npm run test:all` passed: core 483 total (477 passed, 0 failed, 6 platform/privilege skips); UI 29/29. The six core skips require Linux behavior or Windows symlink privileges unavailable in this run. This is local automated evidence, not hosted CI. GitHub hosted Actions are blocked by the repository runner billing/spending limit. Live Claude-to-Codex handoff, live Ollama inference, installed-user acceptance, signing, and customer release readiness remain unverified. No signed public release is claimed.
+Latest full-suite verification: source commit `075d60de5b00d36fb30992de7eedfd7f483bb7ce`. On Windows with Node.js 24.22.1, `npm run test:all` passed: core 483 total (477 passed, 0 failed, 6 platform/privilege skips); UI 29/29. The six core skips require Linux behavior or Windows symlink privileges unavailable in this run. This is local automated evidence, not hosted CI. GitHub hosted Actions are blocked by the repository runner billing/spending limit. Live Claude-to-Codex handoff, live Ollama inference, installed-user acceptance, signing, and customer release readiness remain unverified. No signed public release is claimed.
+
+### Full regression verification after visible RSI topic evidence (2026-10-28)
+
+On Windows with Node.js 24.22.1, `npm run test:all` passed on the code now committed at `075d60de5b00d36fb30992de7eedfd7f483bb7ce`: core 483 total (477 passed, 0 failed, 6 platform/privilege skips) and UI 29/29. Focused discovery, ledger, evaluator, locale and UI checks passed 53/53 before this run. This remains local automated evidence; hosted CI and real client/runtime acceptance remain unverified.
 
 ### Full regression verification after RSI topic gate (2026-10-28)
 
@@ -16,7 +20,7 @@ On Windows with Node.js 24.22.1, `npm run test:all` passed from clean source com
 
 ### Windows installer rebuilt from verified integration source (2026-10-28)
 
-Built `dist/BrainLink-Setup-1.2.8.exe` from source commit `35d15fd` with Inno Setup 6.7.3. SHA-256: `E96AF6ABD775BCA43B377481B338E3A0411976E832FBECB7F352DB8103775214`. The staged bundled runtime reports version 1.2.8; staged English locale matches source; development UI tests are absent; the session-closeout and graph-curation Skills are present. This verifies packaging and staged contents only. The installer was not installed in a user profile, and desktop startup, signature, live AI-client use and customer acceptance remain unverified.
+Built `dist/BrainLink-Setup-1.2.8.exe` from source commit `075d60d` with Inno Setup 6.7.3. SHA-256: `528DC9C56150D8A5EE22872B5EE67FCB325CD9AEFC7513FCFA0F7B247F5D5AA1`. The staged bundled runtime reports version 1.2.8; staged `ui/index.html` matches source; development UI tests are absent; the session-closeout and graph-curation Skills are present. This verifies packaging and staged contents only. The installer was not installed in a user profile, and desktop startup, signature, live AI-client use and customer acceptance remain unverified.
 
 ### Full regression verification after RSI discovery evaluator (2026-10-28)
 
@@ -720,3 +724,7 @@ Added a deterministic offline baseline for RSI research relevance. The historica
 ### RSI discovery now checks the configured topic too (2026-10-28)
 
 Research candidates must now match both the user's problem signal and the topic used for the public-source search, in addition to a BrainLink workflow term. The rule is recorded as `lexical-topic-gate-v2`; Chinese topic terms use the existing overlapping-bigram matcher. An offline fixture covers 28 benign fictional examples and two hostile examples. Current score: 12 true positives, 0 false positives, 0 false negatives and 16 true negatives; both hostile items are blocked. Fixture SHA-256: `c443ba9359b4c10c9a298b4966c5c7ace92a67b552ccf23171aad48a44bacdb0`. The three known false positives informed the new topic labels, so this is a development regression check, not an independent or held-out result. Focused discovery, evaluator and ledger tests passed 40/40 on Windows with Node.js 24.22.1; `npm run evaluate:rsi-discovery` and `git diff --check` passed. Full-suite verification and a separate unseen set remain pending; this does not prove broad research relevance or autonomous self-improvement.
+
+### Show RSI topic-match evidence in proposals (2026-10-28)
+
+New discoveries retain the exact topic terms that passed the lexical gate. Setup now displays those terms next to the problem and workflow evidence. The field is optional when reading older proposals, preserving their existing ledger records. Focused discovery, ledger, evaluator, locale and UI checks passed 53/53; the full suite passed with 477 core passes, 6 platform skips and 29/29 UI tests. No real AI-client call is claimed.
