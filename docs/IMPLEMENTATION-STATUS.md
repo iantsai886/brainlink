@@ -4,7 +4,11 @@ Status snapshot: 2026-10-28 (Asia/Taipei).
 GitHub repository: `iantsai886/brainlink`
 Branch: `integration/brainlink-retrieval-evaluation` (integrates profile-scoped GitHub, RSI discovery, and independent retrieval evaluation)
 Code baseline: development target `1.2.8`, with `package.json` as the canonical version source. The `v1.2.7` tag belongs to the separate `wip/v1.2.7` release line; this branch continues from the full-source `main` history and does not move or recreate that tag.
-Latest full-suite verification: source commit `fe60d80`, recorded on the current branch at `0ce31f5`. On Windows with Node.js 24.22.1, `npm run test:all` passed: core 477 total (471 passed, 0 failed, 6 Windows platform/privilege skips); UI 29/29. The six skips require Linux behavior or Windows symlink privileges unavailable in this run. This is local automated evidence, not hosted CI. GitHub hosted Actions are blocked by the repository runner billing/spending limit. Codex CLI is signed in; Claude Code 2.1.310 is installed but signed out, so model-driven Claude-to-Codex handoff remains unverified. Installed-user acceptance, signing, and customer release readiness are also unverified. No signed public release is claimed.
+Latest full-suite verification: source commit `bac3d9b`. On Windows with Node.js 24.22.1, `npm run test:all` passed: core 480 total (474 passed, 0 failed, 6 platform/privilege skips); UI 29/29. The six core skips require Linux behavior or Windows symlink privileges unavailable in this run. This is local automated evidence, not hosted CI. GitHub hosted Actions are blocked by the repository runner billing/spending limit. Live Claude-to-Codex handoff, installed-user acceptance, signing, and customer release readiness remain unverified. No signed public release is claimed.
+
+### Full regression verification after RSI discovery evaluator (2026-10-28)
+
+On Windows with Node.js 24.22.1, ran `npm run test:all` from clean source commit `bac3d9b682505596632012ac9b94d2c86ba9f6b0`. Core: 480 total, 474 passed, 0 failed, 6 platform/privilege skips. UI: 29/29. The run includes the fixed RSI discovery-quality benchmark, scheduled scan controls, backup/restore, private-data gates, profile separation, graph, session filing, connectors, and GitHub sync. This verifies local automated behavior for this commit. It does not prove live cross-client handoff, hosted CI, release signing, or customer acceptance.
 
 ### Versioned RSI discovery-method provenance (2026-10-28)
 
