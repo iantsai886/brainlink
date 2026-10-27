@@ -593,3 +593,7 @@ On Windows with Node.js 24.22.1, `node --import ./test/_preload.mjs --test --tes
 ### Full regression run on current source (2026-10-27)
 
 On Windows with Node.js 24.22.1, `npm run test:all` on source commit `7614584ea99e9c8f38a88c9207f4f7cba213e1e1` passed: core 459 tests (453 passed, 0 failed, 6 platform/privilege skips) and UI 29/29. The six skips require Linux behavior or Windows symlink privileges. Coverage includes backup/restore, private retrieval, four Twin memory permissions, handoffs and closeout, typed graph review, scheduled scanning, RSI evidence gates, Skills, packaged runtime, and local Git sync. This is full local automated coverage, not live cross-client acceptance, second-device restore, hosted CI, or release readiness.
+
+### Rebuilt Windows installer from current branch (2026-10-27)
+
+Rebuilt `dist/BrainLink-Setup-1.2.8.exe` from source commit `923d58594b90d1a4d64bada05aaf8ae457c040ca` with Inno Setup 6.7.3. Build succeeded; SHA-256 `F96C51FE968A499EA900F722F361E1C9C73FFD17F07E326A8D35E45925722074`. The staged bundled runtime reports 1.2.8, the session-closeout, graph-curation and cross-AI-handoff Skills are present, and `src/connectors.mjs` imports successfully using the bundled Node runtime. The installer was not run; installed shortcuts, PATH, upgrades and uninstall are not verified on this user account.
