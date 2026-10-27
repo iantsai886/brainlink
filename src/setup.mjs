@@ -222,6 +222,7 @@ export async function startSetup(opts = {}) {
   let backupEnabled = false;
   let ingestionKeepsAlive = false;
   let briefKeepsAlive = false;
+  let localSummaryAutoDraftKeepsAlive = false;
   let syncKeepsAlive = false;
   let githubAutoKeepsAlive = false;
   const quit = () => {
@@ -231,10 +232,47 @@ export async function startSetup(opts = {}) {
   const touch = () => {
     clearTimeout(idleTimer);
     clearTimeout(idleQuitTimer);
-    if (!opts.idleMinutes || backupEnabled || discoveryKeepsAlive || observationKeepsAlive || ingestionKeepsAlive || briefKeepsAlive || syncKeepsAlive || githubAutoKeepsAlive) return;
+    if (!opts.idleMinutes || backupEnabled || discoveryKeepsAlive || observationKeepsAlive || ingestionKeepsAlive || briefKeepsAlive || localSummaryAutoDraftKeepsAlive || syncKeepsAlive || githubAutoKeepsAlive) return;
     idleTimer = setTimeout(quit, opts.idleMinutes * 60e3);
     idleTimer.unref?.();
   };
+  let localSummaryAutoDraftRunning = false;
+  const localSummaryAutoDraftAttempts = new Map();
+  const localSummaryAutoDraftStatus = new Map();
+  const localSummaryAutoDraftTimer = setInterval(async () => {
+    if (localSummaryAutoDraftRunning) return;
+    localSummaryAutoDraftRunning = true;
+    try {
+      const cfg = await loadConfig(file);
+      const settings = cfg.sessions.localSummary;
+      localSummaryAutoDraftKeepsAlive = Boolean(settings.enabled && settings.autoDraftOnEnd);
+      if (!localSummaryAutoDraftKeepsAlive) return;
+      touch();
+      await sessions.refresh();
+      const store = await sessions.store();
+      const imported = await store.listSessions({ limit: 100000 });
+      const cues = await listSessionEndCues(path.join(appHome(env), 'sessions', 'end-cues'));
+      for (const cue of cues) {
+        const id = matchSessionEndCue(cue, imported);
+        if (!id || await readLocalSummaryDraft(path.join(appHome(env), 'sessions', 'auto-summary'), id)) continue;
+        const lastAttempt = localSummaryAutoDraftAttempts.get(id) || 0;
+        if (Date.now() - lastAttempt < 10 * 60_000) continue;
+        localSummaryAutoDraftAttempts.set(id, Date.now());
+        try {
+          const { messages } = await store.readSession(id, { limit: 1000 });
+          const draft = await generateLocalSessionSummary(messages, settings.model, { fetchImpl: opts.localSummaryFetch || fetch });
+          await saveLocalSummaryDraft(path.join(appHome(env), 'sessions', 'auto-summary'), id, draft);
+          localSummaryAutoDraftStatus.set(id, 'ready');
+          localSummaryAutoDraftAttempts.delete(id);
+        } catch {
+          localSummaryAutoDraftStatus.set(id, 'failed');
+        }
+        break; // One local-model task per tick; never turn one cue into repeated generation.
+      }
+    } catch { /* Keep the cue available for manual review; never write a note on failure. */ }
+    finally { localSummaryAutoDraftRunning = false; }
+  }, opts.localSummaryAutoDraftTickMs ?? 60_000);
+  localSummaryAutoDraftTimer.unref?.();
 
   // Shared snapshot (Ian's RB8): runs for as long as this Setup process is open. Restarted
   // whenever the setting changes so a just-picked folder, or turning it off, takes effect at once.
@@ -1560,8 +1598,12 @@ export async function startSetup(opts = {}) {
       await sessions.refresh();
       const store = await sessions.store();
       const imported = await store.listSessions({ limit: 100000 });
-      return { cues: cues.map((cue) => ({ id: sessionEndCueId(cue), client: cue.client, ended_at: cue.ended_at,
-        session_ref: matchSessionEndCue(cue, imported) })) };
+      return { cues: await Promise.all(cues.map(async (cue) => {
+        const id = matchSessionEndCue(cue, imported);
+        const summary_ready = Boolean(id && await readLocalSummaryDraft(path.join(appHome(env), 'sessions', 'auto-summary'), id));
+        return { id: sessionEndCueId(cue), client: cue.client, ended_at: cue.ended_at, session_ref: id,
+          summary_ready, summary_failed: id ? localSummaryAutoDraftStatus.get(id) === 'failed' : false };
+      })) };
     },
     'POST /api/sessions/end-cues/dismiss': (b) => dismissSessionEndCue(path.join(appHome(env), 'sessions', 'end-cues'), b.id),
     'POST /api/sessions': async (b) => {
@@ -1662,15 +1704,20 @@ export async function startSetup(opts = {}) {
       const cfg = await loadConfig(file);
       const enabled = typeof b.enabled === 'boolean' ? b.enabled : cfg.sessions.localSummary.enabled;
       const model = typeof b.model === 'string' ? b.model.trim() : cfg.sessions.localSummary.model;
+      const autoDraftOnEnd = enabled && typeof b.autoDraftOnEnd === 'boolean' ? b.autoDraftOnEnd : enabled ? cfg.sessions.localSummary.autoDraftOnEnd : false;
       if (enabled && (!validLocalModelName(model) || !model)) throw new Error('Enter a valid local Ollama model name before enabling summaries.');
-      const next = { ...cfg, sessions: { ...cfg.sessions, localSummary: { enabled, model } } };
+      const next = { ...cfg, sessions: { ...cfg.sessions, localSummary: { enabled, model, autoDraftOnEnd } } };
       await saveConfig(next, file);
+      localSummaryAutoDraftKeepsAlive = Boolean(enabled && autoDraftOnEnd);
+      touch();
       return { ok: true, settings: next.sessions.localSummary };
     },
     'POST /api/sessions/local-summary/generate': async (b) => {
       const cfg = await loadConfig(file);
       if (!cfg.sessions.localSummary.enabled) throw new Error('Turn on local summaries in Sessions settings first.');
       const id = String(b.id || '');
+      const existing = await readLocalSummaryDraft(path.join(appHome(env), 'sessions', 'auto-summary'), id);
+      if (existing) return { ok: true, draft: { summary: existing.summary, model: existing.model, generated_at: existing.generated_at, source: existing.source } };
       const store = await sessions.store();
       const { session, messages } = await store.readSession(id, { limit: 1000 });
       const generated = await generateLocalSessionSummary(messages, cfg.sessions.localSummary.model, { fetchImpl: opts.localSummaryFetch || fetch });
@@ -1914,9 +1961,11 @@ export async function startSetup(opts = {}) {
     }
     try { json(res, 200, await route(body)); } catch (e) { json(res, 400, { error: String(e.message || e) }); }
   });
-  server.once('close', () => { snapshotWatcher?.stop(); vaultWatcher?.stop(); for (const client of eventClients) client.end(); eventClients.clear(); clearInterval(discoveryTimer); clearInterval(observationTimer); clearInterval(ingestionTimer); clearInterval(githubAutoTimer); if (backupTimer) { clearTimeout(backupTimer); clearInterval(backupTimer); } if (syncTimer) { clearTimeout(syncTimer); clearInterval(syncTimer); } });
+  server.once('close', () => { snapshotWatcher?.stop(); vaultWatcher?.stop(); for (const client of eventClients) client.end(); eventClients.clear(); clearInterval(discoveryTimer); clearInterval(observationTimer); clearInterval(ingestionTimer); clearInterval(githubAutoTimer); clearInterval(localSummaryAutoDraftTimer); if (backupTimer) { clearTimeout(backupTimer); clearInterval(backupTimer); } if (syncTimer) { clearTimeout(syncTimer); clearInterval(syncTimer); } });
   await new Promise((resolve, reject) => { server.once('error', reject); server.listen(port, '127.0.0.1', resolve); });
   port = server.address().port;
+  const startupConfig = await loadConfig(file);
+  localSummaryAutoDraftKeepsAlive = Boolean(startupConfig.sessions.localSummary.enabled && startupConfig.sessions.localSummary.autoDraftOnEnd);
   touch();
   const url = `http://127.0.0.1:${port}/?t=${token}`;
   if (opts.openUrl) opts.openUrl(url);
