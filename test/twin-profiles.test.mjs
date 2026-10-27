@@ -315,6 +315,18 @@ test('semantic vault tools exclude documents assigned to disabled memory types',
       assert.equal(read.result.isError, true, `${notePath} is not directly readable through semantic tools`);
       assert.doesNotMatch(JSON.stringify(read), /PROCEDURAL_CANARY|WORKING_CANARY|HANDOFF_CANARY|EPISODIC_CAPTURE_CANARY|EPISODE_CANARY/);
     }
+
+    for (const [tool, args] of [
+      ['vault_recent', { vault: 'Fictional Org', days: 365 }],
+      ['open_loops', { vault: 'Fictional Org', days: 365 }],
+      ['brain_brief', { vault: 'Fictional Org', days: 90 }],
+      ['vault_health', { vault: 'Fictional Org' }],
+      ['vault_related', { vault: 'Fictional Org', path: 'Knowledge.md' }],
+    ]) {
+      const result = await call(tool, args);
+      assert.equal(result.result.isError, false, `${tool} remains available for enabled semantic memory`);
+      assert.doesNotMatch(JSON.stringify(result), new RegExp(canaries[disabled].join('|')), `${tool} must not expose disabled memory content`);
+    }
   }
 });
 
