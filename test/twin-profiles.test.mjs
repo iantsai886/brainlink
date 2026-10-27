@@ -166,12 +166,14 @@ test('profile-scoped agents see only granted vaults and only supported read tool
   assert.deepEqual(guide.result.structuredContent.twin_profile_scope.memory_policy, cfg.twin_profiles[0].memory_policy);
   const deniedSessionPrompt = await mcp.handle({ jsonrpc: '2.0', id: 9, method: 'prompts/get', params: { name: 'close-session' } });
   assert.ok(deniedSessionPrompt.error);
+  const deniedRawPrompt = await mcp.handle({ jsonrpc: '2.0', id: 10, method: 'prompts/get', params: { name: 'organize-sources', arguments: { vault: 'Fictional Org', folder: 'Raw' } } });
+  assert.ok(deniedRawPrompt.error, 'read-only scoped clients cannot get a prompt that prepares knowledge writes');
   const deniedVault = await mcp.handle({ jsonrpc: '2.0', id: 2, method: 'tools/call', params: { name: 'vault_search', arguments: { vault: 'Fictional Personal', query: 'TWIN_PERSONAL_CANARY_77' } } });
   assert.equal(deniedVault.result.isError, true);
   assert.doesNotMatch(JSON.stringify(deniedVault), /TWIN_PERSONAL_CANARY_77|Private\.md/);
   const deniedWrite = await mcp.handle({ jsonrpc: '2.0', id: 3, method: 'tools/call', params: { name: 'propose_note', arguments: { vault: 'Fictional Org', title: 'No write', body: 'Should stay blocked', source: 'test' } } });
   assert.equal(deniedWrite.result.isError, true);
-  assert.match(deniedWrite.result.content[0].text, /not available to profile-scoped agents/);
+  assert.match(deniedWrite.result.content[0].text, /does not allow propose_note/);
   const deniedSession = await mcp.handle({ jsonrpc: '2.0', id: 4, method: 'tools/call', params: { name: 'session_list', arguments: {} } });
   assert.equal(deniedSession.result.isError, true);
   assert.match(deniedSession.result.content[0].text, /does not allow read_session/);
@@ -183,6 +185,32 @@ test('profile-scoped agents see only granted vaults and only supported read tool
   const unassigned = createContext(cfg, { env: { BRAINLINK_AGENT_TOKEN: 'unknown-token' } });
   assert.deepEqual(unassigned.enabled, []);
   assert.equal(unassigned.twinScope.mode, 'unassigned');
+});
+
+test('scoped source organization prompt requires every read, search, write, and receipt grant', async () => {
+  const root = await mkdtemp(path.join(tmpdir(), 'brainlink-twin-raw-prompt-'));
+  const vaultPath = path.join(root, 'org');
+  await mkdir(path.join(vaultPath, 'Raw'), { recursive: true });
+  const cfg = fixture(vaultPath);
+  cfg.twin_profiles[0].vaults[0].access = 'propose';
+  const grant = cfg.twin_profiles[0].agent_access[0].vaults[0];
+  grant.access = 'propose';
+  grant.operations.push('propose_note');
+  const context = () => createContext(cfg, { env: { BRAINLINK_AGENT_TOKEN: 'fictional-agent-token' } });
+  const mcp = createMcp(context());
+  const list = await mcp.handle({ jsonrpc: '2.0', id: 1, method: 'prompts/list' });
+  assert.ok(list.result.prompts.some((prompt) => prompt.name === 'organize-sources'));
+  const got = await mcp.handle({ jsonrpc: '2.0', id: 2, method: 'prompts/get', params: { name: 'organize-sources', arguments: { vault: 'Fictional Org', folder: 'Raw' } } });
+  assert.match(got.result.messages[0].content.text, /exact requested vault is "Fictional Org" and folder is "Raw"/);
+  assert.doesNotMatch(got.result.messages[0].content.text, /Fictional Personal/);
+
+  const readOnly = structuredClone(cfg);
+  readOnly.twin_profiles[0].agent_access[0].vaults[0].operations = readOnly.twin_profiles[0].agent_access[0].vaults[0].operations.filter((operation) => operation !== 'propose_note');
+  const readOnlyMcp = createMcp(createContext(readOnly, { env: { BRAINLINK_AGENT_TOKEN: 'fictional-agent-token' } }));
+  const hidden = await readOnlyMcp.handle({ jsonrpc: '2.0', id: 3, method: 'prompts/list' });
+  assert.ok(!hidden.result.prompts.some((prompt) => prompt.name === 'organize-sources'));
+  const denied = await readOnlyMcp.handle({ jsonrpc: '2.0', id: 4, method: 'prompts/get', params: { name: 'organize-sources', arguments: { vault: 'Fictional Org', folder: 'Raw' } } });
+  assert.ok(denied.error);
 });
 
 test('configured Twin profiles fail closed for preset and anonymous MCP connections', async () => {

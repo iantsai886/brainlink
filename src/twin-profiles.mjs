@@ -62,7 +62,7 @@ export function resolveTwinAgentScope(cfg, agent, tokenProvided = false) {
 // every note. Unknown or undeclared types fail closed for scoped agents.
 const READ_TOOL_MEMORY = Object.freeze({
   brainlink_guide: 'procedural', agent_connect: 'procedural',
-  vault_search: 'semantic', vault_read_note: 'semantic', vault_related: 'semantic', search: 'semantic', fetch: 'semantic',
+  vault_search: 'semantic', vault_read_note: 'semantic', vault_related: 'semantic', search: 'semantic', fetch: 'semantic', propose_note: 'semantic',
   vault_recent: 'semantic', open_loops: 'semantic', brain_brief: 'semantic', vault_health: 'semantic',
   ingestion_queue: 'semantic', ingestion_record: 'semantic',
   list_handoffs: 'working', send_handoff: 'working',
@@ -111,13 +111,13 @@ export function twinNoteMemoryAllowed(ctx, vaultName, rel, meta = {}) {
 const READ_TOOL_ACTION = Object.freeze({
   brainlink_guide: 'read_note',
   vault_search: 'search', vault_recent: 'search', open_loops: 'search', brain_brief: 'search',
-  vault_health: 'search', vault_related: 'search', vault_read_note: 'read_note',
+  vault_health: 'search', vault_related: 'search', vault_read_note: 'read_note', propose_note: 'propose_note',
   ingestion_queue: 'search', ingestion_record: 'propose_note',
   session_list: 'read_session', session_read: 'read_session', session_close: 'propose_note',
   list_handoffs: 'handoff_read', send_handoff: 'write_handoff',
   session_filing_folders: 'search', agent_connect: 'read_note', search: 'search', fetch: 'read_note',
 });
-const VAULT_ARGUMENT_TOOLS = new Set(['vault_search', 'vault_recent', 'ingestion_queue', 'ingestion_record', 'open_loops', 'brain_brief', 'vault_health', 'vault_read_note', 'vault_related', 'session_filing_folders', 'session_close']);
+const VAULT_ARGUMENT_TOOLS = new Set(['vault_search', 'vault_recent', 'ingestion_queue', 'ingestion_record', 'open_loops', 'brain_brief', 'vault_health', 'vault_read_note', 'vault_related', 'propose_note', 'session_filing_folders', 'session_close']);
 const HANDOFF_TOOLS = new Set(['list_handoffs', 'send_handoff']);
 
 function handoffGrant(ctx, action) {

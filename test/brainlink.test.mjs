@@ -734,6 +734,14 @@ test('MCP: initialize, tools, prompts, resources, errors', async () => {
   const prompts = (await call('prompts/list')).result.prompts.map((p) => p.name);
   assert.ok(prompts.includes('connect-chief-of-staff') && prompts.includes('close-loop-chief-of-staff'));
   assert.ok(prompts.includes('review-session'));
+  assert.ok(prompts.includes('organize-sources'));
+  const sourcePrompt = await call('prompts/get', { name: 'organize-sources', arguments: { vault: 'Acme Studio', folder: 'Inbox/Raw' } });
+  const sourceText = sourcePrompt.result.messages[0].content.text;
+  assert.match(sourceText, /exact requested vault is "Acme Studio" and folder is "Inbox\/Raw"/);
+  assert.match(sourceText, /at most five candidates/);
+  assert.match(sourceText, /confirm=false/);
+  assert.match(sourceText, /invoking this prompt is not approval to write/);
+  assert.match(sourceText, /ingestion_record/);
   const reviewPrompt = await call('prompts/get', { name: 'review-session', arguments: { session_hint: 'Fictional demo', vault: 'Acme Studio' } });
   assert.match(reviewPrompt.result.messages[0].content.text, /session_list/);
   assert.match(reviewPrompt.result.messages[0].content.text, /session_read\(full=true\)/);
