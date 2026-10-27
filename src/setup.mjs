@@ -689,7 +689,7 @@ export async function startSetup(opts = {}) {
       github_auto_sync: githubAutoStatus,
       packs: Object.entries(PACKS).map(([id, p]) => ({ id, title: p.title, description: p.description })),
       clients: await detect(clientOpts()),
-      agent_skills: Object.fromEntries(await Promise.all(['claude-code', 'codex', 'gemini', 'antigravity', 'hermes', 'deepseek-harness'].map(async (client) => [client, await inspectAgentSkills({ client, sourceRoot: path.join(ROOT, 'skills'), stateDir: appHome(env), home, env }).catch((error) => ({ supported: true, root: skillClientRoot(client, { home, env }), skills: [], error: error.message || String(error) }))]))),
+      agent_skills: Object.fromEntries(await Promise.all(['claude-code', 'codex', 'gemini', 'antigravity', 'antigravity-cli', 'hermes', 'deepseek-harness'].map(async (client) => [client, await inspectAgentSkills({ client, sourceRoot: path.join(ROOT, 'skills'), stateDir: appHome(env), home, env }).catch((error) => ({ supported: true, root: skillClientRoot(client, { home, env }), skills: [], error: error.message || String(error) }))]))),
       http: { port: cfg.http.port, token_set: Boolean(cfg.http.token) },
       activity: await readActivity(env, 15),
       semantic: await detectEmbedder(cfg, env),
@@ -1254,7 +1254,8 @@ export async function startSetup(opts = {}) {
     'POST /api/client-health': (b) => clientHealthCheck(b.client),
     'POST /api/skills/install': async (b) => {
       const clients = await detect(clientOpts());
-      if (!clients[String(b.client || '')]?.connected) throw new Error('Connect this AI first.');
+      const connectedClient = b.client === 'antigravity-cli' ? 'antigravity' : b.client;
+      if (!clients[String(connectedClient || '')]?.connected) throw new Error('Connect this AI first.');
       return installAgentSkills({ client: b.client, sourceRoot: path.join(ROOT, 'skills'), stateDir: appHome(env), home, env });
     },
     'POST /api/skills/remove': async (b) => removeAgentSkills({ client: b.client, stateDir: appHome(env), home, env }),

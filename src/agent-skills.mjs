@@ -5,7 +5,7 @@ import path from 'node:path';
 import { parseDocument } from 'yaml';
 
 const RECEIPT_VERSION = 1;
-const supported = new Set(['claude-code', 'codex', 'gemini', 'antigravity', 'hermes', 'deepseek-harness']);
+const supported = new Set(['claude-code', 'codex', 'gemini', 'antigravity', 'antigravity-cli', 'hermes', 'deepseek-harness']);
 const digest = (value) => createHash('sha256').update(value).digest('hex');
 const inside = (root, target) => {
   const rel = path.relative(path.resolve(root), path.resolve(target));
@@ -18,6 +18,7 @@ export function skillClientRoot(client, { home = os.homedir(), env = process.env
   if (client === 'codex') return path.join(env.CODEX_HOME || path.join(home, '.codex'), 'skills');
   if (client === 'gemini') return path.join(home, '.gemini', 'skills');
   if (client === 'antigravity') return path.join(home, '.gemini', 'config', 'skills');
+  if (client === 'antigravity-cli') return path.join(home, '.gemini', 'antigravity-cli', 'skills');
   if (client === 'hermes') {
     const configDir = env.HERMES_HOME || path.join(home, '.hermes');
     return path.join(configDir, 'skills');

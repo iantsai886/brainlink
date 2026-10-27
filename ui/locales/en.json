@@ -227,6 +227,8 @@
   "connect.step3Title": "Connect your AIs",
   "connect.hint": "BrainLink auto-detects the AI apps already on this computer. One click adds BrainLink to that app's MCP settings (with a backup of the old file) and runs a live test call so you see it work immediately, not after a restart.",
   "skills.title": "BrainLink skills",
+  "skills.surface.appIde": "Antigravity App / IDE",
+  "skills.surface.cli": "Antigravity CLI",
   "skills.description": "Install BrainLink workflows so this AI can use them. BrainLink updates only its own unchanged files.",
   "skills.connectFirst": "Connect this AI first.",
   "skills.install": "Install or update skills",

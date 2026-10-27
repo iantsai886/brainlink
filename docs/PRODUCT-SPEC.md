@@ -142,7 +142,7 @@ Still weak: cross-language and synonym questions without a translation (needs a 
 
 Native Windows, macOS and Linux packages include the complete runtime dependency set from `package.json`, plus the versioned portable Agent Skills under `skills/`. The installed package must be runnable offline after installation and must not depend on the developer checkout's `node_modules` or skill files.
 
-Setup can install or update BrainLink's versioned Agent Skills in the user-level skill folders for connected Claude Code, Codex CLI, Gemini CLI, Google Antigravity App/IDE, Hermes Agent, and DeepSeek Harness clients. It tracks owned file hashes and protects user edits and unrelated skills. Skill installation is optional and separate from MCP connection; it does not prove live client discovery or model behavior. See `docs/IMPLEMENTATION-STATUS.md` and `skills/README.md`.
+Setup can install or update BrainLink's versioned Agent Skills in the user-level skill folders for connected Claude Code, Codex CLI, Gemini CLI, Antigravity App/IDE, Antigravity CLI, Hermes Agent, and DeepSeek Harness clients. Antigravity App/IDE and CLI use separate global skill folders but share the same MCP connection. BrainLink tracks owned file hashes and protects user edits and unrelated skills. Skill installation is optional and does not prove live client discovery or model behavior. See `docs/IMPLEMENTATION-STATUS.md` and `skills/README.md`.
 
 | | macOS | Windows | Linux |
 |---|---|---|---|

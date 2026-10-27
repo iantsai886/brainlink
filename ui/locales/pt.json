@@ -227,6 +227,8 @@
   "connect.step3Title": "Ligue as suas IAs",
   "connect.hint": "O BrainLink deteta automaticamente as aplicações de IA já instaladas neste computador. Um clique adiciona o BrainLink às definições MCP dessa aplicação (com cópia de segurança do ficheiro antigo) e faz uma chamada de teste em direto, para ver que funciona de imediato, sem esperar por um reinício.",
   "skills.title": "Competências do BrainLink",
+  "skills.surface.appIde": "Aplicativo / IDE Antigravity",
+  "skills.surface.cli": "Antigravity CLI",
   "skills.description": "Instale fluxos de trabalho do BrainLink para esta IA. O BrainLink só atualiza ficheiros próprios que não foram alterados.",
   "skills.connectFirst": "Ligue esta IA primeiro.",
   "skills.install": "Instalar ou atualizar competências",
