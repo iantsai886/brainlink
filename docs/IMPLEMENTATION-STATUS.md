@@ -311,7 +311,7 @@ Using the installed Hermes CLI with an isolated temporary `HERMES_HOME` and a fi
 
 ### Typed relationship rejection (2026-10-27)
 
-The graph review queue and note panel let a user reject an unverified relationship. The note panel can also undo approval: BrainLink returns that edge to `review: proposed`, removes it from graph retrieval, and keeps its evidence. Both actions recheck the note revision; undo requires the source note to remain a valid, visible typed relationship. Windows/Node.js 24.22.1 tests passed for graph API and privacy behavior (18/18), typed graph rules (12/12), locale checks (2/2), and review UI assertions. This does not automate AI extraction or claim improved graph quality.
+The graph review queue and note panel let a user reject an unverified relationship. The source note panel lists rejected suggestions and can return one to review, preserving its evidence. The same panel can undo approval: BrainLink returns that edge to `review: proposed`, removes it from graph retrieval, and keeps its evidence. Actions recheck the note revision and validate both endpoints in the same visible vault. Windows/Node.js 24.22.1 tests passed for graph API and privacy behavior (18/18), typed graph rules (13/13), locale checks (2/2), and review UI assertions. This does not automate AI extraction or claim improved graph quality.
 
 ### Transactional backup restore (2026-10-27)
 

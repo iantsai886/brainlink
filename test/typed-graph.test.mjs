@@ -6,7 +6,7 @@ import path from 'node:path';
 import { normalize } from '../src/config.mjs';
 import { createContext, loadVault } from '../src/core.mjs';
 import { buildGraph3D, noteDetail3D } from '../src/graph3d.mjs';
-import { deriveTypedRelations, discoverTypedRelationshipCandidates, appendTypedRelationProposal, approveTypedRelation, rejectTypedRelation, reopenTypedRelation } from '../src/typed-graph.mjs';
+import { deriveTypedRelations, deriveRejectedTypedRelations, discoverTypedRelationshipCandidates, appendTypedRelationProposal, approveTypedRelation, rejectTypedRelation, reopenTypedRelation } from '../src/typed-graph.mjs';
 import { proposeNote } from '../src/writes.mjs';
 import { createMcp } from '../src/server.mjs';
 
@@ -54,6 +54,9 @@ test('rejecting a proposed relationship preserves source evidence and does not v
   assert.match(rejected, /^    review: rejected$/m);
   assert.match(rejected, /^    source: "Operations handbook section 2"$/m);
   assert.deepEqual(deriveTypedRelations([{ rel: 'Workflow.md', raw: rejected }]), []);
+  const notes = [{ rel: 'Workflow.md', raw: rejected }, { rel: 'Team.md', raw: entity({ type: 'team', id: 'team.product' }) }];
+  assert.equal(deriveRejectedTypedRelations(notes).length, 1);
+  assert.match(reopenTypedRelation(rejected, 0, 'rejected'), /^    review: proposed$/m);
   assert.throws(() => rejectTypedRelation(rejected, 0), /no longer awaiting review/i);
 });
 
@@ -66,6 +69,14 @@ test('reopening an approved relationship returns it to proposal state and preser
   assert.match(reopened, /^    source: "Operations handbook section 2"$/m);
   assert.deepEqual(deriveTypedRelations([{ rel: 'Workflow.md', raw: reopened }]), []);
   assert.throws(() => reopenTypedRelation(reopened, 0), /no longer awaiting review/i);
+});
+
+test('reopening a rejected relation explicitly changes only its review marker', () => {
+  const raw = `---\ntype: workflow\nid: workflow.collect\nscope: organisation\nstatus: current\nrelations:\n  - predicate: runs\n    target: team.product\n    review: rejected\n    source: "Operations handbook section 2"\n    confidence: 0.8\n---\n# Collect questions\n`;
+  const reopened = reopenTypedRelation(raw, 0, 'rejected');
+  assert.match(reopened, /^status: current$/m);
+  assert.match(reopened, /^    review: proposed$/m);
+  assert.match(reopened, /^    source: "Operations handbook section 2"$/m);
 });
 
 test('typed graph relationship suggestions are saved as proposed and become edges only after explicit review', async () => {

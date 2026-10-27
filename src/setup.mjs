@@ -29,7 +29,7 @@ import { sessionsService } from './host.mjs';
 import { addAgent, renameAgent, removeAgent, revokeAgent, markConnected, findAgentByToken, publicAgent, localAgentSnippet, remoteAgentSnippet, generateAgentToken, hashToken } from './mcp-agents.mjs';
 import { analyzeActivitySignals } from './rsi-observations.mjs';
 import { buildGraph3D, noteDetail3D, listProposedTypedRelations } from './graph3d.mjs';
-import { deriveTypedRelations, deriveProposedTypedRelations, discoverTypedRelationshipCandidates, appendTypedRelationProposal, approveTypedRelation, rejectTypedRelation, reopenTypedRelation } from './typed-graph.mjs';
+import { deriveTypedRelations, deriveProposedTypedRelations, deriveRejectedTypedRelations, discoverTypedRelationshipCandidates, appendTypedRelationProposal, approveTypedRelation, rejectTypedRelation, reopenTypedRelation } from './typed-graph.mjs';
 import { snapshotSettings, chooseSnapshot, suggestSnapshotFolder, clearSnapshot, startSnapshotWatcher, writeSnapshotOnce, loadSnapshotStatus, saveSnapshotStatus } from './snapshot.mjs';
 import { listHandoffs } from './writes.mjs';
 import { backupOnce, verifyBackup, restoreBackupToEmpty, loadBackupStatus, saveBackupStatus, pruneBackups, listVerifiedBackups } from './backup.mjs';
@@ -1400,13 +1400,14 @@ export async function startSetup(opts = {}) {
       if (sourceIndex === undefined || index.notes[sourceIndex].generated) throw new Error('This record cannot be reviewed.');
       if (!Number.isSafeInteger(b.relation_index) || b.relation_index < 0) throw new Error('Invalid relationship selection.');
       const relationIndex = b.relation_index;
-      const candidate = deriveTypedRelations(index.notes).find((edge) => edge.source === sourceIndex && edge.relation_index === relationIndex);
-      if (!candidate) throw new Error('That verified relationship is no longer eligible for rollback. Reload the note and review it again.');
+      const wasVerified = deriveTypedRelations(index.notes).some((edge) => edge.source === sourceIndex && edge.relation_index === relationIndex);
+      const wasRejected = deriveRejectedTypedRelations(index.notes).some((edge) => edge.source === sourceIndex && edge.relation_index === relationIndex);
+      if (!wasVerified && !wasRejected) throw new Error('That relationship is no longer eligible to return to review. Reload the note and review it again.');
       const full = safeJoin(vaultRoot(ctx, b.vault), current.path);
       const raw = await readFile(full, 'utf8');
       const etag = createHash('sha256').update(raw).digest('hex');
       if (typeof b.etag !== 'string' || b.etag !== etag) throw new Error('This note changed since it was opened. Reload it before reviewing the relationship.');
-      const next = reopenTypedRelation(raw, relationIndex);
+      const next = reopenTypedRelation(raw, relationIndex, wasVerified ? 'verified' : 'rejected');
       const tmp = `${full}.brainlink-${randomBytes(6).toString('hex')}.tmp`;
       try { await writeFile(tmp, next, 'utf8'); await rename(tmp, full); }
       catch (e) { try { await unlink(tmp); } catch {} throw e; }

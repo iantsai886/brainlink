@@ -234,6 +234,14 @@ test('typed relationship rejection is revision-checked, keeps evidence, and remo
     assert.equal((await api('/api/graph3d', {})).links.some((link) => link.predicate === 'runs'), false);
     const repeated = await api('/api/graph3d/relationship/reject', { ...baseRequest, etag: rejected.etag });
     assert.match(repeated.error, /no longer an eligible suggestion/i);
+    const noteAfterReject = await api('/api/graph3d/note', { vault: 'Main', path: 'Workflow.md' });
+    assert.equal(noteAfterReject.rejected_relationships.length, 1);
+    const reopened = await api('/api/graph3d/relationship/reopen', { ...baseRequest, etag: rejected.etag });
+    assert.equal(reopened.ok, true, JSON.stringify(reopened));
+    const restored = await fs.readFile(path.join(vaultPath, 'Workflow.md'), 'utf8');
+    assert.match(restored, /^    review: proposed$/m);
+    assert.match(restored, /^    source: "Operations handbook section 2"$/m);
+    assert.equal((await api('/api/graph3d/reviews', {})).total, 1);
   } finally { s.server.close(); }
 });
 
@@ -345,6 +353,8 @@ test('graph UI exposes a confirmation-gated action for reviewing a suggested rel
   assert.match(src, /api\('\/api\/graph3d\/relationship\/reject'/);
   assert.match(src, /api\('\/api\/graph3d\/relationship\/reopen'/);
   assert.match(src, /data-reopen-relation/);
+  assert.match(src, /data-reopen-rejected/);
+  assert.match(src, /rejected_relationships/);
   assert.match(src, /data-reject-queued/);
   assert.match(src, /api\('\/api\/graph3d\/relationship\/propose'/);
   assert.match(src, /notes3d\.saveSuggestionConfirm/);

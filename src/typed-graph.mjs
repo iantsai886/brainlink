@@ -100,7 +100,7 @@ export function deriveTypedRelations(notes) {
 
 // Suggestions are visible only after the caller has applied its vault and privacy filters.
 // Targets must still be unique, current, visible records in the same Twin scope.
-export function deriveProposedTypedRelations(notes) {
+function deriveTypedRelationsWithReview(notes, reviewStatus) {
   const records = notes.map((note) => ({ note, ...parseRecord(note.raw) }));
   const byId = new Map();
   const duplicates = new Set();
@@ -118,7 +118,7 @@ export function deriveProposedTypedRelations(notes) {
     relations.forEach((relation, relation_index) => {
       const target = byId.get(relation.target);
       const confidenceText = relation.confidence || '';
-      if (target === undefined || target === source || !PREDICATES.has(relation.predicate) || relation.review !== 'proposed' ||
+      if (target === undefined || target === source || !PREDICATES.has(relation.predicate) || relation.review !== reviewStatus ||
           !relation.source || relation.source.length > 300 || !/^(?:0(?:\.\d+)?|1(?:\.0+)?)$/.test(confidenceText) ||
           records[target].meta.scope !== meta.scope) return;
       proposals.push({ source, target, relation_index, predicate: relation.predicate, evidence: relation.source, confidence: Number(confidenceText) });
@@ -126,6 +126,9 @@ export function deriveProposedTypedRelations(notes) {
   }
   return proposals;
 }
+
+export function deriveProposedTypedRelations(notes) { return deriveTypedRelationsWithReview(notes, 'proposed'); }
+export function deriveRejectedTypedRelations(notes) { return deriveTypedRelationsWithReview(notes, 'rejected'); }
 
 // Deterministic, review-only discovery. It reads only the already-authorized vault index passed
 // by the caller, requires a typed current source and a unique same-scope target, and stores one
@@ -201,7 +204,7 @@ function resolveTypedRelation(raw, relationIndex, decision, expectedReview = 'pr
 // the source, target, and evidence so the user can inspect or correct it later.
 export function approveTypedRelation(raw, relationIndex) { return resolveTypedRelation(raw, relationIndex, 'verified'); }
 export function rejectTypedRelation(raw, relationIndex) { return resolveTypedRelation(raw, relationIndex, 'rejected'); }
-export function reopenTypedRelation(raw, relationIndex) { return resolveTypedRelation(raw, relationIndex, 'proposed', 'verified'); }
+export function reopenTypedRelation(raw, relationIndex, expectedReview = 'verified') { return resolveTypedRelation(raw, relationIndex, 'proposed', expectedReview); }
 
 export function appendTypedRelationProposal(raw, proposal) {
   if (!PREDICATES.has(proposal?.predicate) || !ID.test(String(proposal?.target_id || '')) ||
