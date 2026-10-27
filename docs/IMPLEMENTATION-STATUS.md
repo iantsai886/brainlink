@@ -4,7 +4,7 @@ Status snapshot: 2026-10-28 (Asia/Taipei).
 GitHub repository: `iantsai886/brainlink`
 Branch: `integration/brainlink-retrieval-evaluation` (integrates profile-scoped GitHub, RSI discovery, and independent retrieval evaluation)
 Code baseline: development target `1.2.8`, with `package.json` as the canonical version source. The `v1.2.7` tag belongs to the separate `wip/v1.2.7` release line; this branch continues from the full-source `main` history and does not move or recreate that tag.
-Latest full-suite code revision: `0b6b6e9` (status-only commit `265b10c` records its receipt). On Windows with Node.js 24.22.1, `npm run test:all` passed: core 469 total (463 passed, 0 failed, 6 platform/privilege skips) and UI 29/29. This is local automated evidence, not hosted CI. Codex CLI is signed in; Claude Code 2.1.310 is installed but signed out, so model-driven Claude-to-Codex handoff remains unverified. Installed-user acceptance, hosted CI, signing, and customer release readiness are also unverified. No signed public release is claimed.
+Latest full-suite verification: commit `75b1080` (packaging source is `066126b`). On Windows with Node.js 24.22.1, `npm run test:all` passed: core 469 total (463 passed, 0 failed, 6 platform/privilege skips) and UI 29/29. This is local automated evidence, not hosted CI. Codex CLI is signed in; Claude Code 2.1.310 is installed but signed out, so model-driven Claude-to-Codex handoff remains unverified. Installed-user acceptance, hosted CI, signing, and customer release readiness are also unverified. No signed public release is claimed.
 
 ### Full Windows regression run on current integration revision (2026-10-28)
 
@@ -659,3 +659,9 @@ Found that the Windows installer stage included `ui/app/test`, despite the build
 ### Linux release package smoke from source revision 45add5b (2026-10-28)
 
 In a disposable `node:24-bookworm` container with Node.js 24.22.1, ran `npm ci --omit=dev` and `npm run build:linux` from source commit `45add5b`. Built x64 and ARM64 `.tar.gz` and Debian `.deb` packages. Inspected all four payloads: development UI tests are absent and both required Skills are present. Installed the x64 Debian package, checked version 1.2.8, initialized a fictional vault, and removed the package. Installed the x64 per-user tarball, checked version and initialization, then uninstalled it while retaining the user config. SHA-256: x64 tar `e68990cfb7ea38e0939d3697657aae037b43d72e45ca9e2762367745163011df`; ARM64 tar `1e8eec24b742bccac7ecab5f159b23a6b4c35ba574e9a82b237688db5ea25e5b`; amd64 Debian `e929da44e5c6d3e3325d6da8299f14e29d6edac23a6fb217a542b6ac021d0865`; ARM64 Debian `59bbf245f030de9ac72d72b4187e20426c347dd283434dab91d921d8677f2d24`. ARM64 packages were built and inspected but not executed; hosted GitHub Actions and signed/public release remain unverified.
+
+
+### Full regression run after release package cleanup (2026-10-28)
+
+On Windows with Node.js 24.22.1, 
+pm run test:all at commit 75b10805fb20ca540fadb94057167b89f16f7c58 passed: core 469 tests (463 passed, 0 failed, 6 platform/privilege skips) and UI 29/29. This run includes the packaging-runtime regression checks and covers the current source branch. It is local automated verification; hosted Actions, live Claude-to-Codex continuation, signed release, and installed-user acceptance remain unverified.
