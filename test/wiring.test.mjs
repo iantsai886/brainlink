@@ -392,7 +392,10 @@ test('connectors: DeepSeek Harness named profiles get separate tokens and config
   assert.equal(await readClientAgentToken('deepseek-harness@headless', opts), 'fictional-headless-token');
   const webRows = parse(await readFile(path.join(profileA, 'cordis.patch.yml'), 'utf8')).flatMap((patch) => patch.insert || []);
   const headlessRows = parse(await readFile(path.join(profileB, 'cordis.patch.yml'), 'utf8')).flatMap((patch) => patch.insert || []);
-  assert.notEqual(webRows.find((row) => row.name === '@deepseek-ai/dsh-mcp-client').config.serverName, headlessRows.find((row) => row.name === '@deepseek-ai/dsh-mcp-client').config.serverName);
+  const webServerName = webRows.find((row) => row.name === '@deepseek-ai/dsh-mcp-client').config.serverName;
+  const headlessServerName = headlessRows.find((row) => row.name === '@deepseek-ai/dsh-mcp-client').config.serverName;
+  assert.notEqual(webServerName, headlessServerName);
+  assert.ok(webServerName.length <= 32 && headlessServerName.length <= 32, 'Harness server names stay within its 32-character limit');
   assert.equal((await detect(opts))['deepseek-harness@web'].connected, true);
   await disconnect('deepseek-harness@web', opts);
   assert.equal((await detect(opts))['deepseek-harness@web'].connected, false);

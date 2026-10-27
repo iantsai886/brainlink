@@ -10,6 +10,7 @@ import { createContext } from '../src/core.mjs';
 import { createMcp } from '../src/server.mjs';
 import { hashToken } from '../src/mcp-agents.mjs';
 import { openSessionStore } from '../src/sessions/index.mjs';
+import { parse as parseYaml } from 'yaml';
 
 const fixture = (vaultPath) => normalize({
   version: 2,
@@ -500,6 +501,52 @@ test('preset AI apps receive only the selected Twin permissions and disconnect r
     assert.equal(disconnected.status, 200);
     const after = JSON.parse(await readFile(path.join(env.BRAINLINK_HOME, 'config.json'), 'utf8'));
     assert.equal(after.ai_agents.find((agent) => agent.preset_client_id === 'cursor').tokenHash, null);
+    assert.equal(after.twin_profiles[0].agent_access.length, 0);
+  } finally { setup.server.close(); }
+});
+
+test('DeepSeek Harness named profile connects through Setup with its own Twin-scoped token', async () => {
+  const root = await mkdtemp(path.join(tmpdir(), 'brainlink-dsh-twin-'));
+  const home = path.join(root, 'home');
+  const vaultPath = path.join(root, 'org-vault');
+  const dshHome = path.join(home, '.dsh');
+  const dshProfile = path.join(dshHome, 'profiles', 'web');
+  await mkdir(vaultPath, { recursive: true });
+  await mkdir(dshProfile, { recursive: true });
+  await writeFile(path.join(vaultPath, 'Public.md'), 'Synthetic public organisation note.');
+  await writeFile(path.join(dshProfile, 'cordis.patch.yml'), '[]\n');
+  const env = { BRAINLINK_HOME: path.join(home, 'app'), HOME: home, USERPROFILE: home, DSH_HOME: dshHome };
+  const cfg = fixture(vaultPath);
+  cfg.twin_profiles[0].agent_access = [];
+  await saveConfig(cfg, path.join(env.BRAINLINK_HOME, 'config.json'));
+  const setup = await startSetup({ env, home, os: 'linux', port: 0, useCli: false });
+  const base = `http://127.0.0.1:${setup.port}`;
+  const api = async (route, body) => {
+    const response = await fetch(`${base}${route}`, { method: 'POST', headers: { 'X-BrainLink-Token': setup.token, 'Content-Type': 'application/json' }, body: JSON.stringify(body || {}) });
+    return { status: response.status, body: await response.json() };
+  };
+  try {
+    const state = await (await fetch(`${base}/api/state`, { headers: { 'X-BrainLink-Token': setup.token } })).json();
+    assert.equal(state.clients['deepseek-harness@web'].title, 'DeepSeek Harness · web');
+    const connected = await api('/api/connect', { client: 'deepseek-harness@web', profile_id: 'org_twin_1', vaults: [{ name: 'Fictional Org', operations: ['search', 'read_note'] }] });
+    assert.equal(connected.status, 200, JSON.stringify(connected.body));
+    assert.equal(connected.body.health.ok, true, JSON.stringify(connected.body));
+    const patch = parseYaml(await readFile(path.join(dshProfile, 'cordis.patch.yml'), 'utf8'));
+    const row = patch.flatMap((item) => item.insert || []).find((item) => item.name === '@deepseek-ai/dsh-mcp-client');
+    const token = row.config.env.BRAINLINK_AGENT_TOKEN;
+    assert.match(token, /^bla_/);
+    assert.match(row.config.serverName, /^brainlink-web-[a-f0-9]{8}$/);
+    assert.ok(row.config.serverName.length <= 32);
+    const saved = JSON.parse(await readFile(path.join(env.BRAINLINK_HOME, 'config.json'), 'utf8'));
+    const managed = saved.ai_agents.find((agent) => agent.preset_client_id === 'deepseek-harness@web');
+    assert.equal(managed.tokenHash, hashToken(token));
+    assert.equal(saved.twin_profiles[0].agent_access[0].agent_id, managed.id);
+    assert.doesNotMatch(JSON.stringify(connected.body), new RegExp(token));
+    assert.doesNotMatch(JSON.stringify(state), /tokenHash/);
+    const disconnected = await api('/api/disconnect', { client: 'deepseek-harness@web' });
+    assert.equal(disconnected.status, 200, JSON.stringify(disconnected.body));
+    const after = JSON.parse(await readFile(path.join(env.BRAINLINK_HOME, 'config.json'), 'utf8'));
+    assert.equal(after.ai_agents.find((agent) => agent.preset_client_id === 'deepseek-harness@web').tokenHash, null);
     assert.equal(after.twin_profiles[0].agent_access.length, 0);
   } finally { setup.server.close(); }
 });

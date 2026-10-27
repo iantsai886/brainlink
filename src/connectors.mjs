@@ -3,6 +3,7 @@
 import { readFile, writeFile, mkdir, copyFile, rename, stat, chmod, readdir } from 'node:fs/promises';
 import { existsSync } from 'node:fs';
 import { execFileSync } from 'node:child_process';
+import { createHash } from 'node:crypto';
 import path from 'node:path';
 import { parseDocument } from 'yaml';
 
@@ -72,7 +73,8 @@ function deepSeekProfileId(name) { return `deepseek-harness@${name}`; }
 
 function deepSeekProfileClient(name) {
   if (!/^[A-Za-z0-9_-]{1,64}$/.test(name)) return null;
-  const suffix = name.toLowerCase().replace(/[^a-z0-9_-]/g, '-').slice(0, 24);
+  const readable = name.toLowerCase().replace(/[^a-z0-9_-]/g, '-').slice(0, 13);
+  const suffix = `${readable}-${createHash('sha256').update(name).digest('hex').slice(0, 8)}`;
   return {
     ...CLIENTS['deepseek-harness'],
     title: `DeepSeek Harness · ${name}`,
