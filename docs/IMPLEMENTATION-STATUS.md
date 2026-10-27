@@ -9,7 +9,7 @@ Client discovery and runtime probe: Codex CLI `0.164.0-alpha.11.1` made a live B
 
 ### Twin memory-type filtering in agent connection context
 
-`agent_connect` can return a mixed context packet, so it now checks each content group against that Twin's memory policy before reading it: working tails, semantic recent notes/open loops/memories, and episodic capture summaries. Role notes remain procedural and the tool itself is unavailable when procedural memory is disabled. A synthetic canary test turns off each non-procedural type in turn and verifies the hidden content is absent while enabled types remain available. Focused Windows tests passed 93 tests with 0 failures and 1 platform-only skip; clean-commit full-suite results are recorded above. This verifies the local MCP boundary, not live behavior in every external AI client.
+`agent_connect` can return a mixed context packet, so it now checks each content group against that Twin's memory policy before reading it: working tails, semantic recent notes/open loops/memories, and episodic capture summaries. Role notes remain procedural and the tool itself is unavailable when procedural memory is disabled. The tool description and activation prompt now tell the model to report only context it actually received. Synthetic canaries turn off each non-procedural type in turn and verify the hidden content is absent while enabled types remain available. Focused Windows tests on source commit `79430b6` passed 76 tests with 0 failures and 1 platform-only skip; clean-commit full-suite results for the policy implementation are recorded above. This verifies the local MCP boundary, not live behavior in every external AI client.
 
 ### Scheduled local RSI observation (2026-10-27)
 
