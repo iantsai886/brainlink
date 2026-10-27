@@ -28,6 +28,7 @@ test('BrainLink skills use each supported client’s user skill folder', () => {
   assert.equal(skillClientRoot('codex', { home, env: {} }), path.join(home, '.codex', 'skills'));
   assert.equal(skillClientRoot('gemini', { home, env }), path.join(home, '.gemini', 'skills'));
   assert.equal(skillClientRoot('hermes', { home, env }), path.join(env.HERMES_HOME, 'skills'));
+  assert.equal(skillClientRoot('hermes', { home, env: { LOCALAPPDATA: path.join(home, 'AppData', 'Local') } }), path.join(home, '.hermes', 'skills'), 'Hermes documents ~/.hermes as the default skill root on Windows too');
   assert.equal(skillClientRoot('deepseek-harness', { home, env }), path.join(env.DSH_HOME, 'skills'));
   assert.equal(skillClientRoot('deepseek-harness@research', { home, env }), path.join(env.DSH_HOME, 'skills'));
   assert.throws(() => skillClientRoot('unknown', { home, env }), /not supported/);

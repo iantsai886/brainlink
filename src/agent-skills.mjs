@@ -18,9 +18,7 @@ export function skillClientRoot(client, { home = os.homedir(), env = process.env
   if (client === 'codex') return path.join(env.CODEX_HOME || path.join(home, '.codex'), 'skills');
   if (client === 'gemini') return path.join(home, '.gemini', 'skills');
   if (client === 'hermes') {
-    const configDir = env.HERMES_HOME || (process.platform === 'win32'
-      ? path.join(env.LOCALAPPDATA || path.join(home, 'AppData', 'Local'), 'hermes')
-      : path.join(home, '.hermes'));
+    const configDir = env.HERMES_HOME || path.join(home, '.hermes');
     return path.join(configDir, 'skills');
   }
   if (client === 'deepseek-harness') return path.join(env.DSH_HOME || path.join(home, '.dsh'), 'skills');
