@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtemp, mkdir, readFile, writeFile, cp, readdir, stat } from 'node:fs/promises';
+import { mkdtemp, mkdir, readFile, writeFile, cp, readdir, stat, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { spawn, execFileSync } from 'node:child_process';
 import { setTimeout as delay } from 'node:timers/promises';
@@ -306,6 +306,85 @@ test('connectors: MCP clients receive the configured BrainLink home and custom c
   assert.ok(saved.includes(`BRAINLINK_HOME = ${JSON.stringify(dataHome)}`));
   assert.ok(saved.includes(`BRAINLINK_CONFIG = ${JSON.stringify(configFile)}`));
   assert.match(saved, /BRAINLINK_AGENT_TOKEN = "fictional-custom-home-token"/);
+});
+
+test('connect: the generated Codex config launches BrainLink against its isolated vault and keeps private notes hidden', async () => {
+  const home = await tmp('codex-isolated-runtime');
+  const codexHome = path.join(home, '.codex');
+  const brainHome = path.join(home, 'brainlink-data');
+  const vault = path.join(home, 'fictional-vault');
+  const configFile = path.join(home, 'brainlink-config', 'config.json');
+  const clientConfig = path.join(codexHome, 'config.toml');
+  await mkdir(codexHome, { recursive: true });
+  await mkdir(vault, { recursive: true });
+  await writeFile(clientConfig, 'model = "fictional-test-model"\n');
+  await writeFile(path.join(vault, 'Public Project.md'), '# ORCHIDPUBLIC\n\nA fictional public project note for runtime isolation testing.');
+  await writeFile(path.join(vault, 'Private Project.md'), '---\nprivate: true\n---\n# ORCHIDPRIVATE\n\nA fictional private note that must never be returned.');
+  await saveConfig(normalize({ vaults: [{ name: 'Fictional Runtime Vault', path: vault }] }), configFile);
+
+  const launch = { command: process.execPath, args: [path.join(ROOT, 'bin/brainlink.mjs'), 'serve'] };
+  await connectClient('codex', {
+    home, os: 'win32', env: { CODEX_HOME: codexHome, BRAINLINK_HOME: brainHome, BRAINLINK_CONFIG: configFile },
+    launch, useCli: false,
+  });
+
+  // Read back the exact values written to the generated Codex config, then launch that entry.
+  const saved = await readFile(clientConfig, 'utf8');
+  const clientEntry = { command: null, args: null, env: {} };
+  let section = '';
+  for (const line of saved.split(/\r?\n/)) {
+    const header = line.match(/^\[([^\]]+)\]$/);
+    if (header) { section = header[1]; continue; }
+    const setting = line.match(/^([A-Z0-9_]+|command|args) = (.+)$/);
+    if (!setting) continue;
+    const [, key, encoded] = setting;
+    if (section === 'mcp_servers.brainlink') {
+      if (key === 'command') clientEntry.command = JSON.parse(encoded);
+      if (key === 'args') clientEntry.args = JSON.parse(encoded);
+    } else if (section === 'mcp_servers.brainlink.env') clientEntry.env[key] = JSON.parse(encoded);
+  }
+  assert.equal(clientEntry.command, launch.command);
+  assert.deepEqual(clientEntry.args, launch.args);
+  assert.equal(clientEntry.env.BRAINLINK_HOME, brainHome);
+  assert.equal(clientEntry.env.BRAINLINK_CONFIG, configFile);
+
+  const child = spawn(clientEntry.command, clientEntry.args, {
+    cwd: ROOT,
+    env: { ...process.env, ...clientEntry.env, BRAINLINK_SEMANTIC: '0' },
+    windowsHide: true,
+  });
+  const responses = [];
+  let buffer = '';
+  child.stdout.on('data', (chunk) => {
+    buffer += chunk;
+    let newline;
+    while ((newline = buffer.indexOf('\n')) >= 0) {
+      const line = buffer.slice(0, newline);
+      buffer = buffer.slice(newline + 1);
+      if (line.trim()) responses.push(JSON.parse(line));
+    }
+  });
+  try {
+    child.stdin.write(`${JSON.stringify({ jsonrpc: '2.0', id: 1, method: 'initialize', params: {} })}\n`);
+    child.stdin.write(`${JSON.stringify({ jsonrpc: '2.0', id: 2, method: 'tools/call', params: { name: 'brainlink_guide', arguments: {} } })}\n`);
+    child.stdin.write(`${JSON.stringify({ jsonrpc: '2.0', id: 3, method: 'tools/call', params: { name: 'vault_search', arguments: { vault: 'Fictional Runtime Vault', query: 'ORCHIDPUBLIC' } } })}\n`);
+    child.stdin.write(`${JSON.stringify({ jsonrpc: '2.0', id: 4, method: 'tools/call', params: { name: 'vault_search', arguments: { vault: 'Fictional Runtime Vault', query: 'ORCHIDPRIVATE' } } })}\n`);
+    for (let i = 0; i < 300 && responses.length < 4 && child.exitCode === null; i++) await delay(50);
+    assert.equal(responses.length, 4, `expected four MCP responses; received ${responses.length}, child exit=${child.exitCode}`);
+    assert.equal(responses[1].result.isError, false);
+    const guide = JSON.stringify(responses[1].result);
+    assert.match(guide, /Fictional Runtime Vault/);
+    assert.doesNotMatch(guide, /ORCHIDPRIVATE/);
+    assert.match(JSON.stringify(responses[2].result), /ORCHIDPUBLIC/);
+    assert.doesNotMatch(JSON.stringify(responses[3].result), /ORCHIDPRIVATE/);
+    const runtimeConfig = JSON.parse(await readFile(configFile, 'utf8'));
+    assert.equal(runtimeConfig.vaults[0].path, vault, 'the spawned server loaded the isolated config, not the default app config');
+    assert.ok(await readFile(path.join(brainHome, 'activity.log'), 'utf8').then((log) => log.includes('vault_search')));
+  } finally {
+    child.kill();
+    await new Promise((resolve) => child.once('exit', resolve));
+    await rm(home, { recursive: true, force: true });
+  }
 });
 
 test('connectors: Hermes merges YAML safely, reads its scoped token, backs up settings, and disconnects only BrainLink', async () => {

@@ -6,7 +6,7 @@ import { execFileSync } from 'node:child_process';
 import { createHash, randomBytes } from 'node:crypto';
 import path from 'node:path';
 import { parseDocument } from 'yaml';
-import { appHome } from './config.mjs';
+import { appHome } from './app-home.mjs';
 
 export const SERVER_KEY = 'brainlink';
 const PRIVATE_CONFIG_MODE = 0o600;

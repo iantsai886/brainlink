@@ -87,6 +87,7 @@ test('the staged connector loads with the bundled YAML package outside the check
     await mkdir(path.join(app, 'src'), { recursive: true });
     await mkdir(path.join(app, 'node_modules'), { recursive: true });
     await cp(path.join(ROOT, 'src', 'connectors.mjs'), path.join(app, 'src', 'connectors.mjs'));
+    await cp(path.join(ROOT, 'src', 'app-home.mjs'), path.join(app, 'src', 'app-home.mjs'));
     await cp(path.join(ROOT, 'node_modules', 'yaml'), path.join(app, 'node_modules', 'yaml'), { recursive: true });
     await writeFile(path.join(app, 'package.json'), '{"type":"module"}\n');
     const child = spawnSync(process.execPath, ['--input-type=module', '-e', "const { detect } = await import('./src/connectors.mjs'); if (typeof detect !== 'function') process.exit(2);"], {

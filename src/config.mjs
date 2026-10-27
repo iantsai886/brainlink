@@ -5,11 +5,13 @@ import { readFile, writeFile, mkdir, rename, unlink } from 'node:fs/promises';
 import { existsSync } from 'node:fs';
 import { randomBytes } from 'node:crypto';
 import { setTimeout as delay } from 'node:timers/promises';
-import { homedir } from 'node:os';
 import path from 'node:path';
 import { validateSync } from './sync/settings.mjs';
 import { validateGitHubAssignments } from './sync/github-assignment.mjs';
 import { normalizeBackupSchedule } from './backup-schedule.mjs';
+import { appHome } from './app-home.mjs';
+
+export { appHome };
 
 export const DEFAULT_PLATFORMS = ['Claude', 'ChatGPT', 'ChatGPT Codex', 'Gemini', 'Grok', 'Cursor', 'other'];
 export const CLOSE_MODES = ['append-section', 'new-note', 'append-task', 'proposal-only'];
@@ -17,14 +19,6 @@ export const SCHEMAS = ['standard', 'provenance'];
 export const WRITE_MODES = ['on', 'proposal-only', 'off'];
 export const TWIN_MODES = ['personal', 'organisation', 'client'];
 export const TWIN_ACTIONS = ['search', 'read_note', 'read_session', 'log_session', 'handoff_read', 'write_handoff', 'propose_note', 'write_note'];
-
-// Where BrainLink keeps config.json, activity.log and backups for this OS user.
-export function appHome(env = process.env, platform = process.platform, home = homedir()) {
-  if (env.BRAINLINK_HOME) return env.BRAINLINK_HOME;
-  if (platform === 'darwin') return path.join(home, 'Library', 'Application Support', 'BrainLink');
-  if (platform === 'win32') return path.join(env.APPDATA || path.join(home, 'AppData', 'Roaming'), 'BrainLink');
-  return path.join(env.XDG_CONFIG_HOME || path.join(home, '.config'), 'brainlink');
-}
 
 export function configPath(env = process.env) {
   return env.BRAINLINK_CONFIG || path.join(appHome(env), 'config.json');
