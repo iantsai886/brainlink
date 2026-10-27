@@ -10,6 +10,10 @@ Latest full-suite verification: source commit `476d636cb7d5b5a65d161f782aae7f213
 
 On Windows with Node.js 24.22.1, `npm run test:all` passed on commit `476d636cb7d5b5a65d161f782aae7f213d680a2e`: core 483 total (477 passed, 0 failed, 6 platform/privilege skips); UI 29/29. The six skips require Linux behavior or Windows symlink privileges unavailable here. The run includes the deterministic scheduled-scan retry fixture, privacy and Twin isolation, graph review, backups, RSI, and connectors. This is local automated evidence only; hosted CI, live Claude-to-Codex handoff, live Ollama, installed-user acceptance, signing and customer release readiness remain unverified.
 
+### Windows installer rebuilt from current source (2026-10-28)
+
+Built `dist/BrainLink-Setup-1.2.8.exe` from source commit `3acb1b5ed2efb9ea66d249e6d3445cb5e4dd5eaa` using Inno Setup 6.7.3 and bundled Node.js 24.22.1. SHA-256: `528DC9C56150D8A5EE22872B5EE67FCB325CD9AEFC7513FCFA0F7B247F5D5AA1`. Staged checks confirmed version 1.2.8, `ui/index.html` hash matches source, UI development tests are absent, and the session-closeout and graph-curation Skills are present. Authenticode status is `NotSigned`. The installer was built and inspected but not installed; desktop shortcut acceptance, code signing, hosted builds, live AI-client use, and public release remain unverified.
+
 ### Full regression verification after visible RSI topic evidence (2026-10-28)
 
 On Windows with Node.js 24.22.1, `npm run test:all` passed on the code now committed at `075d60de5b00d36fb30992de7eedfd7f483bb7ce`: core 483 total (477 passed, 0 failed, 6 platform/privilege skips) and UI 29/29. Focused discovery, ledger, evaluator, locale and UI checks passed 53/53 before this run. This remains local automated evidence; hosted CI and real client/runtime acceptance remain unverified.
