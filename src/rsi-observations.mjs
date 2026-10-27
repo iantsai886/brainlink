@@ -8,7 +8,9 @@ const TOOL_GROUPS = Object.freeze({
   filing: new Set(['ingestion_queue', 'ingestion_record', 'propose_note', 'source_scan']),
   handoff: new Set(['list_handoffs', 'send_handoff']),
   recovery: new Set(['backup', 'backup_restore']),
+  graph_review: new Set(['graph_relationship_review']),
 });
+const GRAPH_REVIEW_ACTIONS = ['approved', 'rejected', 'reopened'];
 
 function blank() { return { calls: 0, failures: 0, failure_rate: null }; }
 function finish(bucket) { return { ...bucket, failure_rate: bucket.calls ? Number((bucket.failures / bucket.calls).toFixed(3)) : null }; }
@@ -18,7 +20,7 @@ export function analyzeActivitySignals(entries, { now = new Date() } = {}) {
   const end = now instanceof Date ? now : new Date(now);
   const currentStart = end.getTime() - WINDOWS.current * 86400000;
   const previousStart = currentStart - WINDOWS.previous * 86400000;
-  const counts = Object.fromEntries(Object.keys(TOOL_GROUPS).map((key) => [key, { current: blank(), previous: blank(), currentTokens: [], previousTokens: [] }]));
+  const counts = Object.fromEntries(Object.keys(TOOL_GROUPS).map((key) => [key, { current: blank(), previous: blank(), currentTokens: [], previousTokens: [], currentActions: [], previousActions: [] }]));
   let acceptedEvents = 0;
   for (const entry of Array.isArray(entries) ? entries.slice(-20000) : []) {
     if (!entry || typeof entry !== 'object' || typeof entry.tool !== 'string' || typeof entry.ok !== 'boolean') continue;
@@ -34,6 +36,9 @@ export function analyzeActivitySignals(entries, { now = new Date() } = {}) {
     if (isReadResponseSizeTool(entry.tool) && Number.isSafeInteger(entry.result_token_estimate) && entry.result_token_estimate >= 0 && entry.result_token_estimate <= 250_000) {
       counts[category][window === 'current' ? 'currentTokens' : 'previousTokens'].push(entry.result_token_estimate);
     }
+    if (category === 'graph_review' && GRAPH_REVIEW_ACTIONS.includes(entry.action)) {
+      counts[category][window === 'current' ? 'currentActions' : 'previousActions'].push(entry.action);
+    }
     acceptedEvents++;
   }
   const categories = Object.entries(counts).map(([id, windows]) => {
@@ -44,7 +49,8 @@ export function analyzeActivitySignals(entries, { now = new Date() } = {}) {
       if (current.failures >= 3 && current.failure_rate >= 0.25) signal = 'review_failures';
       if (previous.calls >= 5 && current.failures >= 2 && current.failure_rate - previous.failure_rate >= 0.2) signal = 'review_increase';
     }
-    return { id, current, previous, current_result_tokens: tokenSummary(windows.currentTokens), previous_result_tokens: tokenSummary(windows.previousTokens), signal };
+    const reviewCounts = (actions) => Object.fromEntries(GRAPH_REVIEW_ACTIONS.map((action) => [action, actions.filter((value) => value === action).length]));
+    return { id, current, previous, current_result_tokens: tokenSummary(windows.currentTokens), previous_result_tokens: tokenSummary(windows.previousTokens), current_review_actions: reviewCounts(windows.currentActions), previous_review_actions: reviewCounts(windows.previousActions), signal };
   });
   const findings = categories.filter((item) => item.signal.startsWith('review_')).map((item) => ({
     category: item.id,
@@ -64,6 +70,6 @@ export function analyzeActivitySignals(entries, { now = new Date() } = {}) {
     categories,
     findings,
     privacy: { source: 'local_content_free_activity_log', note_content_read: false, raw_events_returned: false, report_saved: false, read_response_content_persisted: false },
-    limitations: ['Activity logs contain only observed tool calls; they do not show whether an answer was useful.', 'Response token counts are rough estimates for selected read-only BrainLink tool results, not all conversation context or provider billing; averages can change when the tool mix changes.', 'The activity log rotates, so older calls may be missing from a 60-day comparison.', 'No automatic proposal, code change, permission change, or promotion is made.'],
+    limitations: ['Activity logs contain only observed tool calls and graph-review decisions; they do not show whether an answer was useful or why a person rejected a suggestion.', 'Graph approval/rejection/reopen counts are feedback signals, not standalone quality scores; review choices are not linked to note content.', 'Response token counts are rough estimates for selected read-only BrainLink tool results, not all conversation context or provider billing; averages can change when the tool mix changes.', 'The activity log rotates, so older calls may be missing from a 60-day comparison.', 'No automatic proposal, code change, permission change, or promotion is made.'],
   };
 }

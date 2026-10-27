@@ -202,6 +202,11 @@ test('typed relationship review requires a current note revision and adds only t
     assert.match(reopenedRaw, /^    source: "Operations handbook section 2"$/m);
     assert.ok(!(await api('/api/graph3d', {})).links.some((link) => link.predicate === 'runs'));
     assert.equal((await api('/api/graph3d/reviews', {})).total, 1, 'undo returns the link to review');
+    const activity = (await fs.readFile(path.join(home, 'app', 'activity.log'), 'utf8')).trim().split(/\r?\n/).map(JSON.parse)
+      .filter((entry) => entry.tool === 'graph_relationship_review');
+    assert.deepEqual(activity.map((entry) => entry.action), ['approved', 'reopened']);
+    assert.ok(activity.every((entry) => entry.ok === true));
+    assert.doesNotMatch(JSON.stringify(activity), /Workflow\.md|Operations handbook section 2|team\.product/);
   } finally { s.server.close(); }
 });
 

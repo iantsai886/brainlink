@@ -1360,6 +1360,7 @@ export async function startSetup(opts = {}) {
       const tmp = `${full}.brainlink-${randomBytes(6).toString('hex')}.tmp`;
       try { await writeFile(tmp, next, 'utf8'); await rename(tmp, full); }
       catch (e) { try { await unlink(tmp); } catch {} throw e; }
+      await logActivity(env, { tool: 'graph_relationship_review', ok: true, action: 'approved' });
       return { ok: true, etag: createHash('sha256').update(next).digest('hex') };
     },
     'POST /api/graph3d/relationship/reject': async (b) => {
@@ -1385,6 +1386,7 @@ export async function startSetup(opts = {}) {
       const tmp = `${full}.brainlink-${randomBytes(6).toString('hex')}.tmp`;
       try { await writeFile(tmp, next, 'utf8'); await rename(tmp, full); }
       catch (e) { try { await unlink(tmp); } catch {} throw e; }
+      await logActivity(env, { tool: 'graph_relationship_review', ok: true, action: 'rejected' });
       return { ok: true, etag: createHash('sha256').update(next).digest('hex') };
     },
     'POST /api/graph3d/relationship/reopen': async (b) => {
@@ -1411,6 +1413,7 @@ export async function startSetup(opts = {}) {
       const tmp = `${full}.brainlink-${randomBytes(6).toString('hex')}.tmp`;
       try { await writeFile(tmp, next, 'utf8'); await rename(tmp, full); }
       catch (e) { try { await unlink(tmp); } catch {} throw e; }
+      await logActivity(env, { tool: 'graph_relationship_review', ok: true, action: 'reopened' });
       return { ok: true, etag: createHash('sha256').update(next).digest('hex') };
     },
     'POST /api/graph3d/relationship/propose': async (b) => {
