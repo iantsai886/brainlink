@@ -3,7 +3,7 @@
 import path from 'node:path';
 import { execFileSync, spawnSync } from 'node:child_process';
 import { homedir, tmpdir } from 'node:os';
-import { stat, readFile, writeFile, mkdir, cp, mkdtemp } from 'node:fs/promises';
+import { stat, readFile, writeFile, mkdir, cp, mkdtemp, rename, unlink } from 'node:fs/promises';
 import { randomBytes } from 'node:crypto';
 import { loadConfig, saveConfig, configPath, appHome, emptyConfig, normalize } from '../src/config.mjs';
 import { markConnected } from '../src/mcp-agents.mjs';
@@ -43,13 +43,34 @@ const gitClean = (args, cwd) => {
 // for end users and masking stays the default.
 const maskUrl = (url) => (process.env.BRAINLINK_SHOW_TOKEN ? url : url.replace(/([?&]t=)([^&\s]+)/, (_, p, t) => `${p}${t.slice(0, 4)}…`));
 const SETUP_PORT = 47800;
-async function setupToken() {
-  const file = path.join(appHome(), 'setup-token');
+async function setupToken(env = process.env) {
+  const file = path.join(appHome(env), 'setup-token');
   try { const t = (await readFile(file, 'utf8')).trim(); if (t.length >= 20) return t; } catch {}
   const t = randomBytes(18).toString('base64url');
   await mkdir(appHome(), { recursive: true });
   await writeFile(file, t, { mode: 0o600 });
   return t;
+}
+const setupInstancePath = (env = process.env) => path.join(appHome(env), 'setup-instance.json');
+async function readSetupInstance(env) {
+  try {
+    const value = JSON.parse(await readFile(setupInstancePath(env), 'utf8'));
+    return Number.isInteger(value.port) && value.port > 0 && value.port <= 65535 ? value : null;
+  } catch { return null; }
+}
+async function writeSetupInstance(env, port) {
+  const file = setupInstancePath(env);
+  await mkdir(path.dirname(file), { recursive: true });
+  const tmp = `${file}.${process.pid}.tmp`;
+  await writeFile(tmp, JSON.stringify({ port, pid: process.pid, version: VERSION }), { mode: 0o600 });
+  await rename(tmp, file);
+}
+async function removeSetupInstance(env, port) {
+  const file = setupInstancePath(env);
+  try {
+    const value = await readSetupInstance(env);
+    if (value?.port === port) await unlink(file);
+  } catch {}
 }
 const clientOpts = () => ({ home: process.env.HOME || homedir(), os: process.platform, env: process.env, launch: launchSpec() });
 
@@ -103,13 +124,22 @@ async function main() {
       // Same address every time (fixed port + saved token), so a bookmark or old tab works again
       // once BrainLink is reopened. If Setup is already running, just bring it to the front.
       const fromApp = flag('app');
-      const port = Number(opt('port', SETUP_PORT)) || SETUP_PORT;
-      const token = await setupToken();
-      const url = `http://127.0.0.1:${port}/?t=${token}`;
+      const preferredPort = Number(opt('port', SETUP_PORT)) || SETUP_PORT;
+      const token = await setupToken(process.env);
+      const instance = await readSetupInstance(process.env);
+      let port = instance?.port || preferredPort;
       const running = await fetch(`http://127.0.0.1:${port}/health`).then((r) => r.json(), () => null);
-      if (running?.app === 'brainlink') { if (!flag('no-open')) openInBrowser(url); out(`BrainLink Setup: ${maskUrl(url)}`); return; }
+      if (running?.app === 'brainlink') {
+        const url = `http://127.0.0.1:${port}/?t=${token}`;
+        if (!flag('no-open')) openInBrowser(url);
+        out(`BrainLink Setup: ${maskUrl(url)}`);
+        return;
+      }
+      if (instance) await removeSetupInstance(process.env, instance.port);
       const opts = { token, openUrl: flag('no-open') ? null : (u) => openInBrowser(u), idleMinutes: fromApp ? 30 : 0, onQuit: () => process.exit(0) };
       const s = await startSetup({ ...opts, port }).catch((e) => (e.code === 'EADDRINUSE' ? startSetup({ ...opts, port: 0 }) : Promise.reject(e)));
+      await writeSetupInstance(process.env, s.port);
+      s.server.once('close', () => { removeSetupInstance(process.env, s.port).catch(() => {}); });
       out(fromApp ? `BrainLink Setup: ${maskUrl(s.url)}` : `BrainLink Setup is open at ${maskUrl(s.url)}\nKeep this window open while you set up; press Control-C when done.`);
       return;
     }

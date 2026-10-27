@@ -9,6 +9,10 @@ Client discovery and runtime probe: Codex CLI `0.164.0-alpha.11.1` made a live B
 
 ## Current working-tree update (2026-10-27)
 
+### Reliable desktop Setup re-open
+
+The desktop launcher now saves the active Setup port in a small per-user runtime marker. Opening the desktop icon again checks that recorded port and reuses the existing Setup page, even if BrainLink had to choose a fallback port. The marker contains only port, process ID and app version; it is removed when that Setup server closes, and stale markers are cleared on the next launch. `node --import ./test/_preload.mjs --test --test-force-exit test/setup-instance.test.mjs` passed 1/1 on Windows. This covers local launcher reuse, not an installed-package shortcut or cross-user behavior.
+
 ### Optional scheduled research-source freshness checks
 
 Research discovery can now optionally recheck up to three oldest citations from prior BrainLink public-source discoveries after each manual or scheduled run, but only when the new setting is enabled and the source remains selected. A citation is eligible after 30 days without a check; the exact saved public arXiv ID, DOI, or GitHub repository is queried. The batch writes only fingerprint/status receipts, never edits the proposal, and reports checked/deferred counts with the run. The option is off by default; individual manual checks remain available. Privacy text is translated in all shipped locales. On source commit `0a0ded904abd8246207cc08bac00219cc14e39ed`, `npm run test:all` passed on Windows/Node.js 24.22.1: core 428 tests (422 passed, 0 failed, 6 platform/privilege skips) and UI 29/29. This improves citation maintenance only; it does not validate source claims or make RSI autonomous.
