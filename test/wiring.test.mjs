@@ -24,11 +24,12 @@ const windowsAcl = (file) => {
 function assertPrivateWindowsAcl(file) {
   const acl = windowsAcl(file);
   const userName = execFileSync('whoami.exe', ['/user', '/fo', 'csv', '/nh'], { encoding: 'utf8' }).match(/"([^"]+)"/)[1];
-  const grants = acl.split(/\r?\n/).map((line) => line.trim()).filter((line) => /:\(F\)\s*$/.test(line));
+  const grants = acl.split(/\r?\n/).map((line) => line.trim()).filter((line) => /:\([^)]*\)\s*$/.test(line));
   assert.ok(acl.toLowerCase().includes(`${userName.toLowerCase()}:(f)`), 'current Windows user has access');
   assert.match(acl, /NT AUTHORITY\\SYSTEM:\(F\)/);
   assert.match(acl, /BUILTIN\\Administrators:\(F\)/);
   assert.equal(grants.length, 3, 'only the current user, SYSTEM and Administrators may access a token-bearing file');
+  assert.ok(grants.every((line) => /:\(F\)\s*$/.test(line)), 'every access grant must be full control; partial extra grants are forbidden');
   assert.doesNotMatch(acl, /\(I\)|BUILTIN\\Users|Authenticated Users|Everyone/);
 }
 

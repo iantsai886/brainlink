@@ -236,7 +236,7 @@ async function securePrivateFile(file, mode) {
   if (process.platform !== 'win32') return chmod(file, mode);
   const identity = execFileSync('whoami.exe', ['/user', '/fo', 'csv', '/nh'], { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] });
   const sid = identity.match(/\bS-1-\d+(?:-\d+)+\b/)?.[0];
-  if (!sid) throw new Error('Could not identify the current Windows user to protect the DeepSeek Harness token file.');
+  if (!sid) throw new Error('Could not identify the current Windows user to protect the BrainLink agent-token file.');
   execFileSync('icacls.exe', [file, '/inheritance:r', '/grant:r', `*${sid}:(F)`, '*S-1-5-18:(F)', '*S-1-5-32-544:(F)'], { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] });
 }
 
