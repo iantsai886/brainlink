@@ -13,6 +13,11 @@ const temp = (prefix) => mkdtemp(path.join(tmpdir(), 'brainlink-rsi-discovery-' 
 const publicLookup = async () => [{ address: '151.101.1.42', family: 4 }];
 const SIGNAL = 'Agents lose context after a handoff and repeat the same retrieval searches.';
 const settings = { enabled: true, topics: ['agent memory'], signals: [SIGNAL], interval_hours: 24, max_new_per_run: 5 };
+const waitFor = async (predicate, { timeoutMs = 5000, intervalMs = 25 } = {}) => {
+  const deadline = Date.now() + timeoutMs;
+  while (!predicate() && Date.now() < deadline) await delay(intervalMs);
+  return predicate();
+};
 
 // Fictional feed entries; ids look like arXiv ids but the content is synthetic test data.
 const entry = ({ id = '2610.00001v1', title = 'Compact handoff packets for agent memory', summary = 'We show that compact context packets reduce repeated retrieval searches after an agent handoff in long sessions.', published = '2026-10-20T00:00:00Z' } = {}) =>
@@ -492,8 +497,23 @@ test('enabled discovery keeps the desktop process alive through its idle timeout
     assert.equal((await fetch(base + '/health')).status, 200, 'scheduled RSI work keeps BrainLink available after ordinary idle timeout');
     assert.equal(quitCalled, false);
     await post('/api/rsi/discovery/pause');
-    await delay(1500);
-    assert.equal(quitCalled, true, 'pausing discovery restores the configured idle exit');
+    assert.equal(await waitFor(() => quitCalled), true, 'pausing discovery restores the configured idle exit within the timeout');
+  } finally { if (!quitCalled) app.server.close(); }
+});
+
+test('Setup activity cancels shutdown during the idle-exit grace period', async () => {
+  const home = await temp('idle-exit-grace'), env = { BRAINLINK_HOME: path.join(home, 'app'), BRAINLINK_SEMANTIC: '0' };
+  let app, quitCalled = false;
+  app = await startSetup({
+    env, home, os: 'win32', port: 0, useCli: false, idleMinutes: 0.001, idleQuitGraceMs: 1000,
+    onQuit: () => { quitCalled = true; app.server.close(); },
+  });
+  try {
+    await delay(100);
+    assert.equal((await fetch(`http://127.0.0.1:${app.port}/health`)).status, 200);
+    await delay(150);
+    assert.equal(quitCalled, false, 'a request during the grace period cancels the pending shutdown');
+    assert.equal(await waitFor(() => quitCalled), true, 'normal idle exit resumes after the new inactivity window');
   } finally { if (!quitCalled) app.server.close(); }
 });
 

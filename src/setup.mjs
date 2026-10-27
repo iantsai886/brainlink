@@ -199,14 +199,19 @@ export async function startSetup(opts = {}) {
   // the Done button in the browser only hides that tab's view (see ui/index.html) — it must
   // never stop this background process, so idle timeout is the only thing that quits it here.
   let idleTimer = null;
+  let idleQuitTimer = null;
   let backupEnabled = false;
   let ingestionKeepsAlive = false;
   let briefKeepsAlive = false;
   let syncKeepsAlive = false;
   let githubAutoKeepsAlive = false;
-  const quit = () => setTimeout(() => { snapshotWatcher?.stop(); (opts.onQuit ? opts.onQuit() : server.close()); }, 100);
+  const quit = () => {
+    clearTimeout(idleQuitTimer);
+    idleQuitTimer = setTimeout(() => { snapshotWatcher?.stop(); (opts.onQuit ? opts.onQuit() : server.close()); }, opts.idleQuitGraceMs ?? 100);
+  };
   const touch = () => {
     clearTimeout(idleTimer);
+    clearTimeout(idleQuitTimer);
     if (!opts.idleMinutes || backupEnabled || discoveryKeepsAlive || ingestionKeepsAlive || briefKeepsAlive || syncKeepsAlive || githubAutoKeepsAlive) return;
     idleTimer = setTimeout(quit, opts.idleMinutes * 60e3);
     idleTimer.unref?.();
