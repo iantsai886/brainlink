@@ -15,6 +15,10 @@ Follow-up RSI check: trend classification now treats a rise or fall in stale act
 The Windows desktop/Start menu launcher now opens the local Setup page in a dedicated Microsoft Edge app window when Edge is installed; it falls back to the default browser otherwise. Only loopback Setup URLs are opened in app mode. CLI-launched Setup and non-Windows desktop launch keep using the platform's normal browser. Focused Windows Setup, launcher and startup tests passed 88/88 with one Linux-only skip. The full suite and rebuilt installer are pending; a real installed-user desktop check remains unverified.
 
 Full verification for this launch change: on Windows with Node.js 24.22.1, `npm run test:all` passed core 466 total (460 passed, 0 failed, 6 platform/privilege skips) and UI 29/29. `git diff --check` passed. Inno Setup 6.7.3 rebuilt the 1.2.8 Windows installer successfully; SHA-256: `872BC7C9F1DF914E6886FA83630C1A9E4C80392FA785E366359F0601CF5212CA`. This verifies local tests and package creation; it does not verify actual installation, app-window launch on Ian's account, hosted CI, signing, or customer acceptance.
+
+### Linux full-suite verification for source revision 4263445 (2026-10-28)
+
+Ran the committed source snapshot in an isolated Debian 12 container with Node.js 24.22.1 and a temporary Git checkout. `npm run test:all` passed: core 466 total (465 passed, 0 failed, 1 Windows-only skip) and UI 29/29. The Linux path and symlink-capable privacy checks ran instead of the Windows-only skips. This confirms Linux automated behavior for the tested source snapshot; it does not establish a Linux installer build, desktop acceptance, hosted CI, or live cross-client handoff.
 Client discovery and runtime probe: Codex CLI `0.164.0-alpha.11.1` made a live BrainLink guide/search call on a temporary fictional vault and did not retrieve a planted private canary. Claude Code 2.1.310 reports the same fixture MCP server as connected, but its auth status is signed out; a Claude model call and full two-client handoff remain unverified.
 
 ### Guided review of an imported session (2026-10-27)
