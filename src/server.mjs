@@ -230,7 +230,7 @@ export function createMcp(ctx, { onCall = () => {} } = {}) {
         entity_id: { type: 'string', description: 'For a typed entity, a stable ID such as workflow.collect-questions.' },
         entity_scope: { type: 'string', enum: ['personal', 'organisation', 'client'], description: 'Must match the active Twin profile when one is in use.' },
         relations: { type: 'array', description: 'Evidence-backed relationship suggestions. BrainLink always stores these as review=proposed; a person must review and verify them before they become graph edges.', maxItems: 20, items: { type: 'object', properties: {
-          predicate: { type: 'string', enum: ['owned_by', 'runs', 'consumes', 'produces', 'depends_on', 'part_of', 'assigned_to', 'informed_by'] },
+          predicate: { type: 'string', enum: ['owned_by', 'runs', 'consumes', 'produces', 'depends_on', 'part_of', 'assigned_to', 'informed_by', 'communicates_with'] },
           target: { type: 'string', description: 'Stable ID of another typed note in this same vault and scope.' },
           source: { type: 'string', description: 'Short exact source excerpt or citation, up to 300 characters.' },
           confidence: { type: 'number', minimum: 0, maximum: 1 },

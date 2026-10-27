@@ -23,7 +23,7 @@ export function resolveIdentity(ctx, a = {}) {
 const q = (s) => JSON.stringify(String(s ?? ''));
 export const madeBy = (id) => `**Made by ${id.ai_platform} (${id.agent_or_role}).**`;
 const TYPED_ENTITY_TYPES = new Set(['person', 'team', 'workflow', 'dataset', 'artifact', 'project', 'policy', 'concept']);
-const TYPED_PREDICATES = new Set(['owned_by', 'runs', 'consumes', 'produces', 'depends_on', 'part_of', 'assigned_to', 'informed_by']);
+const TYPED_PREDICATES = new Set(['owned_by', 'runs', 'consumes', 'produces', 'depends_on', 'part_of', 'assigned_to', 'informed_by', 'communicates_with']);
 const TYPED_ID = /^[a-z][a-z0-9._:-]{1,127}$/;
 
 export function frontmatter(ctx, vaultName, id, f, now = new Date()) {

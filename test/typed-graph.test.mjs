@@ -32,6 +32,7 @@ test('typed relationships resolve by stable ID and appear in graph links and not
   const ctx = await context([{ name: 'Company', path: dir }]);
   const toolSchema = createMcp(ctx).tools.find((tool) => tool.name === 'propose_note').inputSchema.properties;
   assert.ok(toolSchema.relations.items.properties.predicate.enum.includes('owned_by'));
+  assert.ok(toolSchema.relations.items.properties.predicate.enum.includes('communicates_with'));
   assert.match(toolSchema.relations.description, /review=proposed/);
   const graph = await buildGraph3D(ctx, 'Company');
   const workflow = graph.nodes.find((n) => n.entity_id === 'workflow.collect-questions');
@@ -129,6 +130,20 @@ test('deterministic relationship discovery proposes only explicit same-scope tex
   ];
   const candidates = discoverTypedRelationshipCandidates(notes, 0);
   assert.deepEqual(candidates.map(({ predicate, target_id, evidence }) => [predicate, target_id, evidence]), [['consumes', 'dataset.questions', 'Consumes [[Question data]] every morning.']]);
+});
+
+test('workflow graph suggests explicit team communication links without auto-verifying them', () => {
+  const notes = [
+    { rel: 'Product Team.md', title: 'Product Team', body: 'The Product Team coordinates with the Data Team to review incoming questions.', raw: '---\ntype: team\nid: team.product\nscope: organisation\nstatus: current\n---\n' },
+    { rel: 'Data Team.md', title: 'Data Team', body: '', raw: '---\ntype: team\nid: team.data\nscope: organisation\nstatus: current\n---\n' },
+  ];
+  const links = discoverTypedRelationshipCandidates(notes, 0);
+  assert.deepEqual(links.map(({ predicate, target_id, evidence }) => [predicate, target_id, evidence]), [
+    ['communicates_with', 'team.data', 'The Product Team coordinates with the Data Team to review incoming questions.'],
+  ]);
+  const proposed = appendTypedRelationProposal(notes[0].raw, { predicate: links[0].predicate, target_id: links[0].target_id, evidence: links[0].evidence, confidence: 0.5 });
+  assert.match(proposed, /^    review: proposed$/m);
+  assert.deepEqual(deriveTypedRelations([{ ...notes[0], raw: proposed }, notes[1]]), [], 'suggestion must be reviewed before becoming a graph edge');
 });
 
 test('automatic relationship candidates are saved as proposed YAML and never verified automatically', () => {

@@ -1,7 +1,7 @@
 // Small, fail-closed typed relationship layer for Markdown knowledge records.
 // Only explicitly verified relations with valid evidence are materialized as graph edges.
 const ENTITY_TYPES = new Set(['person', 'team', 'workflow', 'dataset', 'artifact', 'project', 'policy', 'concept']);
-const PREDICATES = new Set(['owned_by', 'runs', 'consumes', 'produces', 'depends_on', 'part_of', 'assigned_to', 'informed_by']);
+const PREDICATES = new Set(['owned_by', 'runs', 'consumes', 'produces', 'depends_on', 'part_of', 'assigned_to', 'informed_by', 'communicates_with']);
 const SCOPES = new Set(['personal', 'organisation', 'client']);
 const ID = /^[a-z][a-z0-9._:-]{1,127}$/;
 const DISCOVERY_RULES = [
@@ -13,6 +13,7 @@ const DISCOVERY_RULES = [
   { predicate: 'part_of', targets: ['team', 'project'], phrase: /\b(?:part of|belongs to)\b/i },
   { predicate: 'assigned_to', targets: ['person', 'team'], phrase: /\bassigned to\b/i },
   { predicate: 'informed_by', targets: ['artifact', 'dataset', 'concept'], phrase: /\b(?:informed by|based on|derived from)\b/i },
+  { predicate: 'communicates_with', targets: ['person', 'team'], phrase: /\b(?:communicates with|talks to|coordinates with|hands off to)\b/i },
 ];
 
 function scalar(value) {
