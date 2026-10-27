@@ -19,6 +19,10 @@ Setup shows the three versioned BrainLink skills for Claude Code, Codex CLI, Gem
 
 Local Windows validation: `npm run test:all` passed on source commit `46cc1a5`: core 444 tests (438 passed, 0 failed, 6 platform/privilege skips) and UI 29/29. Install and skill tests passed 11/11, including Setup authentication/connection checks, separate Antigravity App/IDE and CLI paths, install/update/remove, collision protection, user edit preservation, and status refresh. This verifies local file management and API/UI behavior; live skill discovery, model use, and release-package behavior remain unverified.
 
+### Windows installer build receipt (2026-10-27)
+
+The current source at `326044c` compiled successfully with Inno Setup 6.7.3 on Windows/PowerShell 7.6.5. Artifact: `dist/BrainLink-Setup-1.2.8.exe`, SHA-256 `0AAC7C26884F35A2CCB5392CEB3B132758435E0009C7C1E80992F83C94EF2681`. This proves the current installer definition and staged app package compile. I did not run the installer, so installed launch, upgrade, uninstall, registry/PATH cleanup, signing and user acceptance are still unverified.
+
 ### Support Antigravity and verify Hermes Skill paths on Windows
 
 Setup supports separate user-level Skill installs for Antigravity App/IDE (`~/.gemini/config/skills`) and Antigravity CLI (`~/.gemini/antigravity-cli/skills`) while using its single shared MCP connection configuration. Hermes defaults to `~/.hermes/skills` on Windows and other platforms unless `HERMES_HOME` is set. Reference: [Antigravity Agent Skills locations](https://www.antigravity.google/docs/skills). Focused Windows validation passed 11/11 across `test/agent-skills.test.mjs` and `test/skills.test.mjs`. Full `npm run test:all` passed on this working tree: core 444 tests (438 passed, 0 failed, 6 host-specific skips) and UI 29/29. The CLI install test covers file placement, status, and removal; this is not a live client discovery test. No live Antigravity or Hermes model call has been made.
