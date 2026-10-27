@@ -31,15 +31,15 @@
   const SERVER_MESSAGE_KEYS = {
     'Give the agent a name.': 'agents.errNeedName',
     'Unknown agent. It may already have been removed.': 'agents.errUnknown',
-    'Add a vault first, then test the connection.': 'agents.errNeedVaultForTest',
+    'Add a vault first, then check BrainLink access.': 'agents.errNeedVaultForTest',
     'That key was not recognized. It may have been revoked or mistyped.': 'agents.errKeyNotRecognized',
-    'The call failed; see Activity below.': 'agents.testFailed',
+    'BrainLink access check failed; see Activity below.': 'agents.testFailed',
   };
   function localizeServerMessage(msg) {
     if (SERVER_MESSAGE_KEYS[msg]) return t(SERVER_MESSAGE_KEYS[msg]);
     const dup = /^An agent named "(.+)" already exists\.$/.exec(msg);
     if (dup) return t('agents.errDuplicateName', { name: dup[1] });
-    const succeeded = /^Live call succeeded \((\d+)ms\)\. This agent is now connected\.$/.exec(msg);
+    const succeeded = /^BrainLink access check passed \((\d+)ms\)\. This only checks BrainLink; it does not confirm the AI app loaded its configuration\.$/.exec(msg);
     if (succeeded) return t('agents.testSucceeded', { ms: succeeded[1] });
     return msg;
   }

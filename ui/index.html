@@ -1422,8 +1422,8 @@ document.addEventListener('click', (e) => {
     await load();
   });
   if (d.connect) act(async () => {
-    // /api/connect only returns once the live handshake verified the connection; an unverified
-    // write is rolled back server-side and surfaces as a rejected promise (toast via `act`).
+    // /api/connect only returns after BrainLink locally accepts the configured token and scope.
+    // The user still needs to restart the external app and test from inside it.
     const r = await api('POST', '/api/connect', { client: d.connect });
     healthByClient[d.connect] = r.health;
     toast(t('connect.connectedToast', { title: r.title, msg: r.health.message }));

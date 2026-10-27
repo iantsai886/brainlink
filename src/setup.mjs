@@ -748,9 +748,9 @@ export async function startSetup(opts = {}) {
     };
   }
 
-  // Connect every AI app found on this computer that is not connected yet (within the plan).
-  // connectClient already refuses apps it did not detect; a live handshake (clientHealthCheck)
-  // confirms the write actually works before it is reported as connected, and is undone otherwise.
+  // Configure every AI app found on this computer that is not configured yet.
+  // clientHealthCheck verifies BrainLink locally with the generated client token; it does not
+  // launch the AI app or prove that app loaded the new configuration.
   async function connectAll(cfg) {
     if (cfg.twin_profiles?.length) return { connected: [], skipped: [], failed: ['Choose a Twin profile and permissions for each AI app before connecting it.'] };
     const found = await detect(clientOpts());
@@ -767,10 +767,9 @@ export async function startSetup(opts = {}) {
     return { connected, skipped, failed, already: Object.values(found).filter((c) => c.connected).map((c) => c.title) };
   }
 
-  // Live proof a just-connected client actually works: an in-process MCP round trip through the
-  // exact same createMcp() a real `brainlink serve` process would run, using that client's own
-  // platform/role env so the call looks identical to one the client would make. Logs through the
-  // normal content-free activity log; selected read-only calls may include a response-size estimate.
+  // Verify BrainLink locally with the exact token and profile the client config will use. This is
+  // deliberately not described as an external-client check: it does not launch the AI app or prove
+  // that the app loaded the changed MCP config. Logs through the normal content-free activity log.
   async function clientHealthCheck(clientId, suppliedToken) {
     const c = resolveClient(clientId);
     if (!c) throw new Error(`Unknown client "${clientId}".`);
@@ -778,10 +777,10 @@ export async function startSetup(opts = {}) {
     const token = suppliedToken ?? await readClientAgentToken(clientId, clientOpts());
     const ctx = createContext(cfg, { env: { ...env, BRAINLINK_AGENT_TOKEN: token, BRAINLINK_AI_PLATFORM: c.platform, BRAINLINK_AGENT_ROLE: c.role } });
     if (ctx.twinScope.mode === 'unassigned') return {
-      ok: false, client: clientId, tool: null, took_ms: 0,
+      ok: false, verification: 'brainlink_local_mcp', external_client_verified: false, client: clientId, tool: null, took_ms: 0,
       message: 'This AI app has no Twin profile permission yet. Connect it through a named AI agent assigned to a Twin profile.',
     };
-    if (!ctx.enabled.length) return { ok: false, client: clientId, tool: null, took_ms: 0, message: 'Add a vault first, then test the connection.' };
+    if (!ctx.enabled.length) return { ok: false, verification: 'brainlink_local_mcp', external_client_verified: false, client: clientId, tool: null, took_ms: 0, message: 'Add a vault first, then check BrainLink access.' };
     const pending = [];
     const mcp = createMcp(ctx, { onCall: (e) => pending.push(logActivity(env, { ...e, platform: c.platform, mode: 'health-check' })) });
     const t0 = Date.now();
@@ -803,7 +802,7 @@ export async function startSetup(opts = {}) {
       .flatMap((grant) => grant.operations)
       .some((action) => toolNames.includes(expectedByAction[action]));
     if (!scopeHasLiveTool) return {
-      ok: false, client: clientId, tool: null, took_ms: 0,
+      ok: false, verification: 'brainlink_local_mcp', external_client_verified: false, client: clientId, tool: null, took_ms: 0,
       message: 'This AI app has no usable tools under its selected Twin permissions. Review its memory and action settings.',
     };
     const scopedVault = scopedGrant?.name;
@@ -814,7 +813,13 @@ export async function startSetup(opts = {}) {
     await Promise.all(pending);
     const took_ms = Date.now() - t0;
     const ok = Boolean(called?.result) && !called.result.isError;
-    return { ok, client: clientId, tool, took_ms, message: ok ? `Live MCP call succeeded: ${tool} (${took_ms}ms).` : 'The MCP call failed; see Activity below.' };
+    return {
+      ok, verification: 'brainlink_local_mcp', external_client_verified: false,
+      client: clientId, tool, took_ms,
+      message: ok
+        ? `BrainLink access check passed: ${tool} (${took_ms}ms). Restart the AI app, then verify the connection from inside that app.`
+        : 'BrainLink access check failed; see Activity below.',
+    };
   }
 
   // Give a built-in client its own revocable, profile-scoped identity. The token is written only
@@ -885,19 +890,19 @@ export async function startSetup(opts = {}) {
       await saveConfig(before, file).catch(() => {});
       if (previousClientConfig !== null) await writeFile(clientConfigFile, previousClientConfig, 'utf8').catch(() => {});
       else await disconnectClient(clientId, clientOpts()).catch(() => {});
-      throw new Error(`Could not verify ${client.title}; the previous permissions were restored. ${error.message || error}`);
+      throw new Error(`Could not check BrainLink access for ${client.title}; the previous permissions were restored. ${error.message || error}`);
     }
   }
 
-  // Same live-proof pattern as clientHealthCheck, keyed by an agent's own token instead of a
+  // Same local BrainLink check as clientHealthCheck, keyed by an agent's own token instead of a
   // preset app's env. Agents start out not connected; this is the only path that flips one to
   // connected, and only once the round trip actually succeeds with that exact token.
   async function agentHealthCheck(token) {
     const cfg = await loadConfig(file);
     const agent = findAgentByToken(cfg, token);
-    if (!agent) return { ok: false, agent: null, tool: null, took_ms: 0, message: 'That key was not recognized. It may have been revoked or mistyped.' };
+    if (!agent) return { ok: false, verification: 'brainlink_local_mcp', external_client_verified: false, agent: null, tool: null, took_ms: 0, message: 'That key was not recognized. It may have been revoked or mistyped.' };
     const ctx = createContext(cfg, { env: { ...env, BRAINLINK_AGENT_TOKEN: token } });
-    if (!ctx.enabled.length) return { ok: false, agent: agent.name, tool: null, took_ms: 0, message: 'Add a vault first, then test the connection.' };
+    if (!ctx.enabled.length) return { ok: false, verification: 'brainlink_local_mcp', external_client_verified: false, agent: agent.name, tool: null, took_ms: 0, message: 'Add a vault first, then check BrainLink access.' };
     const pending = [];
     const mcp = createMcp(ctx, { onCall: (e) => pending.push(logActivity(env, { ...e, platform: agent.name, mode: 'agent-check' })) });
     const t0 = Date.now();
@@ -907,7 +912,13 @@ export async function startSetup(opts = {}) {
     const took_ms = Date.now() - t0;
     const ok = Boolean(called?.result) && !called.result.isError;
     if (ok) await saveConfig(markConnected(cfg, agent.id), file);
-    return { ok, agent: agent.name, tool: 'brainlink_guide', took_ms, message: ok ? `Live call succeeded (${took_ms}ms). This agent is now connected.` : 'The call failed; see Activity below.' };
+    return {
+      ok, verification: 'brainlink_local_mcp', external_client_verified: false,
+      agent: agent.name, tool: 'brainlink_guide', took_ms,
+      message: ok
+        ? `BrainLink access check passed (${took_ms}ms). This only checks BrainLink; it does not confirm the AI app loaded its configuration.`
+        : 'BrainLink access check failed; see Activity below.',
+    };
   }
 
   // The one-click path: use an Obsidian vault, a folder, or a brand-new vault; then connect all AIs.

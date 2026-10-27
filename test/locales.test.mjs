@@ -31,6 +31,27 @@ test('every supported locale ships a JSON file with the exact same keys as Engli
   }
 });
 
+test('connection wording distinguishes configured settings from an AI app that loaded them', async () => {
+  const catalogs = Object.fromEntries(await Promise.all(LOCALES.map(async (id) => [id, await loadLocale(id)])));
+  const en = catalogs.en;
+  assert.equal(en['connect.connected'], 'Configured');
+  assert.match(en['connect.hint'], /checks the selected permissions locally/i);
+  assert.match(en['connect.hint'], /test BrainLink from inside that app/i);
+  assert.match(en['connect.connectedToast'], /added to/);
+  assert.match(en['connect.liveOk'], /BrainLink check passed/);
+  assert.doesNotMatch(en['connect.hint'], /live test call/i);
+  assert.equal(en['agents.statusConnected'], 'BrainLink reached');
+  assert.equal(en['agents.statusNotConnected'], 'Not checked yet');
+  assert.match(en['agents.testSucceeded'], /does not confirm an AI app loaded the connection/i);
+  for (const [id, catalog] of Object.entries(catalogs)) {
+    assert.match(catalog['connect.hint'], /BrainLink/i, `${id} explains the local BrainLink check`);
+    assert.match(catalog['agents.statusConnected'], /BrainLink/i, `${id} describes BrainLink reachability`);
+    assert.match(catalog['agents.testSucceeded'], /BrainLink/i, `${id} distinguishes BrainLink from client loading`);
+  }
+  const agentsUi = await readFile(path.join(ROOT, 'ui', 'agents.js'), 'utf8');
+  assert.match(agentsUi, /const succeeded = \/\^BrainLink access check passed/);
+});
+
 test('setup UI: /locales/<id>.json serves each catalog, /api/locale persists the choice', async () => {
   const { startSetup } = await import('../src/setup.mjs');
   const { mkdtemp } = await import('node:fs/promises');

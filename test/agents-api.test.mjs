@@ -73,7 +73,7 @@ test('/api/agents/rename and /api/agents/remove', async () => {
 
 // ---- Connected only after a verified call ----
 
-test('/api/agents/test: a fresh agent is not connected; a real call with its token connects it', async () => {
+test('/api/agents/test: a fresh agent is unverified until its token passes BrainLink local MCP', async () => {
   const { s, api, apiGet } = await withSampleVault('agents-verify');
   try {
     const added = await api('/api/agents/add', { name: 'Verifier' });
@@ -81,6 +81,9 @@ test('/api/agents/test: a fresh agent is not connected; a real call with its tok
 
     const health = await api('/api/agents/test', { token: added.token });
     assert.equal(health.ok, true, JSON.stringify(health));
+    assert.equal(health.verification, 'brainlink_local_mcp');
+    assert.equal(health.external_client_verified, false);
+    assert.match(health.message, /only checks BrainLink.*does not confirm the AI app loaded its configuration/i);
     assert.equal(health.tool, 'brainlink_guide');
 
     assert.equal((await apiGet('/api/state')).ai_agents[0].connected, true);

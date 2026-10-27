@@ -99,14 +99,17 @@ test('/api/ask and /api/note: no vault configured yet returns a clear error, not
   } finally { s.server.close(); }
 });
 
-// ---- /api/client-health + /api/connect: live MCP call after connect ----
+// ---- /api/client-health + /api/connect: local BrainLink permission check ----
 
-test('/api/client-health: a real in-process MCP call (brainlink_guide) runs and is logged to Activity', async () => {
+test('/api/client-health: local MCP call is logged and clearly does not claim external-client verification', async () => {
   const { home, env, s, api } = await withSampleVault('health');
   try {
     const r = await (await api('/api/client-health', { client: 'cursor' })).json();
     assert.equal(r.ok, true, JSON.stringify(r));
     assert.equal(r.tool, 'brainlink_guide');
+    assert.equal(r.verification, 'brainlink_local_mcp');
+    assert.equal(r.external_client_verified, false);
+    assert.match(r.message, /Restart the AI app.*inside that app/i);
     assert.ok(typeof r.took_ms === 'number');
 
     const log = await readFile(path.join(env.BRAINLINK_HOME, 'activity.log'), 'utf8');
@@ -128,7 +131,7 @@ test('/api/client-health: with no vault yet, reports a friendly message instead 
   } finally { s.server.close(); }
 });
 
-test('/api/connect: one-click connect returns a live health-check result alongside the connect result', async () => {
+test('/api/connect: one-click connect returns a local BrainLink check, not an external client claim', async () => {
   const { home, s, api } = await withSampleVault('connect-health');
   await mkdir(path.join(home, '.cursor'), { recursive: true });
   try {
@@ -136,6 +139,9 @@ test('/api/connect: one-click connect returns a live health-check result alongsi
     assert.match(r.title, /Cursor/);
     assert.equal(r.health.ok, true, JSON.stringify(r.health));
     assert.equal(r.health.tool, 'brainlink_guide');
+    assert.equal(r.health.verification, 'brainlink_local_mcp');
+    assert.equal(r.health.external_client_verified, false);
+    assert.match(r.health.message, /Restart the AI app.*inside that app/i);
   } finally { s.server.close(); }
 });
 
