@@ -9,6 +9,10 @@ Client discovery and runtime probe: Codex CLI `0.164.0-alpha.11.1` made a live B
 
 ## Current working-tree update (2026-10-27)
 
+### Optional scheduled research-source freshness checks
+
+Research discovery can now optionally recheck up to three oldest citations from prior BrainLink public-source discoveries after each manual or scheduled run, but only when the new setting is enabled and the source remains selected. A citation is eligible after 30 days without a check; the exact saved public arXiv ID, DOI, or GitHub repository is queried. The batch writes only fingerprint/status receipts, never edits the proposal, and reports checked/deferred counts with the run. The option is off by default; individual manual checks remain available. Privacy text is translated in all shipped locales. `test/rsi-discovery.test.mjs` passed 24/24, including the scheduled Setup path; `npm run test:ui` passed 29/29. Full core suite has not yet been rerun on this change. This improves citation maintenance only; it does not validate source claims or make RSI autonomous.
+
 ### Chinese support for RSI research relevance
 
 Discovery relevance scoring now tokenizes unspaced Han text into overlapping two-character terms and recognizes explicit Traditional and Simplified Chinese workflow phrases across working, semantic, procedural, and episodic memory. Signals and source metadata still need matching wording; there is no translation or Traditional/Simplified mapping, and this lexical matcher is not semantic relevance. On exact commit `25571f3a3004cd0751b9186be8232483adee17c2`, the complete `npm run test:all` passed: core 426 tests (420 passed, 0 failed, 6 platform/privilege skips), UI 29/29. This supports Chinese-language research metadata when the source and user's signal use matching terms, but does not establish broader retrieval or discovery quality.

@@ -39,7 +39,9 @@ const MAX_EVENTS_KEPT = 20;
 const GITHUB_OWNER = /^[A-Za-z0-9](?:[A-Za-z0-9-]{0,38})$/;
 const GITHUB_REPOSITORY = /^[A-Za-z0-9](?:[A-Za-z0-9_.-]{0,99})$/;
 
-export const DEFAULT_DISCOVERY = Object.freeze({ enabled: false, paused: false, sources: ['arxiv'], topics: [], signals: [], interval_hours: 168, max_new_per_run: 5 });
+export const DEFAULT_DISCOVERY = Object.freeze({ enabled: false, paused: false, refresh_existing: false, sources: ['arxiv'], topics: [], signals: [], interval_hours: 168, max_new_per_run: 5 });
+const SOURCE_REFRESH_AGE_MS = 30 * 24 * 3600e3;
+const SOURCE_REFRESH_LIMIT = 3;
 
 // BrainLink workflow vocabulary: an entry must touch at least one of these to be relevant, and the
 // matched group names the memory type shown to the reviewer.
@@ -87,6 +89,7 @@ export function validateDiscoverySettings(input, previous = DEFAULT_DISCOVERY) {
   if (!input || typeof input !== 'object' || Array.isArray(input)) throw new Error('Discovery settings must be an object.');
   const next = { ...previous };
   if ('enabled' in input) { if (typeof input.enabled !== 'boolean') throw new Error('enabled must be true or false.'); next.enabled = input.enabled; }
+  if ('refresh_existing' in input) { if (typeof input.refresh_existing !== 'boolean') throw new Error('refresh_existing must be true or false.'); next.refresh_existing = input.refresh_existing; }
   if ('topics' in input) next.topics = validateTerms(input.topics, { name: 'topics', max: 5, min: 2, maxLength: 60, pattern: /^[\p{L}\p{N}][\p{L}\p{N} .+-]*$/u });
   if ('signals' in input) next.signals = validateTerms(input.signals, { name: 'signals', max: 8, min: 8, maxLength: 200 });
   if ('interval_hours' in input) {
@@ -101,7 +104,7 @@ export function validateDiscoverySettings(input, previous = DEFAULT_DISCOVERY) {
     if (!Array.isArray(input.sources) || !input.sources.length || input.sources.some(s => !Object.hasOwn(DISCOVERY_SOURCES, s))) throw new Error('sources may contain only built-in discovery sources.');
     next.sources = [...new Set(input.sources)];
   }
-  for (const key of Object.keys(input)) if (!['enabled', 'topics', 'signals', 'interval_hours', 'max_new_per_run', 'sources'].includes(key)) throw new Error(`Unknown discovery setting: ${key}.`);
+  for (const key of Object.keys(input)) if (!['enabled', 'refresh_existing', 'topics', 'signals', 'interval_hours', 'max_new_per_run', 'sources'].includes(key)) throw new Error(`Unknown discovery setting: ${key}.`);
   if (next.enabled && (!next.topics.length || !next.signals.length)) throw new Error('Add at least one topic and one problem statement before turning discovery on.');
   next.paused = previous.paused;
   return next;
@@ -517,6 +520,41 @@ export function createRsiDiscovery({ home, ledger, fetchImpl, lookup, now = () =
     try { return await running; } finally { running = null; }
   }
 
+  async function refreshStaleSources() {
+    const { settings, checks } = await load();
+    if (!settings.enabled || settings.paused || running) return { checked: 0, deferred: 0, skipped: 'inactive' };
+    if (!settings.refresh_existing) return { checked: 0, deferred: 0, skipped: 'disabled' };
+    const latestByIdea = new Map();
+    for (const check of checks) if (check?.idea_id && !latestByIdea.has(check.idea_id)) latestByIdea.set(check.idea_id, check);
+    const cutoff = now().getTime() - SOURCE_REFRESH_AGE_MS;
+    const candidates = (await ledger.list()).flatMap((idea) => {
+      if (idea.origin !== 'discovery' || !settings.sources.includes(idea.discovery?.source)) return [];
+      const source = (idea.fields.sources || []).find((item) => item?.url);
+      if (!source) return [];
+      const lastCheck = latestByIdea.get(idea.id);
+      const lastCheckedAt = Date.parse(lastCheck?.checked_at || source.accessed_at || '');
+      if (!Number.isFinite(lastCheckedAt) || lastCheckedAt > cutoff) return [];
+      return [{ idea, lastCheckedAt }];
+    }).sort((a, b) => a.lastCheckedAt - b.lastCheckedAt);
+    const batch = candidates.slice(0, SOURCE_REFRESH_LIMIT);
+    const report = { checked: 0, deferred: Math.max(0, candidates.length - batch.length), outcomes: { unchanged: 0, changed: 0, not_found: 0, unsafe: 0, unavailable: 0, paused: 0 } };
+    for (const { idea } of batch) {
+      const current = await load();
+      if (!current.settings.enabled || current.settings.paused) { report.deferred += batch.length - report.checked; break; }
+      let check;
+      try { check = await refreshSource(idea.id); }
+      catch { report.outcomes.unavailable++; report.checked++; continue; }
+      report.checked++;
+      report.outcomes[check.status] = (report.outcomes[check.status] || 0) + 1;
+      if (check.status === 'paused') { report.deferred += batch.length - report.checked; break; }
+    }
+    return report;
+  }
+
+  async function attachFreshnessReport(runId, report) {
+    return save((state) => ({ ...state, runs: state.runs.map((run) => run.run_id === runId ? { ...run, source_refresh: report } : run) }));
+  }
+
   return {
     file,
     status: async () => view(await load()),
@@ -529,6 +567,8 @@ export function createRsiDiscovery({ home, ledger, fetchImpl, lookup, now = () =
     resume: async () => view(await save((state) => state.settings.paused ? event({ ...state, settings: { ...state.settings, paused: false } }, 'resumed') : state)),
     run,
     refreshSource,
+    refreshStaleSources,
+    attachFreshnessReport,
     // True when the scheduler should start a run now; a run of either trigger resets the clock.
     due: async () => {
       const { settings, runs } = await load();

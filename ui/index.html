@@ -293,6 +293,7 @@ main #ready, main #ask-panel, main #brain-panel, main #sessions-panel, main #s-c
         <label><span data-i18n="rsi.discovery.signals">Problems you want solved (one per line, up to 8)</span><textarea name="signals" rows="4" maxlength="1700"></textarea></label>
         <div class="grid2"><label><span data-i18n="rsi.discovery.interval">Check every</span><select name="interval_hours"><option value="24" data-i18n="rsi.discovery.daily">Day</option><option value="168" data-i18n="rsi.discovery.weekly">Week</option><option value="336" data-i18n="rsi.discovery.fortnightly">Two weeks</option><option value="720" data-i18n="rsi.discovery.monthly">30 days</option></select></label>
           <label><span data-i18n="rsi.discovery.maxNew">New proposals per run (1-10)</span><input name="max_new_per_run" type="number" min="1" max="10" value="5"></label></div>
+        <label class="muted" style="display:flex;flex-direction:row;gap:6px;align-items:center"><input type="checkbox" name="refresh_existing" style="width:auto"><span data-i18n="rsi.discovery.refreshExisting">Also recheck old saved sources (up to 3 each run)</span></label>
         <p class="muted" data-i18n="rsi.discovery.privacy"></p>
         <div class="row"><button class="primary" type="submit" data-i18n="rsi.discovery.save">Save discovery settings</button>
           <button type="button" id="rsi-discovery-run" data-i18n="rsi.discovery.runNow">Run now</button>
@@ -834,12 +835,13 @@ function renderDiscovery(d) {
   form.elements.signals.value = s.signals.join('\n');
   form.elements.interval_hours.value = String(s.interval_hours);
   form.elements.max_new_per_run.value = String(s.max_new_per_run);
+  form.elements.refresh_existing.checked = Boolean(s.refresh_existing);
   $('rsi-discovery-pause').hidden = s.paused || !s.enabled;
   $('rsi-discovery-resume').hidden = !s.paused;
   $('rsi-discovery-run').disabled = !s.enabled || s.paused || d.running;
   const state = !s.enabled ? 'off' : s.paused ? 'paused' : d.running ? 'running' : 'on';
   $('rsi-discovery-status').textContent = t('rsi.discovery.state.' + state) + ' · ' + t('rsi.discovery.sources', { sources: d.sources.filter(x => s.sources.includes(x.id)).map(x => x.label + ' (' + x.host + ')').join(', ') });
-  $('rsi-discovery-runs').innerHTML = d.runs.map(r => '<li>' + esc(new Date(r.started_at).toLocaleString(LOCALE)) + ' · ' + esc(t('rsi.discovery.trigger.' + r.trigger)) + ' · ' + esc(t('rsi.discovery.run.' + r.status)) + ' · ' + esc(t('rsi.discovery.counts', { fetched: r.fetched, entries: r.entries, created: r.created.length, duplicates: r.duplicates, irrelevant: r.dropped.irrelevant, hostile: r.dropped.secret + r.dropped.instruction_like, invalid: r.dropped.invalid, over: r.dropped.over_limit })) + (r.errors.length ? '<br>' + r.errors.map(esc).join('<br>') : '') + '</li>').join('') || '<li>' + esc(t('rsi.discovery.noRuns')) + '</li>';
+  $('rsi-discovery-runs').innerHTML = d.runs.map(r => '<li>' + esc(new Date(r.started_at).toLocaleString(LOCALE)) + ' · ' + esc(t('rsi.discovery.trigger.' + r.trigger)) + ' · ' + esc(t('rsi.discovery.run.' + r.status)) + ' · ' + esc(t('rsi.discovery.counts', { fetched: r.fetched, entries: r.entries, created: r.created.length, duplicates: r.duplicates, irrelevant: r.dropped.irrelevant, hostile: r.dropped.secret + r.dropped.instruction_like, invalid: r.dropped.invalid, over: r.dropped.over_limit })) + (r.source_refresh ? ' · ' + esc(t('rsi.discovery.refreshSummary', { checked: r.source_refresh.checked, deferred: r.source_refresh.deferred })) : '') + (r.errors.length ? '<br>' + r.errors.map(esc).join('<br>') : '') + '</li>').join('') || '<li>' + esc(t('rsi.discovery.noRuns')) + '</li>';
 }
 function renderObservationReport(report) {
   const percent = value => Number.isFinite(value) ? Math.round(value * 100) + '%' : t('rsi.observe.noRate');
@@ -878,7 +880,7 @@ const rsiLines = (value) => String(value || '').split(/\r?\n/).map(x => x.trim()
 $('rsi-discovery-form').addEventListener('submit', (e) => act(async () => {
   e.preventDefault();
   const f = e.currentTarget.elements;
-  renderDiscovery((await api('POST', '/api/rsi/discovery/settings', { enabled: f.enabled.checked, sources: [...f.querySelectorAll('input[name="sources"]:checked')].map(x => x.value), topics: rsiLines(f.topics.value), signals: rsiLines(f.signals.value), interval_hours: Number(f.interval_hours.value), max_new_per_run: Number(f.max_new_per_run.value) })).discovery);
+  renderDiscovery((await api('POST', '/api/rsi/discovery/settings', { enabled: f.enabled.checked, refresh_existing: f.refresh_existing.checked, sources: [...f.querySelectorAll('input[name="sources"]:checked')].map(x => x.value), topics: rsiLines(f.topics.value), signals: rsiLines(f.signals.value), interval_hours: Number(f.interval_hours.value), max_new_per_run: Number(f.max_new_per_run.value) })).discovery);
   toast(t('rsi.discovery.saved'));
 }));
 $('rsi-discovery-pause').addEventListener('click', () => act(async () => { renderDiscovery((await api('POST', '/api/rsi/discovery/pause')).discovery); toast(t('rsi.discovery.pausedToast')); }));

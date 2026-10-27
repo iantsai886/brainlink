@@ -61,11 +61,11 @@ function recordingFetch(body, calls = []) {
   impl.calls = calls;
   return impl;
 }
-async function service(feed, { lookup = publicLookup, home, fetchImpl: injectedFetch } = {}) {
+async function service(feed, { lookup = publicLookup, home, fetchImpl: injectedFetch, now } = {}) {
   home ||= await temp('svc');
   const ledger = createRsiLedger({ home });
   const fetchImpl = injectedFetch || recordingFetch(feed);
-  const discovery = createRsiDiscovery({ home, ledger, fetchImpl, lookup });
+  const discovery = createRsiDiscovery({ home, ledger, fetchImpl, lookup, now });
   return { home, ledger, discovery, fetchImpl };
 }
 
@@ -89,6 +89,8 @@ test('discovery settings reject URLs, secrets, unknown keys, odd topic syntax an
   assert.throws(() => validateDiscoverySettings({ sources: ['https://example.org'] }), /built-in/);
   assert.deepEqual(validateDiscoverySettings({ ...settings, sources: ['crossref'] }).sources, ['crossref']);
   assert.deepEqual(validateDiscoverySettings({ ...settings, sources: ['github'] }).sources, ['github']);
+  assert.equal(validateDiscoverySettings({ ...settings, refresh_existing: true }).refresh_existing, true);
+  assert.throws(() => validateDiscoverySettings({ refresh_existing: 'yes' }), /refresh_existing/);
   assert.throws(() => validateDiscoverySettings({ ...settings, sources: [] }), /built-in/);
   assert.throws(() => validateDiscoverySettings({ interval_hours: 1 }), /24 to 720/);
   assert.throws(() => validateDiscoverySettings({ max_new_per_run: 500 }), /1 to 10/);
@@ -353,6 +355,36 @@ test('source freshness checks use only the stored DOI, append status fingerprint
   assert.doesNotMatch(JSON.stringify(await discovery.status()), /Compact agent handoff memory|repeated retrieval searches/);
 });
 
+test('opt-in source refresh checks only old selected-source proposals, is capped at three, and does not rewrite ideas', async () => {
+  let clock = new Date('2026-10-27T00:00:00Z');
+  const feed = atom(
+    entry({ id: '2610.00011', title: 'Agent handoff records preserve project context', summary: 'Agents resume a handoff without repeating retrieval searches in shared memory.' }),
+    entry({ id: '2610.00012', title: 'Retrieval indexes link knowledge notes for assistants', summary: 'Agents retrieve source-linked context after handoffs instead of repeating searches.' }),
+    entry({ id: '2610.00013', title: 'Procedural agent skills guide safe tool use', summary: 'Agents transfer workflow context across handoffs and avoid repeated retrieval searches.' }),
+    entry({ id: '2610.00014', title: 'Episodic session memory tracks task outcomes', summary: 'Agents resume prior work after handoffs without repeating retrieval searches.' }),
+  );
+  const { discovery, fetchImpl, ledger } = await service(feed, { now: () => new Date(clock) });
+  await discovery.configure({ ...settings, enabled: true, refresh_existing: true });
+  const run = await discovery.run();
+  assert.equal(run.created.length, 4);
+  clock = new Date('2026-12-01T00:00:00Z');
+  const before = await ledger.list();
+  const report = await discovery.refreshStaleSources();
+  assert.equal(report.checked, 3);
+  assert.equal(report.deferred, 1);
+  assert.equal(report.outcomes.unchanged, 3);
+  assert.equal(fetchImpl.calls.length, 4, 'one initial search plus only three exact source lookups');
+  const after = await ledger.list();
+  assert.deepEqual(after.map(row => [row.id, row.revision, row.status, row.fields]), before.map(row => [row.id, row.revision, row.status, row.fields]), 'freshness checks never rewrite proposals');
+  const nextBatch = await discovery.refreshStaleSources();
+  assert.equal(nextBatch.checked, 1, 'the oldest item waits for the next scheduled run after the three-item cap');
+  assert.equal(nextBatch.deferred, 0);
+  assert.equal(fetchImpl.calls.length, 5);
+  assert.equal((await discovery.refreshStaleSources()).checked, 0, 'recent checks are not repeated');
+  await discovery.configure({ sources: ['crossref'] });
+  assert.equal((await discovery.refreshStaleSources()).checked, 0, 'sources no longer selected are not queried');
+});
+
 test('discovery deduplicates against existing proposals, within a run, and across runs, and honours the run limit', async () => {
   const feed = atom(
     entry({ id: '2610.00001v2' }),
@@ -498,6 +530,33 @@ test('Setup exposes discovery only through authenticated local APIs and runs the
   } finally { app.server.close(); }
 });
 
+test('scheduled Setup research rechecks an opted-in stale citation and records a summary receipt', async () => {
+  const home = await temp('scheduled-source-refresh');
+  const appHome = path.join(home, 'app');
+  const env = { BRAINLINK_HOME: appHome, BRAINLINK_SEMANTIC: '0' };
+  const oldNow = new Date(Date.now() - 60 * 24 * 3600e3);
+  const ledger = createRsiLedger({ home: appHome, now: () => new Date(oldNow) });
+  const seed = createRsiDiscovery({ home: appHome, ledger, fetchImpl: recordingFetch(atom(entry())), lookup: publicLookup, now: () => new Date(oldNow) });
+  await seed.configure({ ...settings, enabled: true, refresh_existing: true });
+  await seed.run();
+  const calls = [];
+  const app = await startSetup({ env, home, os: 'linux', port: 0, useCli: false, discoveryFetch: recordingFetch(atom(entry()), calls), discoveryLookup: publicLookup, discoveryTickMs: 20 });
+  const base = 'http://127.0.0.1:' + app.port;
+  try {
+    let result = null;
+    for (let attempt = 0; attempt < 100 && !result; attempt++) {
+      const status = await fetch(base + '/api/rsi/discovery', { headers: { 'X-BrainLink-Token': app.token } }).then(response => response.json());
+      if (status.discovery.runs[0]?.trigger === 'schedule' && status.discovery.runs[0]?.source_refresh) result = status.discovery;
+      else await delay(25);
+    }
+    assert.ok(result, 'scheduled run completes and refreshes old citation metadata');
+    assert.equal(result.runs[0].source_refresh.checked, 1);
+    assert.equal(result.runs[0].source_refresh.outcomes.unchanged, 1);
+    assert.equal(result.checks[0].status, 'unchanged');
+    assert.equal(calls.length, 2, 'one search plus one exact citation refresh');
+  } finally { app.server.close(); }
+});
+
 test('enabled discovery keeps the desktop process alive through its idle timeout; pausing restores it', async () => {
   const home = await temp('idle-policy'), env = { BRAINLINK_HOME: path.join(home, 'app'), BRAINLINK_SEMANTIC: '0' };
   let app, quitCalled = false;
@@ -544,6 +603,8 @@ test('RSI discovery UI has one form, selectable fixed sources, unique controls, 
   assert.match(html, /brainlink-rsi-review-/, 'export filename is recognizable and dated');
   for (const id of ['rsi-discovery', 'rsi-discovery-form', 'rsi-discovery-sources', 'rsi-discovery-run', 'rsi-discovery-pause', 'rsi-discovery-resume', 'rsi-discovery-runs', 'rsi-discovery-status']) assert.equal((html.match(new RegExp(`id="${id}"`, 'g')) || []).length, 1, id);
   assert.match(html, /data-rsi-refresh/);
+  assert.match(html, /name="refresh_existing"/);
+  assert.match(html, /refresh_existing: f\.refresh_existing\.checked/);
   assert.match(html, /sources: \[\.\.\.f\.querySelectorAll\('input\[name="sources"\]:checked'\)\]/);
   assert.doesNotMatch(html.match(/<form id="rsi-discovery-form"[\s\S]*?<\/form>/)[0], /type="url"|name="[^"]*url/i, 'discovery offers no URL field');
   const keys = [...html.matchAll(/t\('(rsi\.discovery\.[\w.]+)'/g), ...html.matchAll(/data-i18n="(rsi\.discovery\.[\w.]+)"/g)].map(m => m[1]).filter(key => !key.endsWith('.'));
@@ -552,6 +613,6 @@ test('RSI discovery UI has one form, selectable fixed sources, unique controls, 
     assert.ok(catalog['rsi.export']);
     assert.ok(catalog['rsi.exported']);
     for (const key of keys) assert.ok(catalog[key], `${locale} ${key}`);
-    for (const key of ['sourceLabel', 'freshness.label', 'freshness.never', 'freshness.check', 'freshness.checked', 'freshness.unchanged', 'freshness.changed', 'freshness.not_found', 'freshness.unsafe', 'freshness.unavailable', 'freshness.paused', 'state.off', 'state.paused', 'state.running', 'state.on', 'trigger.manual', 'trigger.schedule', 'run.ok', 'run.partial', 'run.failed', 'run.paused']) assert.ok(catalog['rsi.discovery.' + key], `${locale} ${key}`);
+    for (const key of ['sourceLabel', 'refreshExisting', 'refreshSummary', 'freshness.label', 'freshness.never', 'freshness.check', 'freshness.checked', 'freshness.unchanged', 'freshness.changed', 'freshness.not_found', 'freshness.unsafe', 'freshness.unavailable', 'freshness.paused', 'state.off', 'state.paused', 'state.running', 'state.on', 'trigger.manual', 'trigger.schedule', 'run.ok', 'run.partial', 'run.failed', 'run.paused']) assert.ok(catalog['rsi.discovery.' + key], `${locale} ${key}`);
   }
 });

@@ -632,13 +632,22 @@ export async function startSetup(opts = {}) {
     snapshotWatcher = startSnapshotWatcher(ctx, cfg, env, { onResult: (r) => saveSnapshotStatus(snapshotStateFile, r).catch(() => {}) });
     await snapshotWatcher.ready;
   }
+  async function runDiscovery(trigger) {
+    const run = await rsiDiscovery.run({ trigger });
+    const { settings } = await rsiDiscovery.status();
+    if (settings.refresh_existing && run.status !== 'paused') {
+      run.source_refresh = await rsiDiscovery.refreshStaleSources();
+      await rsiDiscovery.attachFreshnessReport(run.run_id, run.source_refresh);
+    }
+    return run;
+  }
   // One cheap timer checks whether a scheduled discovery run is due. Enabled, unpaused discovery
   // disables the ordinary idle timeout; pausing or disabling it restores the normal app lifecycle.
   let discoveryTickRunning = false;
   const discoveryTimer = setInterval(async () => {
     if (discoveryTickRunning) return;
     discoveryTickRunning = true;
-    try { if (await rsiDiscovery.due()) await rsiDiscovery.run({ trigger: 'schedule' }); }
+    try { if (await rsiDiscovery.due()) await runDiscovery('schedule'); }
     catch { /* run() records its own receipt; settings errors are shown in Setup */ }
     finally { discoveryTickRunning = false; }
   }, opts.discoveryTickMs ?? 15 * 60e3);
@@ -927,7 +936,7 @@ export async function startSetup(opts = {}) {
     'POST /api/rsi/discovery/settings': async (b) => { const discovery = await rsiDiscovery.configure(b); refreshDiscoveryIdlePolicy(discovery); return { discovery }; },
     'POST /api/rsi/discovery/pause': async () => { const discovery = await rsiDiscovery.pause(); refreshDiscoveryIdlePolicy(discovery); return { discovery }; },
     'POST /api/rsi/discovery/resume': async () => { const discovery = await rsiDiscovery.resume(); refreshDiscoveryIdlePolicy(discovery); return { discovery }; },
-    'POST /api/rsi/discovery/run': async () => ({ run: await rsiDiscovery.run({ trigger: 'manual' }), discovery: await rsiDiscovery.status() }),
+    'POST /api/rsi/discovery/run': async () => ({ run: await runDiscovery('manual'), discovery: await rsiDiscovery.status() }),
     'POST /api/rsi/discovery/refresh-source': async (b) => ({ check: await rsiDiscovery.refreshSource(b.idea_id), discovery: await rsiDiscovery.status() }),
     'POST /api/pick-folder': async () => { const p = await pick(); return p === undefined ? { path: null, unavailable: true } : { path: p }; },
     'POST /api/quick': (b) => quickStart(b),
