@@ -41,6 +41,7 @@ test('every native installer bundles all production dependencies and portable Br
   const macZipTest = await read('packaging/macos/test-zip.sh');
   assert.match(macZipTest, /app\/node_modules\/yaml\/dist\/index\.js/, 'the macOS package smoke test must check a loadable YAML runtime');
   assert.match(macZipTest, /app\/skills\/brainlink-session-closeout\/SKILL\.md/, 'the macOS package smoke test must check a shipped skill');
+  assert.match(macZipTest, /app\/skills\/brainlink-graph-curation\/SKILL\.md/, 'the macOS package smoke test must check the graph-curation skill');
 
   const workflow = await read('.github/workflows/ci.yml');
   const packageJobs = ['windows-package:', 'macos-package:', 'linux-package:'];
@@ -55,6 +56,7 @@ test('every native installer bundles all production dependencies and portable Br
     const job = workflow.slice(jobStart, nextJob === -1 ? undefined : nextJob);
     assert.match(job, /npm ci --omit=dev/, `${jobName} must install production runtime dependencies before building`);
     assert.match(job, /skills\/brainlink-session-closeout\/SKILL\.md/, `${jobName} must smoke-test the packaged Agent Skill`);
+    assert.match(job, /skills\/brainlink-graph-curation\/SKILL\.md/, `${jobName} must smoke-test the packaged graph-curation skill`);
     assert.match(job, /connectors\.mjs/, `${jobName} must smoke-test the packaged YAML connector runtime`);
   }
   assert.match(workflow, /Install, run and uninstall Windows package/, 'Windows CI must exercise install and uninstall');

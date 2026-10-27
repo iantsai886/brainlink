@@ -65,6 +65,7 @@ jobs:
           $version = & $node $app --version
           if ($version -ne (Get-Content package.json | ConvertFrom-Json).version) { throw "Staged runtime failed: $version" }
           if (-not (Test-Path (Join-Path $appRoot 'skills/brainlink-session-closeout/SKILL.md'))) { throw 'Staged portable skill is missing' }
+          if (-not (Test-Path (Join-Path $appRoot 'skills/brainlink-graph-curation/SKILL.md'))) { throw 'Staged graph-curation skill is missing' }
           Push-Location $appRoot
           try { & $node --input-type=module -e "await import('./src/connectors.mjs')"; if ($LASTEXITCODE -ne 0) { throw 'Staged connector could not load its YAML runtime' } }
           finally { Pop-Location }
@@ -133,6 +134,7 @@ jobs:
           test "$("$resources/node/bin/node" "$app" --version)" = "$(node -p "require('./package.json').version")"
           app_root="${app%/bin/brainlink.mjs}"
           test -f "$app_root/skills/brainlink-session-closeout/SKILL.md"
+          test -f "$app_root/skills/brainlink-graph-curation/SKILL.md"
           (cd "$app_root" && "$resources/node/bin/node" --input-type=module -e "await import('./src/connectors.mjs')")
 
       - name: Install and smoke-test macOS package
@@ -141,6 +143,7 @@ jobs:
           sudo installer -allowUntrusted -pkg "dist/BrainLink-$version.pkg" -target /
           test "$(/usr/local/bin/brainlink --version)" = "$version"
           test -f "/Applications/BrainLink.app/Contents/Resources/app/skills/brainlink-session-closeout/SKILL.md"
+          test -f "/Applications/BrainLink.app/Contents/Resources/app/skills/brainlink-graph-curation/SKILL.md"
           "/Applications/BrainLink.app/Contents/Resources/node/bin/node" --input-type=module -e "await import('/Applications/BrainLink.app/Contents/Resources/app/src/connectors.mjs')"
 
       - name: Remove macOS smoke-test installation
@@ -177,6 +180,7 @@ jobs:
           sudo dpkg -i dist/brainlink_*_amd64.deb
           test "$(brainlink --version)" = "$(node -p "require('./package.json').version")"
           test -f /opt/brainlink/app/skills/brainlink-session-closeout/SKILL.md
+          test -f /opt/brainlink/app/skills/brainlink-graph-curation/SKILL.md
           /opt/brainlink/node/bin/node --input-type=module -e "await import('/opt/brainlink/app/src/connectors.mjs')"
           mkdir -p "$RUNNER_TEMP/brainlink-smoke-vault"
           BRAINLINK_HOME="$RUNNER_TEMP/brainlink-smoke-home" brainlink init --vault "$RUNNER_TEMP/brainlink-smoke-vault" --name Smoke
