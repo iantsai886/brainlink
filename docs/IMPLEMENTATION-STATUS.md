@@ -10,6 +10,10 @@ Latest full-suite verification: source commit `476d636cb7d5b5a65d161f782aae7f213
 
 On Windows with Node.js 24.22.1, `npm run test:all` passed with the daily-default RSI discovery and explicit sign-in startup shortcut changes in the working tree: core 483 total (477 passed, 0 failed, 6 platform/privilege skips); UI 29/29. The focused RSI/startup/locale run passed 38/38. New installations use daily discovery intervals after the user opts in; discovery remains off by default. An explicit button exposes the existing quiet sign-in launcher. Scheduled research still runs only while BrainLink is running and unpaused; it is not an always-on service. Existing saved intervals remain unchanged. This is local automated verification; hosted CI, real user install acceptance, and live external AI-client validation remain unverified.
 
+### Windows installer built from RSI background scheduling source (2026-10-28)
+
+Built `dist/BrainLink-Setup-1.2.8.exe` from commit `ef851d64834d52722e8d3a42b7710ef4a81f646c` with Inno Setup 6.7.3 and bundled Node.js 24.22.1. SHA-256: `4150AED3820DD713A8414359A166C2CBB11C8D04B899B410A0A11328318F86E9`. Staged RSI module, UI and English/Traditional Chinese locale hashes match source; UI development tests are absent. Authenticode status is `NotSigned`. The installer was built and inspected, not installed; desktop sign-in acceptance, code signing, hosted builds and customer release readiness remain unverified.
+
 ### Full regression verification after deterministic scheduled-scan retry test (2026-10-28)
 
 On Windows with Node.js 24.22.1, `npm run test:all` passed on commit `476d636cb7d5b5a65d161f782aae7f213d680a2e`: core 483 total (477 passed, 0 failed, 6 platform/privilege skips); UI 29/29. The six skips require Linux behavior or Windows symlink privileges unavailable here. The run includes the deterministic scheduled-scan retry fixture, privacy and Twin isolation, graph review, backups, RSI, and connectors. This is local automated evidence only; hosted CI, live Claude-to-Codex handoff, live Ollama, installed-user acceptance, signing and customer release readiness remain unverified.
