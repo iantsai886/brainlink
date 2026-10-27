@@ -1,6 +1,6 @@
 # BrainLink implementation status
 
-Status snapshot: 2026-10-27 (Asia/Taipei), clean working tree at commit `15c74172038e77f026ca174e9758e184ec2005d9`.
+Status snapshot: 2026-10-27 (Asia/Taipei), clean working tree at commit `039322d3a78e23a5f544debdf956cacd9d15e2b7`.
 GitHub repository: `iantsai886/brainlink`
 Branch: `integration/brainlink-retrieval-evaluation` (integrates profile-scoped GitHub, RSI discovery, and independent retrieval evaluation)
 Code baseline: development target `1.2.8`, with `package.json` as the canonical version source. The `v1.2.7` tag belongs to the separate `wip/v1.2.7` release line; this branch continues from the full-source `main` history and does not move or recreate that tag.
@@ -413,8 +413,8 @@ Imported Claude Code and Codex summaries now preserve the first user goal, the l
 
 ### Cancel idle shutdown when Setup receives new activity (2026-10-27)
 
-Fixed an idle-exit race: a request arriving during the 100 ms shutdown grace period now cancels the pending close, as well as restarting the idle timer. Added a regression test that waits until the grace period, sends a health request, verifies the server stays available, and then verifies normal idle exit resumes. RSI discovery lifecycle file passed 20/20; the two idle lifecycle checks also passed in three repeated runs (6/6); `git diff --check` passed. Full suite verification after this fix is pending.
+Fixed an idle-exit race: a request arriving during the 100 ms shutdown grace period now cancels the pending close, as well as restarting the idle timer. Added a regression test that waits until the grace period, sends a health request, verifies the server stays available, and then verifies normal idle exit resumes. RSI discovery lifecycle file passed 20/20; the two idle lifecycle checks also passed in three repeated runs (6/6); `git diff --check` passed. The subsequent full Windows suite passed on commit `15c7417` (core 418 passed, 0 failed, 6 platform/privilege skips; UI 29/29); see the latest full-suite receipt above.
 
 Full Windows verification attempt on `e68baf6`: core 422 tests (415 passed, 1 failed, 6 platform/privilege skips); the idle-exit regression passed in the full run. The single failure was the synthetic RSI monitoring evidence secret scan; `test/rsi-ledger.test.mjs` passed 9/9 when rerun alone. UI suite passed 29/29. The failure cause has not been established, so the full suite is not marked clean.
 
-The intermittent monitoring check was traced to the generated `monitoring_id`: its date and random hexadecimal suffix could look like a card/account number to the privacy scanner when the suffix began with enough digits. The ID now inserts a fixed letter between those parts; the scanner continues checking all submitted evidence. Focused repetition and the next full-suite run are pending.
+The intermittent monitoring check was traced to the generated `monitoring_id`: its date and random hexadecimal suffix could look like a card/account number to the privacy scanner when the suffix began with enough digits. The ID now inserts a fixed letter between those parts; the scanner continues checking all submitted evidence. The subsequent full Windows suite passed on commit `15c7417` (core 418 passed, 0 failed, 6 platform/privilege skips; UI 29/29); see the latest full-suite receipt above.
