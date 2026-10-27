@@ -55,10 +55,12 @@ export function canonicalSourceUrl(raw) {
 }
 
 const DISCOVERY_KEYS = ['run_id', 'method_version', 'source', 'topic', 'signal', 'matched_terms', 'workflow_terms', 'score'];
+const OPTIONAL_DISCOVERY_KEYS = ['topic_matched_terms'];
 function validateDiscovery(input) {
   if (!input || typeof input !== 'object' || Array.isArray(input)) throw new Error('Discovery provenance must be an object.');
   const out = {};
-  for (const key of DISCOVERY_KEYS) {
+  for (const key of [...DISCOVERY_KEYS, ...OPTIONAL_DISCOVERY_KEYS]) {
+    if (OPTIONAL_DISCOVERY_KEYS.includes(key) && !(key in input)) continue;
     const value = input[key];
     if (key === 'score') { if (!Number.isInteger(value) || value < 0 || value > 100) throw new Error('Discovery score must be an integer from 0 to 100.'); out.score = value; }
     else if (key === 'method_version') {

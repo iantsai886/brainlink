@@ -393,7 +393,7 @@ function candidateFor(entry, relevance, { runId, sourceId, topic, accessedAt }) 
       }],
       privacy_scope: 'Public research metadata only. Only the configured topic terms were sent to the source.',
     },
-    discovery: { run_id: runId, method_version: DISCOVERY_METHOD_VERSION, source: sourceId, topic, signal: relevance.signal, matched_terms: relevance.matched_terms, workflow_terms: relevance.workflow_terms, score: relevance.score },
+    discovery: { run_id: runId, method_version: DISCOVERY_METHOD_VERSION, source: sourceId, topic, topic_matched_terms: relevance.topic_matched_terms, signal: relevance.signal, matched_terms: relevance.matched_terms, workflow_terms: relevance.workflow_terms, score: relevance.score },
   };
 }
 

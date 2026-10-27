@@ -253,6 +253,7 @@ test('a run files relevant entries as discovered proposals with full provenance 
   assert.equal(idea.discovery.method_version, 'lexical-topic-gate-v2');
   assert.equal(idea.discovery.source, 'arxiv');
   assert.equal(idea.discovery.topic, 'agent memory');
+  assert.deepEqual(idea.discovery.topic_matched_terms, ['agent', 'memory']);
   assert.equal(idea.discovery.signal, SIGNAL);
   assert.equal(idea.fields.user_problem, SIGNAL);
   assert.equal(idea.fields.hypothesis, '', 'discovery never invents a hypothesis');
@@ -642,6 +643,7 @@ test('RSI discovery UI has one form, selectable fixed sources, unique controls, 
   assert.match(html, /data-rsi-refresh/);
   assert.match(html, /name="refresh_existing"/);
   assert.match(html, /refresh_existing: f\.refresh_existing\.checked/);
+  assert.match(html, /d\.topic_matched_terms/);
   assert.match(html, /sources: \[\.\.\.f\.querySelectorAll\('input\[name="sources"\]:checked'\)\]/);
   assert.doesNotMatch(html.match(/<form id="rsi-discovery-form"[\s\S]*?<\/form>/)[0], /type="url"|name="[^"]*url/i, 'discovery offers no URL field');
   const keys = [...html.matchAll(/t\('(rsi\.discovery\.[\w.]+)'/g), ...html.matchAll(/data-i18n="(rsi\.discovery\.[\w.]+)"/g)].map(m => m[1]).filter(key => !key.endsWith('.'));
