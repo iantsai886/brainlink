@@ -53,6 +53,10 @@ From source commit `f44b96f`, `packaging/windows/build-windows.ps1` compiled suc
 
 ## Current working-tree update (2026-10-27)
 
+### Existing-folder picker for source scans
+
+Setup now lets a user choose a scan folder from existing directories in the selected public vault instead of typing a path. The authenticated list excludes the vault root, private vaults, hidden/protected/excluded folders, and symlink traversal by reusing BrainLink's bounded safe-folder listing. Vault switching refreshes the options and retains an existing configured choice only when it remains available. On commit `48b68e9c137f3f5b4addd9325ed700de48aaeea7`, `test/ingestion-schedule.test.mjs` passed 4/4 and `npm run test:ui` passed 29/29; `node --check src/setup.mjs` and `git diff --check` passed. This simplifies local Setup; the UI has not yet had installed-app user acceptance.
+
 ### Install DeepSeek Harness Skills through named profiles
 
 BrainLink Skills can now be installed when the user connected DeepSeek Harness through named profiles only. The Skills remain shared in Harness's user-level `skills` folder, while MCP tokens and vault access stay isolated per profile. Setup now accepts an active `deepseek-harness@<profile>` connection as the connection gate for installing the generic Harness Skills; it does not create or widen any profile grant. The setup integration test uses a fictional named profile, verifies the separate profile connection and shared Skills install/remove flow, and still rejects installs for disconnected clients. Focused Windows validation: `node --import ./test/_preload.mjs --test test/agent-skills.test.mjs` passed 8/8; related connector and skill tests passed 38/38. Full Windows validation on source commit `51e0acb`: core 444 tests (438 passed, 0 failed, 6 platform/privilege skips) and UI 29/29. Live Harness Skills discovery and tool access remain unverified.
