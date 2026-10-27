@@ -194,7 +194,20 @@ export async function startSetup(opts = {}) {
   const rsiDiscovery = createRsiDiscovery({ home: appHome(env), ledger: rsiLedger, fetchImpl: opts.discoveryFetch, lookup: opts.discoveryLookup });
   const initialDiscoveryStatus = await rsiDiscovery.status().catch(() => null);
   let discoveryKeepsAlive = Boolean(initialDiscoveryStatus?.settings.enabled && !initialDiscoveryStatus.settings.paused);
-  const rsiObservationSchedule = createRsiObservationSchedule({ home: appHome(env), readEntries: () => readActivity(env, 20000) });
+  const rsiObservationSchedule = createRsiObservationSchedule({
+    home: appHome(env), readEntries: () => readActivity(env, 20000),
+    readVaultHealth: async (name) => {
+      const cfg = await loadConfig(file);
+      const vault = cfg.vaults.find((item) => item.name === name);
+      if (!vault || !await stat(vault.path).then((result) => result.isDirectory(), () => false)) throw new Error('The selected vault is no longer available.');
+      const ctx = localContext(cfg, { ...env, BRAINLINK_VAULTS: name });
+      const health = await vaultHealth(ctx, name);
+      return {
+        notes: health.notes, links: health.links, orphan_count: health.orphan_count, broken_count: health.broken_count,
+        duplicate_title_count: health.duplicate_title_count, stale_active_count: health.stale_active_count,
+      };
+    },
+  });
   const initialObservationStatus = await rsiObservationSchedule.status().catch(() => null);
   let observationKeepsAlive = Boolean(initialObservationStatus?.settings.enabled);
   const html = await readFile(path.join(ROOT, 'ui', 'index.html'), 'utf8');
@@ -940,6 +953,11 @@ export async function startSetup(opts = {}) {
     'GET /api/rsi': async () => ({ ideas: await rsiLedger.list() }),
     'GET /api/rsi/observations': async () => ({ observations: await rsiObservationSchedule.status() }),
     'POST /api/rsi/observations/settings': async (b) => {
+      if (b?.vault_health_enabled === true) {
+        const cfg = await loadConfig(file);
+        const selected = cfg.vaults.find((vault) => vault.name === b.vault_health_vault);
+        if (!selected || !await stat(selected.path).then((result) => result.isDirectory(), () => false)) throw new Error('Choose one available vault for link-health checks. The selected vault stays local and is not combined with another vault.');
+      }
       let observations = await rsiObservationSchedule.configure(b);
       refreshObservationIdlePolicy(observations);
       // Give an enabled schedule its first observation promptly, then use the regular timer.

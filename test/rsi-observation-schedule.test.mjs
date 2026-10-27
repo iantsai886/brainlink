@@ -14,7 +14,7 @@ test('scheduled RSI observation is off by default and only stores aggregate, con
   ];
   const service = createRsiObservationSchedule({ home, now: () => now, readEntries: async () => entries });
   const initial = await service.status();
-  assert.deepEqual(initial.settings, { enabled: false, interval_hours: 168 });
+  assert.deepEqual(initial.settings, { enabled: false, interval_hours: 168, vault_health_enabled: false, vault_health_vault: '' });
   assert.equal(initial.report, null);
   assert.equal(await service.due(), false);
 
@@ -37,11 +37,42 @@ test('scheduled RSI observation is off by default and only stores aggregate, con
 });
 
 test('RSI observation settings accept only explicit opt-in and supported intervals', () => {
-  assert.deepEqual(validateObservationSettings({}), { enabled: false, interval_hours: 168 });
-  assert.deepEqual(validateObservationSettings({ enabled: true, interval_hours: 720 }), { enabled: true, interval_hours: 720 });
-  for (const invalid of [{ enabled: 1 }, { interval_hours: 23 }, { interval_hours: 48 }, { url: 'https://example.com' }]) {
+  assert.deepEqual(validateObservationSettings({}), { enabled: false, interval_hours: 168, vault_health_enabled: false, vault_health_vault: '' });
+  assert.deepEqual(validateObservationSettings({ enabled: true, interval_hours: 720 }), { enabled: true, interval_hours: 720, vault_health_enabled: false, vault_health_vault: '' });
+  assert.deepEqual(validateObservationSettings({ vault_health_enabled: true, vault_health_vault: 'Personal' }), { enabled: false, interval_hours: 168, vault_health_enabled: true, vault_health_vault: 'Personal' });
+  for (const invalid of [{ enabled: 1 }, { interval_hours: 23 }, { interval_hours: 48 }, { url: 'https://example.com' }, { vault_health_enabled: true }, { vault_health_enabled: 'true', vault_health_vault: 'Personal' }]) {
     assert.throws(() => validateObservationSettings(invalid));
   }
+});
+
+test('optional health snapshots are per-vault, local aggregates and compare only with the same vault', async (t) => {
+  const home = await mkdtemp(path.join(os.tmpdir(), 'brainlink-rsi-vault-health-'));
+  t.after(() => rm(home, { recursive: true, force: true }));
+  let now = new Date('2026-10-27T12:00:00.000Z');
+  let snapshot = { notes: 10, links: 8, orphan_count: 4, broken_count: 2, duplicate_title_count: 1, stale_active_count: 3, path: 'PRIVATE_PATH_CANARY', text: 'PRIVATE_NOTE_CANARY' };
+  let selected = [];
+  const service = createRsiObservationSchedule({
+    home, now: () => now, readEntries: async () => [],
+    readVaultHealth: async (vault) => { selected.push(vault); return snapshot; },
+  });
+  await service.configure({ vault_health_enabled: true, vault_health_vault: 'Personal' });
+  const first = await service.run('manual');
+  assert.equal(first.report.vault_health.comparison.signal, 'baseline_unavailable');
+  assert.equal(first.report.privacy.vault_health_content_read_locally, true);
+  assert.equal(first.report.privacy.vault_health_content_persisted, false);
+  assert.equal(JSON.stringify(first).includes('PRIVATE_PATH_CANARY'), false);
+  assert.equal(JSON.stringify(first).includes('PRIVATE_NOTE_CANARY'), false);
+  snapshot = { ...snapshot, links: 10, orphan_count: 2, broken_count: 0 };
+  now = new Date(now.getTime() + 24 * 3600e3);
+  const second = await service.run('schedule');
+  assert.equal(second.report.vault_health.comparison.signal, 'improved');
+  assert.deepEqual(selected, ['Personal', 'Personal']);
+  const saved = await readFile(service.file, 'utf8');
+  assert.doesNotMatch(saved, /PRIVATE_(?:PATH|NOTE)_CANARY/);
+  const reopened = createRsiObservationSchedule({ home, now: () => now, readEntries: async () => [], readVaultHealth: async (vault) => ({ ...snapshot, vault }) });
+  await reopened.configure({ vault_health_vault: 'Organisation' });
+  const newScope = await reopened.run('manual');
+  assert.equal(newScope.report.vault_health.comparison.signal, 'baseline_unavailable');
 });
 
 test('scheduled RSI observation fails closed on an unreadable persistent record', async (t) => {

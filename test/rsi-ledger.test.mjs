@@ -6,6 +6,7 @@ import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { createRsiLedger } from '../src/rsi-ledger.mjs';
 import { findSecrets } from '../src/core.mjs';
+import { normalize, saveConfig } from '../src/config.mjs';
 import { startSetup } from '../src/setup.mjs';
 import { logActivity } from '../src/runtime.mjs';
 
@@ -208,6 +209,12 @@ test('RSI Setup panel has unique ids and one render/submit path', async () => {
   assert.match(html, /data-rsi-rollback-submit/);
   assert.match(html, /\/api\/rsi\/ideas\/rollback/);
   assert.match(html, /id="rsi-observe-run"/);
+  assert.match(html, /name="vault_health_enabled"/);
+  assert.match(html, /name="vault_health_vault"/);
+  assert.match(html, /filter\(vault => vault\.exists\)/);
+  assert.match(html, /rsi\.observe\.vaultHealthSummary/);
+  assert.match(html, /esc\(t\('rsi\.observe\.vaultHealthSummary'/);
+  assert.match(html, /vault_health_vault: form\.elements\.vault_health_vault\.value/);
   assert.match(html, /\/api\/rsi\/observations\/run/);
   assert.match(html, /current_result_tokens/);
   assert.match(html, /rsi\.observe\.resultSize/);
@@ -218,7 +225,7 @@ test('RSI Setup panel has unique ids and one render/submit path', async () => {
     const catalog = JSON.parse(await readFile(new URL(`../ui/locales/${locale}.json`, import.meta.url), 'utf8'));
     assert.ok(catalog['rsi.promotionCommit'], `${locale} promotion commit label`);
     assert.ok(catalog['rsi.promotionCommitHint'], `${locale} promotion commit limitation`);
-    for (const key of ['rsi.rollback.title', 'rsi.rollback.hint', 'rsi.rollback.restoredVersion', 'rsi.rollback.commit', 'rsi.rollback.reviewer', 'rsi.rollback.evidence', 'rsi.rollback.reason', 'rsi.rollback.record', 'rsi.rollback.confirm', 'rsi.rollback.saved', 'rsi.rollback.history', 'rsi.observe.title', 'rsi.observe.hint', 'rsi.observe.scheduleEnabled', 'rsi.observe.interval', 'rsi.observe.daily', 'rsi.observe.weekly', 'rsi.observe.fortnightly', 'rsi.observe.monthly', 'rsi.observe.saveSchedule', 'rsi.observe.scheduleSaved', 'rsi.observe.scheduleOff', 'rsi.observe.firstRunDue', 'rsi.observe.lastRun', 'rsi.observe.lastFailed', 'rsi.observe.nextRun', 'rsi.observe.run', 'rsi.observe.window', 'rsi.observe.stats', 'rsi.observe.noRate', 'rsi.observe.resultSize', 'rsi.observe.graphActions', 'rsi.observe.findings', 'rsi.observe.noFindings', 'rsi.observe.generated', 'rsi.observe.group.retrieval', 'rsi.observe.group.sessions', 'rsi.observe.group.filing', 'rsi.observe.group.handoff', 'rsi.observe.group.recovery', 'rsi.observe.group.graph_review', 'rsi.observe.signal.insufficient_data', 'rsi.observe.signal.stable', 'rsi.observe.signal.review_failures', 'rsi.observe.signal.review_increase', 'rsi.observe.draft', 'rsi.observe.draft.title', 'rsi.observe.draft.problem', 'rsi.observe.draft.hypothesis']) assert.ok(catalog[key], `${locale} ${key}`);
+    for (const key of ['rsi.rollback.title', 'rsi.rollback.hint', 'rsi.rollback.restoredVersion', 'rsi.rollback.commit', 'rsi.rollback.reviewer', 'rsi.rollback.evidence', 'rsi.rollback.reason', 'rsi.rollback.record', 'rsi.rollback.confirm', 'rsi.rollback.saved', 'rsi.rollback.history', 'rsi.observe.title', 'rsi.observe.hint', 'rsi.observe.scheduleEnabled', 'rsi.observe.interval', 'rsi.observe.daily', 'rsi.observe.weekly', 'rsi.observe.fortnightly', 'rsi.observe.monthly', 'rsi.observe.saveSchedule', 'rsi.observe.scheduleSaved', 'rsi.observe.scheduleOff', 'rsi.observe.firstRunDue', 'rsi.observe.lastRun', 'rsi.observe.lastFailed', 'rsi.observe.nextRun', 'rsi.observe.run', 'rsi.observe.window', 'rsi.observe.stats', 'rsi.observe.noRate', 'rsi.observe.resultSize', 'rsi.observe.graphActions', 'rsi.observe.findings', 'rsi.observe.noFindings', 'rsi.observe.generated', 'rsi.observe.vaultHealthEnabled', 'rsi.observe.vaultHealthVault', 'rsi.observe.vaultHealthNone', 'rsi.observe.vaultHealthPrivate', 'rsi.observe.vaultHealthHint', 'rsi.observe.vaultHealthSummary', 'rsi.observe.vaultHealthSignal.baseline_unavailable', 'rsi.observe.vaultHealthSignal.stable', 'rsi.observe.vaultHealthSignal.improved', 'rsi.observe.vaultHealthSignal.regressed', 'rsi.observe.vaultHealthSignal.mixed', 'rsi.observe.group.retrieval', 'rsi.observe.group.sessions', 'rsi.observe.group.filing', 'rsi.observe.group.handoff', 'rsi.observe.group.recovery', 'rsi.observe.group.graph_review', 'rsi.observe.signal.insufficient_data', 'rsi.observe.signal.stable', 'rsi.observe.signal.review_failures', 'rsi.observe.signal.review_increase', 'rsi.observe.draft', 'rsi.observe.draft.title', 'rsi.observe.draft.problem', 'rsi.observe.draft.hypothesis']) assert.ok(catalog[key], `${locale} ${key}`);
     for (const key of ['rsi.monitor.title', 'rsi.monitor.hint', 'rsi.monitor.start', 'rsi.monitor.end', 'rsi.monitor.testSet', 'rsi.monitor.samples', 'rsi.monitor.decision.stable', 'rsi.monitor.decision.regression', 'rsi.monitor.decision.inconclusive', 'rsi.monitor.guardrail.pass', 'rsi.monitor.guardrail.fail', 'rsi.monitor.guardrail.unknown', 'rsi.monitor.metricName', 'rsi.monitor.baseline', 'rsi.monitor.observed', 'rsi.monitor.reviewer', 'rsi.monitor.guardrails', 'rsi.monitor.results', 'rsi.monitor.evidenceRef', 'rsi.monitor.save', 'rsi.monitor.saved', 'rsi.monitor.history']) assert.ok(catalog[key], `${locale} ${key}`);
   }
   assert.equal((html.match(/async function loadRsi\(\)/g) || []).length, 1);
@@ -235,7 +242,7 @@ test('Setup exposes the RSI ledger only through authenticated local APIs', async
   try {
     assert.equal((await fetch(base + '/api/rsi/observations', { headers: { 'X-BrainLink-Token': 'wrong-token' } })).status, 401);
     const initialSchedule = await fetch(base + '/api/rsi/observations', { headers: { 'X-BrainLink-Token': app.token } }).then(r => r.json());
-    assert.deepEqual(initialSchedule.observations.settings, { enabled: false, interval_hours: 168 });
+    assert.deepEqual(initialSchedule.observations.settings, { enabled: false, interval_hours: 168, vault_health_enabled: false, vault_health_vault: '' });
     assert.equal((await post('/api/rsi/observations/settings', { enabled: true, interval_hours: 24 }, 'wrong-token')).status, 401);
     const configured = await post('/api/rsi/observations/settings', { enabled: true, interval_hours: 24 }).then(r => r.json());
     assert.equal(configured.observations.settings.enabled, true);
@@ -297,4 +304,28 @@ test('Setup exposes the RSI ledger only through authenticated local APIs', async
     assert.equal(rolledBack.idea.status, 'rolled_back');
     assert.equal(rolledBack.idea.rollbacks.length, 1);
   } finally { app.server.close(); }
+});
+
+test('RSI vault-health checks require one existing vault and save only aggregate counts', async (t) => {
+  const home = await temp('vault-health-api'), appHome = path.join(home, 'app'), vaultPath = path.join(home, 'private-fictional-vault');
+  await mkdir(vaultPath, { recursive: true });
+  await writeFile(path.join(vaultPath, 'Workflow.md'), '# Workflow\n\nSee [[ZQX_PRIVATE_LINK_TARGET]].\nPRIVATE_BODY_CANARY');
+  const env = { BRAINLINK_HOME: appHome, BRAINLINK_SEMANTIC: '0' };
+  await saveConfig(normalize({ vaults: [{ name: 'Personal Fixture', path: vaultPath, private: true }] }), path.join(appHome, 'config.json'));
+  const app = await startSetup({ env, home, os: 'linux', port: 0, useCli: false });
+  t.after(() => app.server.close());
+  const base = `http://127.0.0.1:${app.port}`;
+  const post = (body) => fetch(base + '/api/rsi/observations/settings', { method: 'POST', headers: { 'Content-Type': 'application/json', 'X-BrainLink-Token': app.token }, body: JSON.stringify(body) });
+  const refused = await post({ vault_health_enabled: true, vault_health_vault: 'Other Vault' });
+  assert.equal(refused.status, 400);
+  const configured = await post({ vault_health_enabled: true, vault_health_vault: 'Personal Fixture' }).then((response) => response.json());
+  assert.equal(configured.observations.settings.vault_health_enabled, true);
+  const result = await fetch(base + '/api/rsi/observations/run', { method: 'POST', headers: { 'X-BrainLink-Token': app.token } }).then((response) => response.json());
+  assert.equal(result.run.ok, true);
+  assert.equal(result.run.report.vault_health.vault, 'Personal Fixture');
+  assert.equal(result.run.report.vault_health.counts.broken_count, 1);
+  assert.equal(result.run.report.vault_health.comparison.signal, 'baseline_unavailable');
+  assert.doesNotMatch(JSON.stringify(result), /ZQX_PRIVATE_LINK_TARGET|PRIVATE_BODY_CANARY|Workflow\.md/);
+  const persisted = await readFile(path.join(appHome, 'rsi', 'observations.json'), 'utf8');
+  assert.doesNotMatch(persisted, /ZQX_PRIVATE_LINK_TARGET|PRIVATE_BODY_CANARY|Workflow\.md/);
 });

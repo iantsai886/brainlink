@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { analyzeActivitySignals } from '../src/rsi-observations.mjs';
+import { analyzeActivitySignals, compareVaultHealth, sanitizeVaultHealthSnapshot } from '../src/rsi-observations.mjs';
 
 test('RSI observation compares local tool failure counts and returns aggregates only', () => {
   const now = new Date('2026-10-27T12:00:00.000Z');
@@ -59,4 +59,22 @@ test('RSI observation labels small or empty samples as unknown, not as zero fail
   assert.deepEqual(sessions.current_result_tokens, { samples: 0, mean_estimate: null }, 'write previews are not included in read-response size metrics');
   assert.deepEqual(graph.current_review_actions, { approved: 0, rejected: 0, reopened: 0 });
   assert.deepEqual(report.findings, []);
+});
+
+test('vault health comparison uses only counts, keeps vaults separate, and reports structural signals', () => {
+  const previous = sanitizeVaultHealthSnapshot({ notes: 10, links: 8, orphan_count: 4, broken_count: 2, duplicate_title_count: 1, stale_active_count: 3, paths: ['PRIVATE_PATH'], note_text: 'PRIVATE_NOTE' }, 'Personal');
+  const current = sanitizeVaultHealthSnapshot({ notes: 10, links: 10, orphan_count: 2, broken_count: 0, duplicate_title_count: 1, stale_active_count: 3, title: 'PRIVATE_TITLE' }, 'Personal');
+  assert.deepEqual(current, { vault: 'Personal', counts: { notes: 10, links: 10, orphan_count: 2, broken_count: 0, duplicate_title_count: 1, stale_active_count: 3 } });
+  assert.deepEqual(compareVaultHealth(current, previous), {
+    signal: 'improved',
+    changes: { notes: 0, links: 2, orphan_count: -2, broken_count: -2, duplicate_title_count: 0, stale_active_count: 0, orphan_rate: -0.2 },
+  });
+  const worse = sanitizeVaultHealthSnapshot({ notes: 10, links: 5, orphan_count: 5, broken_count: 4, duplicate_title_count: 2, stale_active_count: 3 }, 'Personal');
+  assert.equal(compareVaultHealth(worse, previous).signal, 'regressed');
+  const mixed = sanitizeVaultHealthSnapshot({ notes: 10, links: 9, orphan_count: 1, broken_count: 3, duplicate_title_count: 1, stale_active_count: 3 }, 'Personal');
+  assert.equal(compareVaultHealth(mixed, previous).signal, 'mixed');
+  assert.equal(compareVaultHealth(current, { ...previous, vault: 'Organisation' }).signal, 'baseline_unavailable');
+  assert.throws(() => sanitizeVaultHealthSnapshot({ ...current.counts, broken_count: -1 }, 'Personal'), /non-negative/);
+  assert.throws(() => sanitizeVaultHealthSnapshot(current.counts, ''), /one valid vault/);
+  assert.doesNotMatch(JSON.stringify(current), /PRIVATE_(?:PATH|NOTE|TITLE)/);
 });

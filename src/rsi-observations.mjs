@@ -16,6 +16,35 @@ function blank() { return { calls: 0, failures: 0, failure_rate: null }; }
 function finish(bucket) { return { ...bucket, failure_rate: bucket.calls ? Number((bucket.failures / bucket.calls).toFixed(3)) : null }; }
 function tokenSummary(values) { return { samples: values.length, mean_estimate: values.length ? Math.round(values.reduce((sum, value) => sum + value, 0) / values.length) : null }; }
 
+// Persist only a small aggregate snapshot. Do not accept paths, titles, excerpts, or other
+// note-derived fields from the vault-health reader.
+export function sanitizeVaultHealthSnapshot(input, vault) {
+  if (!input || typeof input !== 'object' || Array.isArray(input)) throw new Error('Vault health snapshot is invalid.');
+  const fields = ['notes', 'links', 'orphan_count', 'broken_count', 'duplicate_title_count', 'stale_active_count'];
+  const counts = {};
+  for (const field of fields) {
+    const value = input[field];
+    if (!Number.isSafeInteger(value) || value < 0) throw new Error(`Vault health ${field} must be a non-negative count.`);
+    counts[field] = value;
+  }
+  const name = String(vault || '').trim();
+  if (!name || name.length > 100 || /[\r\n]/.test(name)) throw new Error('Choose one valid vault for local health observation.');
+  return { vault: name, counts };
+}
+
+export function compareVaultHealth(current, previous) {
+  if (!current?.counts || !previous?.counts || current.vault !== previous.vault) return { signal: 'baseline_unavailable', changes: null };
+  const keys = ['notes', 'links', 'orphan_count', 'broken_count', 'duplicate_title_count', 'stale_active_count'];
+  const changes = Object.fromEntries(keys.map((key) => [key, current.counts[key] - previous.counts[key]]));
+  const orphanRate = (snapshot) => snapshot.counts.notes ? snapshot.counts.orphan_count / snapshot.counts.notes : null;
+  const beforeRate = orphanRate(previous), afterRate = orphanRate(current);
+  const orphanRateChange = beforeRate === null || afterRate === null ? null : Number((afterRate - beforeRate).toFixed(4));
+  changes.orphan_rate = orphanRateChange;
+  const worse = changes.broken_count > 0 || changes.duplicate_title_count > 0 || (orphanRateChange !== null && orphanRateChange > 0.01);
+  const better = changes.broken_count < 0 || changes.duplicate_title_count < 0 || (orphanRateChange !== null && orphanRateChange < -0.01);
+  return { signal: worse && better ? 'mixed' : worse ? 'regressed' : better ? 'improved' : 'stable', changes };
+}
+
 export function analyzeActivitySignals(entries, { now = new Date() } = {}) {
   const end = now instanceof Date ? now : new Date(now);
   const currentStart = end.getTime() - WINDOWS.current * 86400000;

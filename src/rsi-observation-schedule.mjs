@@ -3,9 +3,9 @@
 import { mkdir, readFile, rename, unlink, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import { randomUUID } from 'node:crypto';
-import { analyzeActivitySignals } from './rsi-observations.mjs';
+import { analyzeActivitySignals, compareVaultHealth, sanitizeVaultHealthSnapshot } from './rsi-observations.mjs';
 
-export const DEFAULT_OBSERVATION_SETTINGS = Object.freeze({ enabled: false, interval_hours: 168 });
+export const DEFAULT_OBSERVATION_SETTINGS = Object.freeze({ enabled: false, interval_hours: 168, vault_health_enabled: false, vault_health_vault: '' });
 
 export function validateObservationSettings(input, previous = DEFAULT_OBSERVATION_SETTINGS) {
   if (!input || typeof input !== 'object' || Array.isArray(input)) throw new Error('Observation settings must be an object.');
@@ -18,11 +18,20 @@ export function validateObservationSettings(input, previous = DEFAULT_OBSERVATIO
     if (![24, 168, 336, 720].includes(input.interval_hours)) throw new Error('interval_hours must be 24, 168, 336 or 720.');
     next.interval_hours = input.interval_hours;
   }
-  for (const key of Object.keys(input)) if (!['enabled', 'interval_hours'].includes(key)) throw new Error(`Unknown observation setting: ${key}.`);
+  if ('vault_health_enabled' in input) {
+    if (typeof input.vault_health_enabled !== 'boolean') throw new Error('vault_health_enabled must be true or false.');
+    next.vault_health_enabled = input.vault_health_enabled;
+  }
+  if ('vault_health_vault' in input) {
+    if (typeof input.vault_health_vault !== 'string' || input.vault_health_vault.length > 100 || /[\r\n]/.test(input.vault_health_vault)) throw new Error('vault_health_vault must name one selected vault.');
+    next.vault_health_vault = input.vault_health_vault.trim();
+  }
+  if (next.vault_health_enabled && !next.vault_health_vault) throw new Error('Choose one vault before enabling link-health observation.');
+  for (const key of Object.keys(input)) if (!['enabled', 'interval_hours', 'vault_health_enabled', 'vault_health_vault'].includes(key)) throw new Error(`Unknown observation setting: ${key}.`);
   return next;
 }
 
-export function createRsiObservationSchedule({ home, readEntries, now = () => new Date() }) {
+export function createRsiObservationSchedule({ home, readEntries, readVaultHealth, now = () => new Date() }) {
   const file = path.join(home, 'rsi', 'observations.json');
   let running = null;
   let writes = Promise.resolve();
@@ -80,6 +89,18 @@ export function createRsiObservationSchedule({ home, readEntries, now = () => ne
       try {
         const entries = await readEntries();
         const report = analyzeActivitySignals(entries, { now: started });
+        const stateBeforeSave = await load();
+        if (stateBeforeSave.settings.vault_health_enabled) {
+          if (typeof readVaultHealth !== 'function') throw new Error('Selected-vault health observation is unavailable.');
+          const snapshot = sanitizeVaultHealthSnapshot(await readVaultHealth(stateBeforeSave.settings.vault_health_vault), stateBeforeSave.settings.vault_health_vault);
+          snapshot.observed_at = started.toISOString();
+          const previous = stateBeforeSave.report?.vault_health;
+          const comparison = compareVaultHealth(snapshot, previous);
+          report.vault_health = { ...snapshot, comparison };
+          report.privacy.vault_health_content_read_locally = true;
+          report.privacy.vault_health_content_persisted = false;
+          report.limitations.push('Vault health is a structural link and metadata signal for one explicitly selected vault; it does not measure correct filing, note quality, or whether suggested links are useful. Only aggregate counts are saved, and no proposal or vault content is changed.');
+        }
         report.privacy.report_saved = true;
         await save((state) => ({ ...state, report, last_run: { at: started.toISOString(), trigger, ok: true } }));
         return { ok: true, report, last_run: { at: started.toISOString(), trigger, ok: true } };

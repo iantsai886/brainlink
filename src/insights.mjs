@@ -75,6 +75,7 @@ export async function vaultHealth(ctx, vaultName, { staleDays = 180 } = {}, now 
     notes: real.length, links, orphan_count: orphans.length,
     orphans: orphans.slice(0, 30).map((i) => summarize(index, i)),
     broken_links: broken.slice(0, 30).map((b) => ({ in: index.notes[b.from].rel, target: b.target })), broken_count: broken.length,
+    duplicate_title_count: dupes.length, stale_active_count: stale.length,
     duplicate_titles: dupes.slice(0, 20),
     stale_active_notes: stale.slice(0, 20).map((i) => summarize(index, i)),
     tips: [

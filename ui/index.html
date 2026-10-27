@@ -279,10 +279,13 @@ main #ready, main #ask-panel, main #brain-panel, main #sessions-panel, main #s-c
     </details>
     <div class="card" id="rsi-observations" style="margin-bottom:10px">
       <b data-i18n="rsi.observe.title">Review local usage signals</b>
-      <p class="muted" data-i18n="rsi.observe.hint">BrainLink checks local tool outcomes, graph review choices, and rough response-size estimates. It never reads note text or changes the system.</p>
+      <p class="muted" data-i18n="rsi.observe.hint">BrainLink checks local tool outcomes, graph review choices, and rough response-size estimates. Optional link-health checks read one selected vault locally and save counts only.</p>
       <form id="rsi-observe-settings" class="grid2" style="margin:8px 0">
         <label class="muted" style="display:flex;flex-direction:row;gap:6px;align-items:center"><input type="checkbox" name="enabled" style="width:auto"><span data-i18n="rsi.observe.scheduleEnabled">Review signals automatically</span></label>
         <label><span data-i18n="rsi.observe.interval">Review every</span><select name="interval_hours"><option value="24" data-i18n="rsi.observe.daily">Day</option><option value="168" data-i18n="rsi.observe.weekly">Week</option><option value="336" data-i18n="rsi.observe.fortnightly">Two weeks</option><option value="720" data-i18n="rsi.observe.monthly">30 days</option></select></label>
+        <label class="muted" style="display:flex;flex-direction:row;gap:6px;align-items:center"><input type="checkbox" name="vault_health_enabled" style="width:auto"><span data-i18n="rsi.observe.vaultHealthEnabled">Also compare link health in one vault</span></label>
+        <label><span data-i18n="rsi.observe.vaultHealthVault">Choose one vault</span><select name="vault_health_vault"><option value="" data-i18n="rsi.observe.vaultHealthNone">Choose a vault</option></select></label>
+        <p class="muted" data-i18n="rsi.observe.vaultHealthHint"></p>
         <div class="row"><button type="submit" data-i18n="rsi.observe.saveSchedule">Save schedule</button><button type="button" id="rsi-observe-run" data-i18n="rsi.observe.run">Analyze local signals</button></div>
       </form>
       <p id="rsi-observe-status" class="muted" role="status" aria-live="polite"></p>
@@ -884,7 +887,9 @@ function renderDiscovery(d) {
 function renderObservationReport(report) {
   const percent = value => Number.isFinite(value) ? Math.round(value * 100) + '%' : t('rsi.observe.noRate');
   const tokenMean = bucket => bucket.samples ? bucket.mean_estimate.toLocaleString(LOCALE) : t('rsi.observe.noRate');
-  $('rsi-observe-report').innerHTML = `<p class="muted">${esc(t('rsi.observe.window', { days: report.current_window_days, events: report.events_analyzed }))}</p>${report.categories.map(item => `<div class="row muted" style="font-size:13px;justify-content:space-between;flex-wrap:wrap"><b>${esc(t('rsi.observe.group.' + item.id))}</b><span>${esc(t('rsi.observe.stats', { calls: item.current.calls, failures: item.current.failures, rate: percent(item.current.failure_rate) }))}</span>${item.id === 'graph_review' ? `<span>${esc(t('rsi.observe.graphActions', { approved: item.current_review_actions.approved, rejected: item.current_review_actions.rejected, reopened: item.current_review_actions.reopened, previousApproved: item.previous_review_actions.approved, previousRejected: item.previous_review_actions.rejected, previousReopened: item.previous_review_actions.reopened }))}</span>` : ''}${item.current_result_tokens.samples || item.previous_result_tokens.samples ? `<span>${esc(t('rsi.observe.resultSize', { current: tokenMean(item.current_result_tokens), previous: tokenMean(item.previous_result_tokens) }))}</span>` : ''}<span class="pill">${esc(t('rsi.observe.signal.' + item.signal))}</span>${item.signal.startsWith('review_') ? `<button type="button" class="secondary" data-rsi-observe-draft="${esc(item.id)}">${esc(t('rsi.observe.draft'))}</button>` : ''}</div>`).join('')}${report.findings.length ? `<p>${esc(t('rsi.observe.findings', { count: report.findings.length }))}</p>` : `<p class="muted">${esc(t('rsi.observe.noFindings'))}</p>`}<p class="muted" style="font-size:12px">${esc(t('rsi.observe.generated', { when: new Date(report.generated_at).toLocaleString(LOCALE) }))}</p>`;
+  const health = report.vault_health;
+  const healthSummary = health ? `<p class="muted">${esc(t('rsi.observe.vaultHealthSummary', { vault: health.vault, broken: health.counts.broken_count, orphans: health.counts.orphan_count, duplicates: health.counts.duplicate_title_count, state: t('rsi.observe.vaultHealthSignal.' + health.comparison.signal) }))}</p>` : '';
+  $('rsi-observe-report').innerHTML = `<p class="muted">${esc(t('rsi.observe.window', { days: report.current_window_days, events: report.events_analyzed }))}</p>${healthSummary}${report.categories.map(item => `<div class="row muted" style="font-size:13px;justify-content:space-between;flex-wrap:wrap"><b>${esc(t('rsi.observe.group.' + item.id))}</b><span>${esc(t('rsi.observe.stats', { calls: item.current.calls, failures: item.current.failures, rate: percent(item.current.failure_rate) }))}</span>${item.id === 'graph_review' ? `<span>${esc(t('rsi.observe.graphActions', { approved: item.current_review_actions.approved, rejected: item.current_review_actions.rejected, reopened: item.current_review_actions.reopened, previousApproved: item.previous_review_actions.approved, previousRejected: item.previous_review_actions.rejected, previousReopened: item.previous_review_actions.reopened }))}</span>` : ''}${item.current_result_tokens.samples || item.previous_result_tokens.samples ? `<span>${esc(t('rsi.observe.resultSize', { current: tokenMean(item.current_result_tokens), previous: tokenMean(item.previous_result_tokens) }))}</span>` : ''}<span class="pill">${esc(t('rsi.observe.signal.' + item.signal))}</span>${item.signal.startsWith('review_') ? `<button type="button" class="secondary" data-rsi-observe-draft="${esc(item.id)}">${esc(t('rsi.observe.draft'))}</button>` : ''}</div>`).join('')}${report.findings.length ? `<p>${esc(t('rsi.observe.findings', { count: report.findings.length }))}</p>` : `<p class="muted">${esc(t('rsi.observe.noFindings'))}</p>`}<p class="muted" style="font-size:12px">${esc(t('rsi.observe.generated', { when: new Date(report.generated_at).toLocaleString(LOCALE) }))}</p>`;
   $('rsi-observe-report').querySelectorAll('[data-rsi-observe-draft]').forEach(button => button.addEventListener('click', () => {
     const item = report.categories.find(category => category.id === button.dataset.rsiObserveDraft);
     if (!item || !item.signal.startsWith('review_')) return;
@@ -913,6 +918,10 @@ async function loadObservations() {
   const form = $('rsi-observe-settings');
   form.elements.enabled.checked = data.settings.enabled;
   form.elements.interval_hours.value = String(data.settings.interval_hours);
+  form.elements.vault_health_enabled.checked = data.settings.vault_health_enabled;
+  const vaultSelect = form.elements.vault_health_vault;
+  vaultSelect.innerHTML = `<option value="">${esc(t('rsi.observe.vaultHealthNone'))}</option>` + (S?.vaults || []).filter(vault => vault.exists).map(vault => `<option value="${esc(vault.name)}">${esc(vault.name)}${vault.private ? ` · ${esc(t('rsi.observe.vaultHealthPrivate'))}` : ''}</option>`).join('');
+  vaultSelect.value = data.settings.vault_health_vault || '';
   $('rsi-observe-status').textContent = data.last_run
     ? `${t(data.last_run.ok ? 'rsi.observe.lastRun' : 'rsi.observe.lastFailed', { when: new Date(data.last_run.at).toLocaleString(LOCALE) })}${data.next_run_at ? ' · ' + t('rsi.observe.nextRun', { when: new Date(data.next_run_at).toLocaleString(LOCALE) }) : ''}`
     : (data.settings.enabled ? t('rsi.observe.firstRunDue') : t('rsi.observe.scheduleOff'));
@@ -922,7 +931,7 @@ document.getElementById('rsi-observe-settings').addEventListener('submit', event
   event.preventDefault();
   act(async () => {
     const form = event.currentTarget;
-    const data = await api('POST', '/api/rsi/observations/settings', { enabled: form.elements.enabled.checked, interval_hours: Number(form.elements.interval_hours.value) });
+    const data = await api('POST', '/api/rsi/observations/settings', { enabled: form.elements.enabled.checked, interval_hours: Number(form.elements.interval_hours.value), vault_health_enabled: form.elements.vault_health_enabled.checked, vault_health_vault: form.elements.vault_health_vault.value });
     await loadObservations();
     toast(t('rsi.observe.scheduleSaved'));
   });
