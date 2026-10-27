@@ -32,6 +32,11 @@ test('every native installer bundles all production dependencies and portable Br
   const windowsInstaller = await read('packaging/windows/BrainLink.iss');
   assert.match(windowsInstaller, /CurUninstallStepChanged\(CurUninstallStep: TUninstallStep\)/, 'Windows uninstaller must clean up its PATH entry');
   assert.match(windowsInstaller, /SamePathEntry\(Segment, Target\)/, 'Windows PATH cleanup must remove only the BrainLink entry');
+  assert.match(windowsInstaller, /\{autodesktop\}\\BrainLink/, 'Windows install must add a desktop shortcut that opens Setup');
+  assert.match(windowsInstaller, /Filename: "\{sys\}\\wscript\.exe"; Parameters: """\{app\}\\BrainLink\.vbs"""/, 'Windows desktop shortcut must use the quiet Setup launcher');
+  const nsisInstaller = await read('packaging/windows/BrainLink.nsi');
+  assert.match(nsisInstaller, /CreateShortcut "\$DESKTOP\\BrainLink\.lnk"/, 'NSIS install must add the same desktop shortcut');
+  assert.match(nsisInstaller, /Delete "\$DESKTOP\\BrainLink\.lnk"/, 'NSIS uninstall must remove the shortcut it created');
 
   const macZipTest = await read('packaging/macos/test-zip.sh');
   assert.match(macZipTest, /app\/node_modules\/yaml\/dist\/index\.js/, 'the macOS package smoke test must check a loadable YAML runtime');

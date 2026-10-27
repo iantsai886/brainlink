@@ -38,6 +38,7 @@ Source: "BrainLink.ico"; DestDir: "{app}"; Flags: ignoreversion
 
 [Icons]
 Name: "{group}\BrainLink"; Filename: "{sys}\wscript.exe"; Parameters: """{app}\BrainLink.vbs"""; IconFilename: "{app}\BrainLink.ico"
+Name: "{autodesktop}\BrainLink"; Filename: "{sys}\wscript.exe"; Parameters: """{app}\BrainLink.vbs"""; IconFilename: "{app}\BrainLink.ico"
 Name: "{group}\Uninstall BrainLink"; Filename: "{uninstallexe}"
 
 [Registry]

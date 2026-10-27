@@ -9,6 +9,10 @@ Client discovery and runtime probe: Codex CLI `0.164.0-alpha.11.1` made a live B
 
 ## Current working-tree update (2026-10-27)
 
+### Windows one-click desktop entry
+
+Both Windows installer definitions now create a **BrainLink** desktop shortcut that uses the existing quiet launcher to open Setup in the browser; the Start menu shortcut remains. The NSIS uninstaller removes its desktop shortcut, while Inno Setup manages the shortcut through its standard icon entry. `node --import ./test/_preload.mjs --test test/packaging-runtime.test.mjs` passed 2/2, including checks for both installer definitions. The Windows Inno Setup 6.7.3 package compiled successfully as `dist/BrainLink-Setup-1.2.8.exe` (SHA-256 `D9512ABBF8B3438BE2674AEED1FD35FC00D77B47744E06FDB5D18C08FDC1E905`). This verifies compilation, not running the installer or testing the desktop shortcut after installation; signing and real install/uninstall acceptance remain release gates.
+
 ### Current Windows package build and isolated runtime smoke check
 
 After source commit `b2d91ce`, the Windows Inno Setup build completed successfully with Inno Setup 6.7.3 and produced `dist/BrainLink-Setup-1.2.8.exe` (SHA-256 `2DB22CB65DF1689C6976E85EF2E20343DFBE5A1CEA50FEAABBED6792F85A8CDC`). The staged bundled Node.js 24.22.1 runtime reported BrainLink 1.2.8 and initialized a fictional vault with `--no-scaffold` using an isolated temporary `BRAINLINK_HOME`; the temporary config showed the expected vault and default agent. The packaged Setup process then started on loopback port 51988; `/health` identified BrainLink, and the Setup page returned HTTP 200 with title `BrainLink Setup`. The process was stopped after the check. No installer was run against the user's Windows account, so PATH/Start-menu installation and uninstallation were not repeated. This is a successful local build/runtime/UI-start check, not a signed or hosted release.

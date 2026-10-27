@@ -61,6 +61,7 @@ Section "BrainLink" SecMain
 
   CreateDirectory "$SMPROGRAMS\BrainLink"
   CreateShortcut "$SMPROGRAMS\BrainLink\BrainLink.lnk" "$SYSDIR\wscript.exe" '"$INSTDIR\BrainLink.vbs"' "$INSTDIR\BrainLink.ico"
+  CreateShortcut "$DESKTOP\BrainLink.lnk" "$SYSDIR\wscript.exe" '"$INSTDIR\BrainLink.vbs"' "$INSTDIR\BrainLink.ico"
   CreateShortcut "$SMPROGRAMS\BrainLink\Uninstall BrainLink.lnk" "$INSTDIR\Uninstall BrainLink.exe"
 
   ; Put `brainlink` on the user's PATH (no admin; takes effect in new terminals).
@@ -99,6 +100,7 @@ Section "Uninstall"
   Delete "$INSTDIR\BrainLink.vbs"
   Delete "$INSTDIR\BrainLink.ico"
   Delete "$INSTDIR\Uninstall BrainLink.exe"
+  Delete "$DESKTOP\BrainLink.lnk"
   RMDir "$INSTDIR"
   RMDir /r "$SMPROGRAMS\BrainLink"
   DeleteRegKey HKCU "${UNINSTALL_KEY}"
