@@ -565,3 +565,7 @@ The server now uses the same memory mapping during Twin create, edit, and built-
 ### Shared background-start setting (2026-10-27)
 
 Moved the “start quietly when I sign in” option from Backup into a dedicated shared settings section. The hint now states that scheduled scans, briefs, backups, and sync run only while BrainLink is open, and explains that background startup keeps them available while clicking the app icon still opens Setup. Added a regression test for the single control, its section, and all three shipped locale strings. Verification: `npm run test:ui` — 29/29 passed; `node --import ./test/_preload.mjs --test test/startup.test.mjs test/locales.test.mjs` — 10/10 passed; `git diff --check` passed. This verifies the UI and startup-setting behavior, not unattended scheduling while the app is closed or a packaged installer.
+
+### Full regression run on the current integration branch (2026-10-27)
+
+On Windows with Node.js 24.22.1, `npm run test:all` on source commit `47eb74c8fedc729883dc314e2c92c18a73ef628f` completed successfully: core 458 total (452 passed, 0 failed, 6 platform/privilege skips), UI 29/29. The six skips require Linux behavior or Windows symlink privileges. This is a local full-suite receipt. It does not establish hosted CI, native install/upgrade acceptance, live cross-AI handoff, or release readiness.
