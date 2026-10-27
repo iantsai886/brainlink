@@ -101,6 +101,13 @@
         <p id="notes3d-review-status" class="muted" role="status" aria-live="polite"></p>
         <div id="notes3d-review-list"></div>
       </details>`);
+    root.insertAdjacentHTML('beforeend', `<details class="notes3d-browse" id="notes3d-discovery">
+      <summary data-i18n="notes3d.discoverVault"></summary>
+      <p class="muted" data-i18n="notes3d.discoverHint"></p>
+      <button type="button" class="chip" id="notes3d-discover-run" data-i18n="notes3d.discoverRun"></button>
+      <p id="notes3d-discover-status" class="muted" role="status" aria-live="polite"></p>
+      <div id="notes3d-discover-list"></div>
+    </details>`);
   }
 
   function focusNode(graph, node) {
@@ -213,6 +220,32 @@
       }
     }
 
+    async function runDiscovery({ append = false } = {}) {
+      const list = document.getElementById('notes3d-discover-list');
+      const status = document.getElementById('notes3d-discover-status');
+      const button = document.getElementById('notes3d-discover-run');
+      if (!list || !status || !button) return;
+      button.disabled = true;
+      try {
+        const offset = append ? (list._nextOffset || 0) : 0;
+        const result = await api('/api/graph3d/discover', { offset });
+        const items = append ? [...(list._candidates || []), ...result.candidates] : result.candidates;
+        list._candidates = items;
+        list._nextOffset = result.next_offset;
+        list._done = result.done;
+        list.innerHTML = items.map((item, i) => `<article class="card notes3d-review-item">
+          <b>${esc(item.title)}</b><span class="mono muted">${esc(item.vault)} · ${esc(item.path)}</span>
+          <div>${esc(item.predicate)} → ${esc(item.target.title)}</div><small class="muted">${esc(item.evidence)} · ${esc(tr('notes3d.patternOnly'))}</small>
+          <div class="row"><button type="button" class="chip" data-discover-save="${i}">${esc(tr('notes3d.saveSuggestion'))}</button></div>
+        </article>`).join('');
+        status.textContent = result.done ? tr('notes3d.discoverDone', { count: items.length, scanned: result.next_offset, total: result.total_sources })
+          : tr('notes3d.discoverProgress', { count: items.length, scanned: result.next_offset, total: result.total_sources });
+        button.textContent = result.done ? tr('notes3d.discoverRun') : tr('notes3d.discoverMore');
+      } catch (error) {
+        status.textContent = tr('notes3d.discoverFailed', { error: error.message });
+      } finally { button.disabled = false; }
+    }
+
     root.addEventListener('input', (e) => { if (e.target.id === 'notes3d-search') renderNodeList(); });
     window.addEventListener('brainlink:locale-changed', () => {
       root.querySelectorAll('[data-i18n]').forEach((el) => { el.textContent = tr(el.dataset.i18n); });
@@ -257,6 +290,7 @@
         }).catch((err) => { document.getElementById('notes3d-save-status').textContent = err.message; }).finally(() => { button.disabled = false; });
         return;
       }
+      if (e.target.id === 'notes3d-discover-run') { runDiscovery({ append: Boolean(document.getElementById('notes3d-discover-list')._nextOffset && !document.getElementById('notes3d-discover-list')._done) }); return; }
       const review = e.target.closest('[data-review-relation]');
       if (review) {
         if (!currentDetail || !window.confirm(tr('notes3d.approveConfirm'))) return;
@@ -323,6 +357,18 @@
           target_id: suggestion.dataset.saveSuggestion, predicate: suggestion.dataset.predicate, evidence: suggestion.dataset.evidence })
           .then(() => { toast(tr('notes3d.suggestionSaved')); return refreshGraph(); })
           .catch((err) => { suggestion.disabled = false; toast(err.message, true); });
+        return;
+      }
+      const discovered = e.target.closest('[data-discover-save]');
+      if (discovered) {
+        const item = document.getElementById('notes3d-discover-list')._candidates?.[Number(discovered.dataset.discoverSave)];
+        if (!item || !window.confirm(tr('notes3d.saveSuggestionConfirm'))) return;
+        discovered.disabled = true;
+        api('/api/graph3d/note', { vault: item.vault, path: item.path })
+          .then((detail) => api('/api/graph3d/relationship/propose', { vault: item.vault, path: item.path, etag: detail.etag,
+            target_id: item.target_id, predicate: item.predicate, evidence: item.evidence }))
+          .then(() => { toast(tr('notes3d.suggestionSaved')); return refreshGraph(); })
+          .catch((err) => { discovered.disabled = false; toast(err.message, true); });
         return;
       }
       if (e.target.id === 'notes3d-close') {

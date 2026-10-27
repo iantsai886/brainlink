@@ -87,6 +87,35 @@ export async function listProposedTypedRelations(ctx, { limit = 100, vault, offs
   return { proposals, total, offset: start, limited: start + proposals.length < total };
 }
 
+// A bounded page of deterministic, same-scope graph candidates. Callers receive only public
+// vault indexes; candidates remain suggestions until explicitly saved and separately approved.
+export async function discoverVaultRelationshipCandidates(ctx, { vault, offset = 0, limit = 20 } = {}) {
+  if (!Number.isSafeInteger(offset) || offset < 0 || offset > 100_000) throw new Error('Discovery offset is invalid.');
+  const pageSize = Math.max(1, Math.min(50, Number.isSafeInteger(limit) ? limit : 20));
+  const vaults = await visibleVaults(ctx, vault);
+  const rows = [];
+  for (const { name, index } of vaults) {
+    for (let source = 0; source < index.notes.length; source++) {
+      const note = index.notes[source];
+      if (note.generated || isPrivateNote(note)) continue;
+      rows.push({ vault: name, path: note.rel, title: note.title, source, index });
+    }
+  }
+  const page = rows.slice(offset, offset + pageSize);
+  const candidates = [];
+  for (const row of page) {
+    for (const item of discoverTypedRelationshipCandidates(row.index.notes, row.source, { limit: 30 })) {
+      const target = row.index.notes[item.target_index];
+      if (!target || isPrivateNote(target) || target.generated) continue;
+      candidates.push({ vault: row.vault, path: row.path, title: row.title,
+        target_id: item.target_id, predicate: item.predicate, evidence: item.evidence,
+        confidence: item.confidence, target: { title: target.title, path: target.rel } });
+    }
+  }
+  return { candidates, offset, next_offset: offset + page.length, done: offset + page.length >= rows.length,
+    scanned: page.length, total_sources: rows.length };
+}
+
 // One note's panel data: rendered-ready Markdown body, tags, backlinks and outlinks (titles +
 // ids matching the same vault's buildGraph3D() so a backlink click can focus that node).
 export async function noteDetail3D(ctx, vaultName, rel) {

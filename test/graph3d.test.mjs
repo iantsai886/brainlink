@@ -159,6 +159,41 @@ test('/api/graph3d and /api/graph3d/note: same exclusion guarantee over HTTP', a
   } finally { s.server.close(); }
 });
 
+test('vault graph discovery is paged, scope-safe, excludes private records, and only saves review proposals', async () => {
+  const home = await tmp('graph3d-discovery');
+  const vaultPath = path.join(home, 'vault');
+  const privatePath = path.join(home, 'private');
+  await mkdir(vaultPath, { recursive: true });
+  await mkdir(privatePath, { recursive: true });
+  await writeFile(path.join(vaultPath, 'Product Team.md'), '---\ntype: team\nid: team.product\nscope: organisation\nstatus: current\n---\n# Product Team\n\nProduct Team coordinates with Data Team every day.\n');
+  await writeFile(path.join(vaultPath, 'Data Team.md'), '---\ntype: team\nid: team.data\nscope: organisation\nstatus: current\n---\n# Data Team\n');
+  await writeFile(path.join(vaultPath, 'Private Source.md'), '---\ntype: workflow\nid: workflow.private\nscope: organisation\nstatus: current\nprivate: true\n---\n# Private\n\nThis workflow runs PRIVATE_CANARY.\n');
+  await writeFile(path.join(privatePath, 'Client Team.md'), '---\ntype: team\nid: team.client\nscope: client\nstatus: current\n---\n# Client Team\n');
+  await writeFile(path.join(privatePath, 'Client Workflow.md'), '---\ntype: workflow\nid: workflow.client\nscope: client\nstatus: current\n---\n# Client work\n\nThis workflow runs Client Team.\n');
+  const env = { BRAINLINK_HOME: path.join(home, 'app'), BRAINLINK_SEMANTIC: '0' };
+  const s = await startSetup({ env, home, os: 'linux', port: 0, useCli: false });
+  const base = `http://127.0.0.1:${s.port}`;
+  const api = (p, body) => fetch(base + p, { method: 'POST', headers: { 'X-BrainLink-Token': s.token, 'Content-Type': 'application/json' }, body: JSON.stringify(body || {}) }).then((r) => r.json());
+  try {
+    assert.equal((await api('/api/vault', { path: vaultPath, name: 'Main', pack: 'simple', scaffold: false })).ok, true);
+    assert.equal((await api('/api/vault', { path: privatePath, name: 'Client', private: true, pack: 'simple', scaffold: false })).ok, true);
+    const first = await api('/api/graph3d/discover', { offset: 0 });
+    assert.equal(first.done, true);
+    assert.ok(first.candidates.some((c) => c.path === 'Product Team.md' && c.target_id === 'team.data'), JSON.stringify(first));
+    assert.doesNotMatch(JSON.stringify(first), /PRIVATE_CANARY|workflow\.client|team\.client|Client Team/);
+    const badOffset = await api('/api/graph3d/discover', { offset: -1 });
+    assert.match(badOffset.error, /offset is invalid/i);
+    const candidate = first.candidates.find((c) => c.path === 'Product Team.md');
+    const detail = await api('/api/graph3d/note', { vault: 'Main', path: candidate.path });
+    const saved = await api('/api/graph3d/relationship/propose', { vault: 'Main', path: candidate.path, etag: detail.etag,
+      target_id: candidate.target_id, predicate: candidate.predicate, evidence: candidate.evidence });
+    assert.equal(saved.ok, true, JSON.stringify(saved));
+    const graph = await api('/api/graph3d', {});
+    assert.equal(graph.links.some((edge) => edge.predicate === candidate.predicate), false, 'a proposal must not become a live graph edge');
+    assert.equal((await api('/api/graph3d/reviews', {})).total, 1);
+  } finally { s.server.close(); }
+});
+
 test('typed relationship review requires a current note revision and adds only the explicitly approved edge', async () => {
   const home = await tmp('graph3d-review-home');
   const vaultPath = path.join(home, 'vault');
@@ -411,8 +446,10 @@ test('3D graph has a searchable, keyboard-accessible note list in every supporte
   assert.match(src, /data-graph-note-id=.*aria-pressed=/);
   assert.match(src, /if \(graphNote\) \{ openById\(graphNote\.dataset\.graphNoteId\); return; \}/, 'keyboard activation of a note button must open the same detail panel as a graph click');
   assert.match(src, /brainlink:locale-changed/);
+  assert.match(src, /api\('\/api\/graph3d\/discover'/, 'vault-wide discovery must call its authenticated local API');
+  assert.match(src, /data-discover-save/, 'each discovered link must be saved through the review flow');
   assert.match(css, /\.notes3d-node:focus-visible/);
-  const keys = ['notes3d.browseNotes', 'notes3d.browseSearch', 'notes3d.browsePlaceholder', 'notes3d.browseEmpty', 'notes3d.browseCount', 'notes3d.browseMore'];
+  const keys = ['notes3d.browseNotes', 'notes3d.browseSearch', 'notes3d.browsePlaceholder', 'notes3d.browseEmpty', 'notes3d.browseCount', 'notes3d.browseMore', 'notes3d.discoverVault', 'notes3d.discoverHint', 'notes3d.discoverRun', 'notes3d.discoverMore', 'notes3d.discoverDone', 'notes3d.discoverProgress', 'notes3d.discoverFailed'];
   for (const locale of ['en', 'zh-TW', 'pt']) {
     const catalog = JSON.parse(await readFile(new URL(`../ui/locales/${locale}.json`, import.meta.url), 'utf8'));
     for (const key of keys) assert.ok(catalog[key], `${locale} ${key}`);

@@ -28,7 +28,7 @@ import { runGitHubAutoSync } from './sync/github-auto-sync.mjs';
 import { sessionsService } from './host.mjs';
 import { addAgent, renameAgent, removeAgent, revokeAgent, markConnected, findAgentByToken, publicAgent, localAgentSnippet, remoteAgentSnippet, generateAgentToken, hashToken } from './mcp-agents.mjs';
 import { analyzeActivitySignals } from './rsi-observations.mjs';
-import { buildGraph3D, noteDetail3D, listProposedTypedRelations } from './graph3d.mjs';
+import { buildGraph3D, noteDetail3D, listProposedTypedRelations, discoverVaultRelationshipCandidates } from './graph3d.mjs';
 import { deriveTypedRelations, deriveProposedTypedRelations, deriveRejectedTypedRelations, discoverTypedRelationshipCandidates, appendTypedRelationProposal, approveTypedRelation, rejectTypedRelation, reopenTypedRelation } from './typed-graph.mjs';
 import { snapshotSettings, chooseSnapshot, suggestSnapshotFolder, clearSnapshot, startSnapshotWatcher, writeSnapshotOnce, loadSnapshotStatus, saveSnapshotStatus } from './snapshot.mjs';
 import { listHandoffs } from './writes.mjs';
@@ -1319,6 +1319,12 @@ export async function startSetup(opts = {}) {
       const offset = b.offset === undefined ? 0 : b.offset;
       if (!Number.isSafeInteger(offset) || offset < 0 || offset > 100_000) throw new Error('Review queue offset is invalid.');
       return listProposedTypedRelations(ctx, { vault: b.vault, offset });
+    },
+    'POST /api/graph3d/discover': async (b) => {
+      const cfg = await loadConfig(file);
+      const ctx = localContext(cfg, { ...env, BRAINLINK_SEMANTIC: '0' });
+      if (b.vault && !ctx.enabled.includes(b.vault)) throw new Error('Unknown vault.');
+      return discoverVaultRelationshipCandidates(ctx, { vault: b.vault, offset: b.offset ?? 0, limit: 20 });
     },
     'POST /api/graph3d/note': async (b) => {
       const cfg = await loadConfig(file);
