@@ -913,7 +913,8 @@ test('CLI: `brainlink serve` speaks MCP over stdio and logs content-free activit
   child.stdin.write(JSON.stringify({ jsonrpc: '2.0', id: 1, method: 'initialize', params: {} }) + '\n');
   child.stdin.write(JSON.stringify({ jsonrpc: '2.0', id: 2, method: 'tools/call', params: { name: 'brainlink_guide', arguments: {} } }) + '\n');
   child.stdin.write(JSON.stringify({ jsonrpc: '2.0', id: 3, method: 'tools/call', params: { name: 'vault_search', arguments: { vault: 'Acme Studio', query: 'secret pricing words' } } }) + '\n');
-  for (let i = 0; i < 100 && lines.length < 3; i++) await new Promise((r) => setTimeout(r, 50));
+  for (let i = 0; i < 300 && lines.length < 3 && child.exitCode === null; i++) await new Promise((r) => setTimeout(r, 50));
+  assert.equal(lines.length, 3, `expected three MCP responses before timeout; received ${lines.length}, child exit=${child.exitCode}`);
   for (let i = 0; i < 40; i++) { if (await readFile(path.join(home, 'activity.log'), 'utf8').then((t) => t.includes('vault_search'), () => false)) break; await new Promise((r) => setTimeout(r, 50)); }
   child.kill();
   assert.equal(lines[0].result.serverInfo.name, 'brainlink');

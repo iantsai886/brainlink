@@ -464,3 +464,7 @@ An independent review found three UX/performance edge cases in graph discovery. 
 ### Full-suite regression check after graph batching (2026-10-27)
 
 On Windows/Node.js 24, `npm run test:all` completed core with 436 tests: 429 passed, 1 failed, 6 platform/privilege skips. The only failure was `CLI: brainlink serve speaks MCP over stdio`, where the test did not receive its expected JSON-RPC result before dereferencing it. The same test passed alone on immediate rerun (1/1), which points to an intermittent CLI/test-environment issue but does not prove the cause. The UI suite passed 29/29. Graph and typed-graph suites passed 34/34 on this code. Overall full-suite status remains not clean; repeat or diagnose the intermittent stdio test before release. No product failure was attributed to the graph change.
+
+### CLI stdio full-suite timeout fix (2026-10-27)
+
+The 1.2.8 full core suite had one intermittent failure in the `brainlink serve` subprocess test: under serial-suite load it could receive fewer than three replies within the old five-second window, then dereference a missing response. The test now allows 15 seconds, stops waiting if the child exits, and reports the response count and exit code clearly. The focused test passed 4/4 consecutive runs after the change. This improves the test's startup tolerance; the complete 436-test core suite has not yet been rerun, so the prior 429/1/6 receipt remains the latest full-run result.
