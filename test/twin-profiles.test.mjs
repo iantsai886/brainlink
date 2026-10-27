@@ -742,7 +742,7 @@ test('DeepSeek Harness named profile connects through Setup with its own Twin-sc
   try {
     const state = await (await fetch(`${base}/api/state`, { headers: { 'X-BrainLink-Token': setup.token } })).json();
     assert.equal(state.clients['deepseek-harness@web'].title, 'DeepSeek Harness · web');
-    const connected = await api('/api/connect', { client: 'deepseek-harness@web', profile_id: 'org_twin_1', vaults: [{ name: 'Fictional Org', operations: ['search', 'read_note'] }] });
+    const connected = await api('/api/connect', { client: 'deepseek-harness@web', profile_id: 'org_twin_1', vaults: [{ name: 'Fictional Org', operations: ['search', 'read_note', 'log_session'] }] });
     assert.equal(connected.status, 200, JSON.stringify(connected.body));
     assert.equal(connected.body.health.ok, true, JSON.stringify(connected.body));
     const patch = parseYaml(await readFile(path.join(dshProfile, 'cordis.patch.yml'), 'utf8'));
@@ -755,6 +755,16 @@ test('DeepSeek Harness named profile connects through Setup with its own Twin-sc
     const managed = saved.ai_agents.find((agent) => agent.preset_client_id === 'deepseek-harness@web');
     assert.equal(managed.tokenHash, hashToken(token));
     assert.equal(saved.twin_profiles[0].agent_access[0].agent_id, managed.id);
+    assert.ok(saved.twin_profiles[0].agent_access[0].vaults[0].operations.includes('log_session'));
+    const dshMcp = createMcp(createContext(saved, { env: { ...env, BRAINLINK_AGENT_TOKEN: token, BRAINLINK_AI_PLATFORM: 'DeepSeek Harness' } }));
+    const logResult = await dshMcp.handle({ jsonrpc: '2.0', id: 8, method: 'tools/call', params: { name: 'session_log', arguments: { title: 'Fictional Harness session', text: 'Saved by synthetic test.', private: false } } });
+    assert.equal(logResult.result.isError, false);
+    const loggedSession = JSON.parse(logResult.result.content[0].text);
+    const storedSessions = await (await openSessionStore(env)).listSessions({ profile_id: 'org_twin_1', limit: 10 });
+    assert.equal(storedSessions.length, 1);
+    assert.equal(storedSessions[0].id, loggedSession.id);
+    assert.equal(storedSessions[0].private, true);
+    assert.equal(storedSessions[0].profile_id, 'org_twin_1');
     assert.doesNotMatch(JSON.stringify(connected.body), new RegExp(token));
     assert.doesNotMatch(JSON.stringify(state), /tokenHash/);
     const disconnected = await api('/api/disconnect', { client: 'deepseek-harness@web' });
