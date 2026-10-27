@@ -4,7 +4,11 @@ Status snapshot: 2026-10-28 (Asia/Taipei).
 GitHub repository: `iantsai886/brainlink`
 Branch: `integration/brainlink-retrieval-evaluation` (integrates profile-scoped GitHub, RSI discovery, and independent retrieval evaluation)
 Code baseline: development target `1.2.8`, with `package.json` as the canonical version source. The `v1.2.7` tag belongs to the separate `wip/v1.2.7` release line; this branch continues from the full-source `main` history and does not move or recreate that tag.
-Latest full-suite verification: source commit `bac3d9b`. On Windows with Node.js 24.22.1, `npm run test:all` passed: core 480 total (474 passed, 0 failed, 6 platform/privilege skips); UI 29/29. The six core skips require Linux behavior or Windows symlink privileges unavailable in this run. This is local automated evidence, not hosted CI. GitHub hosted Actions are blocked by the repository runner billing/spending limit. Live Claude-to-Codex handoff, installed-user acceptance, signing, and customer release readiness remain unverified. No signed public release is claimed.
+Latest full-suite verification: source commit `bdcf5df2e0635e137b8283da5f8ec008d5fd21e7`. On Windows with Node.js 24.22.1, `npm run test:all` passed: core 481 total (475 passed, 0 failed, 6 platform/privilege skips); UI 29/29. The six core skips require Linux behavior or Windows symlink privileges unavailable in this run. This is local automated evidence, not hosted CI. GitHub hosted Actions are blocked by the repository runner billing/spending limit. Live Claude-to-Codex handoff, live Ollama inference, installed-user acceptance, signing, and customer release readiness remain unverified. No signed public release is claimed.
+
+### Full regression verification after opt-in automatic session drafts (2026-10-28)
+
+On Windows with Node.js 24.22.1, `npm run test:all` passed from clean source commit `bdcf5df2e0635e137b8283da5f8ec008d5fd21e7`: core 481 total (475 passed, 0 failed, 6 platform/privilege skips) and UI 29/29. The run includes the opt-in local session-end draft worker, privacy and vault-scope checks, backup/restore, scheduled scans, graph, RSI, profile-scoped DeepSeek Harness, and GitHub sync. It is local automated evidence. It does not prove inference with a real Ollama service, Claude-to-Codex continuation, hosted CI, or release/customer acceptance.
 
 ### Full regression verification after RSI discovery evaluator (2026-10-28)
 
