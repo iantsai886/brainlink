@@ -597,3 +597,7 @@ On Windows with Node.js 24.22.1, `npm run test:all` on source commit `7614584ea9
 ### Rebuilt Windows installer from current branch (2026-10-27)
 
 Rebuilt `dist/BrainLink-Setup-1.2.8.exe` from source commit `923d58594b90d1a4d64bada05aaf8ae457c040ca` with Inno Setup 6.7.3. Build succeeded; SHA-256 `F96C51FE968A499EA900F722F361E1C9C73FFD17F07E326A8D35E45925722074`. The staged bundled runtime reports 1.2.8, the session-closeout, graph-curation and cross-AI-handoff Skills are present, and `src/connectors.mjs` imports successfully using the bundled Node runtime. The installer was not run; installed shortcuts, PATH, upgrades and uninstall are not verified on this user account.
+
+### Production dependency audit (2026-10-27)
+
+`npm audit --omit=dev --audit-level=moderate` on source commit `fd3774acfdff835db88780f1d2da5921efd006c4` completed successfully and reported zero production dependency vulnerabilities. This is an npm advisory-database scan of the locked production dependency tree; it is not a code audit, penetration test, or operating-system package review.
