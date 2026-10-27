@@ -1,0 +1,28 @@
+import test from 'node:test';
+import assert from 'node:assert/strict';
+import { readFile } from 'node:fs/promises';
+
+const html = await readFile(new URL('../ui/index.html', import.meta.url), 'utf8');
+
+test('local summary UI explains opt-in, local processing, and review requirements', () => {
+  assert.match(html, /id="sess-local-summary-enabled"/);
+  assert.match(html, /id="sess-local-summary-model"/);
+  assert.match(html, /sessions\.localSummaryHint/);
+  assert.match(html, /sessions\.localSummaryEnable/);
+  assert.match(html, /sessions_local_summary\?\.enabled \? `<button[^`]*data-sess-summarize/s);
+});
+
+test('local summary UI uses the reviewed private draft for both preview and explicit save', () => {
+  assert.match(html, /useLocalDraft: fileLocalDraftIds\.has\(id\)/);
+  assert.match(html, /useLocalDraft: fileLocalDraftIds\.has\(d\.fileConfirm\)/);
+  assert.match(html, /if \(d\.fileConfirm\) act\(async \(\) =>/);
+  assert.match(html, /sessions\.localSummaryReady/);
+  assert.match(html, /data-file-confirm="\$\{esc\(id\)\}" hidden/);
+  assert.match(html, /session-file-preview/);
+});
+
+test('the app never starts summary generation automatically while loading end-of-session cues', () => {
+  const cuesLoader = html.match(/async function loadSessionEndCues\(\) \{([\s\S]*?)\n\}/)?.[1] || '';
+  assert.doesNotMatch(cuesLoader, /local-summary\/generate/);
+  assert.match(html, /if \(d\.sessSummarize\) act\(async \(\) =>/);
+});
