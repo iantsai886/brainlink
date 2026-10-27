@@ -316,6 +316,10 @@ export function parseGitHub(json, { single = false } = {}) {
 
 // ---- relevance ----
 
+// Keep the discovery strategy in each saved proposal so future method changes can be
+// compared against the method that found an earlier idea.
+export const DISCOVERY_METHOD_VERSION = 'lexical-overlap-v1';
+
 const stem = (w) => w.length > 3 ? w.replace(/(?:ies)$/, 'y').replace(/(?<!s)s$/, '') : w;
 const tokens = (text) => {
   const out = [];
@@ -384,7 +388,7 @@ function candidateFor(entry, relevance, { runId, sourceId, topic, accessedAt }) 
       }],
       privacy_scope: 'Public research metadata only. Only the configured topic terms were sent to the source.',
     },
-    discovery: { run_id: runId, source: sourceId, topic, signal: relevance.signal, matched_terms: relevance.matched_terms, workflow_terms: relevance.workflow_terms, score: relevance.score },
+    discovery: { run_id: runId, method_version: DISCOVERY_METHOD_VERSION, source: sourceId, topic, signal: relevance.signal, matched_terms: relevance.matched_terms, workflow_terms: relevance.workflow_terms, score: relevance.score },
   };
 }
 

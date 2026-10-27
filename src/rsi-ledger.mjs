@@ -54,14 +54,17 @@ export function canonicalSourceUrl(raw) {
   return `https://${host}${pathname}${url.search}`;
 }
 
-const DISCOVERY_KEYS = ['run_id', 'source', 'topic', 'signal', 'matched_terms', 'workflow_terms', 'score'];
+const DISCOVERY_KEYS = ['run_id', 'method_version', 'source', 'topic', 'signal', 'matched_terms', 'workflow_terms', 'score'];
 function validateDiscovery(input) {
   if (!input || typeof input !== 'object' || Array.isArray(input)) throw new Error('Discovery provenance must be an object.');
   const out = {};
   for (const key of DISCOVERY_KEYS) {
     const value = input[key];
     if (key === 'score') { if (!Number.isInteger(value) || value < 0 || value > 100) throw new Error('Discovery score must be an integer from 0 to 100.'); out.score = value; }
-    else if (key.endsWith('_terms')) {
+    else if (key === 'method_version') {
+      if (typeof value !== 'string' || !/^[a-z][a-z0-9-]{0,47}-v[1-9][0-9]*$/.test(value)) throw new Error('Discovery method_version must be a short versioned method label.');
+      out[key] = value;
+    } else if (key.endsWith('_terms')) {
       if (!Array.isArray(value) || value.length > 12 || value.some(x => typeof x !== 'string' || !x || x.length > 60)) throw new Error(`${key} must be a short list of terms.`);
       out[key] = value;
     } else {

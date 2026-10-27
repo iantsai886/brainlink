@@ -236,6 +236,7 @@ test('a run files relevant entries as discovered proposals with full provenance 
   assert.equal(idea.status, 'discovered');
   assert.equal(idea.origin, 'discovery');
   assert.equal(idea.discovery.run_id, receipt.run_id);
+  assert.equal(idea.discovery.method_version, 'lexical-overlap-v1');
   assert.equal(idea.discovery.source, 'arxiv');
   assert.equal(idea.discovery.topic, 'agent memory');
   assert.equal(idea.discovery.signal, SIGNAL);
@@ -260,6 +261,19 @@ test('a run files relevant entries as discovered proposals with full provenance 
   const sent = JSON.stringify(fetchImpl.calls.map(c => ({ url: c.url, headers: c.init.headers })));
   assert.match(decodeURIComponent(fetchImpl.calls[0].url), /all:"agent[+ ]memory"/);
   for (const word of ['lose', 'context after', 'repeat the same']) assert.ok(!decodeURIComponent(sent).includes(word), word);
+});
+
+test('discovery ledger rejects missing or malformed method-version lineage', async () => {
+  const { ledger } = await service('');
+  const fields = {
+    title: 'Synthetic candidate', user_problem: SIGNAL, hypothesis: '', memory_types: ['working'],
+    sources: [{ url: 'https://arxiv.org/abs/2610.00090', title: 'Synthetic source', published_at: 'unknown', accessed_at: '2026-10-28', claim: 'Synthetic claim.', confidence: 'low', limitations: 'Synthetic fixture.' }],
+    privacy_scope: 'Synthetic fixture only.',
+  };
+  const discovery = { run_id: 'BL-RSI-DISC-20261028-aa112233', source: 'arxiv', topic: 'agent memory', signal: SIGNAL, matched_terms: ['handoff', 'memory'], workflow_terms: ['handoff'], score: 60 };
+  assert.equal((await ledger.appendDiscoveries([{ fields, discovery }])).invalid, 1, 'new records require method lineage');
+  assert.equal((await ledger.appendDiscoveries([{ fields, discovery: { ...discovery, method_version: '../unknown' } }])).invalid, 1, 'method labels are bounded identifiers, not paths or arbitrary text');
+  assert.equal((await ledger.list()).length, 0);
 });
 
 test('Crossref can be explicitly selected and adds cited proposals without sending local problem statements', async () => {

@@ -44,7 +44,7 @@ An additional **Recheck old saved sources** option is off by default. When enabl
 
 ## Provenance on each discovered proposal
 
-`origin: "discovery"` plus `discovery.{run_id, source, topic, signal, matched_terms, workflow_terms, score}`, and one source with canonical URL, title, publication date (or `unknown`), access date, claim (`Abstract states (not verified): …`), confidence (always `low`), and limitations (automatic, unreviewed, preprints may not be peer reviewed, no evidence of improvement for BrainLink). The card in Setup shows why the item is relevant: the user's problem, shared terms, BrainLink workflow terms and the match score.
+`origin: "discovery"` plus `discovery.{run_id, method_version, source, topic, signal, matched_terms, workflow_terms, score}`, and one source with canonical URL, title, publication date (or `unknown`), access date, claim (`Abstract states (not verified): …`), confidence (always `low`), and limitations (automatic, unreviewed, preprints may not be peer reviewed, no evidence of improvement for BrainLink). New proposals record `method_version` (currently `lexical-overlap-v1`) so later research-method changes retain lineage. This label supports comparison; it does not show the method improved. The card in Setup shows why the item is relevant: the user's problem, shared terms, BrainLink workflow terms and the match score.
 
 ## Manual source freshness check
 
