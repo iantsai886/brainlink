@@ -96,6 +96,11 @@ test('Setup offers authenticated manual scans and runs an enabled daily scan in 
   const get = (route, token = app.token) => fetch(base + route, { headers: { 'X-BrainLink-Token': token } });
   const post = (route, body = {}, token = app.token) => fetch(base + route, { method: 'POST', headers: { 'Content-Type': 'application/json', 'X-BrainLink-Token': token }, body: JSON.stringify(body) });
   try {
+    assert.equal((await post('/api/ingestion/folders', { vault: 'Fictional Team' }, 'wrong')).status, 401);
+    const folderChoices = await post('/api/ingestion/folders', { vault: 'Fictional Team' });
+    assert.equal(folderChoices.status, 200);
+    assert.deepEqual((await folderChoices.json()).folders, ['Raw']);
+    assert.notEqual((await post('/api/ingestion/folders', { vault: 'Private Notes' })).status, 200, 'private vault folders are never offered');
     assert.equal((await post('/api/ingestion/run', {}, 'wrong')).status, 401);
     let status;
     for (let i = 0; i < 100; i++) {
@@ -142,12 +147,14 @@ test('ingestion scan UI has manual and scheduled controls with all locale string
   for (const id of ['ingestion-enabled', 'ingestion-vault', 'ingestion-folder', 'ingestion-add', 'ingestion-target-list', 'ingestion-time', 'ingestion-save', 'ingestion-run', 'ingestion-status', 'ingestion-queue']) {
     assert.equal((html.match(new RegExp(`id="${id}"`, 'g')) || []).length, 1, id);
   }
+  assert.match(html, /<select id="ingestion-folder"><\/select>/, 'folder target is selected from existing directories, not typed as a path');
+  assert.match(html, /api\('POST', '\/api\/ingestion\/folders', \{ vault \}\)/, 'folder options come from the authenticated vault-scoped endpoint');
   assert.match(html, /api\('POST', '\/api\/ingestion\/run', \{ targets: currentIngestionTargets\(\) \}\)/);
   assert.match(html, /data-open-note="\$\{esc\(item\.vault \|\| r\.vault\)\}::\$\{esc\(item\.path\)\}"/, 'queue entries open each source note in its own vault');
   assert.match(html, /document\.addEventListener\('click', async \(event\) => \{\s*const removeIngestionTarget/);
   assert.match(html, /currentIngestionTargets\(\)\.push\(target\)/);
   for (const locale of ['en', 'zh-TW', 'pt']) {
     const catalog = JSON.parse(await readFile(new URL(`../ui/locales/${locale}.json`, import.meta.url), 'utf8'));
-    for (const key of ['ingestion.title', 'ingestion.hint', 'ingestion.enabled', 'ingestion.vault', 'ingestion.folder', 'ingestion.addTarget', 'ingestion.targets', 'ingestion.removeTarget', 'ingestion.emptyTargets', 'ingestion.targetRequired', 'ingestion.maxTargets', 'ingestion.duplicateTarget', 'ingestion.time', 'ingestion.save', 'ingestion.run', 'ingestion.never', 'ingestion.running', 'ingestion.lastRun', 'ingestion.failed', 'ingestion.retryScheduled', 'ingestion.saved', 'ingestion.disabled', 'ingestion.scanDone', 'ingestion.empty', 'ingestion.limited', 'ingestion.trigger.manual', 'ingestion.trigger.schedule']) assert.ok(catalog[key], `${locale} ${key}`);
+    for (const key of ['ingestion.title', 'ingestion.hint', 'ingestion.enabled', 'ingestion.vault', 'ingestion.folder', 'ingestion.chooseFolder', 'ingestion.addTarget', 'ingestion.targets', 'ingestion.removeTarget', 'ingestion.emptyTargets', 'ingestion.targetRequired', 'ingestion.maxTargets', 'ingestion.duplicateTarget', 'ingestion.time', 'ingestion.save', 'ingestion.run', 'ingestion.never', 'ingestion.running', 'ingestion.lastRun', 'ingestion.failed', 'ingestion.retryScheduled', 'ingestion.saved', 'ingestion.disabled', 'ingestion.scanDone', 'ingestion.empty', 'ingestion.limited', 'ingestion.trigger.manual', 'ingestion.trigger.schedule']) assert.ok(catalog[key], `${locale} ${key}`);
   }
 });

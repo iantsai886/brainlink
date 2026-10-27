@@ -423,7 +423,7 @@ main #ready, main #ask-panel, main #brain-panel, main #sessions-panel, main #s-c
     <label class="muted" style="display:flex;flex-direction:row;gap:6px;align-items:center"><input type="checkbox" id="ingestion-enabled" style="width:auto"><span data-i18n="ingestion.enabled"></span></label>
     <div class="grid2" style="margin-top:10px">
       <label><span data-i18n="ingestion.vault"></span><select id="ingestion-vault"></select></label>
-      <label><span data-i18n="ingestion.folder"></span><input id="ingestion-folder" class="mono" placeholder="Raw"></label>
+      <label><span data-i18n="ingestion.folder"></span><select id="ingestion-folder"></select></label>
       <label><span data-i18n="ingestion.time"></span><input id="ingestion-time" type="time" value="02:00"></label>
     </div>
     <div class="row" style="margin-top:8px"><button type="button" id="ingestion-add" data-i18n="ingestion.addTarget"></button></div>
@@ -547,6 +547,25 @@ function currentIngestionTargets() {
       : S?.ingestion?.vault && S?.ingestion?.folder ? [{ vault: S.ingestion.vault, folder: S.ingestion.folder }] : [];
   }
   return ingestionTargetsDraft;
+}
+let ingestionFolderRequest = 0;
+async function refreshIngestionFolders(preferred = '') {
+  const select = $('ingestion-folder');
+  const request = ++ingestionFolderRequest;
+  const vault = $('ingestion-vault').value;
+  select.disabled = true;
+  select.innerHTML = `<option value="">${esc(t('ingestion.chooseFolder'))}</option>`;
+  if (!vault) return;
+  try {
+    const result = await api('POST', '/api/ingestion/folders', { vault });
+    if (request !== ingestionFolderRequest || vault !== $('ingestion-vault').value) return;
+    const folders = Array.isArray(result.folders) ? result.folders : [];
+    select.innerHTML = `<option value="">${esc(t('ingestion.chooseFolder'))}</option>` + folders.map((folder) => `<option value="${esc(folder)}">${esc(folder)}</option>`).join('');
+    if (folders.includes(preferred)) select.value = preferred;
+    select.disabled = folders.length === 0;
+  } catch {
+    if (request === ingestionFolderRequest) select.disabled = true;
+  }
 }
 function renderIngestionTargets() {
   if (!$('ingestion-target-list') || !S) return;
@@ -1301,8 +1320,13 @@ async function load() {
   $('sync-folder').value = SY.folder || '';
   $('backup-enabled').checked = Boolean(S.backup?.enabled);
   $('ingestion-enabled').checked = Boolean(S.ingestion?.enabled);
-  $('ingestion-vault').innerHTML = S.vaults.filter((v) => !v.private && v.exists).map((v) => `<option value="${esc(v.name)}" ${v.name === S.ingestion?.vault ? 'selected' : ''}>${esc(v.name)}</option>`).join('');
-  $('ingestion-folder').value = S.ingestion?.folder || '';
+  const scanVaults = S.vaults.filter((v) => !v.private && v.exists);
+  const oldScanVault = $('ingestion-vault').value;
+  $('ingestion-vault').innerHTML = scanVaults.map((v) => `<option value="${esc(v.name)}">${esc(v.name)}</option>`).join('');
+  $('ingestion-vault').value = scanVaults.some((v) => v.name === oldScanVault) ? oldScanVault
+    : scanVaults.some((v) => v.name === S.ingestion?.vault) ? S.ingestion.vault : (scanVaults[0]?.name || '');
+  const selectedTarget = currentIngestionTargets().find((target) => target.vault === $('ingestion-vault').value);
+  await refreshIngestionFolders(selectedTarget?.folder || (S.ingestion?.vault === $('ingestion-vault').value ? S.ingestion?.folder : '') || '');
   renderIngestionTargets();
   $('ingestion-time').value = S.ingestion?.time || '02:00';
   $('ingestion-status').textContent = S.ingestion?.status?.at
@@ -1813,6 +1837,10 @@ document.addEventListener('change', (e) => {
   if (e.target.id === 'github-profile') { $('github-repository').value = ''; $('github-assign-folders').value = ''; $('github-assign-whole-vault').checked = false; githubResetState(); renderGitHubProfile(S.vaults.filter((v) => !v.private && v.exists)); }
   if (e.target.id === 'github-assign-whole-vault') { if (e.target.checked) $('github-assign-folders').value = ''; githubInspected = null; $('github-assign-confirm').disabled = true; }
   if (e.target.id === 'github-vault') { githubInspected = null; $('github-assign-confirm').disabled = true; githubCandidates = []; githubPullCandidates = []; renderGitHubCandidates(); renderGitHubPullCandidates(); $('github-status').textContent = ''; $('github-result').hidden = true; }
+  if (e.target.id === 'ingestion-vault') {
+    const target = currentIngestionTargets().find((item) => item.vault === e.target.value);
+    refreshIngestionFolders(target?.folder || '').catch(() => {});
+  }
 });
 document.addEventListener('click', async (event) => {
   const removeIngestionTarget = event.target.closest('[data-ingestion-remove]');
@@ -1908,7 +1936,7 @@ $('backup-pick').onclick = async () => {
   } catch (e) { toast(e.message, true); }
 };
 $('ingestion-add').onclick = () => {
-  const target = { vault: $('ingestion-vault').value, folder: $('ingestion-folder').value.trim().replace(/\\/g, '/') };
+  const target = { vault: $('ingestion-vault').value, folder: $('ingestion-folder').value };
   if (!target.vault || !target.folder) { toast(t('ingestion.targetRequired'), true); return; }
   if (currentIngestionTargets().length >= 20) { toast(t('ingestion.maxTargets'), true); return; }
   if (currentIngestionTargets().some((item) => item.vault.toLocaleLowerCase() === target.vault.toLocaleLowerCase() && item.folder.toLocaleLowerCase() === target.folder.toLocaleLowerCase())) { toast(t('ingestion.duplicateTarget'), true); return; }

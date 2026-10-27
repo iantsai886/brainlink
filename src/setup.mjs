@@ -1718,6 +1718,15 @@ export async function startSetup(opts = {}) {
       refreshIngestionSchedule(next);
       return { ok: true, ingestion: { ...next.ingestion, status: ingestionStatus } };
     },
+    'POST /api/ingestion/folders': async (b) => {
+      const cfg = await loadConfig(file);
+      const vaultName = String(b.vault || '');
+      const selected = cfg.vaults.find((item) => item.name === vaultName);
+      if (!selected || selected.private) throw new Error('Choose an existing non-private vault.');
+      const ctx = localContext(cfg, { ...env, BRAINLINK_SEMANTIC: '0' });
+      const folders = await listSessionFilingFolders(ctx, vaultName);
+      return { folders: folders.map((item) => item.path).filter(Boolean) };
+    },
     'POST /api/ingestion/run': async (b) => {
       const cfg = await loadConfig(file);
       const targets = Array.isArray(b.targets) ? b.targets : b.vault && b.folder ? [{ vault: String(b.vault), folder: String(b.folder) }] : undefined;
