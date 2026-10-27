@@ -18,6 +18,10 @@ Built `dist/BrainLink-Setup-1.2.8.exe` from source commit `3acb1b5ed2efb9ea66d24
 
 The 3D graph already excluded private and generated notes from nodes and edges, but its aggregate `total` included them. The count now includes only visible, non-generated notes, matching the graph-vault list. Regression tests cover a private note, a private vault, and both authenticated graph API responses. `test/graph3d.test.mjs` passed 19/19 on Windows with Node.js 24.22.1; `git diff --check` passed. The full suite was not rerun for this focused change. No real vault data was used.
 
+### Windows package refreshed with graph privacy fix (2026-10-28)
+
+Rebuilt `dist/BrainLink-Setup-1.2.8.exe` from source commit `17a34e0ac4c266bef8eba33be1468d041cfb8650` using Inno Setup 6.7.3 and bundled Node.js 24.22.1. SHA-256: `DAD80D410D69475ED60974D01D1D82133DB7B9F2C7C72F7721870C825B5BAAF8`. Verified the staged graph source and UI match the current repository, UI development tests are absent, and the graph-curation and session-closeout Skills are present. Authenticode status is `NotSigned`; the installer was not installed. This confirms a local package build and contents only.
+
 ### Full regression verification after visible RSI topic evidence (2026-10-28)
 
 On Windows with Node.js 24.22.1, `npm run test:all` passed on the code now committed at `075d60de5b00d36fb30992de7eedfd7f483bb7ce`: core 483 total (477 passed, 0 failed, 6 platform/privilege skips) and UI 29/29. Focused discovery, ledger, evaluator, locale and UI checks passed 53/53 before this run. This remains local automated evidence; hosted CI and real client/runtime acceptance remain unverified.
