@@ -650,6 +650,10 @@ Added a Sessions setting for local Ollama summary drafts, off by default. A user
 
 Added three UI contract checks for this feature: local processing and opt-in are explained, model generation is user-triggered, and the save control stays hidden until a preview. On Windows, the focused local summary UI/API/module run passed 8/8. These are source-level UI checks, not a visual or Ollama runtime acceptance test.
 
+### Windows installer rebuilt with local summary drafts (2026-10-28)
+
+Built the 1.2.8 Windows installer from source commit `a9cc70a` with Inno Setup 6.7.3. Artifact: `dist/BrainLink-Setup-1.2.8.exe`, SHA-256 `D59226667F0E4C9925F3F89259455C639FA11092851E34E9D237A6F1FC8168EE`. The staging check confirms the new local-summary module and English locale are present, the staged UI hash matches source, and UI development tests are excluded. Authenticode reports `NotSigned`. This is a successful package build and staging check; it does not verify installation, desktop shortcut operation, Ollama availability, or release readiness.
+
 ### Full core regression after local summary integration (2026-10-28)
 
 On Windows with Node.js 24.22.1, `npm test` on source commit `0612e99` passed: 474 tests total (468 passed, 0 failed, 6 platform/privilege skips). The skipped tests require Linux or Windows symlink privileges. This broad local regression includes session summaries, closeout and handoff, vault boundaries, graph privacy, backups, scheduled ingestion, Skills/connectors, and RSI. UI tests separately passed 29/29. It does not establish a live Ollama run, cross-client Claude-to-Codex acceptance, hosted CI, or release readiness.
