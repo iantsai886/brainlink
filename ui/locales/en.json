@@ -255,6 +255,7 @@
   "connect.notFoundHint": "Not found on this computer — install it, then reload this page.",
   "connect.manualReady": "Ready to configure",
   "connect.manualHint": "One click adds BrainLink to Antigravity's global MCP settings and backs up the previous file. Then reload MCP servers or restart Antigravity.",
+  "connect.deepseekHint": "One click backs up and updates DeepSeek Harness's shared MCP settings. Use a BrainLink agent limited to the right Twin, then restart or reload the Harness profile.",
   "connect.none": "No AI clients recognised on this computer yet.",
   "connect.liveOk": "● live",
   "connect.liveFailed": "○ failed",

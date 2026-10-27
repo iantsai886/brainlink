@@ -19,12 +19,11 @@ Let the Harness search and read only the Second Brain vaults and tools that Brai
 
 ## Step 2: Connect using BrainLink's supported route
 
-1. Check BrainLink Setup's detected-client connection flow. If it recognizes the Harness, use that flow; it merges the BrainLink entry and backs up the existing client config. Do not replace the whole config.
-2. If it is not detected, but the Harness documentation confirms it supports local stdio MCP, use BrainLink's existing generic agent setup: open **Agents** in BrainLink Setup, choose **Add AI agent**, enter `DeepSeek Harness`, select **Local** only if both apps run in the same OS environment, and add it. BrainLink shows a JSON MCP snippet and a newly generated key once. Put that snippet in the Harness's documented MCP client config, merging it with existing entries. Use the exact command, arguments, and environment values BrainLink generated; do not guess paths or edit the source snippet.
-3. If Harness supports only remote MCP, do not choose Local. Use BrainLink's **Remote** agent option only after confirming the supported transport and reachability. BrainLink's current remote snippet uses loopback and is not reachable from a cloud or remote machine. Do not expose it with a tunnel yourself.
-4. In BrainLink Setup, assign the new named agent to an appropriate Personal, Organisation, or Client Twin profile with only the needed vaults, memory types, and operations. If Ian has not chosen the profile/scope, stop before searching note content and ask him to choose. Begin with read-only operations if supported.
-5. For local stdio, confirm BrainLink and the Harness run in the same operating-system environment. A Windows-local process, WSL/container, and remote agent may have different paths and cannot necessarily reach one another.
-6. Never put tokens or credentials in chat, this prompt, source code, Git, shell history, screenshots, or logs. Save the generated key only through the Harness's documented local secret/config flow. Do not ask Ian to paste secrets into chat.
+1. Open BrainLink Setup → **Connect** and find **DeepSeek Harness**. BrainLink can add its documented local stdio MCP entry to `$DSH_HOME/cordis.patch.yml` (normally `~/.dsh/cordis.patch.yml`), after making a backup. It merges one BrainLink entry and keeps other plugin entries. Do not replace the whole file.
+2. This is a home-level Harness patch shared by profiles on this computer. Before connecting, create or select a named BrainLink AI agent and grant it only the correct Personal, Organisation, or Client Twin scope, tools, and memory types. Use that agent's token for the Harness connection. Do not reuse another agent's token or give Harness a broader scope for convenience.
+3. BrainLink starts a local stdio MCP process. Use it only if Harness and BrainLink run in the same operating-system environment. Windows, WSL/container, and remote Harness instances may have different paths and cannot necessarily reach each other. For those cases, stop and confirm a separately reviewed supported connection method; do not expose BrainLink through a tunnel yourself.
+4. BrainLink's connector creates a config entry but does not install DeepSeek Harness or its MCP package, choose a Harness profile, restart Harness, or prove a live connection. Follow the official [DeepSeek Harness MCP client instructions](https://github.com/deepseek-ai/deepseek-harness/blob/master/packages/mcp/mcp-client/README.md) and reload/restart the intended profile.
+5. Never put tokens or credentials in chat, this prompt, source code, Git, shell history, screenshots, or logs. BrainLink writes its agent token into the local Harness patch file, which is readable to the same OS user; protect that account and config backup accordingly. Do not ask Ian to paste secrets into chat.
 
 ## Step 3: Verify with a harmless read-only check
 
@@ -62,4 +61,4 @@ Do not claim success until a real BrainLink tool call succeeds in the Harness.
 
 ## Maintainer note
 
-This file is an instruction prompt, not a verified DeepSeek Harness connector. The Harness's MCP capability and its local/remote execution environment have not been verified from this repository. BrainLink's implementation version, client connector list, supported transports, and runtime grants are authoritative. A prompt alone does not install, authorize, or verify an integration.
+BrainLink's config merge is locally tested, and the official DeepSeek Harness docs describe the `@deepseek-ai/dsh-mcp-client` stdio configuration. A local config edit alone does not prove that an installed Harness profile loaded it or that a live BrainLink call succeeds. Verify the actual Harness version, profile, runtime, and Twin scope before claiming a live integration.

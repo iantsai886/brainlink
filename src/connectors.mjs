@@ -54,6 +54,11 @@ export const CLIENTS = {
     },
     note: 'Start a new Hermes session or run /reload-mcp. If Hermes runs in WSL or on another machine, configure BrainLink in that environment too.',
   },
+  'deepseek-harness': {
+    title: 'DeepSeek Harness', platform: 'DeepSeek Harness', role: 'DeepSeek Harness', format: 'dsh-yaml', manual: true,
+    file: ({ home, env }) => path.join(env.DSH_HOME || path.join(home, '.dsh'), 'cordis.patch.yml'),
+    note: 'Restart or reload the selected DeepSeek Harness profile, then confirm the BrainLink tools appear. The home-level patch is shared by Harness profiles on this computer.',
+  },
   windsurf: {
     title: 'Windsurf', platform: 'other', role: 'Windsurf', format: 'json',
     file: ({ home }) => path.join(home, '.codeium', 'windsurf', 'mcp_config.json'),
@@ -91,7 +96,7 @@ async function detectOne(id, c, opts) {
   let connected = false;
   if (await exists(file)) {
     const raw = await readFile(file, 'utf8');
-    connected = c.format === 'toml' ? /^\[mcp_servers\.brainlink\]/m.test(raw) : c.format === 'yaml' ? (() => { try { return Boolean(parseYaml(raw, file).value.mcp_servers?.[SERVER_KEY]); } catch { return false; } })() : (() => { try { return Boolean(JSON.parse(raw || '{}').mcpServers?.[SERVER_KEY]); } catch { return false; } })();
+    connected = c.format === 'toml' ? /^\[mcp_servers\.brainlink\]/m.test(raw) : c.format === 'yaml' ? (() => { try { return Boolean(parseYaml(raw, file).value.mcp_servers?.[SERVER_KEY]); } catch { return false; } })() : c.format === 'dsh-yaml' ? (() => { try { return dshEntries(parseDocument(raw, { uniqueKeys: true })).some((entry) => entry.id === 'mcp-brainlink' && entry.name === '@deepseek-ai/dsh-mcp-client'); } catch { return false; } })() : (() => { try { return Boolean(JSON.parse(raw || '{}').mcpServers?.[SERVER_KEY]); } catch { return false; } })();
   }
   return { title: c.title, file, present, connected, canConnect: present || Boolean(c.manual), manual: Boolean(c.manual), note: c.note };
 }
@@ -128,8 +133,51 @@ export async function readClientAgentToken(id, opts) {
     try { return String(parseYaml(raw, file).value.mcp_servers?.[SERVER_KEY]?.env?.BRAINLINK_AGENT_TOKEN || ''); }
     catch { return ''; }
   }
+  if (c.format === 'dsh-yaml') {
+    try { return String(dshEntries(parseDocument(raw, { uniqueKeys: true })).find((entry) => entry.id === 'mcp-brainlink')?.config?.env?.BRAINLINK_AGENT_TOKEN || ''); }
+    catch { return ''; }
+  }
   try { return String(JSON.parse(raw || '{}').mcpServers?.[SERVER_KEY]?.env?.BRAINLINK_AGENT_TOKEN || ''); }
   catch { return ''; }
+}
+
+function dshEntries(doc) {
+  if (doc.errors.length) throw new Error('DeepSeek Harness patch is not valid YAML; fix it, then try again (BrainLink will not overwrite it).');
+  const root = doc.contents;
+  if (!root || !Array.isArray(root.items)) throw new Error('DeepSeek Harness patch must be a YAML list; BrainLink will not overwrite it.');
+  const entries = [];
+  for (const patch of root.items) {
+    if (!Array.isArray(patch?.items)) continue;
+    const insert = patch.items.find((pair) => pair.key?.value === 'insert')?.value;
+    if (!insert) continue;
+    if (!Array.isArray(insert.items)) throw new Error('DeepSeek Harness insert patch must contain a list; BrainLink will not overwrite it.');
+    for (const node of insert.items) {
+      const row = node?.toJSON?.();
+      if (row && typeof row === 'object' && !Array.isArray(row)) entries.push(row);
+    }
+  }
+  return entries;
+}
+
+function updateDshPatch(raw, entry) {
+  const doc = parseDocument(raw || '[]', { uniqueKeys: true });
+  dshEntries(doc); // Validate the full document and every insert patch before changing anything.
+  const rows = [];
+  const root = doc.contents;
+  for (const patch of root.items) {
+    if (!Array.isArray(patch?.items)) { rows.push(patch); continue; }
+    const insertPair = patch.items.find((pair) => pair.key?.value === 'insert');
+    if (!insertPair) { rows.push(patch); continue; }
+    insertPair.value.items = insertPair.value.items.filter((node) => node?.toJSON?.()?.id !== 'mcp-brainlink');
+    rows.push(patch);
+  }
+  if (entry) {
+    const target = rows.find((patch) => Array.isArray(patch?.items) && patch.items.some((pair) => pair.key?.value === 'insert'));
+    if (target) target.items.find((pair) => pair.key?.value === 'insert').value.items.push(doc.createNode(entry));
+    else rows.push(doc.createNode({ insert: [entry] }));
+  }
+  root.items = rows;
+  return doc.toString();
 }
 
 async function backup(file, now) {
@@ -191,6 +239,7 @@ export async function connectClient(id, opts) {
   const raw = (await exists(file)) ? await readFile(file, 'utf8') : '';
   let text;
   if (c.format === 'toml') text = codexToml(raw, entry);
+  else if (c.format === 'dsh-yaml') text = updateDshPatch(raw, { id: 'mcp-brainlink', name: '@deepseek-ai/dsh-mcp-client', config: { serverName: SERVER_KEY, transport: 'stdio', command: entry.command, args: entry.args, env: entry.env } });
   else if (c.format === 'yaml') {
     const { doc, value } = parseYaml(raw, file);
     if (!value.mcp_servers) doc.set('mcp_servers', {});
@@ -218,6 +267,11 @@ export async function disconnectClient(id, opts) {
   const raw = await readFile(file, 'utf8');
   let text;
   if (c.format === 'toml') text = codexToml(raw, null);
+  else if (c.format === 'dsh-yaml') {
+    const doc = parseDocument(raw, { uniqueKeys: true });
+    if (!dshEntries(doc).some((entry) => entry.id === 'mcp-brainlink')) return { client: id, removed: false };
+    text = updateDshPatch(raw, null);
+  }
   else if (c.format === 'yaml') {
     const { doc, value } = parseYaml(raw, file);
     if (!value.mcp_servers?.[SERVER_KEY]) return { client: id, removed: false };

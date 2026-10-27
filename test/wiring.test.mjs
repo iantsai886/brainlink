@@ -318,6 +318,53 @@ test('connectors: Hermes uses its Windows LocalAppData default, honors HERMES_HO
   assert.equal(legacy.hermes.file, path.join(legacyHome, '.hermes', 'config.yaml'), 'existing legacy config remains discoverable');
 });
 
+test('connectors: DeepSeek Harness adds one profile patch entry, preserves other plugins, and disconnects cleanly', async () => {
+  const home = await tmp('dsh-connect');
+  const dshHome = path.join(home, '.dsh');
+  const file = path.join(dshHome, 'cordis.patch.yml');
+  await mkdir(dshHome, { recursive: true });
+  const original = '# Keep this note\n- insert:\n    - id: existing-tool\n      name: example/plugin\n      config: { enabled: true }\n';
+  await writeFile(file, original);
+  const opts = { home, os: 'win32', env: { DSH_HOME: dshHome }, launch: { command: process.execPath, args: ['brainlink.mjs', 'serve'] }, useCli: false, extraEnv: { BRAINLINK_AGENT_TOKEN: 'fictional-dsh-token' }, now: new Date('2026-10-27T12:00:00.000Z') };
+  const before = await detect(opts);
+  assert.equal(before['deepseek-harness'].present, true);
+  assert.equal(before['deepseek-harness'].connected, false);
+  assert.equal(before['deepseek-harness'].canConnect, true);
+  const connected = await connect('deepseek-harness', opts);
+  assert.equal(connected.ok, true, connected.message);
+  const config = parse(await readFile(file, 'utf8'));
+  assert.equal(config[0].insert[0].id, 'existing-tool');
+  const brainlink = config.flatMap((patch) => patch.insert || []).find((row) => row.id === 'mcp-brainlink');
+  assert.equal(brainlink.name, '@deepseek-ai/dsh-mcp-client');
+  assert.equal(brainlink.config.serverName, 'brainlink');
+  assert.equal(brainlink.config.transport, 'stdio');
+  assert.equal(brainlink.config.env.BRAINLINK_AGENT_TOKEN, 'fictional-dsh-token');
+  assert.equal((await detect(opts))['deepseek-harness'].connected, true);
+  assert.equal(await readClientAgentToken('deepseek-harness', opts), 'fictional-dsh-token');
+  assert.match(await readFile(file, 'utf8'), /# Keep this note/);
+  assert.equal(await readFile((await readdir(dshHome).then((names) => path.join(dshHome, names.find((name) => name.includes('.brainlink-backup-'))))), 'utf8'), original);
+  const removed = await disconnect('deepseek-harness', opts);
+  assert.equal(removed.ok, true, removed.message);
+  const after = parse(await readFile(file, 'utf8'));
+  assert.equal(after.flatMap((patch) => patch.insert || []).some((row) => row.id === 'mcp-brainlink'), false);
+  assert.equal(after[0].insert[0].id, 'existing-tool');
+});
+
+test('connectors: DeepSeek Harness refuses malformed patch YAML without overwriting it', async () => {
+  const home = await tmp('dsh-bad-patch');
+  const dshHome = path.join(home, '.dsh');
+  const file = path.join(dshHome, 'cordis.patch.yml');
+  await mkdir(dshHome, { recursive: true });
+  const original = '- insert: [\n';
+  await writeFile(file, original);
+  const opts = { home, os: 'win32', env: { DSH_HOME: dshHome }, launch: { command: process.execPath, args: ['brainlink.mjs', 'serve'] }, useCli: false };
+  const connected = await connect('deepseek-harness', opts);
+  assert.equal(connected.ok, false);
+  assert.match(connected.message, /not valid YAML/);
+  assert.equal(await readFile(file, 'utf8'), original);
+  assert.equal((await readdir(dshHome)).some((name) => name.includes('.brainlink-backup-')), false);
+});
+
 // ---- bin/brainlink.mjs: connect --all and sync ----
 
 test('CLI: `brainlink connect --all` connects every present client and skips the rest', async () => {
