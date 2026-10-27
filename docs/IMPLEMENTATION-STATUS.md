@@ -581,3 +581,7 @@ Updated Windows staged-app, macOS installer, macOS zip, and Linux package smoke 
 ### Windows installer build with graph-curation Skill (2026-10-27)
 
 Built `dist/BrainLink-Setup-1.2.8.exe` from source commit `3feb247` using Inno Setup 6.7.3. SHA-256: `F96C51FE968A499EA900F722F361E1C9C73FFD17F07E326A8D35E45925722074`. The staged package contains `skills/brainlink-graph-curation/SKILL.md`, and the staged bundled Node runtime reports BrainLink 1.2.8. The planned isolated per-user install/uninstall check was rejected by the automatic action policy because it would temporarily change the Windows user PATH and desktop shortcut. The installer was not run; no existing BrainLink data or Windows setup was changed. Package build and staged-file evidence do not prove installed-app acceptance, signature, or customer readiness.
+
+### Packaged Windows Setup launch smoke (2026-10-27)
+
+Launched the staged bundled runtime's built-in fictional demo on loopback with browser opening disabled. `GET /health` returned BrainLink 1.2.8; Setup returned HTTP 200 with page title `BrainLink Setup`; the staged graph-curation Skill was present. The test process was stopped. The demo created one synthetic directory, `brainlink-demo-7Cy5eD`, under the Windows temp folder. Cleanup was rejected by the automatic action policy; the demo files remain for manual removal. No configured vault or existing BrainLink app data was accessed. This verifies staged runtime startup and page serving, not installation, desktop shortcut behavior, or user acceptance.
