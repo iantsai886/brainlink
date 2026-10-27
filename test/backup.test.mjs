@@ -229,7 +229,9 @@ test('authenticated Setup enables scheduled backup only after a verified first c
   await writeFile(path.join(root, 'Private.md'), '---\nprivate: true\n---\nprivate fixture');
   const env = { BRAINLINK_HOME: home, HOME: home, BRAINLINK_SEMANTIC: '0' };
   await saveConfig(normalize({ vaults: [{ name: 'Personal', path: root, private: true }] }), path.join(home, 'config.json'));
-  const app = await startSetup({ env, home, os: 'win32', port: 0, useCli: false, backupIntervalMs: 50, idleMinutes: 0.01,
+  // This integration test covers backup setup, not the short-idle lifecycle; keep enough
+  // time for initial API setup on a loaded CI/Windows host before scheduling is enabled.
+  const app = await startSetup({ env, home, os: 'win32', port: 0, useCli: false, backupIntervalMs: 50, idleMinutes: 10,
     pickRestoreSourceFolder: async () => 'C:\\Fictional\\BrainLink-Backup',
     pickRestoreDestinationFolder: async () => 'D:\\Fictional\\Recovery' });
   const api = (route, body, token = app.token) => fetch(`http://127.0.0.1:${app.port}${route}`, {

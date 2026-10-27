@@ -42,12 +42,23 @@ export function extractText(content) {
   return '';
 }
 
-// First user line + last assistant line, redacted and clipped to ~60 tokens. No LLM call.
+const LOW_SIGNAL_USER_TURNS = /^(?:continue|keep going|go ahead|thanks?|thank you|ok(?:ay)?|yes|yep|done|收到|继续|繼續|好|好的|可以|嗯)[.!。！\s]*$/i;
+
+// Build a compact, explicitly unverified record from imported turns; this never calls a model.
+// Keep the original goal, the latest meaningful user direction, and the assistant's final reply
+// in separate budgets so a long opening request cannot consume the space needed for the outcome.
 export function autoSummary(messages) {
-  const firstUser = messages.find((m) => m.role === 'user');
-  const lastAssistant = [...messages].reverse().find((m) => m.role === 'assistant');
-  const parts = [firstUser?.text, lastAssistant?.text].filter(Boolean);
-  return clip(parts.join(' — '), 60);
+  const users = messages.filter((m) => m.role === 'user' && String(m.text || '').trim());
+  const assistants = messages.filter((m) => m.role === 'assistant' && String(m.text || '').trim());
+  const firstUser = users[0];
+  const recentUser = [...users].reverse().find((m) => !LOW_SIGNAL_USER_TURNS.test(String(m.text || '').trim()));
+  const lastAssistant = assistants.at(-1);
+  const sections = [];
+  const safeClip = (value, budget) => clip(redactText(String(value || '').replace(/\s+/g, ' ').trim()), budget);
+  if (firstUser) sections.push(`Goal: ${safeClip(firstUser.text, 26)}`);
+  if (recentUser && recentUser !== firstUser) sections.push(`Latest direction: ${safeClip(recentUser.text, 24)}`);
+  if (lastAssistant) sections.push(`Last reply (unverified): ${safeClip(lastAssistant.text, 46)}`);
+  return sections.join('\n');
 }
 
 export function autoTitle(messages, summaryLine) {

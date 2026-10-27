@@ -11,10 +11,34 @@ import { createSessionStore } from '../src/sessions/store.mjs';
 import { createSessionRefresher } from '../src/sessions/index.mjs';
 import { importClaudeCode, defaultRoot as defaultClaudeRoot } from '../src/sessions/claude-code.mjs';
 import { importCodex, defaultRoot as defaultCodexRoot, defaultHistoryFile } from '../src/sessions/codex.mjs';
+import { autoSummary } from '../src/sessions/import-util.mjs';
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const FIXTURES = path.join(ROOT, 'test', 'fixtures');
 const tmp = (p) => mkdtemp(path.join(tmpdir(), `brainlink-${p}-`));
+
+test('automatic session excerpt keeps goal, latest meaningful direction, and final reply in separate token budgets', () => {
+  const summary = autoSummary([
+    { role: 'user', text: `Build the fictional garden planner. ${'opening detail '.repeat(120)}` },
+    { role: 'assistant', text: 'I inspected the sample project.' },
+    { role: 'user', text: 'continue' },
+    { role: 'user', text: `Keep the planner private and add a recovery export. ${'recent detail '.repeat(30)}` },
+    { role: 'assistant', text: `API_TOKEN=classified-value. Implemented the private planner and tested restore in an isolated folder. ${'final detail '.repeat(80)}` },
+  ]);
+  assert.match(summary, /Goal: Build the fictional garden planner/);
+  assert.match(summary, /Latest direction: Keep the planner private and add a recovery export/);
+  assert.match(summary, /Last reply \(unverified\): API_TOKEN=\[REDACTED\] Implemented the private planner and tested restore/);
+  assert.match(summary, /API_TOKEN=\[REDACTED\]/);
+  assert.doesNotMatch(summary, /classified-value/);
+  assert.ok(estTokens(summary) <= 115, `summary should remain compact, got ${estTokens(summary)} tokens`);
+});
+
+test('automatic session excerpt avoids duplicating one-turn sessions and handles user-only history', () => {
+  const oneTurn = autoSummary([{ role: 'user', text: 'Write a short project note.' }, { role: 'assistant', text: 'Saved the draft.' }]);
+  assert.equal((oneTurn.match(/Goal:/g) || []).length, 1);
+  assert.match(oneTurn, /Last reply \(unverified\): Saved the draft\./);
+  assert.equal(autoSummary([{ role: 'user', text: 'Check local project status.' }, { role: 'user', text: 'okay' }]), 'Goal: Check local project status.');
+});
 
 // Tests never read real ~/.claude or ~/.codex; fixtures are small fake histories only.
 test('session importer paths default under the real home (not exercised here) and accept an override root', () => {
