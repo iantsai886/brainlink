@@ -20,6 +20,11 @@ async function visibleVaults(ctx, only) {
   return out;
 }
 
+export async function listGraphVaults(ctx) {
+  const vaults = await visibleVaults(ctx);
+  return { vaults: vaults.map(({ name, index }) => ({ name, notes: index.notes.filter((note) => !note.generated && !isPrivateNote(note)).length })) };
+}
+
 // { nodes: [{id, title, vault, group, tags, degree}], links: [{source, target}], shown, total }
 export async function buildGraph3D(ctx, vaultName, { limit = 2000 } = {}) {
   const vaults = await visibleVaults(ctx, vaultName);

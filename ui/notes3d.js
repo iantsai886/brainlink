@@ -77,6 +77,7 @@
   function buildLayout(root) {
     root.innerHTML = `
       <div class="notes3d-wrap">
+        <div class="notes3d-vault-picker"><label for="notes3d-vault-select" data-i18n="notes3d.vaultFilter"></label><select id="notes3d-vault-select" aria-label="Choose a vault"></select></div>
         <div class="notes3d-canvas" id="notes3d-canvas"></div>
         <aside class="notes3d-panel" id="notes3d-panel-detail" hidden>
           <div class="notes3d-actions"><a class="chip" id="notes3d-edit" target="_blank" rel="noopener" hidden></a><button class="chip" id="notes3d-edit-toggle" hidden>Edit</button><button class="link notes3d-close" id="notes3d-close" data-i18n="notes3d.close">Close ✕</button></div>
@@ -121,7 +122,7 @@
     const brainPanel = document.getElementById('brain-panel');
     const root = document.getElementById('notes3d-root');
     if (!brainPanel || !root) return;
-    let graphInstance = null, nodesById = [], byTitle = new Map(), loaded = false, loadedOk = false, selectedId = null, currentDetail = null, currentNode = null, pendingVaultRefresh = false;
+    let graphInstance = null, nodesById = [], byTitle = new Map(), loaded = false, loadedOk = false, selectedId = null, currentDetail = null, currentNode = null, pendingVaultRefresh = false, vaultFilter = null;
 
     function stat(id, v) { const el = document.getElementById(id); if (el) el.textContent = v; }
 
@@ -201,7 +202,7 @@
       if (!list || !status) return;
       try {
         const offset = append ? (list._nextOffset || 0) : 0;
-        const result = await api('/api/graph3d/reviews', { offset });
+        const result = await api('/api/graph3d/reviews', { offset, vault: vaultFilter && vaultFilter !== '*' ? vaultFilter : undefined });
         const proposals = append ? [...(list._pendingReviews || []), ...result.proposals] : result.proposals;
         list._pendingReviews = proposals;
         list._nextOffset = result.offset + result.proposals.length;
@@ -228,7 +229,7 @@
       button.disabled = true;
       try {
         const offset = append ? (list._nextOffset || 0) : 0;
-        const result = await api('/api/graph3d/discover', { offset, scan_id: append ? list._scanId : undefined });
+        const result = await api('/api/graph3d/discover', { offset, vault: vaultFilter && vaultFilter !== '*' ? vaultFilter : undefined, scan_id: append ? list._scanId : undefined });
         const items = append ? [...(list._candidates || []), ...result.candidates] : result.candidates;
         list._candidates = items;
         list._scanId = result.scan_id;
@@ -251,6 +252,17 @@
     }
 
     root.addEventListener('input', (e) => { if (e.target.id === 'notes3d-search') renderNodeList(); });
+    root.addEventListener('change', (e) => {
+      if (e.target.id !== 'notes3d-vault-select') return;
+      vaultFilter = e.target.value || '*';
+      selectedId = null; currentDetail = null; currentNode = null;
+      document.getElementById('notes3d-panel-detail').hidden = true;
+      const suggestions = document.getElementById('notes3d-discover-list');
+      suggestions._nextOffset = 0; suggestions._done = true; suggestions._candidates = []; suggestions._scanId = null; suggestions.innerHTML = '';
+      document.getElementById('notes3d-discover-status').textContent = '';
+      document.getElementById('notes3d-discover-run').textContent = tr('notes3d.discoverRun');
+      loadGraph();
+    });
     window.addEventListener('brainlink:locale-changed', () => {
       root.querySelectorAll('[data-i18n]').forEach((el) => { el.textContent = tr(el.dataset.i18n); });
       root.querySelectorAll('[data-i18n-placeholder]').forEach((el) => { el.placeholder = tr(el.dataset.i18nPlaceholder); });
@@ -391,7 +403,15 @@
       const canvas = document.getElementById('notes3d-canvas');
       if (!graphInstance) canvas.innerHTML = '<p class="skeleton">Loading your 3D brain map…</p>';
       let g;
-      try { g = await api('/api/graph3d', {}); }
+      try {
+        const optionData = await api('/api/graph3d/vaults', {});
+        const select = document.getElementById('notes3d-vault-select');
+        if (vaultFilter === null && optionData.vaults.length) vaultFilter = optionData.vaults[0].name;
+        if (vaultFilter && vaultFilter !== '*' && !optionData.vaults.some((vault) => vault.name === vaultFilter)) vaultFilter = optionData.vaults[0]?.name || '*';
+        select.innerHTML = `<option value="*">${esc(tr('notes3d.allVaults'))}</option>${optionData.vaults.map((vault) => `<option value="${esc(vault.name)}">${esc(vault.name)} · ${esc(vault.notes)}</option>`).join('')}`;
+        select.value = vaultFilter === null ? '*' : vaultFilter;
+        g = await api('/api/graph3d', { vault: vaultFilter && vaultFilter !== '*' ? vaultFilter : undefined });
+      }
       catch (e) { canvas.innerHTML = `<p class="error-box">Could not load the map: ${esc(e.message)}</p>`; return; }
       try { const h = await api('/api/graph', {}); stat('st-notes', h.health?.notes ?? 0); stat('st-links', h.health?.links ?? 0); stat('st-orphans', h.health?.not_linked ?? 0); } catch {}
       nodesById = g.nodes;

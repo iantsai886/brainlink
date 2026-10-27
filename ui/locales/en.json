@@ -446,6 +446,8 @@
   "agents.testSucceeded": "Live call succeeded ({ms}ms). This agent is now connected.",
   "agents.testFailed": "The call failed; see Activity below.",
   "notes3d.panelTitle": "Your brain",
+  "notes3d.vaultFilter": "Vault",
+  "notes3d.allVaults": "All accessible vaults",
   "notes3d.loading": "Loading your 3D brain map…",
   "notes3d.loadError": "Could not load the map: {error}",
   "notes3d.empty": "No notes yet — once you add some, their links show up here.",

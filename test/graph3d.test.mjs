@@ -133,6 +133,11 @@ test('/api/graph3d and /api/graph3d/note: same exclusion guarantee over HTTP', a
     const titles = g.nodes.map((n) => n.title);
     assert.ok(!titles.includes('Hidden Note') && !titles.includes('Buried'), JSON.stringify(titles));
     assert.ok(titles.includes('External') && !titles.includes('External Private'), JSON.stringify(titles));
+    const available = await api('/api/graph3d/vaults', {});
+    assert.deepEqual(available.vaults.map((v) => v.name), ['Main']);
+    assert.ok(available.vaults[0].notes >= titles.length);
+    const filtered = await api('/api/graph3d', { vault: 'Main' });
+    assert.deepEqual(filtered.nodes.map((n) => n.title), titles);
 
     const note = await api('/api/graph3d/note', { vault: 'Main', path: 'Beta.md' });
     assert.match(note.body, /Backlinked from Alpha/);
@@ -462,8 +467,10 @@ test('3D graph has a searchable, keyboard-accessible note list in every supporte
   assert.match(src, /brainlink:locale-changed/);
   assert.match(src, /api\('\/api\/graph3d\/discover'/, 'vault-wide discovery must call its authenticated local API');
   assert.match(src, /data-discover-save/, 'each discovered link must be saved through the review flow');
+  assert.match(src, /id="notes3d-vault-select"/, 'graph must let the user focus on one vault');
+  assert.match(src, /api\('\/api\/graph3d\/vaults'/, 'vault choices must come from the privacy-filtered API');
   assert.match(css, /\.notes3d-node:focus-visible/);
-  const keys = ['notes3d.browseNotes', 'notes3d.browseSearch', 'notes3d.browsePlaceholder', 'notes3d.browseEmpty', 'notes3d.browseCount', 'notes3d.browseMore', 'notes3d.discoverVault', 'notes3d.discoverHint', 'notes3d.discoverRun', 'notes3d.discoverMore', 'notes3d.discoverDone', 'notes3d.discoverProgress', 'notes3d.discoverFailed', 'notes3d.discoverChanged', 'notes3d.discoverReadOnly'];
+  const keys = ['notes3d.browseNotes', 'notes3d.browseSearch', 'notes3d.browsePlaceholder', 'notes3d.browseEmpty', 'notes3d.browseCount', 'notes3d.browseMore', 'notes3d.vaultFilter', 'notes3d.allVaults', 'notes3d.discoverVault', 'notes3d.discoverHint', 'notes3d.discoverRun', 'notes3d.discoverMore', 'notes3d.discoverDone', 'notes3d.discoverProgress', 'notes3d.discoverFailed', 'notes3d.discoverChanged', 'notes3d.discoverReadOnly'];
   for (const locale of ['en', 'zh-TW', 'pt']) {
     const catalog = JSON.parse(await readFile(new URL(`../ui/locales/${locale}.json`, import.meta.url), 'utf8'));
     for (const key of keys) assert.ok(catalog[key], `${locale} ${key}`);

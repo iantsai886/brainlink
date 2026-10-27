@@ -9,6 +9,12 @@ Client discovery and runtime probe: Codex CLI `0.164.0-alpha.11.1` made a live B
 
 ## Current working-tree update (2026-10-27)
 
+### Privacy-filtered graph vault picker
+
+The 3D graph now lists only enabled, non-private vaults and starts with the first available vault selected. Users can choose another vault or explicitly view all accessible vaults. The same selection filters the graph, relationship review queue, and discovery scan. Note-level private and generated content remains excluded by the existing graph paths. The new `/api/graph3d/vaults` response contains only visible vault names and eligible note counts.
+
+Local Windows validation: graph and typed-relationship tests passed 34/34; UI tests passed 29/29; locale JSON parsing and `git diff --check` passed. These automated fixtures validate filtering and display wiring, not usability against the customer's live vaults. This change has not yet received a full-suite run or live desktop acceptance.
+
 ### Protect credentials in local AI client configs
 
 Every local AI client config BrainLink writes now gets restrictive permissions because it contains a BrainLink agent token. On Windows, the config and token-bearing backups are ACL-checked to allow only the current user, SYSTEM, and Administrators; POSIX files use mode `0600`. This includes JSON, YAML, TOML, and Claude Code's CLI-managed config path. Also fixed Hermes setup for a valid config that has no `mcp_servers` section. On this Windows machine, `node --import ./test/_preload.mjs --test --test-concurrency=1 test/wiring.test.mjs` passed 30/30, including the config and backup ACL checks; `git diff --check` and `node --check src/connectors.mjs` passed. Unix permission behavior still needs a Unix-host run, and live client pickup remains unverified.

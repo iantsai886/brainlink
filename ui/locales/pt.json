@@ -446,6 +446,8 @@
   "agents.testSucceeded": "Chamada ao vivo bem-sucedida ({ms}ms). Este agente agora está conectado.",
   "agents.testFailed": "A chamada falhou; veja o Histórico abaixo.",
   "notes3d.panelTitle": "Seu cérebro",
+  "notes3d.vaultFilter": "Vault",
+  "notes3d.allVaults": "Todos os vaults acessíveis",
   "notes3d.loading": "Carregando o mapa 3D das suas notas…",
   "notes3d.loadError": "Não foi possível carregar o mapa: {error}",
   "notes3d.empty": "Ainda não há notas — assim que você adicionar algumas, os links delas aparecem aqui.",

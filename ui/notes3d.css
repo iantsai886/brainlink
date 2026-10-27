@@ -2,6 +2,9 @@
 /* P1c: larger by default than the old 4/3 box, with a floor so it's never cramped on narrow viewports. */
 .notes3d-wrap { display: grid; grid-template-columns: 1fr; width: 100%; aspect-ratio: 16 / 10; min-height: 480px; max-width: 100%; border-radius: 10px; background: var(--bg); border: 1px solid var(--line); overflow: hidden; position: relative; }
 .notes3d-canvas { width: 100%; height: 100%; display: grid; place-items: center; overflow: hidden; }
+.notes3d-vault-picker { position: absolute; z-index: 2; top: 10px; left: 10px; display: flex; align-items: center; gap: 8px; max-width: calc(100% - 20px); padding: 6px 9px; border: 1px solid var(--line); border-radius: 8px; background: var(--panel); }
+.notes3d-vault-picker label { font-size: 12px; white-space: nowrap; }
+.notes3d-vault-picker select { max-width: min(300px, 55vw); }
 /* 3d-force-graph sizes its own wrapper div (and the <canvas> inside it) to the pixel width/height
    it was last given; max-width/max-height here is a hard cap so a stale or pre-layout read (e.g.
    clientWidth still 0 the instant #brain-panel stops being hidden) can never make the graph

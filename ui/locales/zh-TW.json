@@ -446,6 +446,8 @@
   "agents.testSucceeded": "連線測試成功（{ms} 毫秒）。這個代理人現在已連線。",
   "agents.testFailed": "連線測試失敗，請查看下方的活動記錄。",
   "notes3d.panelTitle": "你的大腦",
+  "notes3d.vaultFilter": "資料庫",
+  "notes3d.allVaults": "所有可存取的資料庫",
   "notes3d.loading": "正在載入 3D 筆記地圖…",
   "notes3d.loadError": "無法載入地圖：{error}",
   "notes3d.empty": "目前還沒有筆記——加入筆記後，彼此的連結就會顯示在這裡。",
