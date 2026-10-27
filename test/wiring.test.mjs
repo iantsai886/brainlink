@@ -9,7 +9,7 @@ import { fileURLToPath } from 'node:url';
 import { parse } from 'yaml';
 
 import { normalize, validate, saveConfig, configPath } from '../src/config.mjs';
-import { detect, connect, disconnect, readClientAgentToken, test as testClient, UNSUPPORTED } from '../src/connectors.mjs';
+import { detect, connect, disconnect, connectClient, disconnectClient, readClientAgentToken, test as testClient, UNSUPPORTED } from '../src/connectors.mjs';
 import { runSync } from '../src/sync-cli.mjs';
 import { startSetup } from '../src/setup.mjs';
 import { openSessionStore } from '../src/sessions/index.mjs';
@@ -213,6 +213,35 @@ test('connectors: connect()/test()/disconnect() normalize to {ok,message} over t
   assert.equal(d.ok, true);
   const bad = await connect('nope-not-a-client', opts);
   assert.equal(bad.ok, false);
+});
+
+test('connectors: every config format protects BrainLink tokens and token-bearing backups', async () => {
+  const home = await tmp('connector-private-configs');
+  const cases = [
+    { id: 'cursor', dir: path.join(home, '.cursor'), file: path.join(home, '.cursor', 'mcp.json'), original: '{"mcpServers":{"other":{"command":"other-mcp"}}}\n', env: {} },
+    { id: 'hermes', dir: path.join(home, 'hermes'), file: path.join(home, 'hermes', 'config.yaml'), original: 'model: fictional\n', env: { HERMES_HOME: path.join(home, 'hermes') } },
+    { id: 'codex', dir: path.join(home, 'codex'), file: path.join(home, 'codex', 'config.toml'), original: 'model = "fictional"\n', env: { CODEX_HOME: path.join(home, 'codex') } },
+  ];
+  const launch = { command: process.execPath, args: ['brainlink.mjs', 'serve'] };
+  const assertPrivate = async (file) => {
+    if (process.platform === 'win32') assertPrivateWindowsAcl(file);
+    else assert.equal((await stat(file)).mode & 0o777, 0o600, `${file} must be private`);
+  };
+  for (const client of cases) {
+    await mkdir(client.dir, { recursive: true });
+    await writeFile(client.file, client.original);
+    const opts = { home, os: process.platform, env: client.env, launch, useCli: false, extraEnv: { BRAINLINK_AGENT_TOKEN: `fictional-${client.id}-token` } };
+    const connected = await connectClient(client.id, opts);
+    assert.equal(connected.ok, undefined, 'connectClient returns its detailed receipt');
+    await assertPrivate(client.file);
+    await assertPrivate(connected.backup);
+    assert.equal(await readFile(connected.backup, 'utf8'), client.original);
+    const disconnected = await disconnectClient(client.id, opts);
+    assert.equal(disconnected.removed, true);
+    assert.match(await readFile(disconnected.backup, 'utf8'), new RegExp(`fictional-${client.id}-token`));
+    await assertPrivate(disconnected.backup);
+    await assertPrivate(client.file);
+  }
 });
 
 test('connectors: Antigravity one-click setup merges and backs up global MCP config, and disconnect preserves other servers', async () => {

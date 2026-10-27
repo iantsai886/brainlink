@@ -9,6 +9,10 @@ Client discovery and runtime probe: Codex CLI `0.164.0-alpha.11.1` made a live B
 
 ## Current working-tree update (2026-10-27)
 
+### Protect credentials in local AI client configs
+
+Every local AI client config BrainLink writes now gets restrictive permissions because it contains a BrainLink agent token. On Windows, the config and token-bearing backups are ACL-checked to allow only the current user, SYSTEM, and Administrators; POSIX files use mode `0600`. This includes JSON, YAML, TOML, and Claude Code's CLI-managed config path. Also fixed Hermes setup for a valid config that has no `mcp_servers` section. On this Windows machine, `node --import ./test/_preload.mjs --test --test-concurrency=1 test/wiring.test.mjs` passed 30/30, including the config and backup ACL checks; `git diff --check` and `node --check src/connectors.mjs` passed. Unix permission behavior still needs a Unix-host run, and live client pickup remains unverified.
+
 ### Reliable desktop Setup re-open
 
 The desktop launcher now saves the active Setup port in a small per-user runtime marker. Opening the desktop icon again checks that recorded port and reuses the existing Setup page, even if BrainLink had to choose a fallback port. The marker contains only port, process ID and app version; it is removed when that Setup server closes, and stale markers are cleared on the next launch. `node --import ./test/_preload.mjs --test --test-force-exit test/setup-instance.test.mjs` passed 1/1 on Windows. This covers local launcher reuse, not an installed-package shortcut or cross-user behavior.

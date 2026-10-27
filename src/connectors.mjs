@@ -8,6 +8,7 @@ import path from 'node:path';
 import { parseDocument } from 'yaml';
 
 export const SERVER_KEY = 'brainlink';
+const PRIVATE_CONFIG_MODE = 0o600;
 
 const appData = (home, env) => env.APPDATA || path.join(home, 'AppData', 'Roaming');
 
@@ -290,14 +291,23 @@ export async function connectClient(id, opts) {
   if (!(await detectOne(id, c, opts)).canConnect) throw new Error(`${c.title} was not found on this computer. Install it, then try Connect again.`);
   const entry = serverEntry(id, opts.launch, opts.extraEnv);
   const now = opts.now || new Date();
+  const file = c.file(opts);
+  const previousConfig = await exists(file) ? await readFile(file, 'utf8') : null;
   // Claude Code owns ~/.claude.json and rewrites it while running; use its CLI when present.
   const cli = c.cli && opts.useCli !== false ? whichCli(c.cli) : null;
   if (cli) {
-    try { execFileSync(cli, ['mcp', 'remove', '-s', 'user', SERVER_KEY], { stdio: 'ignore' }); } catch {}
-    execFileSync(cli, ['mcp', 'add-json', '-s', 'user', SERVER_KEY, JSON.stringify({ type: 'stdio', ...entry })], { stdio: 'ignore' });
-    return { client: id, title: c.title, via: `${c.cli} mcp add-json`, file: null, backup: null, note: c.note };
+    const b = await backup(file, now, PRIVATE_CONFIG_MODE);
+    try {
+      try { execFileSync(cli, ['mcp', 'remove', '-s', 'user', SERVER_KEY], { stdio: 'ignore' }); } catch {}
+      execFileSync(cli, ['mcp', 'add-json', '-s', 'user', SERVER_KEY, JSON.stringify({ type: 'stdio', ...entry })], { stdio: 'ignore' });
+      await securePrivateFile(file, PRIVATE_CONFIG_MODE);
+      return { client: id, title: c.title, via: `${c.cli} mcp add-json`, file: null, backup: b, note: c.note };
+    } catch (error) {
+      if (previousConfig !== null) await atomicWrite(file, previousConfig, PRIVATE_CONFIG_MODE).catch(() => {});
+      else { try { execFileSync(cli, ['mcp', 'remove', '-s', 'user', SERVER_KEY], { stdio: 'ignore' }); } catch {} }
+      throw error;
+    }
   }
-  const file = c.file(opts);
   const raw = (await exists(file)) ? await readFile(file, 'utf8') : '';
   let text;
   if (c.format === 'toml') text = codexToml(raw, entry);
@@ -312,7 +322,9 @@ export async function connectClient(id, opts) {
   }
   else if (c.format === 'yaml') {
     const { doc, value } = parseYaml(raw, file);
-    if (!value.mcp_servers) doc.set('mcp_servers', {});
+    // Create a YAML mapping node (a plain JS object is serialized as a scalar by
+    // this document API when inserted with set()).
+    if (!value.mcp_servers) doc.set('mcp_servers', doc.createNode({}));
     doc.setIn(['mcp_servers', SERVER_KEY], entry);
     text = doc.toString();
   }
@@ -322,9 +334,8 @@ export async function connectClient(id, opts) {
     json.mcpServers = { ...(json.mcpServers || {}), [SERVER_KEY]: entry };
     text = JSON.stringify(json, null, 2) + '\n';
   }
-  const privateConfig = c.format === 'dsh-yaml' ? 0o600 : null;
-  const b = await backup(file, now, privateConfig);
-  await atomicWrite(file, text, privateConfig);
+  const b = await backup(file, now, PRIVATE_CONFIG_MODE);
+  await atomicWrite(file, text, PRIVATE_CONFIG_MODE);
   return { client: id, title: c.title, via: 'config file', file, backup: b, note: c.note };
 }
 
@@ -332,8 +343,19 @@ export async function disconnectClient(id, opts) {
   const c = resolveClient(id);
   if (!c) throw new Error(`Unknown client "${id}"`);
   const cli = c.cli && opts.useCli !== false ? whichCli(c.cli) : null;
-  if (cli) { try { execFileSync(cli, ['mcp', 'remove', '-s', 'user', SERVER_KEY], { stdio: 'ignore' }); } catch {} return { client: id, removed: true }; }
   const file = c.file(opts);
+  if (cli) {
+    const previousConfig = await exists(file) ? await readFile(file, 'utf8') : null;
+    const b = await backup(file, opts.now || new Date(), PRIVATE_CONFIG_MODE);
+    try {
+      try { execFileSync(cli, ['mcp', 'remove', '-s', 'user', SERVER_KEY], { stdio: 'ignore' }); } catch {}
+      if (await exists(file)) await securePrivateFile(file, PRIVATE_CONFIG_MODE);
+      return { client: id, removed: true, backup: b };
+    } catch (error) {
+      if (previousConfig !== null) await atomicWrite(file, previousConfig, PRIVATE_CONFIG_MODE).catch(() => {});
+      throw error;
+    }
+  }
   if (!(await exists(file))) return { client: id, removed: false };
   const raw = await readFile(file, 'utf8');
   let text;
@@ -357,9 +379,8 @@ export async function disconnectClient(id, opts) {
     delete json.mcpServers[SERVER_KEY];
     text = JSON.stringify(json, null, 2) + '\n';
   }
-  const privateConfig = c.format === 'dsh-yaml' ? 0o600 : null;
-  const b = await backup(file, opts.now || new Date(), privateConfig);
-  await atomicWrite(file, text, privateConfig);
+  const b = await backup(file, opts.now || new Date(), PRIVATE_CONFIG_MODE);
+  await atomicWrite(file, text, PRIVATE_CONFIG_MODE);
   return { client: id, removed: true, backup: b };
 }
 
