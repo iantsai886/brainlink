@@ -2,7 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { mkdtemp, mkdir, readFile, writeFile, cp, readdir, stat } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
-import { spawn } from 'node:child_process';
+import { spawn, execFileSync } from 'node:child_process';
 import { setTimeout as delay } from 'node:timers/promises';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -18,6 +18,19 @@ import { launchSpec, CLI_PATH } from '../src/runtime.mjs';
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const FIXTURES = path.join(ROOT, 'test', 'fixtures');
 const tmp = (p) => mkdtemp(path.join(tmpdir(), `brainlink-${p}-`));
+const windowsAcl = (file) => {
+  return execFileSync('icacls.exe', [file], { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] });
+};
+function assertPrivateWindowsAcl(file) {
+  const acl = windowsAcl(file);
+  const userName = execFileSync('whoami.exe', ['/user', '/fo', 'csv', '/nh'], { encoding: 'utf8' }).match(/"([^"]+)"/)[1];
+  const grants = acl.split(/\r?\n/).map((line) => line.trim()).filter((line) => /:\(F\)\s*$/.test(line));
+  assert.ok(acl.toLowerCase().includes(`${userName.toLowerCase()}:(f)`), 'current Windows user has access');
+  assert.match(acl, /NT AUTHORITY\\SYSTEM:\(F\)/);
+  assert.match(acl, /BUILTIN\\Administrators:\(F\)/);
+  assert.equal(grants.length, 3, 'only the current user, SYSTEM and Administrators may access a token-bearing file');
+  assert.doesNotMatch(acl, /\(I\)|BUILTIN\\Users|Authenticated Users|Everyone/);
+}
 
 // ---- config.mjs: optional `sync` key ----
 
@@ -347,12 +360,22 @@ test('connectors: DeepSeek Harness adds one profile patch entry, preserves other
   if (process.platform !== 'win32') {
     assert.equal((await stat(file)).mode & 0o777, 0o600, 'the Harness config contains an agent token and must not be group/world readable');
     assert.equal((await stat(backupPath)).mode & 0o777, 0o600, 'the backup also contains a credential and must stay private');
+  } else {
+    assertPrivateWindowsAcl(file);
+    assertPrivateWindowsAcl(backupPath);
   }
   const removed = await disconnect('deepseek-harness', opts);
   assert.equal(removed.ok, true, removed.message);
   const after = parse(await readFile(file, 'utf8'));
   assert.equal(after.flatMap((patch) => patch.insert || []).some((row) => row.id === 'mcp-brainlink'), false);
   assert.equal(after[0].insert[0].id, 'existing-tool');
+  if (process.platform === 'win32') {
+    const disconnectBackups = await readdir(dshHome).then((names) => names.filter((name) => name.includes('.brainlink-backup-')).map((name) => path.join(dshHome, name)));
+    const disconnectBackup = await Promise.all(disconnectBackups.map(async (candidate) => ({ candidate, content: await readFile(candidate, 'utf8') }))).then((items) => items.find((item) => item.content.includes('fictional-dsh-token'))?.candidate);
+    assert.ok(disconnectBackup, 'disconnect backup retains the previous token-bearing config');
+    assertPrivateWindowsAcl(disconnectBackup);
+    assertPrivateWindowsAcl(file);
+  }
 });
 
 test('connectors: DeepSeek Harness refuses malformed patch YAML without overwriting it', async () => {

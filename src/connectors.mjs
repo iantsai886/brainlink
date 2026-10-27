@@ -1,9 +1,9 @@
 // One-click "Connect AI": writes BrainLink into each AI client's MCP config, keeping a
 // timestamped backup of the previous file. Refuses to touch a config it cannot parse.
-import { readFile, writeFile, mkdir, copyFile, rename, stat, chmod, readdir } from 'node:fs/promises';
+import { readFile, writeFile, mkdir, copyFile, rename, stat, chmod, readdir, unlink } from 'node:fs/promises';
 import { existsSync } from 'node:fs';
 import { execFileSync } from 'node:child_process';
-import { createHash } from 'node:crypto';
+import { createHash, randomBytes } from 'node:crypto';
 import path from 'node:path';
 import { parseDocument } from 'yaml';
 
@@ -224,16 +224,36 @@ async function backup(file, now, mode = null) {
   if (!(await exists(file))) return null;
   const dest = `${file}.brainlink-backup-${now.toISOString().replace(/[:.]/g, '-')}`;
   await copyFile(file, dest);
-  if (mode !== null) await chmod(dest, mode).catch((error) => { if (process.platform !== 'win32') throw error; });
+  if (mode !== null) {
+    try { await securePrivateFile(dest, mode); }
+    catch (error) { await unlink(dest).catch(() => {}); throw error; }
+  }
   return dest;
+}
+
+async function securePrivateFile(file, mode) {
+  if (process.platform !== 'win32') return chmod(file, mode);
+  const identity = execFileSync('whoami.exe', ['/user', '/fo', 'csv', '/nh'], { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] });
+  const sid = identity.match(/\bS-1-\d+(?:-\d+)+\b/)?.[0];
+  if (!sid) throw new Error('Could not identify the current Windows user to protect the DeepSeek Harness token file.');
+  execFileSync('icacls.exe', [file, '/inheritance:r', '/grant:r', `*${sid}:(F)`, '*S-1-5-18:(F)', '*S-1-5-32-544:(F)'], { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] });
 }
 
 async function atomicWrite(file, text, mode = null) {
   await mkdir(path.dirname(file), { recursive: true });
-  const tmp = `${file}.brainlink-tmp`;
-  await writeFile(tmp, text, mode === null ? undefined : { mode });
-  if (mode !== null) await chmod(tmp, mode).catch((error) => { if (process.platform !== 'win32') throw error; });
-  await rename(tmp, file);
+  const tmp = mode === null ? `${file}.brainlink-tmp` : `${file}.brainlink-tmp-${randomBytes(6).toString('hex')}`;
+  try {
+    if (mode === null) await writeFile(tmp, text);
+    else {
+      await writeFile(tmp, '', { flag: 'wx', mode });
+      await securePrivateFile(tmp, mode);
+      await writeFile(tmp, text, 'utf8');
+    }
+    await rename(tmp, file);
+  } catch (error) {
+    await unlink(tmp).catch(() => {});
+    throw error;
+  }
 }
 
 // TOML: drop any existing [mcp_servers.brainlink*] tables, then append ours.
@@ -337,8 +357,9 @@ export async function disconnectClient(id, opts) {
     delete json.mcpServers[SERVER_KEY];
     text = JSON.stringify(json, null, 2) + '\n';
   }
-  const b = await backup(file, opts.now || new Date());
-  await atomicWrite(file, text);
+  const privateConfig = c.format === 'dsh-yaml' ? 0o600 : null;
+  const b = await backup(file, opts.now || new Date(), privateConfig);
+  await atomicWrite(file, text, privateConfig);
   return { client: id, removed: true, backup: b };
 }
 
