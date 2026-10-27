@@ -561,3 +561,7 @@ Corrected the profile and built-in-app setup screens: `propose_note` now follows
 ### Server-side Twin proposal mapping and connection check (2026-10-27)
 
 The server now uses the same memory mapping during Twin create, edit, and built-in-app connection: `propose_note` requires semantic memory, and only `read_session` requires episodic memory. A profile with proposal access but no search permission can still pass the connection check through its advertised MCP tool list; this check makes no vault write. Tests cover create/edit rejection when semantic memory is off, acceptance when episodic memory is off, proposal-only app connection, and no generated note. Twin suite: 21/21; UI suite: 29/29; `git diff --check` passed. This is local test evidence; actual client loading remains unverified.
+
+### Shared background-start setting (2026-10-27)
+
+Moved the “start quietly when I sign in” option from Backup into a dedicated shared settings section. The hint now states that scheduled scans, briefs, backups, and sync run only while BrainLink is open, and explains that background startup keeps them available while clicking the app icon still opens Setup. Added a regression test for the single control, its section, and all three shipped locale strings. Verification: `npm run test:ui` — 29/29 passed; `node --import ./test/_preload.mjs --test test/startup.test.mjs test/locales.test.mjs` — 10/10 passed; `git diff --check` passed. This verifies the UI and startup-setting behavior, not unattended scheduling while the app is closed or a packaged installer.

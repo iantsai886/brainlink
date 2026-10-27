@@ -363,6 +363,12 @@ main #ready, main #ask-panel, main #brain-panel, main #sessions-panel, main #s-c
     <div id="test-out" style="margin-top:10px"></div>
   </section>
 
+  <section id="s-background">
+    <h2 data-i18n="startup.title"></h2>
+    <p class="hint" data-i18n="startup.hint"></p>
+    <label class="muted" style="display:flex;flex-direction:row;gap:6px;align-items:center"><input type="checkbox" id="startup-at-login" style="width:auto"><span data-i18n="startup.enabled"></span></label>
+  </section>
+
   <section id="s-sync">
     <h2 data-i18n="sync.title"></h2>
     <p class="hint" data-i18n="sync.hint"></p>
@@ -464,8 +470,6 @@ main #ready, main #ask-panel, main #brain-panel, main #sessions-panel, main #s-c
     <div class="row"><button id="backup-key" data-i18n="backup.showKey"></button><button id="backup-key-copy" data-i18n="backup.copyKey"></button><input id="backup-key-value" class="mono" type="password" readonly autocomplete="off" data-i18n-placeholder="backup.keyPlaceholder" style="flex:1"></div>
     <div class="row" style="margin-top:12px"><button id="backup-pick" data-i18n="backup.choose"></button><button class="primary" id="backup-save" data-i18n="backup.save"></button><button id="backup-run" data-i18n="backup.run"></button></div>
     <p id="backup-status" class="muted" role="status"></p>
-    <label class="muted" style="display:flex;flex-direction:row;gap:6px;align-items:center;margin-top:10px"><input type="checkbox" id="startup-at-login" style="width:auto"><span data-i18n="startup.enabled"></span></label>
-    <p class="hint" data-i18n="startup.hint"></p>
     <details><summary data-i18n="backup.restoreTitle"></summary>
       <p class="hint" data-i18n="backup.restoreHint"></p>
       <div class="row"><button id="backup-history-refresh" data-i18n="backup.historyRefresh"></button><label style="flex:1"><span data-i18n="backup.historyLabel"></span><select id="backup-history" style="width:100%"><option value="" data-i18n="backup.historyEmpty"></option></select></label></div>

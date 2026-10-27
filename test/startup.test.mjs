@@ -14,6 +14,20 @@ test('startup launcher is hidden, opens no browser, and safely quotes paths', ()
   assert.match(source, /Brain Link/);
 });
 
+test('the shared background-start control is outside Backup and explains scheduled work', async () => {
+  const html = await readFile(new URL('../ui/index.html', import.meta.url), 'utf8');
+  assert.equal((html.match(/id="startup-at-login"/g) || []).length, 1);
+  const background = html.match(/<section id="s-background">([\s\S]*?)<\/section>/)?.[1] || '';
+  const backup = html.match(/<section id="s-backup">([\s\S]*?)<\/section>/)?.[1] || '';
+  assert.match(background, /id="startup-at-login"/);
+  assert.doesNotMatch(backup, /id="startup-at-login"/);
+  for (const locale of ['en', 'zh-TW', 'pt']) {
+    const catalog = JSON.parse(await readFile(new URL(`../ui/locales/${locale}.json`, import.meta.url), 'utf8'));
+    assert.ok(catalog['startup.title']);
+    assert.ok(catalog['startup.hint']);
+  }
+});
+
 test('startup setting creates and removes only its own launcher', async () => {
   const root = await mkdtemp(path.join(os.tmpdir(), 'brainlink-startup-'));
   const env = { APPDATA: root };
