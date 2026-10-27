@@ -12,7 +12,7 @@ Added an end-to-end local regression test that connects Codex to a fictional Bra
 
 ### Windows 1.2.8 installer rebuilt after isolated connector fix (2026-10-28)
 
-Built `dist/BrainLink-Setup-1.2.8.exe` from source commit `3dc548bbc5d09e86b4d277398608a2569574f0cf` using Inno Setup 6.7.3 and the pinned Node.js 24.22.1 runtime. The staged `src/app-home.mjs` hash matches source and development UI tests are absent. Installer SHA-256: `07FB9BF147AE8E1BAF1F29A3B5AC810860469D403AA072E8A6B4787BA8DA3BB8`. Authenticode status is `NotSigned`. An isolated install/uninstall smoke test was blocked by automatic approval review before the installer ran, so no installation occurred. This confirms a successful local build and staged contents, not installed operation, desktop acceptance, signing, hosted CI, or release readiness.
+Built `dist/BrainLink-Setup-1.2.8.exe` from source commit `3dc548bbc5d09e86b4d277398608a2569574f0cf` using Inno Setup 6.7.3 and the pinned Node.js 24.22.1 runtime. The staged `src/app-home.mjs` hash matches source and development UI tests are absent. Installer SHA-256: `07FB9BF147AE8E1BAF1F29A3B5AC810860469D403AA072E8A6B4787BA8DA3BB8`. Authenticode status is `NotSigned`. An isolated install/uninstall smoke test was blocked by automatic approval review before the installer ran, so no installation occurred. A separate Windows smoke test ran the complete staged app directly with its bundled Node.js runtime against a fictional vault: MCP startup and guide passed, the public fixture was found, and the private canary stayed hidden. This validates staged package runtime behavior, not installer installation, desktop shortcut acceptance, signing, hosted CI, or release readiness.
 
 ### MCP client receives the selected BrainLink data home (2026-10-28)
 
