@@ -288,6 +288,26 @@ test('connectors: Antigravity is available as a manual setup but is not auto-det
   assert.equal(found.antigravity.canConnect, true);
 });
 
+test('connectors: MCP clients receive the configured BrainLink home and custom config path', async () => {
+  const home = await tmp('custom-brainlink-home');
+  const codexHome = path.join(home, '.codex');
+  const dataHome = path.join(home, 'isolated-brainlink-data');
+  const configFile = path.join(home, 'custom-config', 'brainlink.json');
+  await mkdir(codexHome, { recursive: true });
+  const config = path.join(codexHome, 'config.toml');
+  await writeFile(config, 'model = "fictional"\n');
+  const opts = {
+    home, os: 'win32', env: { CODEX_HOME: codexHome, BRAINLINK_HOME: dataHome, BRAINLINK_CONFIG: configFile },
+    launch: { command: process.execPath, args: ['brainlink.mjs', 'serve'] }, useCli: false,
+    extraEnv: { BRAINLINK_AGENT_TOKEN: 'fictional-custom-home-token' },
+  };
+  await connectClient('codex', opts);
+  const saved = await readFile(config, 'utf8');
+  assert.ok(saved.includes(`BRAINLINK_HOME = ${JSON.stringify(dataHome)}`));
+  assert.ok(saved.includes(`BRAINLINK_CONFIG = ${JSON.stringify(configFile)}`));
+  assert.match(saved, /BRAINLINK_AGENT_TOKEN = "fictional-custom-home-token"/);
+});
+
 test('connectors: Hermes merges YAML safely, reads its scoped token, backs up settings, and disconnects only BrainLink', async () => {
   const home = await tmp('hermes-connect');
   const folder = path.join(home, '.hermes');

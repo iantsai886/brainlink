@@ -6,6 +6,7 @@ import { execFileSync } from 'node:child_process';
 import { createHash, randomBytes } from 'node:crypto';
 import path from 'node:path';
 import { parseDocument } from 'yaml';
+import { appHome } from './config.mjs';
 
 export const SERVER_KEY = 'brainlink';
 const PRIVATE_CONFIG_MODE = 0o600;
@@ -289,7 +290,15 @@ export async function connectClient(id, opts) {
   // it creates the folder, writes a config nobody reads, and then reports Connected -- a false
   // success a fresh-install test caught on an uninstalled Claude Desktop.
   if (!(await detectOne(id, c, opts)).canConnect) throw new Error(`${c.title} was not found on this computer. Install it, then try Connect again.`);
-  const entry = serverEntry(id, opts.launch, opts.extraEnv);
+  // MCP clients start BrainLink in a separate process and may not inherit custom
+  // environment variables from the Setup process. Pin the local data/config paths
+  // explicitly so the client cannot silently open a different BrainLink home.
+  const runtimeEnv = {
+    ...opts.extraEnv,
+    BRAINLINK_HOME: appHome(opts.env || process.env, opts.os || process.platform, opts.home),
+    ...(opts.env?.BRAINLINK_CONFIG ? { BRAINLINK_CONFIG: opts.env.BRAINLINK_CONFIG } : {}),
+  };
+  const entry = serverEntry(id, opts.launch, runtimeEnv);
   const now = opts.now || new Date();
   const file = c.file(opts);
   const previousConfig = await exists(file) ? await readFile(file, 'utf8') : null;
