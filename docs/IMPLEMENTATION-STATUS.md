@@ -658,6 +658,10 @@ Built the 1.2.8 Windows installer from source commit `a9cc70a` with Inno Setup 6
 
 On Windows with Node.js 24.22.1, `npm test` on source commit `0612e99` passed: 474 tests total (468 passed, 0 failed, 6 platform/privilege skips). The skipped tests require Linux or Windows symlink privileges. This broad local regression includes session summaries, closeout and handoff, vault boundaries, graph privacy, backups, scheduled ingestion, Skills/connectors, and RSI. UI tests separately passed 29/29. It does not establish a live Ollama run, cross-client Claude-to-Codex acceptance, hosted CI, or release readiness.
 
+### Linux full regression on latest integration snapshot (2026-10-28)
+
+In a disposable `node:24-bookworm` container, `npm run test:all` on source commit `45e0679` passed: core 477 tests (476 passed, 0 failed, 1 Windows-only skip) and UI 29/29. The first container copy omitted `.git`, causing one retrieval-receipt test to fail because it could not read the current revision; rerunning from the same read-only checkout with Git metadata included passed. This is local Linux automation, not hosted GitHub Actions. Hosted CI remains blocked by the repository runner billing limit. Live Claude-to-Codex acceptance, real Ollama inference, signed installation and user desktop acceptance remain unverified.
+
 ### Full regression run after closeout request change (2026-10-28)
 
 On Windows, `npm run test:all` at source commit `0b6b6e9` passed: core 469 tests (463 passed, 0 failed, 6 platform/privilege skips) and UI 29/29. Coverage includes backups and restore, privacy filters, multi-profile vault boundaries, Git sync, RSI gates, session capture and filing, plus the new closeout request. This is local automated evidence; it does not prove live AI-client pickup, hosted CI, installed-app acceptance, or customer readiness.
