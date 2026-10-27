@@ -5,9 +5,9 @@ compatibility: Requires a connected BrainLink MCP server with brainlink_guide an
 metadata:
   owner: Iango
   version: "0.2.0"
-  applicable-clients: "Claude Code; Codex CLI"
+  applicable-clients: "Claude Code; Codex CLI; Gemini CLI; Hermes Agent; DeepSeek Harness"
   required-tools: "BrainLink MCP: brainlink_guide, send_handoff, list_handoffs"
-  test-status: "Local fictional MCP handoff and Git checkpoint fixtures pass; live Claude Code/Codex handoff not yet verified because Claude is signed out; Codex CLI made live guide/search calls on a fictional vault and did not retrieve a private canary; Claude MCP health connected"
+  test-status: "Local fictional MCP handoff and Git checkpoint fixtures pass; live behavior must be validated for each client and Twin configuration"
   rollback: "Revert the Git commit that changes this skill; no data migration"
 ---
 

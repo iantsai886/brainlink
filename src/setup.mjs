@@ -44,6 +44,7 @@ import { twinProfileStatus, profileScopeEditable } from './twin-profiles.mjs';
 import { createRsiLedger } from './rsi-ledger.mjs';
 import { createRsiExperiments } from './rsi-experiments.mjs';
 import { createRsiDiscovery } from './rsi-discovery.mjs';
+import { inspectAgentSkills, installAgentSkills, removeAgentSkills, skillClientRoot } from './agent-skills.mjs';
 import { ingestionQueue } from './ingestion.mjs';
 import { INGESTION_MAX_ATTEMPTS, INGESTION_RETRY_DELAY_MS, ingestionScheduleDue, localDateAndTime, normalizeIngestionTargets, validateIngestionSchedule } from './ingestion-schedule.mjs';
 import { briefScheduleDue, validateBriefSchedule } from './brief-schedule.mjs';
@@ -688,6 +689,7 @@ export async function startSetup(opts = {}) {
       github_auto_sync: githubAutoStatus,
       packs: Object.entries(PACKS).map(([id, p]) => ({ id, title: p.title, description: p.description })),
       clients: await detect(clientOpts()),
+      agent_skills: Object.fromEntries(await Promise.all(['claude-code', 'codex', 'gemini', 'hermes', 'deepseek-harness'].map(async (client) => [client, await inspectAgentSkills({ client, sourceRoot: path.join(ROOT, 'skills'), stateDir: appHome(env), home, env }).catch((error) => ({ supported: true, root: skillClientRoot(client, { home, env }), skills: [], error: error.message || String(error) }))]))),
       http: { port: cfg.http.port, token_set: Boolean(cfg.http.token) },
       activity: await readActivity(env, 15),
       semantic: await detectEmbedder(cfg, env),
@@ -1250,6 +1252,12 @@ export async function startSetup(opts = {}) {
       return { ...r, health };
     },
     'POST /api/client-health': (b) => clientHealthCheck(b.client),
+    'POST /api/skills/install': async (b) => {
+      const clients = await detect(clientOpts());
+      if (!clients[String(b.client || '')]?.connected) throw new Error('Connect this AI first.');
+      return installAgentSkills({ client: b.client, sourceRoot: path.join(ROOT, 'skills'), stateDir: appHome(env), home, env });
+    },
+    'POST /api/skills/remove': async (b) => removeAgentSkills({ client: b.client, stateDir: appHome(env), home, env }),
     'POST /api/disconnect': async (b) => {
       const cfg = await loadConfig(file);
       const managed = cfg.ai_agents.find((agent) => agent.preset_client_id === String(b.client || ''));

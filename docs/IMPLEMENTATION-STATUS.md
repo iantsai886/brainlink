@@ -9,6 +9,12 @@ Client discovery and runtime probe: Codex CLI `0.164.0-alpha.11.1` made a live B
 
 ## Current working-tree update (2026-10-27)
 
+### Install portable Agent Skills into connected AI clients
+
+Setup now shows the three versioned BrainLink skills and their status for Claude Code, Codex CLI, Gemini CLI, Hermes Agent, and DeepSeek Harness. After the client is connected, the user can install or update the skills in that client's user-level discovery folder, or remove BrainLink-managed copies. BrainLink records hashes so it only updates/removes unchanged files it installed; collisions, local edits, unsafe paths and damaged receipts fail closed. A pre-existing identical skill is reported as current and is not claimed. DeepSeek Harness profiles share the configured user skill folder. This manages files only: each client's skill discovery and live AI use still need validation on the user's installed client.
+
+Local Windows validation: `npm run test:all` passed on this working tree: core 442 tests (436 passed, 0 failed, 6 platform/privilege skips) and UI 29/29. The new install and skill tests passed 9/9, including Setup authentication/connection checks, install/update/remove, collision protection, user edit preservation and status refresh. Syntax checks, locale JSON parsing and `git diff --check` passed. This verifies local file management and API/UI behavior; live skill discovery, model use, and release-package behavior remain unverified.
+
 ### Privacy-filtered graph vault picker
 
 The 3D graph now lists only enabled, non-private vaults and starts with the first available vault selected. Users can choose another vault or explicitly view all accessible vaults. The same selection filters the graph, relationship review queue, and discovery scan. Note-level private and generated content remains excluded by the existing graph paths. The new `/api/graph3d/vaults` response contains only visible vault names and eligible note counts.
