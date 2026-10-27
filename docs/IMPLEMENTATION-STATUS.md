@@ -10,6 +10,10 @@ Latest full-suite verification: source commit `bdcf5df2e0635e137b8283da5f8ec008d
 
 On Windows with Node.js 24.22.1, `npm run test:all` passed from clean source commit `bdcf5df2e0635e137b8283da5f8ec008d5fd21e7`: core 481 total (475 passed, 0 failed, 6 platform/privilege skips) and UI 29/29. The run includes the opt-in local session-end draft worker, privacy and vault-scope checks, backup/restore, scheduled scans, graph, RSI, profile-scoped DeepSeek Harness, and GitHub sync. It is local automated evidence. It does not prove inference with a real Ollama service, Claude-to-Codex continuation, hosted CI, or release/customer acceptance.
 
+### Windows installer rebuilt from verified integration source (2026-10-28)
+
+Built `dist/BrainLink-Setup-1.2.8.exe` from source commit `7f93744` with Inno Setup 6.7.3. SHA-256: `141ABCC3639B5A69E42FB5486EC7CE52A2EE76A6A5D7F6BB86F4484C4E0B8813`. The staged bundled runtime reports version 1.2.8; staged `ui/index.html` exactly matches the source hash; development UI tests are absent; the session-closeout and graph-curation Skills are present. This verifies packaging and staged contents only. The installer was not installed in a user profile, and desktop startup, signature, live AI-client use and customer acceptance remain unverified.
+
 ### Full regression verification after RSI discovery evaluator (2026-10-28)
 
 On Windows with Node.js 24.22.1, ran `npm run test:all` from clean source commit `bac3d9b682505596632012ac9b94d2c86ba9f6b0`. Core: 480 total, 474 passed, 0 failed, 6 platform/privilege skips. UI: 29/29. The run includes the fixed RSI discovery-quality benchmark, scheduled scan controls, backup/restore, private-data gates, profile separation, graph, session filing, connectors, and GitHub sync. This verifies local automated behavior for this commit. It does not prove live cross-client handoff, hosted CI, release signing, or customer acceptance.
