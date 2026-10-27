@@ -158,7 +158,9 @@ test('profile-scoped agents see only granted vaults and only supported read tool
   const scopedGuide = JSON.parse(guideResource.result.contents[0].text);
   assert.deepEqual(scopedGuide.server.enabled_vaults, ['Fictional Org']);
   assert.equal(scopedGuide.twin_profile_scope.writes_available, false);
-  assert.match(scopedGuide.write_rules.join(' '), /General note writes/);
+  assert.equal(scopedGuide.twin_profile_scope.note_proposals_available, false);
+  assert.deepEqual(scopedGuide.twin_profile_scope.proposal_vaults, []);
+  assert.match(scopedGuide.write_rules.join(' '), /General memory writes/);
   assert.doesNotMatch(guideResource.result.contents[0].text, /Fictional Personal|TWIN_PERSONAL_CANARY_77/);
   const guide = await mcp.handle({ jsonrpc: '2.0', id: 6, method: 'tools/call', params: { name: 'brainlink_guide', arguments: {} } });
   assert.equal(guide.result.structuredContent.twin_profile_scope.profile_id, 'org_twin_1');
@@ -180,8 +182,15 @@ test('profile-scoped agents see only granted vaults and only supported read tool
   const filingCfg = structuredClone(cfg);
   filingCfg.twin_profiles[0].agent_access[0].vaults[0].access = 'propose';
   filingCfg.twin_profiles[0].agent_access[0].vaults[0].operations.push('propose_note');
-  const filingTools = createMcp(createContext(filingCfg, { env: { BRAINLINK_AGENT_TOKEN: 'fictional-agent-token' } })).tools.map((tool) => tool.name);
+  const filingMcp = createMcp(createContext(filingCfg, { env: { BRAINLINK_AGENT_TOKEN: 'fictional-agent-token' } }));
+  const filingTools = filingMcp.tools.map((tool) => tool.name);
   assert.ok(filingTools.includes('ingestion_record'), 'filing receipts appear only after an explicit propose_note grant');
+  assert.ok(filingTools.includes('propose_note'));
+  const filingGuide = await filingMcp.handle({ jsonrpc: '2.0', id: 11, method: 'tools/call', params: { name: 'brainlink_guide', arguments: {} } });
+  assert.equal(filingGuide.result.structuredContent.twin_profile_scope.writes_available, false);
+  assert.equal(filingGuide.result.structuredContent.twin_profile_scope.note_proposals_available, true);
+  assert.deepEqual(filingGuide.result.structuredContent.twin_profile_scope.proposal_vaults, ['Fictional Org']);
+  assert.match(filingGuide.result.structuredContent.write_rules.join(' '), /preview and separate user approval/);
   const unassigned = createContext(cfg, { env: { BRAINLINK_AGENT_TOKEN: 'unknown-token' } });
   assert.deepEqual(unassigned.enabled, []);
   assert.equal(unassigned.twinScope.mode, 'unassigned');
@@ -211,6 +220,12 @@ test('scoped source organization prompt requires every read, search, write, and 
   assert.ok(!hidden.result.prompts.some((prompt) => prompt.name === 'organize-sources'));
   const denied = await readOnlyMcp.handle({ jsonrpc: '2.0', id: 4, method: 'prompts/get', params: { name: 'organize-sources', arguments: { vault: 'Fictional Org', folder: 'Raw' } } });
   assert.ok(denied.error);
+
+  const noGuide = structuredClone(cfg);
+  noGuide.twin_profiles[0].memory_policy.procedural = false;
+  const noGuideMcp = createMcp(createContext(noGuide, { env: { BRAINLINK_AGENT_TOKEN: 'fictional-agent-token' } }));
+  const noGuidePrompts = await noGuideMcp.handle({ jsonrpc: '2.0', id: 5, method: 'prompts/list' });
+  assert.ok(!noGuidePrompts.result.prompts.some((prompt) => prompt.name === 'organize-sources'), 'a prompt that requires the guide is hidden when procedural memory is disabled');
 });
 
 test('configured Twin profiles fail closed for preset and anonymous MCP connections', async () => {
