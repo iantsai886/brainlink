@@ -4,7 +4,11 @@ Status snapshot: 2026-10-28 (Asia/Taipei).
 GitHub repository: `iantsai886/brainlink`
 Branch: `integration/brainlink-retrieval-evaluation` (integrates profile-scoped GitHub, RSI discovery, and independent retrieval evaluation)
 Code baseline: development target `1.2.8`, with `package.json` as the canonical version source. The `v1.2.7` tag belongs to the separate `wip/v1.2.7` release line; this branch continues from the full-source `main` history and does not move or recreate that tag.
-Latest full-suite verification: source commit `bdcf5df2e0635e137b8283da5f8ec008d5fd21e7`. On Windows with Node.js 24.22.1, `npm run test:all` passed: core 481 total (475 passed, 0 failed, 6 platform/privilege skips); UI 29/29. The six core skips require Linux behavior or Windows symlink privileges unavailable in this run. This is local automated evidence, not hosted CI. GitHub hosted Actions are blocked by the repository runner billing/spending limit. Live Claude-to-Codex handoff, live Ollama inference, installed-user acceptance, signing, and customer release readiness remain unverified. No signed public release is claimed.
+Latest full-suite verification: source commit `35d15fde12b9000fd0a8d010ed2e68887d9f67db`. On Windows with Node.js 24.22.1, `npm run test:all` passed: core 483 total (477 passed, 0 failed, 6 platform/privilege skips); UI 29/29. The six core skips require Linux behavior or Windows symlink privileges unavailable in this run. This is local automated evidence, not hosted CI. GitHub hosted Actions are blocked by the repository runner billing/spending limit. Live Claude-to-Codex handoff, live Ollama inference, installed-user acceptance, signing, and customer release readiness remain unverified. No signed public release is claimed.
+
+### Full regression verification after RSI topic gate (2026-10-28)
+
+On Windows with Node.js 24.22.1, `npm run test:all` passed against the code now committed at `35d15fde12b9000fd0a8d010ed2e68887d9f67db`: core 483 total (477 passed, 0 failed, 6 platform/privilege skips) and UI 29/29. This includes the RSI topic gate and evaluation, session closeout, backup/restore, graph scope filters, multi-profile isolation, DeepSeek Harness connection, and GitHub sync. This is local automated evidence only. Hosted Actions, live Ollama inference, live Claude-to-Codex use, install acceptance and customer readiness remain unverified.
 
 ### Full regression verification after opt-in automatic session drafts (2026-10-28)
 
@@ -12,7 +16,7 @@ On Windows with Node.js 24.22.1, `npm run test:all` passed from clean source com
 
 ### Windows installer rebuilt from verified integration source (2026-10-28)
 
-Built `dist/BrainLink-Setup-1.2.8.exe` from source commit `7f93744` with Inno Setup 6.7.3. SHA-256: `141ABCC3639B5A69E42FB5486EC7CE52A2EE76A6A5D7F6BB86F4484C4E0B8813`. The staged bundled runtime reports version 1.2.8; staged `ui/index.html` exactly matches the source hash; development UI tests are absent; the session-closeout and graph-curation Skills are present. This verifies packaging and staged contents only. The installer was not installed in a user profile, and desktop startup, signature, live AI-client use and customer acceptance remain unverified.
+Built `dist/BrainLink-Setup-1.2.8.exe` from source commit `35d15fd` with Inno Setup 6.7.3. SHA-256: `E96AF6ABD775BCA43B377481B338E3A0411976E832FBECB7F352DB8103775214`. The staged bundled runtime reports version 1.2.8; staged English locale matches source; development UI tests are absent; the session-closeout and graph-curation Skills are present. This verifies packaging and staged contents only. The installer was not installed in a user profile, and desktop startup, signature, live AI-client use and customer acceptance remain unverified.
 
 ### Full regression verification after RSI discovery evaluator (2026-10-28)
 
@@ -20,7 +24,7 @@ On Windows with Node.js 24.22.1, ran `npm run test:all` from clean source commit
 
 ### Versioned RSI discovery-method provenance (2026-10-28)
 
-New discovery proposals record a versioned relevance method; the current method is `lexical-topic-gate-v2`. It requires overlap with the configured search topic and problem signal, as well as a BrainLink workflow term. The development fixture now catches the three known lexical-only false positives; this is not held-out proof. Full-suite verification after this change is still pending.
+New discovery proposals record a versioned relevance method; the current method is `lexical-topic-gate-v2`. It requires overlap with the configured search topic and problem signal, as well as a BrainLink workflow term. The development fixture catches the three known lexical-only false positives; this is not held-out proof. The full suite passed on the committed implementation (483 core tests: 477 pass, 6 platform skips; UI 29/29).
 
 ### Windows installer build and isolated install/uninstall smoke test (2026-10-28)
 
