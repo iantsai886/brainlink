@@ -268,6 +268,56 @@ test('Twin memory policy blocks disabled types at tool, prompt and resource boun
   }
 });
 
+test('semantic vault tools exclude documents assigned to disabled memory types', async () => {
+  const root = await mkdtemp(path.join(tmpdir(), 'brainlink-twin-memory-index-'));
+  const vaultPath = path.join(root, 'org');
+  await mkdir(path.join(vaultPath, 'Office'), { recursive: true });
+  await mkdir(path.join(vaultPath, 'Handoffs'), { recursive: true });
+  await writeFile(path.join(vaultPath, 'Knowledge.md'), '# Knowledge\n\nSEMANTIC_CANARY stays visible.');
+  await writeFile(path.join(vaultPath, 'Policy.md'), '# Policy\n\nPROCEDURAL_CANARY must be hidden when procedural is off.');
+  await writeFile(path.join(vaultPath, 'Working.md'), '# Working\n\nWORKING_CANARY must be hidden when working is off.');
+  await writeFile(path.join(vaultPath, 'Handoffs', 'Request.md'), '---\ntype: handoff\nstatus: REQUEST\n---\n# Request\n\nHANDOFF_CANARY must be hidden when working is off.');
+  await writeFile(path.join(vaultPath, 'Office', 'Captures.md'), '# Captures\n\nEPISODIC_CAPTURE_CANARY must be hidden when episodic is off.');
+  await writeFile(path.join(vaultPath, 'Episode.md'), '---\ntype: episode\nstatus: proposed\n---\n# Episode\n\nEPISODE_CANARY must be hidden when episodic is off.');
+
+  const cfg = fixture(vaultPath);
+  cfg.vaults[0].read_first = ['Policy.md'];
+  cfg.handoff = { vault: 'Fictional Org', folder: 'Handoffs' };
+  const canaries = {
+    procedural: ['PROCEDURAL_CANARY'],
+    working: ['WORKING_CANARY', 'HANDOFF_CANARY'],
+    episodic: ['EPISODIC_CAPTURE_CANARY', 'EPISODE_CANARY'],
+  };
+  for (const disabled of Object.keys(canaries)) {
+    const ctx = createContext(cfg, { env: { BRAINLINK_AGENT_TOKEN: 'fictional-agent-token', BRAINLINK_SEMANTIC: '0' } });
+    ctx.twinScope.memory_policy[disabled] = false;
+    ctx.agents = [{
+      name: 'Fictional Operations', vault: 'Fictional Org', role: 'Synthetic role', activation: ['Connect to Operations'],
+      close: ['Operations close loop'], connect_notes: ['Policy.md'], tail_notes: ['Working.md'],
+      close_target: { mode: 'append-section', path: 'Office/Captures.md' }, stale_days: 30,
+    }];
+    const mcp = createMcp(ctx);
+    const call = (name, args) => mcp.handle({ jsonrpc: '2.0', id: 1, method: 'tools/call', params: { name, arguments: args } });
+    const search = await call('vault_search', { vault: 'Fictional Org', query: canaries[disabled].join(' ') });
+    assert.equal(search.result.isError, false, JSON.stringify(search));
+    const searchText = JSON.stringify(search.result.structuredContent);
+    for (const marker of canaries[disabled]) assert.doesNotMatch(searchText, new RegExp(marker), `${marker} must not enter the semantic search index`);
+    const semantic = await call('vault_search', { vault: 'Fictional Org', query: 'SEMANTIC_CANARY' });
+    assert.match(JSON.stringify(semantic.result.structuredContent), /Knowledge\.md|SEMANTIC_CANARY/, 'semantic knowledge remains searchable');
+
+    const hiddenPaths = {
+      procedural: ['Policy.md'],
+      working: ['Working.md', 'Handoffs/Request.md'],
+      episodic: ['Office/Captures.md', 'Episode.md'],
+    }[disabled];
+    for (const notePath of hiddenPaths) {
+      const read = await call('vault_read_note', { vault: 'Fictional Org', path: notePath });
+      assert.equal(read.result.isError, true, `${notePath} is not directly readable through semantic tools`);
+      assert.doesNotMatch(JSON.stringify(read), /PROCEDURAL_CANARY|WORKING_CANARY|HANDOFF_CANARY|EPISODIC_CAPTURE_CANARY|EPISODE_CANARY/);
+    }
+  }
+});
+
 test('profile-scoped session reads stay inside the profile and closeouts remain approval-gated', async () => {
   const root = await mkdtemp(path.join(tmpdir(), 'brainlink-twin-sessions-'));
   const orgPath = path.join(root, 'org');

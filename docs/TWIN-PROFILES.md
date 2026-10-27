@@ -34,7 +34,9 @@ The profile's four booleans are runtime access controls for named agent tokens. 
 | Procedural | BrainLink guide, role activation, and published `read_first` instructions |
 | Episodic | Session list/read/closeout, session filing destinations, and configured capture summaries in agent activation context |
 
-Vault grants and memory-type policy must both allow an operation. `agent_connect` itself requires procedural access, but its mixed context packet checks the working, semantic, and episodic switches separately before reading those sections. This mapping is a first implementation and still needs cross-client acceptance and checks for other data surfaces.
+Vault grants and memory-type policy must both allow an operation. `agent_connect` itself requires procedural access, but its mixed context packet checks the working, semantic, and episodic switches separately before reading those sections. The shared semantic note index also omits documents BrainLink can identify as another memory type: configured `read_first` and role notes (procedural), configured tails and handoff folders (working), configured closeout targets (working or episodic), and explicit `memory_type` or known episode/handoff frontmatter. It checks bounded frontmatter before reading a note body, then rechecks after the body read to handle a file changing during indexing. Direct note reads use the same filter. Generic notes without a known type remain semantic. This is a first implementation; cross-client acceptance and other data surfaces still need review.
+
+Focused synthetic canary validation: `test/twin-profiles.test.mjs` and `test/brainlink.test.mjs` passed 94 tests, 0 failed, 1 platform-only skip on Windows. The new test turns off each non-semantic type and confirms its content is absent from semantic search and direct note reads while generic semantic knowledge remains searchable. This verifies the local MCP boundary only, not live behavior in every external AI client.
 
 Example values are synthetic. They illustrate the declaration shape, not effective access:
 

@@ -11,7 +11,7 @@ import { deriveTypedRelations } from './typed-graph.mjs';
 import { appHome } from './config.mjs';
 import { detectEmbedder, VectorStore, fillVectors, embedTexts, nearest } from './embed.mjs';
 import { findAgentByToken, publicAgent } from './mcp-agents.mjs';
-import { resolveTwinAgentScope } from './twin-profiles.mjs';
+import { resolveTwinAgentScope, twinNoteMemoryAllowed } from './twin-profiles.mjs';
 
 const truthy = (v) => /^(1|true|yes|on)$/i.test(String(v || ''));
 
@@ -257,25 +257,29 @@ export async function isExcludedPath(root, rel) {
 // Inspect only a bounded frontmatter prefix before reading/indexing a note body. A malformed
 // or overlong frontmatter is hidden until the owner fixes it; never guess "public" when the
 // privacy marker might be beyond the bounded header.
-export function indexableHeader(prefix, size, bytesRead = Buffer.byteLength(prefix, 'utf8')) {
+function inspectIndexableHeader(prefix, size, bytesRead = Buffer.byteLength(prefix, 'utf8')) {
   prefix = String(prefix).replace(/^\uFEFF/, '');
   const start = prefix.match(/^(?:[ \t]*\r?\n)*---[^\S\r\n]*\r?\n/);
-  if (!start) return /\S/.test(prefix) || bytesRead >= size;
+  if (!start) return { indexable: /\S/.test(prefix) || bytesRead >= size, meta: {} };
   const tail = prefix.slice(start[0].length);
   const end = tail.match(/^---[^\S\r\n]*(?:\r?\n|$)/m);
-  if (!end) return false;
+  if (!end) return { indexable: false, meta: {} };
   const header = tail.slice(0, end.index);
   const { meta } = parseFrontmatter(prefix.slice(0, start[0].length + end.index + end[0].length));
-  return !(isPrivateMeta(meta) || fmSaysPrivate(header));
+  return { indexable: !(isPrivateMeta(meta) || fmSaysPrivate(header)), meta };
 }
 
-async function indexableFromHeader(full, size) {
+export function indexableHeader(prefix, size, bytesRead = Buffer.byteLength(prefix, 'utf8')) {
+  return inspectIndexableHeader(prefix, size, bytesRead).indexable;
+}
+
+async function readIndexableHeader(full, size) {
   const fd = await open(full, 'r');
   const buffer = Buffer.alloc(Math.min(size, 65536));
   let bytesRead;
   try { ({ bytesRead } = await fd.read(buffer, 0, buffer.length, 0)); }
   finally { await fd.close(); }
-  return indexableHeader(buffer.subarray(0, bytesRead).toString('utf8'), size);
+  return inspectIndexableHeader(buffer.subarray(0, bytesRead).toString('utf8'), size, bytesRead);
 }
 
 // Hash-incremental: unchanged files are not re-chunked on the next call.
@@ -290,7 +294,15 @@ export async function loadVault(ctx, name) {
     const prev = state.files.get(rel);
     if (prev) { const st = await stat(full); if (st.mtimeMs === prev.mtime && st.size === prev.bytes) continue; }
     const stNow = await stat(full);
-    if (!(await indexableFromHeader(full, stNow.size))) {
+    // Configured paths such as the handoff mailbox and capture log have known types;
+    // exclude them before even opening their Markdown body.
+    if (!twinNoteMemoryAllowed(ctx, name, rel)) {
+      changed = true;
+      state.files.set(rel, { hash: null, mtime: stNow.mtimeMs, bytes: stNow.size, note: null });
+      continue;
+    }
+    const header = await readIndexableHeader(full, stNow.size);
+    if (!header.indexable || !twinNoteMemoryAllowed(ctx, name, rel, header.meta)) {
       changed = true;
       state.files.set(rel, { hash: null, mtime: stNow.mtimeMs, bytes: stNow.size, note: null });
       continue;
@@ -306,7 +318,7 @@ export async function loadVault(ctx, name) {
     const names = [title, ...aliases].join(' ');
     const chunks = chunkMarkdown(body).map((c, i) => ({ ...c, id: `${rel}#${i}`, tokens: termFrequencies(`${names} ${c.heading} ${c.text}`) }));
     // Recheck after the full read in case the file changed between the header and body reads.
-    if (isPrivateMeta(meta) || fmSaysPrivate(frontmatter)) {
+    if (isPrivateMeta(meta) || fmSaysPrivate(frontmatter) || !twinNoteMemoryAllowed(ctx, name, rel, meta)) {
       state.files.set(rel, { hash: null, mtime: stNow.mtimeMs, bytes: stNow.size, note: null });
       continue;
     }

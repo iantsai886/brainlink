@@ -77,6 +77,37 @@ export function twinMemoryAllowed(ctx, memoryType) {
     && scope.memory_policy?.[memoryType] === true;
 }
 
+// Whole-vault tools share one Markdown index, so tool-level checks alone are not enough:
+// a semantic search must also omit documents that BrainLink knows are procedural, working,
+// or episodic. Apply this before reading bodies and use the same rule for direct note reads.
+export function twinNoteMemoryAllowed(ctx, vaultName, rel, meta = {}) {
+  const scope = ctx.twinScope || { mode: 'legacy' };
+  if (scope.mode === 'legacy') return true;
+  if (scope.mode !== 'scoped') return false;
+  const required = new Set();
+  const samePath = (candidate) => typeof candidate === 'string' && candidate.replace(/^\/+|\/+$/g, '') === rel;
+  const folderContains = (folder) => typeof folder === 'string' && rel.toLowerCase().startsWith(`${folder.replace(/^\/+|\/+$/g, '').toLowerCase()}/`);
+  const vault = ctx.byName?.get(vaultName);
+  if ((vault?.read_first || []).some(samePath)) required.add('procedural');
+  for (const agent of ctx.agents || []) {
+    if (agent.vault !== vaultName) continue;
+    if ((agent.connect_notes || []).some(samePath)) required.add('procedural');
+    if ((agent.tail_notes || []).some(samePath)) required.add('working');
+    const target = agent.close_target || {};
+    if (['append-section', 'proposal-only'].includes(target.mode) && samePath(target.path)) required.add('episodic');
+    if (target.mode === 'append-task' && samePath(target.path)) required.add('working');
+    if (target.mode === 'new-note' && folderContains(target.dir) && /(?:^|[,\s\["'])close-loop(?:$|[,\s\]"'])/i.test(String(meta.tags || ''))) required.add('episodic');
+  }
+  if (ctx.cfg?.handoff?.vault === vaultName && folderContains(ctx.cfg.handoff.folder)) required.add('working');
+
+  const declared = String(meta.memory_type || meta.brainlink_memory_type || '').toLowerCase();
+  if (['working', 'semantic', 'procedural', 'episodic'].includes(declared)) required.add(declared);
+  const type = String(meta.type || '').toLowerCase();
+  if (['episode', 'session_episode', 'session_summary'].includes(type)) required.add('episodic');
+  if (type === 'handoff') required.add('working');
+  return [...required].every((memoryType) => scope.memory_policy?.[memoryType] === true);
+}
+
 const READ_TOOL_ACTION = Object.freeze({
   brainlink_guide: 'read_note',
   vault_search: 'search', vault_recent: 'search', open_loops: 'search', brain_brief: 'search',
