@@ -577,3 +577,7 @@ Added `brainlink-graph-curation` 1.0.0 to the canonical Git skill library and id
 ### Package smoke checks include the graph-curation Skill (2026-10-27)
 
 Updated Windows staged-app, macOS installer, macOS zip, and Linux package smoke checks to require `skills/brainlink-graph-curation/SKILL.md` in the built artifact. The files were already copied by the shared package builders; this closes a regression-check gap so packaging cannot silently omit the new Skill. Verification: `node --import ./test/_preload.mjs --test test/packaging-runtime.test.mjs` passed 2/2; `git diff --check` passed. This is local static/package-path coverage; the hosted package matrix remains blocked by the existing GitHub Actions billing/spending-limit issue.
+
+### Windows installer build with graph-curation Skill (2026-10-27)
+
+Built `dist/BrainLink-Setup-1.2.8.exe` from source commit `3feb247` using Inno Setup 6.7.3. SHA-256: `F96C51FE968A499EA900F722F361E1C9C73FFD17F07E326A8D35E45925722074`. The staged package contains `skills/brainlink-graph-curation/SKILL.md`, and the staged bundled Node runtime reports BrainLink 1.2.8. The planned isolated per-user install/uninstall check was rejected by the automatic action policy because it would temporarily change the Windows user PATH and desktop shortcut. The installer was not run; no existing BrainLink data or Windows setup was changed. Package build and staged-file evidence do not prove installed-app acceptance, signature, or customer readiness.
