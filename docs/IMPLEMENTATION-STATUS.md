@@ -17,7 +17,7 @@ Added a ready-to-use Markdown prompt at `docs/DEEPSEEK-HARNESS-SECOND-BRAIN-ACCE
 
 ### Back up scheduled RSI observation records
 
-The verified local backup now includes the observer's settings, aggregate report and run status beside the RSI ledger and discovery state. Restore places the record in the inspected `BrainLink/rsi/observations.json` recovery copy; it does not silently replace the active app's settings. Focused Windows backup suite: 17 tests (16 passed, 0 failed, 1 symlink-privilege skip), including encrypted backup, integrity verification and restore of the schedule record. This confirms backup durability, not live schedule behavior after restoring to a new installation.
+The verified local backup now includes the observer's settings, aggregate report and run status beside the RSI ledger and discovery state. Restore places the record in the inspected `BrainLink/rsi/observations.json` recovery copy; it does not silently replace the active app's settings. Focused Windows backup suite: 17 tests (16 passed, 0 failed, 1 symlink-privilege skip), including encrypted backup, integrity verification and restore of the schedule record. The separate-app-home recovery test also restores the encrypted observation record using only the exported recovery key. This confirms local recovery across separate app-data folders, not a physical second-device or post-restore auto-activation test.
 
 ### Rebuild current Windows installer
 

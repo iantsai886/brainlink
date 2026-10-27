@@ -76,7 +76,14 @@ test('encrypted backup restores through a fresh BrainLink Setup using only the e
   await writeFile(path.join(source, 'Private.md'), 'PORTABLE_RECOVERY_PRIVATE_FIXTURE');
   const sourceEnv = { BRAINLINK_HOME: sourceHome };
   const recoveryKey = (await createOrReadBackupRecoveryKey(sourceEnv)).key;
-  const backup = await backupOnce([{ name: 'Personal', path: source }], destination, new Date('2026-10-27T00:00:00Z'), [], { encryptionKey: recoveryKey });
+  const observationRecord = JSON.stringify({
+    settings: { enabled: true, interval_hours: 168 },
+    report: { schema: 1, categories: [], findings: [], privacy: { report_saved: true } },
+    last_run: { at: '2026-10-27T00:00:00.000Z', trigger: 'schedule', ok: true },
+  });
+  const backup = await backupOnce([{ name: 'Personal', path: source }], destination, new Date('2026-10-27T00:00:00Z'), [
+    { name: 'rsi/observations.json', data: observationRecord },
+  ], { encryptionKey: recoveryKey });
   const secondEnv = { BRAINLINK_HOME: secondHome, HOME: secondHome, BRAINLINK_SEMANTIC: '0' };
   const secondApp = await startSetup({ env: secondEnv, home: secondHome, os: 'win32', port: 0, useCli: false, idleMinutes: 0.01 });
   const api = (body) => fetch(`http://127.0.0.1:${secondApp.port}/api/backup/restore`, {
@@ -90,8 +97,9 @@ test('encrypted backup restores through a fresh BrainLink Setup using only the e
     assert.deepEqual(await readdir(restored), [], 'a wrong key leaves the restore target empty');
     const response = await api({ backupFolder: backup.folder, destination: restored, confirm: true, recoveryKey });
     assert.equal(response.status, 200);
-    assert.equal((await response.json()).file_count, 1);
+    assert.equal((await response.json()).file_count, 2);
     assert.equal(await readFile(path.join(restored, '1-Personal', 'Private.md'), 'utf8'), 'PORTABLE_RECOVERY_PRIVATE_FIXTURE');
+    assert.equal(await readFile(path.join(restored, 'BrainLink', 'rsi', 'observations.json'), 'utf8'), observationRecord);
     await assert.rejects(readFile(path.join(secondHome, 'backup-key.bin')), { code: 'ENOENT' }, 'restore does not silently copy the recovery key into local app data');
   } finally { secondApp.server.close(); }
 });
