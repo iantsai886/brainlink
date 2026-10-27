@@ -71,6 +71,10 @@ test('vault health comparison uses only counts, keeps vaults separate, and repor
   });
   const worse = sanitizeVaultHealthSnapshot({ notes: 10, links: 5, orphan_count: 5, broken_count: 4, duplicate_title_count: 2, stale_active_count: 3 }, 'Personal');
   assert.equal(compareVaultHealth(worse, previous).signal, 'regressed');
+  const staleWorse = sanitizeVaultHealthSnapshot({ notes: 10, links: 8, orphan_count: 4, broken_count: 2, duplicate_title_count: 1, stale_active_count: 4 }, 'Personal');
+  assert.equal(compareVaultHealth(staleWorse, previous).signal, 'regressed', 'stale active notes affect the trend classification');
+  const staleBetter = sanitizeVaultHealthSnapshot({ notes: 10, links: 8, orphan_count: 4, broken_count: 2, duplicate_title_count: 1, stale_active_count: 2 }, 'Personal');
+  assert.equal(compareVaultHealth(staleBetter, previous).signal, 'improved', 'fewer stale active notes affect the trend classification');
   const mixed = sanitizeVaultHealthSnapshot({ notes: 10, links: 9, orphan_count: 1, broken_count: 3, duplicate_title_count: 1, stale_active_count: 3 }, 'Personal');
   assert.equal(compareVaultHealth(mixed, previous).signal, 'mixed');
   assert.equal(compareVaultHealth(current, { ...previous, vault: 'Organisation' }).signal, 'baseline_unavailable');

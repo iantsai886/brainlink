@@ -40,8 +40,8 @@ export function compareVaultHealth(current, previous) {
   const beforeRate = orphanRate(previous), afterRate = orphanRate(current);
   const orphanRateChange = beforeRate === null || afterRate === null ? null : Number((afterRate - beforeRate).toFixed(4));
   changes.orphan_rate = orphanRateChange;
-  const worse = changes.broken_count > 0 || changes.duplicate_title_count > 0 || (orphanRateChange !== null && orphanRateChange > 0.01);
-  const better = changes.broken_count < 0 || changes.duplicate_title_count < 0 || (orphanRateChange !== null && orphanRateChange < -0.01);
+  const worse = changes.broken_count > 0 || changes.duplicate_title_count > 0 || changes.stale_active_count > 0 || (orphanRateChange !== null && orphanRateChange > 0.01);
+  const better = changes.broken_count < 0 || changes.duplicate_title_count < 0 || changes.stale_active_count < 0 || (orphanRateChange !== null && orphanRateChange < -0.01);
   return { signal: worse && better ? 'mixed' : worse ? 'regressed' : better ? 'improved' : 'stable', changes };
 }
 
