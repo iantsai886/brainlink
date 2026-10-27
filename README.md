@@ -5,7 +5,7 @@ One Obsidian / Markdown vault that every AI can search and write to safely: Clau
 ## For customers
 
 1. Install `BrainLink-<version>.pkg` (macOS), `BrainLink-Setup-<version>.exe` (Windows), or on Linux the `.deb` or `brainlink-<version>-linux-<arch>.tar.gz` (run `./install.sh`).
-2. Setup opens in your browser: choose your vault folder and a rule pack, then name your agent.
+2. Setup opens in a dedicated Edge app window on Windows (or your default browser if Edge is unavailable); on macOS/Linux it opens in your default browser. Choose your vault folder and a rule pack, then name your agent.
 3. Press **Connect** for each AI app, then restart that app.
 4. In the AI, say **"Connect to <agent>"**. Say **"<agent> close loop"** to save the session to your vault.
 

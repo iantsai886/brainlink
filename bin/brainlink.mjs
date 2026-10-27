@@ -13,7 +13,7 @@ import { createMcp, serveStdio, serveHttp, VERSION } from '../src/server.mjs';
 import { openContext, launchSpec, logActivity, refreshMap, ROOT } from '../src/runtime.mjs';
 import { createContext, warmSemantic } from '../src/core.mjs';
 import { brief } from '../src/insights.mjs';
-import { startSetup, openInBrowser } from '../src/setup.mjs';
+import { startSetup, openInBrowser, openInAppWindow } from '../src/setup.mjs';
 import { runSync } from '../src/sync-cli.mjs';
 import { PROVIDER_LABELS } from '../src/sync/settings.mjs';
 import { importAll } from '../src/sessions/index.mjs';
@@ -131,12 +131,13 @@ async function main() {
       const running = await fetch(`http://127.0.0.1:${port}/health`).then((r) => r.json(), () => null);
       if (running?.app === 'brainlink') {
         const url = `http://127.0.0.1:${port}/?t=${token}`;
-        if (!flag('no-open')) openInBrowser(url);
+        if (!flag('no-open')) (fromApp ? openInAppWindow : openInBrowser)(url);
         out(`BrainLink Setup: ${maskUrl(url)}`);
         return;
       }
       if (instance) await removeSetupInstance(process.env, instance.port);
-      const opts = { token, openUrl: flag('no-open') ? null : (u) => openInBrowser(u), idleMinutes: fromApp ? 30 : 0, onQuit: () => process.exit(0) };
+      const openSetup = fromApp ? openInAppWindow : openInBrowser;
+      const opts = { token, openUrl: flag('no-open') ? null : (u) => openSetup(u), idleMinutes: fromApp ? 30 : 0, onQuit: () => process.exit(0) };
       const s = await startSetup({ ...opts, port }).catch((e) => (e.code === 'EADDRINUSE' ? startSetup({ ...opts, port: 0 }) : Promise.reject(e)));
       await writeSetupInstance(process.env, s.port);
       s.server.once('close', () => { removeSetupInstance(process.env, s.port).catch(() => {}); });

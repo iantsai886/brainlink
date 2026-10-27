@@ -1,6 +1,7 @@
 // Setup UI backend: a local-only web app (127.0.0.1, random session token) that picks the
 // vault folder, applies a rule pack and connects AI clients.
 import { createServer } from 'node:http';
+import { existsSync } from 'node:fs';
 import { watch as watchFs } from 'node:fs';
 import { readFile, stat, lstat, cp, mkdir, writeFile, rename, unlink, readdir } from 'node:fs/promises';
 import { randomBytes, timingSafeEqual, createHash } from 'node:crypto';
@@ -1880,10 +1881,30 @@ export async function startSetup(opts = {}) {
   return { server, url, port, token };
 }
 
-export function openInBrowser(url, os = process.platform) {
-  if (os === 'darwin') execFile('open', [url]);
-  else if (os === 'win32') execFile('cmd', ['/c', 'start', '', url]);
-  else execFile('xdg-open', [url]);
+export function openInBrowser(url, os = process.platform, run = execFile) {
+  if (os === 'darwin') run('open', [url]);
+  else if (os === 'win32') run('cmd', ['/c', 'start', '', url]);
+  else run('xdg-open', [url]);
+}
+
+// The installed desktop icon should feel like opening an app, while CLI use keeps
+// the user's normal browser. Never pass a non-loopback URL to Edge app mode.
+export function openInAppWindow(url, { os = process.platform, env = process.env, exists = existsSync, run = execFile } = {}) {
+  let parsed;
+  try { parsed = new URL(url); } catch { parsed = null; }
+  const local = parsed && ['127.0.0.1', 'localhost', '[::1]'].includes(parsed.hostname)
+    && ['http:', 'https:'].includes(parsed.protocol);
+  if (os === 'win32' && local) {
+    const roots = [env['ProgramFiles(x86)'], env.ProgramFiles, env.LOCALAPPDATA].filter(Boolean);
+    const edge = roots.map((root) => path.join(root, 'Microsoft', 'Edge', 'Application', 'msedge.exe')).find((candidate) => exists(candidate));
+    if (edge) {
+      const child = run(edge, [`--app=${url}`], () => openInBrowser(url, os, run));
+      child?.unref?.();
+      return { mode: 'app', browser: 'edge' };
+    }
+  }
+  openInBrowser(url, os, run);
+  return { mode: 'browser', browser: 'default' };
 }
 
 export { CLIENTS };
