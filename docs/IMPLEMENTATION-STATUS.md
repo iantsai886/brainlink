@@ -647,3 +647,7 @@ Matched session-end reminders now offer a localized “Copy request for AI” ac
 ### Full regression run after closeout request change (2026-10-28)
 
 On Windows, `npm run test:all` at source commit `0b6b6e9` passed: core 469 tests (463 passed, 0 failed, 6 platform/privilege skips) and UI 29/29. Coverage includes backups and restore, privacy filters, multi-profile vault boundaries, Git sync, RSI gates, session capture and filing, plus the new closeout request. This is local automated evidence; it does not prove live AI-client pickup, hosted CI, installed-app acceptance, or customer readiness.
+
+### Rebuilt Windows installer and staged-runtime smoke (2026-10-28)
+
+Built `dist/BrainLink-Setup-1.2.8.exe` from source commit `596536e` with Inno Setup 6.7.3. SHA-256: `E6870390156B42499F304D068553492F7589B4A8E6F8ED389094F420C9216B4A`. The staged UI file hash matches the current source. Launched the staged bundled Node runtime's fictional demo with browser opening disabled: `/health` returned version 1.2.8 and the Setup page returned HTTP 200 with title `BrainLink Setup`; the process was stopped. This verifies build and staged launch, not installation, desktop shortcut behavior, signature, or release readiness. Two fictional demo folders created during the smoke check remain under the system temp directory because cleanup was blocked by the automatic action policy; no real vault was used.
