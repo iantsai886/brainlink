@@ -1,0 +1,107 @@
+// Optional recurring RSI observation. It stores only the aggregate report produced from
+// BrainLink's content-free local activity log; it never stores raw events or note content.
+import { mkdir, readFile, rename, unlink, writeFile } from 'node:fs/promises';
+import path from 'node:path';
+import { randomUUID } from 'node:crypto';
+import { analyzeActivitySignals } from './rsi-observations.mjs';
+
+export const DEFAULT_OBSERVATION_SETTINGS = Object.freeze({ enabled: false, interval_hours: 168 });
+
+export function validateObservationSettings(input, previous = DEFAULT_OBSERVATION_SETTINGS) {
+  if (!input || typeof input !== 'object' || Array.isArray(input)) throw new Error('Observation settings must be an object.');
+  const next = { ...previous };
+  if ('enabled' in input) {
+    if (typeof input.enabled !== 'boolean') throw new Error('enabled must be true or false.');
+    next.enabled = input.enabled;
+  }
+  if ('interval_hours' in input) {
+    if (![24, 168, 336, 720].includes(input.interval_hours)) throw new Error('interval_hours must be 24, 168, 336 or 720.');
+    next.interval_hours = input.interval_hours;
+  }
+  for (const key of Object.keys(input)) if (!['enabled', 'interval_hours'].includes(key)) throw new Error(`Unknown observation setting: ${key}.`);
+  return next;
+}
+
+export function createRsiObservationSchedule({ home, readEntries, now = () => new Date() }) {
+  const file = path.join(home, 'rsi', 'observations.json');
+  let running = null;
+  let writes = Promise.resolve();
+
+  async function load() {
+    let raw;
+    try { raw = JSON.parse(await readFile(file, 'utf8')); }
+    catch (error) {
+      if (error.code === 'ENOENT') raw = {};
+      else throw new Error('RSI observation record is unreadable; fix or remove the local observations.json file.');
+    }
+    const settings = validateObservationSettings(raw.settings || {});
+    const report = raw.report && raw.report.schema === 1 && Array.isArray(raw.report.categories) && Array.isArray(raw.report.findings) ? raw.report : null;
+    const lastRun = raw.last_run && typeof raw.last_run === 'object' && typeof raw.last_run.at === 'string'
+      ? { at: raw.last_run.at, trigger: ['manual', 'schedule'].includes(raw.last_run.trigger) ? raw.last_run.trigger : 'manual', ok: raw.last_run.ok === true }
+      : null;
+    return { settings, report, last_run: lastRun };
+  }
+
+  function save(mutator) {
+    const next = writes.then(async () => {
+      const updated = await mutator(await load());
+      await mkdir(path.dirname(file), { recursive: true });
+      const temp = `${file}.${process.pid}.${randomUUID().slice(0, 8)}.tmp`;
+      try {
+        await writeFile(temp, JSON.stringify(updated, null, 2), { encoding: 'utf8', mode: 0o600, flag: 'wx' });
+        await rename(temp, file);
+      } catch (error) { await unlink(temp).catch(() => {}); throw error; }
+      return updated;
+    });
+    writes = next.catch(() => {});
+    return next;
+  }
+
+  async function status() {
+    const state = await load();
+    const last = Date.parse(state.last_run?.at || '');
+    const current = now();
+    const next_run_at = !state.settings.enabled ? null : Number.isFinite(last)
+      ? new Date(last + state.settings.interval_hours * 3600e3).toISOString()
+      : current.toISOString();
+    return { ...state, running: Boolean(running), next_run_at };
+  }
+
+  async function configure(input) {
+    const updated = await save((state) => ({ ...state, settings: validateObservationSettings(input, state.settings) }));
+    return status().then((result) => ({ ...result, settings: updated.settings }));
+  }
+
+  async function run(trigger = 'manual') {
+    if (!['manual', 'schedule'].includes(trigger)) throw new Error('Unknown observation trigger.');
+    if (running) return running;
+    running = (async () => {
+      const started = now();
+      try {
+        const entries = await readEntries();
+        const report = analyzeActivitySignals(entries, { now: started });
+        report.privacy.report_saved = true;
+        await save((state) => ({ ...state, report, last_run: { at: started.toISOString(), trigger, ok: true } }));
+        return { ok: true, report, last_run: { at: started.toISOString(), trigger, ok: true } };
+      } catch {
+        const last_run = { at: started.toISOString(), trigger, ok: false };
+        await save((state) => ({ ...state, last_run })).catch(() => {});
+        return { ok: false, last_run, error: 'The local observation could not be saved. Check the RSI observation record in BrainLink data.' };
+      }
+    })();
+    try { return await running; } finally { running = null; }
+  }
+
+  return {
+    file,
+    status,
+    configure,
+    run,
+    due: async () => {
+      const state = await load();
+      if (!state.settings.enabled || running) return false;
+      const last = Date.parse(state.last_run?.at || '');
+      return !Number.isFinite(last) || now().getTime() - last >= state.settings.interval_hours * 3600e3;
+    },
+  };
+}

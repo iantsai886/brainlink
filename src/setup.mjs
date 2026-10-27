@@ -44,6 +44,7 @@ import { twinProfileStatus, profileScopeEditable } from './twin-profiles.mjs';
 import { createRsiLedger } from './rsi-ledger.mjs';
 import { createRsiExperiments } from './rsi-experiments.mjs';
 import { createRsiDiscovery } from './rsi-discovery.mjs';
+import { createRsiObservationSchedule } from './rsi-observation-schedule.mjs';
 import { inspectAgentSkills, installAgentSkills, removeAgentSkills, skillClientRoot } from './agent-skills.mjs';
 import { ingestionQueue } from './ingestion.mjs';
 import { INGESTION_MAX_ATTEMPTS, INGESTION_RETRY_DELAY_MS, ingestionScheduleDue, localDateAndTime, normalizeIngestionTargets, validateIngestionSchedule } from './ingestion-schedule.mjs';
@@ -194,6 +195,9 @@ export async function startSetup(opts = {}) {
   const rsiDiscovery = createRsiDiscovery({ home: appHome(env), ledger: rsiLedger, fetchImpl: opts.discoveryFetch, lookup: opts.discoveryLookup });
   const initialDiscoveryStatus = await rsiDiscovery.status().catch(() => null);
   let discoveryKeepsAlive = Boolean(initialDiscoveryStatus?.settings.enabled && !initialDiscoveryStatus.settings.paused);
+  const rsiObservationSchedule = createRsiObservationSchedule({ home: appHome(env), readEntries: () => readActivity(env, 20000) });
+  const initialObservationStatus = await rsiObservationSchedule.status().catch(() => null);
+  let observationKeepsAlive = Boolean(initialObservationStatus?.settings.enabled);
   const html = await readFile(path.join(ROOT, 'ui', 'index.html'), 'utf8');
   let port = opts.port ?? 0;
   // When started from the app (no terminal), exit after idleMinutes without requests. Closing
@@ -213,7 +217,7 @@ export async function startSetup(opts = {}) {
   const touch = () => {
     clearTimeout(idleTimer);
     clearTimeout(idleQuitTimer);
-    if (!opts.idleMinutes || backupEnabled || discoveryKeepsAlive || ingestionKeepsAlive || briefKeepsAlive || syncKeepsAlive || githubAutoKeepsAlive) return;
+    if (!opts.idleMinutes || backupEnabled || discoveryKeepsAlive || observationKeepsAlive || ingestionKeepsAlive || briefKeepsAlive || syncKeepsAlive || githubAutoKeepsAlive) return;
     idleTimer = setTimeout(quit, opts.idleMinutes * 60e3);
     idleTimer.unref?.();
   };
@@ -616,6 +620,10 @@ export async function startSetup(opts = {}) {
     discoveryKeepsAlive = Boolean(status?.settings.enabled && !status.settings.paused);
     touch();
   }
+  function refreshObservationIdlePolicy(status) {
+    observationKeepsAlive = Boolean(status?.settings.enabled);
+    touch();
+  }
   async function refreshSnapshotWatcher(cfg) {
     snapshotWatcher?.stop();
     snapshotWatcher = null;
@@ -653,6 +661,17 @@ export async function startSetup(opts = {}) {
     finally { discoveryTickRunning = false; }
   }, opts.discoveryTickMs ?? 15 * 60e3);
   discoveryTimer.unref?.();
+
+  let observationTickRunning = false;
+  const observationTimer = setInterval(async () => {
+    if (observationTickRunning) return;
+    observationTickRunning = true;
+    try { if (await rsiObservationSchedule.due()) await rsiObservationSchedule.run('schedule'); }
+    catch { /* aggregate-only observation failures stay in local status; never affect live behavior */ }
+    finally { observationTickRunning = false; }
+  }, opts.observationTickMs ?? 15 * 60e3);
+  observationTimer.unref?.();
+  if (await rsiObservationSchedule.due().catch(() => false)) rsiObservationSchedule.run('schedule').catch(() => {});
 
   refreshSnapshotWatcher(await loadConfig(file)).catch(() => {});
   const initialConfig = await loadConfig(file);
@@ -912,6 +931,16 @@ export async function startSetup(opts = {}) {
   const routes = {
     'GET /api/state': () => state(),
     'GET /api/rsi': async () => ({ ideas: await rsiLedger.list() }),
+    'GET /api/rsi/observations': async () => ({ observations: await rsiObservationSchedule.status() }),
+    'POST /api/rsi/observations/settings': async (b) => {
+      let observations = await rsiObservationSchedule.configure(b);
+      refreshObservationIdlePolicy(observations);
+      // Give an enabled schedule its first observation promptly, then use the regular timer.
+      if (await rsiObservationSchedule.due()) await rsiObservationSchedule.run('schedule');
+      observations = await rsiObservationSchedule.status();
+      return { observations };
+    },
+    'POST /api/rsi/observations/run': async () => ({ run: await rsiObservationSchedule.run('manual'), observations: await rsiObservationSchedule.status() }),
     'GET /api/rsi/export': async () => {
       const record = { schema: 1, exported_at: new Date().toISOString(), ideas: await rsiLedger.list() };
       return { ...record, sha256: createHash('sha256').update(JSON.stringify(record)).digest('hex') };
@@ -1808,7 +1837,7 @@ export async function startSetup(opts = {}) {
     }
     try { json(res, 200, await route(body)); } catch (e) { json(res, 400, { error: String(e.message || e) }); }
   });
-  server.once('close', () => { snapshotWatcher?.stop(); vaultWatcher?.stop(); for (const client of eventClients) client.end(); eventClients.clear(); clearInterval(discoveryTimer); clearInterval(ingestionTimer); clearInterval(githubAutoTimer); if (backupTimer) { clearTimeout(backupTimer); clearInterval(backupTimer); } if (syncTimer) { clearTimeout(syncTimer); clearInterval(syncTimer); } });
+  server.once('close', () => { snapshotWatcher?.stop(); vaultWatcher?.stop(); for (const client of eventClients) client.end(); eventClients.clear(); clearInterval(discoveryTimer); clearInterval(observationTimer); clearInterval(ingestionTimer); clearInterval(githubAutoTimer); if (backupTimer) { clearTimeout(backupTimer); clearInterval(backupTimer); } if (syncTimer) { clearTimeout(syncTimer); clearInterval(syncTimer); } });
   await new Promise((resolve, reject) => { server.once('error', reject); server.listen(port, '127.0.0.1', resolve); });
   port = server.address().port;
   touch();

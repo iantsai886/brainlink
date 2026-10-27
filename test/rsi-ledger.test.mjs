@@ -156,7 +156,7 @@ test('RSI Setup panel has unique ids and one render/submit path', async () => {
   assert.match(html, /data-rsi-rollback-submit/);
   assert.match(html, /\/api\/rsi\/ideas\/rollback/);
   assert.match(html, /id="rsi-observe-run"/);
-  assert.match(html, /\/api\/rsi\/observations\/analyze/);
+  assert.match(html, /\/api\/rsi\/observations\/run/);
   assert.match(html, /current_result_tokens/);
   assert.match(html, /rsi\.observe\.resultSize/);
   assert.match(html, /rsi\.observe\.graphActions/);
@@ -166,7 +166,7 @@ test('RSI Setup panel has unique ids and one render/submit path', async () => {
     const catalog = JSON.parse(await readFile(new URL(`../ui/locales/${locale}.json`, import.meta.url), 'utf8'));
     assert.ok(catalog['rsi.promotionCommit'], `${locale} promotion commit label`);
     assert.ok(catalog['rsi.promotionCommitHint'], `${locale} promotion commit limitation`);
-    for (const key of ['rsi.rollback.title', 'rsi.rollback.hint', 'rsi.rollback.restoredVersion', 'rsi.rollback.commit', 'rsi.rollback.reviewer', 'rsi.rollback.evidence', 'rsi.rollback.reason', 'rsi.rollback.record', 'rsi.rollback.confirm', 'rsi.rollback.saved', 'rsi.rollback.history', 'rsi.observe.title', 'rsi.observe.hint', 'rsi.observe.run', 'rsi.observe.window', 'rsi.observe.stats', 'rsi.observe.noRate', 'rsi.observe.resultSize', 'rsi.observe.graphActions', 'rsi.observe.findings', 'rsi.observe.noFindings', 'rsi.observe.generated', 'rsi.observe.group.retrieval', 'rsi.observe.group.sessions', 'rsi.observe.group.filing', 'rsi.observe.group.handoff', 'rsi.observe.group.recovery', 'rsi.observe.group.graph_review', 'rsi.observe.signal.insufficient_data', 'rsi.observe.signal.stable', 'rsi.observe.signal.review_failures', 'rsi.observe.signal.review_increase', 'rsi.observe.draft', 'rsi.observe.draft.title', 'rsi.observe.draft.problem', 'rsi.observe.draft.hypothesis']) assert.ok(catalog[key], `${locale} ${key}`);
+    for (const key of ['rsi.rollback.title', 'rsi.rollback.hint', 'rsi.rollback.restoredVersion', 'rsi.rollback.commit', 'rsi.rollback.reviewer', 'rsi.rollback.evidence', 'rsi.rollback.reason', 'rsi.rollback.record', 'rsi.rollback.confirm', 'rsi.rollback.saved', 'rsi.rollback.history', 'rsi.observe.title', 'rsi.observe.hint', 'rsi.observe.scheduleEnabled', 'rsi.observe.interval', 'rsi.observe.daily', 'rsi.observe.weekly', 'rsi.observe.fortnightly', 'rsi.observe.monthly', 'rsi.observe.saveSchedule', 'rsi.observe.scheduleSaved', 'rsi.observe.scheduleOff', 'rsi.observe.firstRunDue', 'rsi.observe.lastRun', 'rsi.observe.lastFailed', 'rsi.observe.nextRun', 'rsi.observe.run', 'rsi.observe.window', 'rsi.observe.stats', 'rsi.observe.noRate', 'rsi.observe.resultSize', 'rsi.observe.graphActions', 'rsi.observe.findings', 'rsi.observe.noFindings', 'rsi.observe.generated', 'rsi.observe.group.retrieval', 'rsi.observe.group.sessions', 'rsi.observe.group.filing', 'rsi.observe.group.handoff', 'rsi.observe.group.recovery', 'rsi.observe.group.graph_review', 'rsi.observe.signal.insufficient_data', 'rsi.observe.signal.stable', 'rsi.observe.signal.review_failures', 'rsi.observe.signal.review_increase', 'rsi.observe.draft', 'rsi.observe.draft.title', 'rsi.observe.draft.problem', 'rsi.observe.draft.hypothesis']) assert.ok(catalog[key], `${locale} ${key}`);
     for (const key of ['rsi.monitor.title', 'rsi.monitor.hint', 'rsi.monitor.start', 'rsi.monitor.end', 'rsi.monitor.testSet', 'rsi.monitor.samples', 'rsi.monitor.decision.stable', 'rsi.monitor.decision.regression', 'rsi.monitor.decision.inconclusive', 'rsi.monitor.guardrail.pass', 'rsi.monitor.guardrail.fail', 'rsi.monitor.guardrail.unknown', 'rsi.monitor.metricName', 'rsi.monitor.baseline', 'rsi.monitor.observed', 'rsi.monitor.reviewer', 'rsi.monitor.guardrails', 'rsi.monitor.results', 'rsi.monitor.evidenceRef', 'rsi.monitor.save', 'rsi.monitor.saved', 'rsi.monitor.history']) assert.ok(catalog[key], `${locale} ${key}`);
   }
   assert.equal((html.match(/async function loadRsi\(\)/g) || []).length, 1);
@@ -181,6 +181,14 @@ test('Setup exposes the RSI ledger only through authenticated local APIs', async
   const base = 'http://127.0.0.1:' + app.port;
   const post = (route, body, token = app.token) => fetch(base + route, { method: 'POST', headers: { 'Content-Type': 'application/json', 'X-BrainLink-Token': token }, body: JSON.stringify(body) });
   try {
+    assert.equal((await fetch(base + '/api/rsi/observations', { headers: { 'X-BrainLink-Token': 'wrong-token' } })).status, 401);
+    const initialSchedule = await fetch(base + '/api/rsi/observations', { headers: { 'X-BrainLink-Token': app.token } }).then(r => r.json());
+    assert.deepEqual(initialSchedule.observations.settings, { enabled: false, interval_hours: 168 });
+    assert.equal((await post('/api/rsi/observations/settings', { enabled: true, interval_hours: 24 }, 'wrong-token')).status, 401);
+    const configured = await post('/api/rsi/observations/settings', { enabled: true, interval_hours: 24 }).then(r => r.json());
+    assert.equal(configured.observations.settings.enabled, true);
+    assert.equal(configured.observations.last_run.trigger, 'schedule', 'enabling the schedule runs the first due observation promptly');
+    assert.equal((await post('/api/rsi/observations/run', {}, 'wrong-token')).status, 401);
     assert.equal((await post('/api/rsi/observations/analyze', {}, 'wrong-token')).status, 401);
     for (let i = 0; i < 5; i++) await logActivity(env, { tool: 'vault_search', ok: false, platform: 'PRIVATE_ACTIVITY_CANARY', message: 'PRIVATE_NOTE_CANARY' });
     const observation = await post('/api/rsi/observations/analyze', {}).then(r => r.json());
@@ -189,6 +197,11 @@ test('Setup exposes the RSI ledger only through authenticated local APIs', async
     assert.equal(retrievalSignal.current.failures, 5);
     assert.doesNotMatch(JSON.stringify(observation), /PRIVATE_ACTIVITY_CANARY|PRIVATE_NOTE_CANARY/);
     assert.equal(observation.report.privacy.report_saved, false);
+    const savedObservation = await post('/api/rsi/observations/run', {}).then(r => r.json());
+    assert.equal(savedObservation.run.ok, true);
+    assert.equal(savedObservation.run.report.privacy.report_saved, true);
+    assert.equal(savedObservation.observations.last_run.trigger, 'manual');
+    assert.doesNotMatch(JSON.stringify(savedObservation), /PRIVATE_ACTIVITY_CANARY|PRIVATE_NOTE_CANARY/);
     assert.equal((await post('/api/rsi/ideas', validIdea, 'wrong-token')).status, 401);
     const created = await post('/api/rsi/ideas', validIdea).then(r => r.json());
     assert.equal(created.idea.status, 'discovered');
