@@ -635,7 +635,7 @@ export async function readNote(ctx, name, rel) {
   if (i === undefined || index.notes[i].private) throw new Error(PRIVATE_NOTE_ERROR);
   const raw = await readFile(full, 'utf8');
   const { meta, body, frontmatter } = parseFrontmatter(raw);
-  if (isPrivateMeta(meta) || fmSaysPrivate(frontmatter)) throw new Error(PRIVATE_NOTE_ERROR);
+  if (isPrivateMeta(meta) || fmSaysPrivate(frontmatter) || !twinNoteMemoryAllowed(ctx, name, relNorm, meta)) throw new Error(PRIVATE_NOTE_ERROR);
   return { path: rel, meta, body, historical: isHistorical(rel, meta) };
 }
 

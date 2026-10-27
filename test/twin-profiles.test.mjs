@@ -1,12 +1,12 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtemp, mkdir, readFile, writeFile } from 'node:fs/promises';
+import { mkdtemp, mkdir, readFile, writeFile, stat, utimes } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { normalize, validate, saveConfig } from '../src/config.mjs';
 import { twinProfileStatus, profileScopeEditable } from '../src/twin-profiles.mjs';
 import { startSetup } from '../src/setup.mjs';
-import { createContext } from '../src/core.mjs';
+import { createContext, loadVault, readNote } from '../src/core.mjs';
 import { createMcp } from '../src/server.mjs';
 import { hashToken } from '../src/mcp-agents.mjs';
 import { openSessionStore } from '../src/sessions/index.mjs';
@@ -328,6 +328,28 @@ test('semantic vault tools exclude documents assigned to disabled memory types',
       assert.doesNotMatch(JSON.stringify(result), new RegExp(canaries[disabled].join('|')), `${tool} must not expose disabled memory content`);
     }
   }
+});
+
+test('direct note read rechecks memory type after reading a stale-index file', async () => {
+  const root = await mkdtemp(path.join(tmpdir(), 'brainlink-twin-memory-read-race-'));
+  const vaultPath = path.join(root, 'org');
+  await mkdir(vaultPath, { recursive: true });
+  const notePath = path.join(vaultPath, 'Mutable.md');
+  const canary = 'FRESH_EPISODIC_RACE_CANARY';
+  await writeFile(notePath, `---\nmemory_type: semantic\n---\n# Mutable\n\n${'S'.repeat(canary.length)}`);
+  const cfg = fixture(vaultPath);
+  const ctx = createContext(cfg, { env: { BRAINLINK_AGENT_TOKEN: 'fictional-agent-token' } });
+  ctx.twinScope.memory_policy.episodic = false;
+  const original = await stat(notePath);
+  await loadVault(ctx, 'Fictional Org');
+
+  await writeFile(notePath, `---\nmemory_type: episodic\n---\n# Mutable\n\n${canary}`);
+  await utimes(notePath, original.atimeMs / 1000, original.mtimeMs / 1000);
+  const unchangedFingerprint = await stat(notePath);
+  assert.equal(unchangedFingerprint.size, original.size, 'the fixture preserves file size so the index cache remains stale');
+  assert.equal(unchangedFingerprint.mtimeMs, original.mtimeMs, 'the fixture restores the cached modification time');
+
+  await assert.rejects(readNote(ctx, 'Fictional Org', 'Mutable.md'), /private/i);
 });
 
 test('profile-scoped session reads stay inside the profile and closeouts remain approval-gated', async () => {
