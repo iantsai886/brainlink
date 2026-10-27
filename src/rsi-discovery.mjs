@@ -44,10 +44,10 @@ export const DEFAULT_DISCOVERY = Object.freeze({ enabled: false, paused: false, 
 // BrainLink workflow vocabulary: an entry must touch at least one of these to be relevant, and the
 // matched group names the memory type shown to the reviewer.
 const WORKFLOW_TERMS = {
-  working: ['working memory', 'context window', 'long context', 'handoff', 'session', 'continuation', 'context compression', 'summarization'],
-  semantic: ['retrieval', 'rag', 'knowledge graph', 'embedding', 'semantic memory', 'semantic search', 'knowledge base', 'note'],
-  procedural: ['procedural memory', 'skill', 'tool use', 'workflow', 'planning'],
-  episodic: ['episodic memory', 'conversation history', 'reflection', 'trajectory', 'experience replay'],
+  working: ['working memory', 'context window', 'long context', 'handoff', 'session', 'continuation', 'context compression', 'summarization', '工作記憶', '工作记忆', '上下文', '交接', '工作階段', '工作阶段', '會話', '会话', '摘要', '脈絡壓縮', '脉络压缩', '工作延續', '工作延续'],
+  semantic: ['retrieval', 'rag', 'knowledge graph', 'embedding', 'semantic memory', 'semantic search', 'knowledge base', 'note', '語意記憶', '语义记忆', '知識圖譜', '知识图谱', '知識庫', '知识库', '語意搜尋', '语义搜索', '檢索', '检索', '嵌入', '筆記', '笔记'],
+  procedural: ['procedural memory', 'skill', 'tool use', 'workflow', 'planning', '程序記憶', '程序记忆', '技能', '工具使用', '工作流程', '規劃', '规划'],
+  episodic: ['episodic memory', 'conversation history', 'reflection', 'trajectory', 'experience replay', '情節記憶', '情节记忆', '對話歷史', '对话历史', '反思', '軌跡', '轨迹', '經驗重播', '经验重放'],
 };
 const GENERAL_TERMS = ['agent', 'memory', 'language model', 'llm'];
 const STOPWORDS = new Set('a an and are as at be by can do does for from has have how in into is it its of on or our so than that the their them then there these this to too was we were what when which while who why will with without you your after before about across again all also any because been being both but each few more most much need needs not only other over same should some such very via who'.split(' '));
@@ -314,10 +314,24 @@ export function parseGitHub(json, { single = false } = {}) {
 // ---- relevance ----
 
 const stem = (w) => w.length > 3 ? w.replace(/(?:ies)$/, 'y').replace(/(?<!s)s$/, '') : w;
-const tokens = (text) => (text.toLowerCase().normalize('NFKC').match(/[\p{L}\p{N}]+/gu) || []).filter(w => w.length > 1 && !STOPWORDS.has(w));
+const tokens = (text) => {
+  const out = [];
+  for (const part of text.toLowerCase().normalize('NFKC').match(/[\p{Script=Han}]+|[\p{L}\p{N}]+/gu) || []) {
+    if (/^\p{Script=Han}+$/u.test(part)) {
+      // Chinese does not mark word boundaries with spaces. Overlapping bigrams let exact
+      // concepts match across a phrase without treating one long sentence as a single token.
+      const chars = Array.from(part);
+      for (let i = 0; i < chars.length - 1; i++) out.push(chars[i] + chars[i + 1]);
+    } else if (part.length > 1 && !STOPWORDS.has(part)) out.push(part);
+  }
+  return out;
+};
 const words = (text) => tokens(text).map(stem);
-const containsPhrase = (haystack, phrase) => new RegExp(`(?:^|[^\\p{L}\\p{N}])${phrase.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}s?(?:$|[^\\p{L}\\p{N}])`, 'iu').test(haystack);
-
+const containsPhrase = (haystack, phrase) => {
+  if (/\p{Script=Han}/u.test(phrase)) return haystack.normalize('NFKC').toLowerCase().includes(phrase.normalize('NFKC').toLowerCase());
+  const escaped = phrase.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  return new RegExp('(?:^|[^\\p{L}\\p{N}])' + escaped + 's?(?:$|[^\\p{L}\\p{N}])', 'iu').test(haystack);
+};
 export function assessRelevance(entry, signals) {
   const text = `${entry.title} ${entry.summary}`.toLowerCase();
   const memoryTypes = Object.entries(WORKFLOW_TERMS).filter(([, terms]) => terms.some(t => containsPhrase(text, t))).map(([type]) => type);

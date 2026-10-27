@@ -195,6 +195,25 @@ test('relevance requires both a user problem statement and a BrainLink memory/ag
   assert.equal(assessRelevance({ title: 'Agent memory benchmarks', summary: 'Vision models for robots.' }, [SIGNAL]), null, 'no user problem overlap');
 });
 
+test('research relevance supports Chinese phrases without spaces and reports matching memory types', () => {
+  const signal = '降低 AI 知識檢索成本並改善智能體交接';
+  const relevant = assessRelevance({ title: 'AI 智能體的知識檢索與交接', summary: '精簡上下文能降低檢索成本。' }, [signal]);
+  assert.ok(relevant, 'Chinese signal and source text should match');
+  assert.ok(relevant.matched_terms.some((term) => term.includes('知識') || term.includes('檢索')));
+  assert.ok(relevant.memory_types.includes('semantic'));
+  assert.ok(relevant.memory_types.includes('working'));
+  assert.ok(relevant.workflow_terms.some((term) => term.includes('交接') || term.includes('檢索')));
+
+  const simplified = assessRelevance({ title: '人工智能知识检索与智能体交接', summary: '知识检索能缩短上下文。' }, ['降低人工智能知识检索成本并改善智能体交接']);
+  assert.ok(simplified, 'Simplified Chinese text should also match when the same characters are used');
+  assert.ok(simplified.memory_types.includes('semantic') && simplified.memory_types.includes('working'));
+});
+
+test('Chinese relevance rejects unrelated text that has no matching multi-character concepts', () => {
+  const signal = '改善人工智慧知識檢索效率與智能體交接';
+  assert.equal(assessRelevance({ title: '台灣山區降雨觀測', summary: '分析季節性氣候與水庫蓄水變化。' }, [signal]), null);
+});
+
 test('a run files relevant entries as discovered proposals with full provenance and drops hostile content', async () => {
   const feed = atom(
     entry(),
