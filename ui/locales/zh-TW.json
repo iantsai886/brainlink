@@ -774,9 +774,11 @@
   "rsi.confidenceShort": "可信度",
   "rsi.baselineVersion": "基準版本",
   "rsi.candidateVersion": "候選版本",
-  "rsi.promotionCommit": "合併後的 Git commit SHA",
-  "rsi.promotionCommitHint": "接受改進時必填。BrainLink 只檢查格式，不會向 GitHub 驗證此 commit。",
-  "rsi.testSetVersion": "測試集版本",
+  "rsi.promotionCommit": "已測試並要採用的 Git commit",
+  "rsi.promotionCommitHint": "必須與下方選取的乾淨測試執行完全相同。BrainLink 不會查驗 GitHub CI 或遠端 commit 是否存在。",
+  "rsi.experimentRunId": "測試執行 ID",
+  "rsi.testSetVersion": "測試 fixture SHA-256",
+  "rsi.testSetHashHint": "按下測試執行的審查按鈕即可帶入。",
   "rsi.reviewer": "審查者",
   "rsi.results": "測量結果",
   "rsi.metrics": "指標（每行一項）",
@@ -901,5 +903,11 @@
   "rsi.experiment.decision.no_demonstrated_gain": "沒有明確改善",
   "rsi.experiment.decision.no_demonstrated_efficiency_gain": "沒有明確減少 token",
   "rsi.experiment.decision.quality_regression": "品質下降",
-  "rsi.experiment.decision.blocked_privacy": "因隱私問題而停止"
+  "rsi.experiment.decision.blocked_privacy": "因隱私問題而停止",
+  "rsi.experiment.decision.source_unbound": "未綁定乾淨的 Git commit",
+  "rsi.experiment.source.unbound": "未知 commit",
+  "rsi.experiment.source.clean": "乾淨的 commit",
+  "rsi.experiment.source.changed": "程式碼有變更或工作目錄不乾淨",
+  "rsi.experiment.useForReview": "用這次測試作為審查依據",
+  "rsi.experiment.evidencePrefilled": "已將測試執行、commit 和 fixture 填入審查欄位。"
 }

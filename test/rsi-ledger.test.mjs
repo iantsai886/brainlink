@@ -1,6 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtemp, readFile, writeFile } from 'node:fs/promises';
+import { mkdir, mkdtemp, readFile, writeFile } from 'node:fs/promises';
+import { createHash } from 'node:crypto';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { createRsiLedger } from '../src/rsi-ledger.mjs';
@@ -31,13 +32,31 @@ test('RSI acceptance requires recorded evidence, reviewer, promotion commit and 
   const ledger = createRsiLedger({ home: await temp('accept') });
   const idea = await ledger.create(validIdea);
   let current = idea;
-  for (const status of ['triaged', 'proposed', 'testing', 'review']) current = await ledger.update({ id: idea.id, expected_revision: current.revision, status });
+  for (const status of ['triaged', 'proposed']) current = await ledger.update({ id: idea.id, expected_revision: current.revision, status });
+  current = await ledger.update({ id: idea.id, expected_revision: current.revision, status: 'testing', fields: { candidate_version: 'per-case-rephrasing-v1' } });
+  const testReceipt = {
+    schema: 2, run_id: 'BL-RSI-RUN-20261025-aa112233', suite: 'retrieval-rsi-v1',
+    started_at: '2026-10-25T00:00:00.000Z', completed_at: '2026-10-25T00:00:01.000Z', fixture_sha256: 'f'.repeat(64),
+    evaluator_version: 'retrieval-eval-v3', software_version: '1.2.8', source_commit_sha: 'a'.repeat(40),
+    source_tree_clean: true, source_tree_clean_after: true, source_stable: true,
+    candidate_version: 'per-case-rephrasing-v1', candidate_policy: 'fixed fictional evaluation', sample_count: 21, decision: 'eligible_for_review',
+    primary_metric: { name: 'hit_at_k_rate', baseline: 0.8, candidate: 0.9 }, secondary_metric: { name: 'mean_reciprocal_rank', baseline: 0.7, candidate: 0.8 },
+    guardrails: { baseline_privacy_violations: 0, candidate_privacy_violations: 0 }, estimated_context_tokens: { baseline: 500, candidate: 450 }, limitations: ['Fictional data only.'],
+  };
+  current = await ledger.recordExperiment({ id: idea.id, expected_revision: current.revision, receipt: testReceipt });
+  const unboundReceipt = { ...testReceipt, run_id: 'BL-RSI-RUN-20261025-bb223344', source_commit_sha: null, source_tree_clean: false, source_tree_clean_after: false, source_stable: false, decision: 'source_unbound' };
+  current = await ledger.recordExperiment({ id: idea.id, expected_revision: current.revision, receipt: unboundReceipt });
+  current = await ledger.update({ id: idea.id, expected_revision: current.revision, status: 'review' });
   await assert.rejects(ledger.update({ id: idea.id, expected_revision: current.revision, status: 'accepted' }), /requires baseline/);
   const evidence = {
-    baseline_version: 'commit:base123', candidate_version: 'release:1.2.9', test_set_version: 'fictional-v1', results: 'Task success held; measured read count fell in this fixture.', metrics: ['task success: unchanged', 'reads: lower'], guardrails: ['no privacy leak'], reviewer: 'Independent reviewer', decision_and_reason: 'Accept within stated fixture limits.', rollback: 'Revert commit abc123.',
+    baseline_version: 'commit:base123', candidate_version: 'per-case-rephrasing-v1', experiment_run_id: testReceipt.run_id, test_set_version: testReceipt.fixture_sha256, results: 'Task success held; measured read count fell in this fixture.', metrics: ['task success: unchanged', 'reads: lower'], guardrails: ['no privacy leak'], reviewer: 'Independent reviewer', decision_and_reason: 'Accept within stated fixture limits.', rollback: 'Revert commit abc123.',
   };
   await assert.rejects(ledger.update({ id: idea.id, expected_revision: current.revision, status: 'accepted', fields: evidence }), /promotion commit SHA/);
   await assert.rejects(ledger.update({ id: idea.id, expected_revision: current.revision, fields: { promotion_commit_sha: 'abc123' } }), /full 40-character Git commit SHA/);
+  await assert.rejects(ledger.update({ id: idea.id, expected_revision: current.revision, status: 'accepted', fields: { ...evidence, experiment_run_id: 'BL-RSI-RUN-20261025-badbad00', promotion_commit_sha: 'a'.repeat(40) } }), /recorded experiment run/);
+  await assert.rejects(ledger.update({ id: idea.id, expected_revision: current.revision, status: 'accepted', fields: { ...evidence, experiment_run_id: unboundReceipt.run_id, promotion_commit_sha: 'a'.repeat(40) } }), /eligible for human review/);
+  await assert.rejects(ledger.update({ id: idea.id, expected_revision: current.revision, status: 'accepted', fields: { ...evidence, promotion_commit_sha: 'b'.repeat(40) } }), /exactly match/);
+  await assert.rejects(ledger.update({ id: idea.id, expected_revision: current.revision, status: 'accepted', fields: { ...evidence, test_set_version: '0'.repeat(64), promotion_commit_sha: 'a'.repeat(40) } }), /fixture SHA-256/);
   const accepted = await ledger.update({ id: idea.id, expected_revision: current.revision, status: 'accepted', fields: {
     ...evidence, promotion_commit_sha: 'a'.repeat(40),
   } });
@@ -76,9 +95,10 @@ test('RSI experiment receipts are aggregate-only, append-only, and require a fre
   for (const status of ['triaged', 'proposed']) idea = await ledger.update({ id: idea.id, expected_revision: idea.revision, status });
   idea = await ledger.update({ id: idea.id, expected_revision: idea.revision, status: 'testing', fields: { candidate_version: 'per-case-rephrasing-v1' } });
   const receipt = {
-    schema: 1, run_id: 'BL-RSI-RUN-20261025-12345678', suite: 'retrieval-rsi-v1',
+    schema: 2, run_id: 'BL-RSI-RUN-20261025-12345678', suite: 'retrieval-rsi-v1',
     started_at: '2026-10-25T00:00:00.000Z', completed_at: '2026-10-25T00:00:01.000Z',
-    fixture_sha256: 'a'.repeat(64), evaluator_version: 'retrieval-eval-v2', software_version: '1.2.8', candidate_version: 'per-case-rephrasing-v1',
+    fixture_sha256: 'a'.repeat(64), evaluator_version: 'retrieval-eval-v3', software_version: '1.2.8', source_commit_sha: 'a'.repeat(40),
+    source_tree_clean: true, source_tree_clean_after: true, source_stable: true, candidate_version: 'per-case-rephrasing-v1',
     candidate_policy: 'fixed fictional evaluation', sample_count: 21, decision: 'eligible_for_review',
     primary_metric: { name: 'hit_at_k_rate', baseline: 0.8, candidate: 0.9 },
     secondary_metric: { name: 'mean_reciprocal_rank', baseline: 0.7, candidate: 0.8 },
@@ -103,6 +123,35 @@ test('RSI experiment receipts are aggregate-only, append-only, and require a fre
   const compactRecorded = await ledger.recordExperiment({ id: compactIdea.id, expected_revision: compactIdea.revision, receipt: compactReceipt });
   assert.equal(compactRecorded.experiments[0].evaluator_version, 'retrieval-eval-v3');
   assert.equal(compactRecorded.experiments[0].candidate_version, 'compact-search-v1');
+});
+
+test('ledger still reads existing schema-1 experiment history without treating it as bound proof', async () => {
+  const ledger = createRsiLedger({ home: await temp('legacy-experiment') });
+  const id = 'BL-RSI-20261025-1234abcd';
+  const receipt = {
+    schema: 1, run_id: 'BL-RSI-RUN-20261025-12345678', suite: 'retrieval-rsi-v1', started_at: '2026-10-25T00:00:00.000Z', completed_at: '2026-10-25T00:00:01.000Z',
+    fixture_sha256: 'a'.repeat(64), evaluator_version: 'retrieval-eval-v3', software_version: '1.2.8', candidate_version: 'per-case-rephrasing-v1', candidate_policy: 'old receipt', sample_count: 21, decision: 'eligible_for_review',
+    primary_metric: { name: 'hit_at_k_rate', baseline: 0.8, candidate: 0.9 }, secondary_metric: { name: 'mean_reciprocal_rank', baseline: 0.7, candidate: 0.8 },
+    guardrails: { baseline_privacy_violations: 0, candidate_privacy_violations: 0 }, estimated_context_tokens: { baseline: 500, candidate: 450 }, limitations: ['Legacy evidence.'],
+  };
+  const events = [
+    { kind: 'created', idea_id: id, at: '2026-10-25T00:00:00.000Z', fields: validIdea },
+    { kind: 'status', idea_id: id, at: '2026-10-25T00:00:00.100Z', status: 'testing' },
+    { kind: 'experiment_run', idea_id: id, at: '2026-10-25T00:00:01.000Z', receipt },
+  ];
+  let previous = '0'.repeat(64);
+  const lines = events.map((payload) => {
+    const body = { ...payload, prev_hash: previous };
+    const hash = createHash('sha256').update(JSON.stringify(body)).digest('hex');
+    previous = hash;
+    return JSON.stringify({ ...body, hash });
+  });
+  await mkdir(path.dirname(ledger.file), { recursive: true });
+  await writeFile(ledger.file, lines.join('\n') + '\n');
+  const [row] = await ledger.list();
+  assert.equal(row.experiments[0].schema, 1);
+  assert.equal(row.experiments[0].source_stable, undefined);
+  assert.equal(row.status, 'testing');
 });
 
 test('RSI ledger rejects secret-bearing text and non-public source URLs', async () => {
@@ -152,6 +201,9 @@ test('RSI Setup panel has unique ids and one render/submit path', async () => {
   assert.equal((html.match(/id="rsi-panel"/g) || []).length, 1);
   assert.equal((html.match(/id="rsi-idea-form"/g) || []).length, 1);
   assert.match(html, /data-rsi-field="promotion_commit_sha"/);
+  assert.match(html, /data-rsi-field="experiment_run_id"/);
+  assert.match(html, /data-rsi-use-experiment/);
+  assert.match(html, /source_commit_sha/);
   assert.match(html, /data-rsi-monitor-submit/);
   assert.match(html, /data-rsi-rollback-submit/);
   assert.match(html, /\/api\/rsi\/ideas\/rollback/);
@@ -177,7 +229,7 @@ test('RSI Setup panel has unique ids and one render/submit path', async () => {
 
 test('Setup exposes the RSI ledger only through authenticated local APIs', async () => {
   const home = await temp('api'), env = { BRAINLINK_HOME: path.join(home, 'app'), BRAINLINK_SEMANTIC: '0' };
-  const app = await startSetup({ env, home, os: 'linux', port: 0, useCli: false });
+  const app = await startSetup({ env, home, os: 'linux', port: 0, useCli: false, rsiSourceState: () => ({ commit_sha: 'c'.repeat(40), clean: true }) });
   const base = 'http://127.0.0.1:' + app.port;
   const post = (route, body, token = app.token) => fetch(base + route, { method: 'POST', headers: { 'Content-Type': 'application/json', 'X-BrainLink-Token': token }, body: JSON.stringify(body) });
   try {
@@ -228,7 +280,8 @@ test('Setup exposes the RSI ledger only through authenticated local APIs', async
     const unknownSuite = await post('/api/rsi/experiments/run', { idea_id: idea.id, suite: '../user-vault' }).then(r => r.json());
     assert.match(unknownSuite.error, /built-in fictional/);
     idea = (await post('/api/rsi/ideas/update', { id: idea.id, expected_revision: run.idea.revision, status: 'review' }).then(r => r.json())).idea;
-    const approval = { baseline_version: '1.2.8', candidate_version: 'per-case-rephrasing-v1', promotion_commit_sha: 'c'.repeat(40), test_set_version: 'fictional-v1', results: 'Reviewed fixture evidence.', metrics: ['task success 0.9'], guardrails: ['privacy pass'], reviewer: 'Reviewer', decision_and_reason: 'Synthetic test only.', rollback: 'Revert commit.' };
+    const experiment = run.idea.experiments[0];
+    const approval = { baseline_version: '1.2.8', candidate_version: 'per-case-rephrasing-v1', experiment_run_id: experiment.run_id, promotion_commit_sha: experiment.source_commit_sha, test_set_version: experiment.fixture_sha256, results: 'Reviewed fixture evidence.', metrics: ['task success 0.9'], guardrails: ['privacy pass'], reviewer: 'Reviewer', decision_and_reason: 'Synthetic test only.', rollback: 'Revert commit.' };
     idea = (await post('/api/rsi/ideas/update', { id: idea.id, expected_revision: idea.revision, status: 'accepted', fields: approval }).then(r => r.json())).idea;
     const sampleMonitoring = { monitored_commit_sha: 'c'.repeat(40), window_start: '2026-10-25', window_end: '2026-10-26', test_set_version: 'fictional-monitor-v1', sample_count: 12, decision: 'regression', primary_metric: { name: 'task success', baseline: 0.9, observed: 0.7 }, guardrail_status: 'fail', guardrails: ['task success fell'], results: 'Synthetic regression signal.', reviewer: 'Reviewer', evidence_ref: '' };
     assert.equal((await post('/api/rsi/ideas/monitor', { id: idea.id, expected_revision: idea.revision, monitoring: sampleMonitoring }, 'wrong-token')).status, 401);

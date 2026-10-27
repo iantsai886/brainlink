@@ -9,6 +9,7 @@ import { randomUUID } from 'node:crypto';
 import { normalize } from './config.mjs';
 import { createContext } from './core.mjs';
 import { evaluateRetrieval, RETRIEVAL_EVALUATOR_VERSION } from './retrieval-eval.mjs';
+import { readGitSourceState } from './git-source-state.mjs';
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 export const RSI_EXPERIMENT_SUITES = Object.freeze({
@@ -18,7 +19,7 @@ export const RSI_EXPERIMENT_SUITES = Object.freeze({
 
 const safeRatio = (value) => Number.isFinite(value) ? Math.max(0, Math.min(1, Number(value))) : 0;
 
-export function createRsiExperiments({ root = ROOT, env = process.env, now = () => new Date() } = {}) {
+export function createRsiExperiments({ root = ROOT, env = process.env, now = () => new Date(), sourceState = readGitSourceState } = {}) {
   let running = false;
   return {
     suites: () => Object.entries(RSI_EXPERIMENT_SUITES).map(([id, suite]) => ({ id, fixture: suite.fixture, candidate_version: suite.candidate_version, candidate_policy: suite.policy })),
@@ -29,6 +30,7 @@ export function createRsiExperiments({ root = ROOT, env = process.env, now = () 
       running = true;
       try {
         const startedAt = now().toISOString();
+        const sourceBefore = sourceState(root);
         const fixturePath = path.join(root, 'samples', 'evaluation', suite.fixture);
         const fixtureBytes = await readFile(fixturePath);
         const fixture = JSON.parse(fixtureBytes.toString('utf8'));
@@ -41,6 +43,10 @@ export function createRsiExperiments({ root = ROOT, env = process.env, now = () 
           });
           report = await evaluateRetrieval(ctx, fixture, { fixtureBytes });
         } finally { await rm(isolatedHome, { recursive: true, force: true }); }
+        const sourceAfter = sourceState(root);
+        const sourceStable = Boolean(sourceBefore?.clean && sourceAfter?.clean
+          && /^[a-f0-9]{40}$/.test(sourceBefore.commit_sha || '')
+          && sourceBefore.commit_sha === sourceAfter.commit_sha);
         const independent = report.schema === 2;
         const baselineQuality = independent ? report.baseline.task_success.rate : report.baseline.hit_at_k / report.case_count;
         const candidateQuality = independent ? report.candidate.task_success.rate : report.result.hit_at_k / report.case_count;
@@ -51,7 +57,7 @@ export function createRsiExperiments({ root = ROOT, env = process.env, now = () 
         const baselineTokens = independent ? report.baseline.context.mean_estimated_tokens : report.baseline.mean_estimated_output_tokens;
         const candidateTokens = independent ? report.candidate.context.mean_estimated_tokens : report.result.mean_estimated_output_tokens;
         return {
-          schema: 1,
+          schema: 2,
           run_id: `BL-RSI-RUN-${startedAt.slice(0, 10).replaceAll('-', '')}-${randomUUID().slice(0, 8)}`,
           suite: suiteId,
           started_at: startedAt,
@@ -59,10 +65,14 @@ export function createRsiExperiments({ root = ROOT, env = process.env, now = () 
           fixture_sha256: report.fixture_sha256,
           evaluator_version: RETRIEVAL_EVALUATOR_VERSION,
           software_version: report.package_version || 'development',
+          source_commit_sha: /^[a-f0-9]{40}$/.test(sourceBefore?.commit_sha || '') ? sourceBefore.commit_sha : null,
+          source_tree_clean: Boolean(sourceBefore?.clean),
+          source_tree_clean_after: Boolean(sourceAfter?.clean),
+          source_stable: sourceStable,
           candidate_version: suite.candidate_version,
           candidate_policy: suite.policy,
           sample_count: report.case_count,
-          decision: report.decision,
+          decision: sourceStable ? report.decision : 'source_unbound',
           primary_metric: {
             name: independent ? 'task_success_rate' : 'hit_at_k_rate',
             baseline: safeRatio(baselineQuality), candidate: safeRatio(candidateQuality),

@@ -190,7 +190,7 @@ export async function startSetup(opts = {}) {
   const localContext = (cfg, contextEnv = env) => createContext(cfg, { env: contextEnv, trustedLocal: true });
   const sessions = sessionsService(env); // src/host.mjs: cross-session reads over src/sessions/* (importAll, session_list/read semantics)
   const rsiLedger = createRsiLedger({ home: appHome(env) });
-  const rsiExperiments = createRsiExperiments({ env });
+  const rsiExperiments = createRsiExperiments({ env, ...(opts.rsiSourceState ? { sourceState: opts.rsiSourceState } : {}) });
   // Opt-in research discovery: off until the user enables it; runs only while this process is open.
   const rsiDiscovery = createRsiDiscovery({ home: appHome(env), ledger: rsiLedger, fetchImpl: opts.discoveryFetch, lookup: opts.discoveryLookup });
   const initialDiscoveryStatus = await rsiDiscovery.status().catch(() => null);

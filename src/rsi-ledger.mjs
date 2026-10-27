@@ -18,7 +18,7 @@ const TRANSITIONS = {
   review: new Set(['accepted', 'rejected', 'testing', 'deferred']),
   accepted: new Set(), rejected: new Set(), deferred: new Set(['triaged', 'rejected']), rolled_back: new Set(['testing', 'rejected']),
 };
-const FIELDS = ['title', 'user_problem', 'hypothesis', 'memory_types', 'sources', 'baseline_version', 'candidate_version', 'promotion_commit_sha', 'test_set_version', 'metrics', 'guardrails', 'privacy_scope', 'cost_cap', 'results', 'reviewer', 'decision_and_reason', 'rollback'];
+const FIELDS = ['title', 'user_problem', 'hypothesis', 'memory_types', 'sources', 'baseline_version', 'candidate_version', 'experiment_run_id', 'promotion_commit_sha', 'test_set_version', 'metrics', 'guardrails', 'privacy_scope', 'cost_cap', 'results', 'reviewer', 'decision_and_reason', 'rollback'];
 const MAX_TEXT = 1200;
 const clean = (v, max = MAX_TEXT) => typeof v === 'string' ? v.trim().slice(0, max) : '';
 const canonical = (v) => JSON.stringify(v);
@@ -112,13 +112,18 @@ function validatePayload(input, { partial = false } = {}) {
       const maximum = key === 'title' ? 160 : MAX_TEXT;
       if (typeof value !== 'string' || value.length > maximum) throw new Error(`${key} must be text up to ${maximum} characters.`);
       if (key === 'promotion_commit_sha' && value.trim() && !/^[a-f0-9]{40}$/i.test(value.trim())) throw new Error('promotion_commit_sha must be a full 40-character Git commit SHA.');
+      if (key === 'experiment_run_id' && value.trim() && !/^BL-RSI-RUN-\d{8}-[a-f0-9-]{8,36}$/.test(value.trim())) throw new Error('experiment_run_id must identify a BrainLink RSI run.');
       out[key] = value.trim();
     }
   }
   if (!partial && (!out.title || !out.user_problem)) throw new Error('title and user_problem are required.');
   // A full Git commit SHA is a public content identifier, not a credential. It is separately
   // constrained above to exactly 40 hex characters; keep every free-text field in secret scan.
-  const scanFields = { ...out, ...(out.promotion_commit_sha ? { promotion_commit_sha: '' } : {}) };
+  const scanFields = {
+    ...out,
+    ...(out.promotion_commit_sha ? { promotion_commit_sha: '' } : {}),
+    ...(/^[a-f0-9]{64}$/i.test(out.test_set_version || '') ? { test_set_version: '' } : {}),
+  };
   const text = JSON.stringify(scanFields);
   if (findSecrets(text).length) throw new Error('Potential secret detected; remove it before saving an RSI idea.');
   if (/<(?:script|iframe)\b/i.test(text)) throw new Error('HTML markup is not allowed in RSI idea fields.');
@@ -248,8 +253,17 @@ export function createRsiLedger({ home, now = () => new Date() }) {
       if (status === 'rolled_back') throw new Error('Use the reviewed rollback receipt after the revert has been made and checked.');
       if (status !== undefined && (!STATUSES.has(status) || !TRANSITIONS[row.status]?.has(status))) throw new Error(`Status cannot move from ${row.status} to ${status}.`);
       const merged = { ...row.fields, ...fields };
-      if (status === 'accepted' && ['baseline_version', 'candidate_version', 'promotion_commit_sha', 'test_set_version', 'results', 'reviewer', 'decision_and_reason', 'rollback'].some(key => !clean(merged[key]))) throw new Error('Acceptance requires baseline and candidate versions, a promotion commit SHA, test set, measured results, reviewer, decision rationale, and rollback instructions.');
+      if (status === 'accepted' && ['baseline_version', 'candidate_version', 'experiment_run_id', 'promotion_commit_sha', 'test_set_version', 'results', 'reviewer', 'decision_and_reason', 'rollback'].some(key => !clean(merged[key]))) throw new Error('Acceptance requires baseline and candidate versions, an experiment run ID, a promotion commit SHA, test set, measured results, reviewer, decision rationale, and rollback instructions.');
       if (status === 'accepted' && (!merged.metrics?.length || !merged.guardrails?.length)) throw new Error('Acceptance requires measured metrics and guardrail results.');
+      if (status === 'accepted') {
+        const experiment = row.experiments.find((run) => run.run_id === merged.experiment_run_id);
+        if (!experiment) throw new Error('Acceptance requires a recorded experiment run for this idea.');
+        if (experiment.decision !== 'eligible_for_review') throw new Error('Acceptance requires an experiment result eligible for human review.');
+        if (experiment.schema !== 2 || experiment.source_stable !== true || !/^[a-f0-9]{40}$/.test(experiment.source_commit_sha || '')) throw new Error('Acceptance requires an experiment bound to a clean, unchanged Git commit.');
+        if (experiment.candidate_version !== merged.candidate_version) throw new Error('The experiment candidate does not match the candidate being accepted.');
+        if (experiment.fixture_sha256 !== merged.test_set_version) throw new Error('The test-set field must match the selected run fixture SHA-256.');
+        if (experiment.source_commit_sha !== merged.promotion_commit_sha.toLowerCase()) throw new Error('The promotion commit must exactly match the commit tested by the selected experiment.');
+      }
       const safeNote = clean(note, 500);
       if (status === 'rolled_back' && !safeNote) throw new Error('Record why the accepted change was rolled back.');
       if (findSecrets(safeNote).length) throw new Error('Potential secret detected in status note.');
@@ -264,8 +278,8 @@ export function createRsiLedger({ home, now = () => new Date() }) {
       if (!row) throw new Error('RSI idea not found.');
       if (!Number.isInteger(expected_revision) || expected_revision !== row.revision) throw new Error('RSI idea changed; reload it before recording an experiment.');
       if (row.status !== 'testing') throw new Error('Only an RSI idea in testing status can run an experiment.');
-      const allowed = ['schema', 'run_id', 'suite', 'started_at', 'completed_at', 'fixture_sha256', 'evaluator_version', 'software_version', 'candidate_version', 'candidate_policy', 'sample_count', 'decision', 'primary_metric', 'secondary_metric', 'guardrails', 'estimated_context_tokens', 'limitations'];
-      if (!receipt || typeof receipt !== 'object' || Array.isArray(receipt) || Object.keys(receipt).some(key => !allowed.includes(key)) || allowed.some(key => !(key in receipt)) || receipt.schema !== 1 || !/^BL-RSI-RUN-\d{8}-[a-f0-9-]{8,36}$/.test(receipt.run_id || '') || !['retrieval-rsi-v1', 'retrieval-independent-v1'].includes(receipt.suite) || !/^\d{4}-\d\d-\d\dT/.test(receipt.started_at || '') || !/^\d{4}-\d\d-\d\dT/.test(receipt.completed_at || '') || !/^[a-f0-9]{64}$/.test(receipt.fixture_sha256 || '') || !['retrieval-eval-v2', 'retrieval-eval-v3'].includes(receipt.evaluator_version) || typeof receipt.software_version !== 'string' || receipt.software_version.length > 64 || typeof receipt.candidate_version !== 'string' || !['per-case-rephrasing-v1', 'compact-coverage-v1', 'compact-search-v1'].includes(receipt.candidate_version) || typeof receipt.candidate_policy !== 'string' || receipt.candidate_policy.length > 160 || !Number.isInteger(receipt.sample_count) || receipt.sample_count < 1 || receipt.sample_count > 500 || !['eligible_for_review', 'needs_more_cases', 'no_demonstrated_gain', 'quality_regression', 'blocked_privacy', 'no_demonstrated_efficiency_gain'].includes(receipt.decision)) throw new Error('Experiment receipt is invalid.');
+      const allowed = ['schema', 'run_id', 'suite', 'started_at', 'completed_at', 'fixture_sha256', 'evaluator_version', 'software_version', 'source_commit_sha', 'source_tree_clean', 'source_tree_clean_after', 'source_stable', 'candidate_version', 'candidate_policy', 'sample_count', 'decision', 'primary_metric', 'secondary_metric', 'guardrails', 'estimated_context_tokens', 'limitations'];
+      if (!receipt || typeof receipt !== 'object' || Array.isArray(receipt) || Object.keys(receipt).some(key => !allowed.includes(key)) || allowed.some(key => !(key in receipt)) || receipt.schema !== 2 || !/^BL-RSI-RUN-\d{8}-[a-f0-9-]{8,36}$/.test(receipt.run_id || '') || !['retrieval-rsi-v1', 'retrieval-independent-v1'].includes(receipt.suite) || !/^\d{4}-\d\d-\d\dT/.test(receipt.started_at || '') || !/^\d{4}-\d\d-\d\dT/.test(receipt.completed_at || '') || !/^[a-f0-9]{64}$/.test(receipt.fixture_sha256 || '') || !['retrieval-eval-v2', 'retrieval-eval-v3'].includes(receipt.evaluator_version) || typeof receipt.software_version !== 'string' || receipt.software_version.length > 64 || !(receipt.source_commit_sha === null || /^[a-f0-9]{40}$/.test(receipt.source_commit_sha)) || typeof receipt.source_tree_clean !== 'boolean' || typeof receipt.source_tree_clean_after !== 'boolean' || typeof receipt.source_stable !== 'boolean' || (receipt.source_stable && (!receipt.source_commit_sha || !receipt.source_tree_clean || !receipt.source_tree_clean_after)) || typeof receipt.candidate_version !== 'string' || !['per-case-rephrasing-v1', 'compact-coverage-v1', 'compact-search-v1'].includes(receipt.candidate_version) || typeof receipt.candidate_policy !== 'string' || receipt.candidate_policy.length > 160 || !Number.isInteger(receipt.sample_count) || receipt.sample_count < 1 || receipt.sample_count > 500 || !['eligible_for_review', 'needs_more_cases', 'no_demonstrated_gain', 'blocked_privacy', 'quality_regression', 'no_demonstrated_efficiency_gain', 'source_unbound'].includes(receipt.decision) || (receipt.decision === 'eligible_for_review' && !receipt.source_stable)) throw new Error('Experiment receipt is invalid.');
       const metricValid = (metric) => metric && typeof metric === 'object' && Object.keys(metric).length === 3 && typeof metric.name === 'string' && metric.name.length <= 48 && [metric.baseline, metric.candidate].every(value => typeof value === 'number' && Number.isFinite(value) && value >= 0 && value <= 1);
       if (!metricValid(receipt.primary_metric) || !metricValid(receipt.secondary_metric) || !receipt.guardrails || Object.keys(receipt.guardrails).length !== 2 || !Number.isInteger(receipt.guardrails.baseline_privacy_violations) || !Number.isInteger(receipt.guardrails.candidate_privacy_violations) || receipt.guardrails.baseline_privacy_violations < 0 || receipt.guardrails.candidate_privacy_violations < 0 || !receipt.estimated_context_tokens || Object.keys(receipt.estimated_context_tokens).length !== 2 || !Number.isInteger(receipt.estimated_context_tokens.baseline) || !Number.isInteger(receipt.estimated_context_tokens.candidate) || !Array.isArray(receipt.limitations) || receipt.limitations.length > 8 || receipt.limitations.some(value => typeof value !== 'string' || value.length > 200)) throw new Error('Experiment receipt metrics are invalid.');
       if (row.fields.candidate_version !== receipt.candidate_version) throw new Error('Experiment suite does not match the candidate version in this RSI idea.');

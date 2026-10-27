@@ -774,9 +774,11 @@
   "rsi.confidenceShort": "confidence",
   "rsi.baselineVersion": "Baseline version",
   "rsi.candidateVersion": "Candidate version",
-  "rsi.promotionCommit": "Merged Git commit SHA",
-  "rsi.promotionCommitHint": "Required to accept. BrainLink checks the format only; it does not verify the commit on GitHub.",
-  "rsi.testSetVersion": "Test set version",
+  "rsi.promotionCommit": "Git commit tested and promoted",
+  "rsi.promotionCommitHint": "Must exactly match the clean test run selected below. BrainLink does not check GitHub CI or remote commit existence.",
+  "rsi.experimentRunId": "Test run ID",
+  "rsi.testSetVersion": "Test fixture SHA-256",
+  "rsi.testSetHashHint": "Copy this from the eligible test run using its review button.",
   "rsi.reviewer": "Reviewer",
   "rsi.results": "Measured results",
   "rsi.metrics": "Metrics (one per line)",
@@ -901,5 +903,11 @@
   "rsi.experiment.decision.no_demonstrated_gain": "No clear improvement found",
   "rsi.experiment.decision.no_demonstrated_efficiency_gain": "No token reduction found",
   "rsi.experiment.decision.quality_regression": "Quality went down",
-  "rsi.experiment.decision.blocked_privacy": "Blocked by a privacy issue"
+  "rsi.experiment.decision.blocked_privacy": "Blocked by a privacy issue",
+  "rsi.experiment.decision.source_unbound": "Not tied to a clean Git commit",
+  "rsi.experiment.source.unbound": "Commit unknown",
+  "rsi.experiment.source.clean": "clean commit",
+  "rsi.experiment.source.changed": "source changed or dirty",
+  "rsi.experiment.useForReview": "Use this test for review",
+  "rsi.experiment.evidencePrefilled": "Test run, commit and fixture are copied into the review fields."
 }

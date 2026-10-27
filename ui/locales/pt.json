@@ -774,9 +774,11 @@
   "rsi.confidenceShort": "confiança",
   "rsi.baselineVersion": "Versão de referência",
   "rsi.candidateVersion": "Versão candidata",
-  "rsi.promotionCommit": "SHA do commit integrado",
-  "rsi.promotionCommitHint": "Obrigatório para aceitar. O BrainLink valida apenas o formato, não confirma o commit no GitHub.",
-  "rsi.testSetVersion": "Versão do conjunto de testes",
+  "rsi.promotionCommit": "Commit Git testado e promovido",
+  "rsi.promotionCommitHint": "Deve corresponder exatamente ao teste limpo selecionado abaixo. O BrainLink não confirma o CI nem a existência do commit no GitHub.",
+  "rsi.experimentRunId": "ID da execução de teste",
+  "rsi.testSetVersion": "SHA-256 da fixture de teste",
+  "rsi.testSetHashHint": "Copie do teste elegível usando o botão de revisão.",
   "rsi.reviewer": "Revisor",
   "rsi.results": "Resultados medidos",
   "rsi.metrics": "Métricas (uma por linha)",
@@ -901,5 +903,11 @@
   "rsi.experiment.decision.no_demonstrated_gain": "Sem melhoria clara",
   "rsi.experiment.decision.no_demonstrated_efficiency_gain": "Sem redução clara de tokens",
   "rsi.experiment.decision.quality_regression": "A qualidade diminuiu",
-  "rsi.experiment.decision.blocked_privacy": "Bloqueado por um problema de privacidade"
+  "rsi.experiment.decision.blocked_privacy": "Bloqueado por um problema de privacidade",
+  "rsi.experiment.decision.source_unbound": "Não vinculado a um commit Git limpo",
+  "rsi.experiment.source.unbound": "Commit desconhecido",
+  "rsi.experiment.source.clean": "commit limpo",
+  "rsi.experiment.source.changed": "código alterado ou com mudanças locais",
+  "rsi.experiment.useForReview": "Usar este teste na revisão",
+  "rsi.experiment.evidencePrefilled": "A execução, o commit e a fixture foram copiados para os campos de revisão."
 }

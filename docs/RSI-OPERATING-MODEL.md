@@ -90,6 +90,10 @@ Autonomy is configured by operation and data scope, not by a single “RSI on”
 
 ## Current implementation boundary
 
+### Commit-bound experiment evidence
+
+Every new RSI experiment receipt records the Git commit before and after the run and whether each tree was clean. If Git is missing, the tree is dirty, or the commit changes during the run, the receipt is marked `source_unbound` and cannot support acceptance. An accepted idea must cite an eligible experiment run ID, the exact fixture SHA-256, the tested candidate version, and the identical full promotion commit SHA. Existing schema-1 ledger receipts remain readable but cannot be used as commit-bound acceptance evidence. The Setup form can copy these identifiers from an eligible run. This proves the local receipt's source binding; it does not verify that the commit exists on GitHub, passed hosted CI, or was independently reviewed.
+
 Current update: discovery settings include an off-by-default option to recheck up to three 30-day-old public citations from BrainLink discovery records after each manual or scheduled discovery run. It uses only still-selected sources and exact stored public identifiers, appends freshness fingerprints/statuses, and leaves proposal content unchanged. This is citation maintenance, not independent verification of claims or evidence of recursive improvement.
 
 The authenticated **Download review record** export includes a SHA-256 integrity checksum over its JSON payload. The checksum detects accidental changes but does not authenticate the author.
