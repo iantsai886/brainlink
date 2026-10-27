@@ -1,6 +1,6 @@
 // One-click "Connect AI": writes BrainLink into each AI client's MCP config, keeping a
 // timestamped backup of the previous file. Refuses to touch a config it cannot parse.
-import { readFile, writeFile, mkdir, copyFile, rename, stat } from 'node:fs/promises';
+import { readFile, writeFile, mkdir, copyFile, rename, stat, chmod } from 'node:fs/promises';
 import { existsSync } from 'node:fs';
 import { execFileSync } from 'node:child_process';
 import path from 'node:path';
@@ -180,17 +180,19 @@ function updateDshPatch(raw, entry) {
   return doc.toString();
 }
 
-async function backup(file, now) {
+async function backup(file, now, mode = null) {
   if (!(await exists(file))) return null;
   const dest = `${file}.brainlink-backup-${now.toISOString().replace(/[:.]/g, '-')}`;
   await copyFile(file, dest);
+  if (mode !== null) await chmod(dest, mode).catch((error) => { if (process.platform !== 'win32') throw error; });
   return dest;
 }
 
-async function atomicWrite(file, text) {
+async function atomicWrite(file, text, mode = null) {
   await mkdir(path.dirname(file), { recursive: true });
   const tmp = `${file}.brainlink-tmp`;
-  await writeFile(tmp, text);
+  await writeFile(tmp, text, mode === null ? undefined : { mode });
+  if (mode !== null) await chmod(tmp, mode).catch((error) => { if (process.platform !== 'win32') throw error; });
   await rename(tmp, file);
 }
 
@@ -252,8 +254,9 @@ export async function connectClient(id, opts) {
     json.mcpServers = { ...(json.mcpServers || {}), [SERVER_KEY]: entry };
     text = JSON.stringify(json, null, 2) + '\n';
   }
-  const b = await backup(file, now);
-  await atomicWrite(file, text);
+  const privateConfig = c.format === 'dsh-yaml' ? 0o600 : null;
+  const b = await backup(file, now, privateConfig);
+  await atomicWrite(file, text, privateConfig);
   return { client: id, title: c.title, via: 'config file', file, backup: b, note: c.note };
 }
 

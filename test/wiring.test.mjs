@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtemp, mkdir, readFile, writeFile, cp, readdir } from 'node:fs/promises';
+import { mkdtemp, mkdir, readFile, writeFile, cp, readdir, stat } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { spawn } from 'node:child_process';
 import { setTimeout as delay } from 'node:timers/promises';
@@ -342,7 +342,12 @@ test('connectors: DeepSeek Harness adds one profile patch entry, preserves other
   assert.equal((await detect(opts))['deepseek-harness'].connected, true);
   assert.equal(await readClientAgentToken('deepseek-harness', opts), 'fictional-dsh-token');
   assert.match(await readFile(file, 'utf8'), /# Keep this note/);
-  assert.equal(await readFile((await readdir(dshHome).then((names) => path.join(dshHome, names.find((name) => name.includes('.brainlink-backup-'))))), 'utf8'), original);
+  const backupPath = await readdir(dshHome).then((names) => path.join(dshHome, names.find((name) => name.includes('.brainlink-backup-'))));
+  assert.equal(await readFile(backupPath, 'utf8'), original);
+  if (process.platform !== 'win32') {
+    assert.equal((await stat(file)).mode & 0o777, 0o600, 'the Harness config contains an agent token and must not be group/world readable');
+    assert.equal((await stat(backupPath)).mode & 0o777, 0o600, 'the backup also contains a credential and must stay private');
+  }
   const removed = await disconnect('deepseek-harness', opts);
   assert.equal(removed.ok, true, removed.message);
   const after = parse(await readFile(file, 'utf8'));
