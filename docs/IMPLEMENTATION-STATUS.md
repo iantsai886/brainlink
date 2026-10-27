@@ -1,6 +1,6 @@
 # BrainLink implementation status
 
-Status snapshot: 2026-10-27 (Asia/Taipei).
+Status snapshot: 2026-10-28 (Asia/Taipei).
 GitHub repository: `iantsai886/brainlink`
 Branch: `integration/brainlink-retrieval-evaluation` (integrates profile-scoped GitHub, RSI discovery, and independent retrieval evaluation)
 Code baseline: development target `1.2.8`, with `package.json` as the canonical version source. The `v1.2.7` tag belongs to the separate `wip/v1.2.7` release line; this branch continues from the full-source `main` history and does not move or recreate that tag.
@@ -24,6 +24,10 @@ Ran the committed source snapshot in an isolated Debian 12 container with Node.j
 
 On source snapshot `03a9322`, `npm run build:linux` succeeded in Debian 12 with Node.js 24.22.1 for x64 and ARM64. It produced both per-user `.tar.gz` archives and Debian `.deb` packages; all four SHA-256 sidecars verified. Checksums: x64 tar `f45626276f8a9da41787fe171978bbf0c192a55f1eda9a5be06cbf241be237f2`; ARM64 tar `0ec008ec1b5f1606af7d051ff33cc0a55048e35a65e1ba872aed2a1e2a6c39db`; amd64 `.deb` `fd9829753bf37def313954a6e62fbe80563f570bcf4339d57ce784faeeb5574c`; arm64 `.deb` `1cf5447933b99893e99020e03ca7a3e7995266ba93dd7a38b540693b73114197`. In a disposable Debian container, the amd64 `.deb` installed, reported version 1.2.8, initialized a fictional vault, and removed cleanly. The x64 tarball's per-user install, version check, fictional-vault initialization and uninstall also passed; test vault and settings were preserved. ARM64 package metadata and its embedded AArch64 runtime were verified, but the ARM64 application was not executed. A real desktop session/menu launch, app-window behavior, and customer acceptance remain unverified; packages are unsigned.
 Client discovery and runtime probe: Codex CLI `0.164.0-alpha.11.1` made a live BrainLink guide/search call on a temporary fictional vault and did not retrieve a planted private canary. Claude Code 2.1.310 reports the same fixture MCP server as connected, but its auth status is signed out; a Claude model call and full two-client handoff remain unverified.
+
+### Linux CI package checks (2026-10-28)
+
+The Linux package workflow now checks all artifact SHA-256 sidecars, Debian package architecture metadata, and the embedded x64/AArch64 Node runtime machine types. It also smoke-tests the no-root x64 tarball installer and verifies uninstall preserves user settings. The focused packaging regression tests passed 2/2. An isolated Debian 12 / Node.js 24.22.1 container ran the same checksum, architecture, amd64 `.deb` install/init/remove, and x64 tarball install/init/uninstall checks successfully; fictional vault data and config were preserved. This locally simulates the workflow commands but does not prove the hosted GitHub Actions job ran. Hosted CI remains blocked by the repository account's runner billing/spending limit. ARM64 binary execution is not verified on this x64 host.
 
 ### Guided review of an imported session (2026-10-27)
 

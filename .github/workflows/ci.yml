@@ -175,6 +175,17 @@ jobs:
       - name: Build x64 and arm64 packages with pinned Node.js
         run: bash packaging/linux/build-linux.sh
 
+      - name: Verify Linux package checksums and runtime architectures
+        run: |
+          (cd dist && sha256sum -c *.sha256)
+          test "$(dpkg-deb -f dist/brainlink_*_amd64.deb Architecture)" = amd64
+          test "$(dpkg-deb -f dist/brainlink_*_arm64.deb Architecture)" = arm64
+          mkdir -p "$RUNNER_TEMP/brainlink-amd64" "$RUNNER_TEMP/brainlink-arm64"
+          dpkg-deb --extract dist/brainlink_*_amd64.deb "$RUNNER_TEMP/brainlink-amd64"
+          dpkg-deb --extract dist/brainlink_*_arm64.deb "$RUNNER_TEMP/brainlink-arm64"
+          test "$(od -An -tu2 -j18 -N2 "$RUNNER_TEMP/brainlink-amd64/opt/brainlink/node/bin/node" | tr -d ' ')" = 62
+          test "$(od -An -tu2 -j18 -N2 "$RUNNER_TEMP/brainlink-arm64/opt/brainlink/node/bin/node" | tr -d ' ')" = 183
+
       - name: Install and smoke-test x64 Debian package
         run: |
           sudo dpkg -i dist/brainlink_*_amd64.deb
@@ -189,6 +200,24 @@ jobs:
           test ! -e /opt/brainlink
           test ! -e /usr/bin/brainlink
           test -f "$RUNNER_TEMP/brainlink-smoke-home/config.json"
+
+      - name: Install and smoke-test per-user Linux tarball
+        run: |
+          mkdir -p "$RUNNER_TEMP/brainlink-tarball" "$RUNNER_TEMP/brainlink-tar-home/vault"
+          archive=$(printf '%s\n' dist/brainlink-*-linux-x64.tar.gz)
+          tar -xzf "$archive" -C "$RUNNER_TEMP/brainlink-tarball"
+          bundle="$RUNNER_TEMP/brainlink-tarball/$(basename "${archive%.tar.gz}")"
+          export HOME="$RUNNER_TEMP/brainlink-tar-home"
+          export XDG_DATA_HOME="$HOME/.local/share"
+          export XDG_CONFIG_HOME="$HOME/.config"
+          export BRAINLINK_HOME="$HOME/brainlink-home"
+          "$bundle/install.sh" --no-open
+          test "$("$HOME/.local/bin/brainlink" version)" = "$(node -p "require('./package.json').version")"
+          "$HOME/.local/bin/brainlink" init --vault "$HOME/vault" --name Smoke
+          test -f "$BRAINLINK_HOME/config.json"
+          "$XDG_DATA_HOME/brainlink/uninstall.sh"
+          test ! -e "$XDG_DATA_HOME/brainlink"
+          test -f "$BRAINLINK_HOME/config.json"
 
       - name: Upload Linux artifacts
         uses: actions/upload-artifact@v4

@@ -66,6 +66,9 @@ test('every native installer bundles all production dependencies and portable Br
   assert.match(workflow, /Install and smoke-test macOS package/, 'macOS CI must install and run the packaged app');
   assert.match(workflow, /Remove macOS smoke-test installation/, 'macOS CI must clean up its installed package');
   assert.match(workflow, /test ! -e \/opt\/brainlink/, 'Linux CI must verify package removal');
+  assert.match(workflow, /Verify Linux package checksums and runtime architectures/, 'Linux CI must check package digests and both runtime architectures');
+  assert.match(workflow, /Install and smoke-test per-user Linux tarball/, 'Linux CI must exercise the no-root installer and its removal path');
+  assert.match(workflow, /test ! -e "\$XDG_DATA_HOME\/brainlink"/, 'Linux CI must verify tarball uninstall removes the application only');
 });
 
 test('the staged connector loads with the bundled YAML package outside the checkout', async () => {
