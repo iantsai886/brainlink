@@ -198,6 +198,7 @@ export async function startSetup(opts = {}) {
   let discoveryKeepsAlive = Boolean(initialDiscoveryStatus?.settings.enabled && !initialDiscoveryStatus.settings.paused);
   const rsiObservationSchedule = createRsiObservationSchedule({
     home: appHome(env), readEntries: () => readActivity(env, 20000),
+    ledger: rsiLedger,
     readVaultHealth: async (name) => {
       const cfg = await loadConfig(file);
       const vault = cfg.vaults.find((item) => item.name === name);

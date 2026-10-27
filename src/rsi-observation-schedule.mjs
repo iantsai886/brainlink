@@ -31,7 +31,7 @@ export function validateObservationSettings(input, previous = DEFAULT_OBSERVATIO
   return next;
 }
 
-export function createRsiObservationSchedule({ home, readEntries, readVaultHealth, now = () => new Date() }) {
+export function createRsiObservationSchedule({ home, readEntries, readVaultHealth, ledger, now = () => new Date() }) {
   const file = path.join(home, 'rsi', 'observations.json');
   let running = null;
   let writes = Promise.resolve();
@@ -100,6 +100,10 @@ export function createRsiObservationSchedule({ home, readEntries, readVaultHealt
           report.privacy.vault_health_content_read_locally = true;
           report.privacy.vault_health_content_persisted = false;
           report.limitations.push('Vault health is a structural link and metadata signal for one explicitly selected vault; it does not measure correct filing, note quality, or whether suggested links are useful. Only aggregate counts are saved, and no proposal or vault content is changed.');
+        }
+        if (trigger === 'schedule' && ledger && report.findings.length) {
+          const proposals = await ledger.appendObservationSignals(report.findings);
+          report.proposal_intake = { created_count: proposals.created.length, duplicate_count: proposals.duplicates.length };
         }
         report.privacy.report_saved = true;
         await save((state) => ({ ...state, report, last_run: { at: started.toISOString(), trigger, ok: true } }));

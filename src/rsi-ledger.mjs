@@ -1,7 +1,7 @@
 // Local, append-only RSI proposal ledger. This stores proposal metadata only; it never executes
 // experiments, fetches sources, changes vault content, or promotes a candidate into live behavior.
-// Opt-in discovery (src/rsi-discovery.mjs) may append `discovered` proposals through
-// appendDiscoveries(); their origin and discovery provenance are fixed at creation.
+// Opt-in discovery (src/rsi-discovery.mjs) and scheduled aggregate observation may append
+// `discovered` proposals; their origin and provenance are fixed at creation.
 import { appendFile, mkdir, readFile, open, unlink } from 'node:fs/promises';
 import path from 'node:path';
 import { createHash, randomUUID } from 'node:crypto';
@@ -23,6 +23,10 @@ const MAX_TEXT = 1200;
 const clean = (v, max = MAX_TEXT) => typeof v === 'string' ? v.trim().slice(0, max) : '';
 const canonical = (v) => JSON.stringify(v);
 const digest = (v) => createHash('sha256').update(canonical(v)).digest('hex');
+const OBSERVATION_CATEGORIES = Object.freeze({
+  retrieval: 'Search and reading', sessions: 'Session capture', filing: 'Filing and organization',
+  handoff: 'AI handoffs', recovery: 'Backup and restore', graph_review: 'Graph review',
+});
 
 function similarity(left, right) {
   const words = (value) => new Set(clean(value, 4000).toLowerCase().normalize('NFKC').match(/[\p{L}\p{N}]+/gu) || []);
@@ -80,7 +84,7 @@ function validateDiscovery(input) {
 function validatePayload(input, { partial = false } = {}) {
   if (!input || typeof input !== 'object' || Array.isArray(input)) throw new Error('Idea must be an object.');
   // Provenance is set by BrainLink at creation and never by a caller or a later edit.
-  if ('origin' in input || 'discovery' in input) throw new Error('origin and discovery provenance are recorded by BrainLink and cannot be supplied or edited.');
+  if ('origin' in input || 'discovery' in input || 'observation' in input) throw new Error('origin and provenance are recorded by BrainLink and cannot be supplied or edited.');
   const out = {};
   for (const key of FIELDS) {
     if (partial && !(key in input)) continue;
@@ -153,7 +157,7 @@ function project(events) {
   const records = new Map();
   for (const event of events) {
     const row = records.get(event.idea_id);
-    if (event.kind === 'created') records.set(event.idea_id, { id: event.idea_id, status: 'discovered', revision: 1, created_at: event.at, updated_at: event.at, origin: event.origin || 'manual', ...(event.discovery ? { discovery: event.discovery } : {}), fields: event.fields, experiments: [], monitoring: [], rollbacks: [], history: [{ status: 'discovered', at: event.at, note: event.origin === 'discovery' ? 'Found by opt-in discovery' : 'Created' }] });
+    if (event.kind === 'created') records.set(event.idea_id, { id: event.idea_id, status: 'discovered', revision: 1, created_at: event.at, updated_at: event.at, origin: event.origin || 'manual', ...(event.discovery ? { discovery: event.discovery } : {}), ...(event.observation ? { observation: event.observation } : {}), fields: event.fields, experiments: [], monitoring: [], rollbacks: [], history: [{ status: 'discovered', at: event.at, note: event.origin === 'discovery' ? 'Found by opt-in discovery' : event.origin === 'observation' ? 'Created from scheduled local aggregate signals' : 'Created' }] });
     else if (row) {
       if (event.fields) row.fields = { ...row.fields, ...event.fields };
       if (event.kind === 'experiment_run') row.experiments.push(event.receipt);
@@ -248,6 +252,36 @@ export function createRsiLedger({ home, now = () => new Date() }) {
         created.push(id);
       }
       return { created, duplicates, invalid, over_limit: overLimit, stopped: false };
+    }),
+    // Scheduled observations may open a review item from fixed aggregate signals only.
+    // No note text, paths, tool arguments, or caller-supplied proposal copy is accepted.
+    appendObservationSignals: (findings) => locked(async () => {
+      if (!Array.isArray(findings) || findings.length > Object.keys(OBSERVATION_CATEGORIES).length) throw new Error('Observation findings are invalid.');
+      const created = [], duplicates = [];
+      const rows = project(await readEvents(file));
+      for (const finding of findings) {
+        if (!finding || !Object.hasOwn(OBSERVATION_CATEGORIES, finding.category) || !['review_failures', 'review_increase'].includes(finding.signal)) continue;
+        const calls = finding.current_calls, failures = finding.current_failures;
+        if (!Number.isInteger(calls) || calls < 5 || calls > 20000 || !Number.isInteger(failures) || failures < 2 || failures > calls) continue;
+        const failureRate = Number((failures / calls).toFixed(3));
+        const existing = rows.find((row) => row.origin === 'observation' && row.observation?.category === finding.category && !['rejected', 'deferred'].includes(row.status));
+        if (existing) { duplicates.push({ category: finding.category, existing_id: existing.id }); continue; }
+        const area = OBSERVATION_CATEGORIES[finding.category];
+        const fields = validatePayload({
+          title: `Review recurring ${area.toLowerCase()} failures`,
+          user_problem: `The local activity log recorded ${failures} failures in ${calls} ${area.toLowerCase()} calls during a recent 30-day window. The log does not explain the cause or include private content.`,
+          hypothesis: 'Find a reproducible cause and add fictional regression cases. Keep any proposed change only if it improves the measured result without weakening privacy or task quality.',
+          memory_types: [], sources: [], metrics: ['Failure rate on fictional regression cases', 'Task success on unchanged control cases'],
+          guardrails: ['No private note content or customer data in the proposal', 'No permission or runtime changes without human review'],
+          privacy_scope: 'Aggregate local tool outcomes only; no note content, paths, arguments, or customer data.',
+        });
+        const observation = { schema: 1, category: finding.category, signal: finding.signal, calls, failures, failure_rate: failureRate };
+        const id = newId(), at = now().toISOString();
+        await append({ kind: 'created', idea_id: id, at, origin: 'observation', observation, fields });
+        rows.push({ id, status: 'discovered', origin: 'observation', observation, fields });
+        created.push(id);
+      }
+      return { created, duplicates };
     }),
     update: ({ id, expected_revision, fields: changes, status, note }) => locked(async () => {
       if (typeof id !== 'string' || !/^BL-RSI-\d{8}-[a-f0-9-]{8,36}$/.test(id)) throw new Error('Invalid RSI idea id.');

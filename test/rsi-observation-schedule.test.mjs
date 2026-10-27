@@ -4,6 +4,7 @@ import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import { createRsiObservationSchedule, validateObservationSettings } from '../src/rsi-observation-schedule.mjs';
+import { createRsiLedger } from '../src/rsi-ledger.mjs';
 
 test('scheduled RSI observation is off by default and only stores aggregate, content-free reports', async (t) => {
   const home = await mkdtemp(path.join(os.tmpdir(), 'brainlink-rsi-observe-'));
@@ -43,6 +44,25 @@ test('RSI observation settings accept only explicit opt-in and supported interva
   for (const invalid of [{ enabled: 1 }, { interval_hours: 23 }, { interval_hours: 48 }, { url: 'https://example.com' }, { vault_health_enabled: true }, { vault_health_enabled: 'true', vault_health_vault: 'Personal' }]) {
     assert.throws(() => validateObservationSettings(invalid));
   }
+});
+
+test('scheduled aggregate findings enter the review ledger while manual observations do not', async (t) => {
+  const home = await mkdtemp(path.join(os.tmpdir(), 'brainlink-rsi-observe-ledger-'));
+  t.after(() => rm(home, { recursive: true, force: true }));
+  const now = new Date('2026-10-27T12:00:00.000Z');
+  const entries = Array.from({ length: 8 }, (_, i) => ({ at: now.toISOString(), tool: 'vault_search', ok: i >= 4, note: 'PRIVATE_NOTE_CANARY', path: 'PRIVATE_PATH_CANARY' }));
+  const ledger = createRsiLedger({ home, now: () => now });
+  const service = createRsiObservationSchedule({ home, now: () => now, readEntries: async () => entries, ledger });
+  const manual = await service.run('manual');
+  assert.equal(manual.report.proposal_intake, undefined);
+  assert.deepEqual(await ledger.list(), [], 'manual analysis only reports signals');
+  await service.configure({ enabled: true });
+  const scheduled = await service.run('schedule');
+  assert.equal(scheduled.report.proposal_intake.created_count, 1);
+  assert.equal((await ledger.list()).length, 1);
+  assert.doesNotMatch(JSON.stringify(scheduled), /PRIVATE_(?:NOTE|PATH)_CANARY/);
+  assert.doesNotMatch(await readFile(service.file, 'utf8'), /PRIVATE_(?:NOTE|PATH)_CANARY/);
+  assert.doesNotMatch(await readFile(ledger.file, 'utf8'), /PRIVATE_(?:NOTE|PATH)_CANARY/);
 });
 
 test('optional health snapshots are per-vault, local aggregates and compare only with the same vault', async (t) => {
