@@ -249,6 +249,11 @@ test('authenticated Setup enables scheduled backup only after a verified first c
       method: 'POST', headers: { 'Content-Type': 'application/json', 'X-BrainLink-Token': app.token },
       body: JSON.stringify({ topics: ['agent memory'], signals: ['Agents lose context after handoff and repeat retrieval searches.'] }),
     });
+    const observationSettings = await fetch(`http://127.0.0.1:${app.port}/api/rsi/observations/settings`, {
+      method: 'POST', headers: { 'Content-Type': 'application/json', 'X-BrainLink-Token': app.token },
+      body: JSON.stringify({ enabled: true, interval_hours: 24 }),
+    }).then((r) => r.json());
+    assert.equal(observationSettings.observations.last_run.trigger, 'schedule');
     const missingKey = await api('/api/backup', { enabled: true, folder: dest, intervalHours: 24, encrypted: true });
     assert.equal(missingKey.status, 400, 'encryption cannot be enabled until the recovery key is created');
     const keyResponse = await api('/api/backup/encryption-key');
@@ -272,12 +277,12 @@ test('authenticated Setup enables scheduled backup only after a verified first c
     const history = await api('/api/backup/history');
     assert.equal(history.status, 200);
     const historyBody = await history.json();
-    assert.ok(historyBody.backups.some((item) => item.folder === result.backup.status.folder && item.encrypted && item.file_count === 2));
+    assert.ok(historyBody.backups.some((item) => item.folder === result.backup.status.folder && item.encrypted && item.file_count === 3));
     const state = await fetch(`http://127.0.0.1:${app.port}/api/state`, { headers: { 'X-BrainLink-Token': app.token } }).then((r) => r.json());
     assert.equal(state.backup.enabled, true);
     assert.equal(state.backup.keepCount, 30);
     assert.equal(state.backup.encrypted, true);
-    assert.equal(state.backup.status.file_count, 2, 'backup includes the vault note and RSI discovery settings');
+    assert.equal(state.backup.status.file_count, 3, 'backup includes the vault note, discovery settings and observation schedule');
     let secondVerified = false;
     for (let i = 0; i < 120 && !secondVerified; i++) {
       for (const folder of await readdir(dest)) {
@@ -301,6 +306,9 @@ test('authenticated Setup enables scheduled backup only after a verified first c
     assert.doesNotMatch(JSON.stringify(activity.filter((entry) => ['backup', 'backup_restore'].includes(entry.tool))), /Private\.md|api-destination|api-restore|recoveryKey/);
     const discoveryCopy = JSON.parse(await readFile(path.join(restore, 'BrainLink', 'rsi', 'discovery.json'), 'utf8'));
     assert.deepEqual(discoveryCopy.settings.topics, ['agent memory']);
+    const observationsCopy = JSON.parse(await readFile(path.join(restore, 'BrainLink', 'rsi', 'observations.json'), 'utf8'));
+    assert.equal(observationsCopy.settings.enabled, true);
+    assert.equal(observationsCopy.report.privacy.report_saved, true);
     const off = await api('/api/backup', { enabled: false, folder: dest, intervalHours: 24 });
     const offBody = await off.json();
     assert.equal(offBody.backup?.enabled, false, JSON.stringify(offBody));

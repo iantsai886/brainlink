@@ -468,6 +468,13 @@ export async function startSetup(opts = {}) {
       if (!discoveryStat.isFile() || discoveryStat.isSymbolicLink()) throw new Error('RSI discovery backup refused: expected a regular local file.');
       artifacts.push({ name: 'rsi/discovery.json', data: await readFile(rsiDiscovery.file) });
     }
+    // The optional recurring observer stores only settings, aggregate reports and run status.
+    // Preserve that privacy-safe record with the other RSI artifacts in the verified backup.
+    const observationStat = await lstat(rsiObservationSchedule.file).catch((e) => e.code === 'ENOENT' ? null : Promise.reject(e));
+    if (observationStat) {
+      if (!observationStat.isFile() || observationStat.isSymbolicLink()) throw new Error('RSI observation backup refused: expected a regular local file.');
+      artifacts.push({ name: 'rsi/observations.json', data: await readFile(rsiObservationSchedule.file) });
+    }
     return artifacts;
   }
   async function runBackup(cfg, trigger = 'manual') {
