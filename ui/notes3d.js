@@ -122,9 +122,16 @@
     const brainPanel = document.getElementById('brain-panel');
     const root = document.getElementById('notes3d-root');
     if (!brainPanel || !root) return;
-    let graphInstance = null, nodesById = [], byTitle = new Map(), loaded = false, loadedOk = false, selectedId = null, currentDetail = null, currentNode = null, pendingVaultRefresh = false, vaultFilter = null;
+    let graphInstance = null, nodesById = [], byTitle = new Map(), loaded = false, loadedOk = false, selectedId = null, currentDetail = null, currentNode = null, pendingVaultRefresh = false, vaultFilter = null, graphVaultOptions = [];
 
     function stat(id, v) { const el = document.getElementById(id); if (el) el.textContent = v; }
+
+    function renderVaultOptions() {
+      const select = document.getElementById('notes3d-vault-select');
+      if (!select) return;
+      select.innerHTML = `<option value="*">${esc(tr('notes3d.allVaults'))}</option>${graphVaultOptions.map((vault) => `<option value="${esc(vault.name)}">${esc(vault.name)} · ${esc(vault.notes)}</option>`).join('')}`;
+      select.value = vaultFilter === null ? '*' : vaultFilter;
+    }
 
     function openPanel(node) {
       const panel = document.getElementById('notes3d-panel-detail');
@@ -266,6 +273,7 @@
     window.addEventListener('brainlink:locale-changed', () => {
       root.querySelectorAll('[data-i18n]').forEach((el) => { el.textContent = tr(el.dataset.i18n); });
       root.querySelectorAll('[data-i18n-placeholder]').forEach((el) => { el.placeholder = tr(el.dataset.i18nPlaceholder); });
+      renderVaultOptions();
       renderNodeList();
     });
 
@@ -405,11 +413,10 @@
       let g;
       try {
         const optionData = await api('/api/graph3d/vaults', {});
-        const select = document.getElementById('notes3d-vault-select');
+        graphVaultOptions = optionData.vaults;
         if (vaultFilter === null && optionData.vaults.length) vaultFilter = optionData.vaults[0].name;
         if (vaultFilter && vaultFilter !== '*' && !optionData.vaults.some((vault) => vault.name === vaultFilter)) vaultFilter = optionData.vaults[0]?.name || '*';
-        select.innerHTML = `<option value="*">${esc(tr('notes3d.allVaults'))}</option>${optionData.vaults.map((vault) => `<option value="${esc(vault.name)}">${esc(vault.name)} · ${esc(vault.notes)}</option>`).join('')}`;
-        select.value = vaultFilter === null ? '*' : vaultFilter;
+        renderVaultOptions();
         g = await api('/api/graph3d', { vault: vaultFilter && vaultFilter !== '*' ? vaultFilter : undefined });
       }
       catch (e) { canvas.innerHTML = `<p class="error-box">Could not load the map: ${esc(e.message)}</p>`; return; }

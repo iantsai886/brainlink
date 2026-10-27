@@ -469,6 +469,7 @@ test('3D graph has a searchable, keyboard-accessible note list in every supporte
   assert.match(src, /data-discover-save/, 'each discovered link must be saved through the review flow');
   assert.match(src, /id="notes3d-vault-select"/, 'graph must let the user focus on one vault');
   assert.match(src, /api\('\/api\/graph3d\/vaults'/, 'vault choices must come from the privacy-filtered API');
+  assert.match(src, /brainlink:locale-changed[\s\S]*?renderVaultOptions\(\);/, 'vault filter choices must update when the app language changes');
   assert.match(css, /\.notes3d-node:focus-visible/);
   const keys = ['notes3d.browseNotes', 'notes3d.browseSearch', 'notes3d.browsePlaceholder', 'notes3d.browseEmpty', 'notes3d.browseCount', 'notes3d.browseMore', 'notes3d.vaultFilter', 'notes3d.allVaults', 'notes3d.discoverVault', 'notes3d.discoverHint', 'notes3d.discoverRun', 'notes3d.discoverMore', 'notes3d.discoverDone', 'notes3d.discoverProgress', 'notes3d.discoverFailed', 'notes3d.discoverChanged', 'notes3d.discoverReadOnly'];
   for (const locale of ['en', 'zh-TW', 'pt']) {

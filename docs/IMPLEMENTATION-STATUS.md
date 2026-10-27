@@ -13,7 +13,7 @@ Client discovery and runtime probe: Codex CLI `0.164.0-alpha.11.1` made a live B
 
 The 3D graph now lists only enabled, non-private vaults and starts with the first available vault selected. Users can choose another vault or explicitly view all accessible vaults. The same selection filters the graph, relationship review queue, and discovery scan. Note-level private and generated content remains excluded by the existing graph paths. The new `/api/graph3d/vaults` response contains only visible vault names and eligible note counts.
 
-Local Windows validation: graph and typed-relationship tests passed 34/34; UI tests passed 29/29; locale JSON parsing and `git diff --check` passed. These automated fixtures validate filtering and display wiring, not usability against the customer's live vaults. This change has not yet received a full-suite run or live desktop acceptance.
+Changing the app language also refreshes the picker’s generated option label while preserving the current vault selection. Local Windows validation on source commit `610890f`: graph and typed-relationship tests passed 34/34; UI tests passed 29/29; locale JSON parsing and `git diff --check` passed. The full Windows `npm run test:all` on that source commit passed: core 436 tests (430 passed, 0 failed, 6 platform/privilege skips) and UI 29/29. After the locale-refresh fix, graph and typed-relationship tests passed 34/34 again, UI tests passed 29/29, `node --check ui/notes3d.js` and `git diff --check` passed. These automated fixtures validate filtering and display wiring, not usability against the customer's live vaults. Live desktop acceptance remains unverified.
 
 ### Protect credentials in local AI client configs
 
