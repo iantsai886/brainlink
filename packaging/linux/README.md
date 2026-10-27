@@ -11,4 +11,6 @@ Both bundle the pinned official Node 24.22.1 runtime (checksum-verified against 
 
 Verified 2026-10-24 in a Debian 12 x64 container: rebuilt x64 and arm64 archives and `.deb` packages, installed the x64 `.deb`, ran the bundled-runtime `brainlink --version`, and initialized an isolated fictional vault. CI now repeats install/version/init on Ubuntu. Not tested: a desktop session (browser opening and the app-menu entry) and real Linux AI apps. Packages are unsigned; an apt repository with a signing key can come later.
 
+**Verified again 2026-10-28:** the current 1.2.8 source built all four x64/ARM64 tar and `.deb` artifacts in Debian 12 with Node.js 24.22.1. Their SHA-256 sidecars matched. In a disposable Debian container, the amd64 `.deb` install/version/init/remove flow and the x64 tarball per-user install/version/init/uninstall flow passed using a fictional vault. The ARM64 `.deb` declares `arm64` and contains an AArch64 Node runtime; it was not executed on this x64 host. The latest source, checksums, test counts and limits are recorded in [`docs/IMPLEMENTATION-STATUS.md`](../../docs/IMPLEMENTATION-STATUS.md). A real desktop session/menu launch and signed distribution remain release checks.
+
 `ar.mjs` writes the `.deb` container, because macOS's `ar` only handles object files.
