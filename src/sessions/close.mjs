@@ -33,6 +33,7 @@ async function withCloseLock(key, action) {
 
 export function closeSummary(args) {
   return section('Goal', args.goal) + section('Outcome', args.outcome) + section('Decisions', args.decisions)
+    + section('Source session', args.source_session_id ? `Imported BrainLink session ${args.source_session_id}` : [])
     + section('Actions taken', args.actions) + section('Corrections', args.corrections)
     + section('Open questions', args.open_questions) + section('Next actions', args.next_actions);
 }
@@ -44,6 +45,7 @@ export async function closeSession(ctx, store, args, now = new Date(), { fileSum
   const sourceId = String(args.session_or_task_id || '').trim();
   const errors = checkCommon(ctx, args.vault, { ...args, source: 'session_close' }, id);
   if (!sourceId || sourceId.length > 120 || /[\r\n]/.test(sourceId)) errors.push('stable session_or_task_id is required (up to 120 characters)');
+  if (args.source_session_id !== undefined && (typeof args.source_session_id !== 'string' || !/^[A-Za-z0-9_-]{1,160}$/.test(args.source_session_id))) errors.push('source_session_id must be an exact safe BrainLink session ID');
   if (!String(args.title || '').trim()) errors.push('title is required');
   if (!lines(args.goal).length || !lines(args.outcome).length) errors.push('goal and outcome are required');
   const summary = closeSummary(args);

@@ -733,6 +733,14 @@ test('MCP: initialize, tools, prompts, resources, errors', async () => {
   assert.match(init.result.instructions, /MEMORY TYPES ENABLED FOR THIS CONNECTION: working, semantic, procedural, episodic/);
   const prompts = (await call('prompts/list')).result.prompts.map((p) => p.name);
   assert.ok(prompts.includes('connect-chief-of-staff') && prompts.includes('close-loop-chief-of-staff'));
+  assert.ok(prompts.includes('review-session'));
+  const reviewPrompt = await call('prompts/get', { name: 'review-session', arguments: { session_hint: 'Fictional demo', vault: 'Acme Studio' } });
+  assert.match(reviewPrompt.result.messages[0].content.text, /session_list/);
+  assert.match(reviewPrompt.result.messages[0].content.text, /session_read\(full=true\)/);
+  assert.match(reviewPrompt.result.messages[0].content.text, /confirm=false/);
+  assert.match(reviewPrompt.result.messages[0].content.text, /only after the user approves/);
+  assert.match(reviewPrompt.result.messages[0].content.text, /source_session_id set to the exact imported session ID/);
+  assert.match(reviewPrompt.result.messages[0].content.text, /Fictional demo/);
   assert.match((await call('prompts/get', { name: 'close-loop-chief-of-staff', arguments: { focus: 'launch' } })).result.messages[0].content.text, /launch/);
   const res = (await call('resources/list')).result.resources;
   const rule = res.find((r) => r.name === 'Acme Studio: AGENTS.md');

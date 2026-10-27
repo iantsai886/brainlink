@@ -254,6 +254,7 @@ test('Twin memory policy blocks disabled types at tool, prompt and resource boun
     if (item.prompt) {
       const prompts = await mcp.handle({ jsonrpc: '2.0', id: 3, method: 'prompts/list' });
       assert.ok(!prompts.result.prompts.some((prompt) => prompt.name === item.prompt), `${item.type} prompt is hidden`);
+      assert.ok(!prompts.result.prompts.some((prompt) => prompt.name === 'review-session'), 'session review prompt is hidden when episodic memory is disabled');
     }
 
     if (item.type === 'procedural') {
@@ -266,6 +267,35 @@ test('Twin memory policy blocks disabled types at tool, prompt and resource boun
       assert.ok(!prompts.result.prompts.some((prompt) => prompt.name.startsWith('connect-')));
     }
   }
+});
+
+test('review-session prompt requires scoped session read and approved closeout tools', async () => {
+  const root = await mkdtemp(path.join(tmpdir(), 'brainlink-review-session-prompt-'));
+  const vaultPath = path.join(root, 'org');
+  await mkdir(vaultPath, { recursive: true });
+  const cfg = fixture(vaultPath);
+  const env = { BRAINLINK_HOME: path.join(root, 'app'), BRAINLINK_AGENT_TOKEN: 'fictional-agent-token', BRAINLINK_SEMANTIC: '0' };
+  const hidden = createMcp(createContext(cfg, { env }));
+  let prompts = await hidden.handle({ jsonrpc: '2.0', id: 1, method: 'prompts/list' });
+  assert.ok(!prompts.result.prompts.some((prompt) => prompt.name === 'review-session'));
+  const denied = await hidden.handle({ jsonrpc: '2.0', id: 2, method: 'prompts/get', params: { name: 'review-session' } });
+  assert.ok(denied.error);
+
+  cfg.twin_profiles[0].allowed_actions.push('read_session', 'propose_note');
+  const grant = cfg.twin_profiles[0].agent_access[0].vaults[0];
+  grant.access = 'propose';
+  grant.operations.push('read_session', 'propose_note');
+  assert.deepEqual(validate(cfg), [], 'explicit read and close permissions remain a valid profile');
+  const scoped = createMcp(createContext(cfg, { env }));
+  const tools = (await scoped.handle({ jsonrpc: '2.0', id: 3, method: 'tools/list' })).result.tools.map((tool) => tool.name);
+  assert.ok(tools.includes('session_list'));
+  assert.ok(tools.includes('session_read'));
+  assert.ok(tools.includes('session_close'));
+  prompts = await scoped.handle({ jsonrpc: '2.0', id: 4, method: 'prompts/list' });
+  assert.ok(prompts.result.prompts.some((prompt) => prompt.name === 'review-session'));
+  const allowed = await scoped.handle({ jsonrpc: '2.0', id: 5, method: 'prompts/get', params: { name: 'review-session', arguments: { session_id: 'fictional-session-1' } } });
+  assert.match(allowed.result.messages[0].content.text, /fictional-session-1/);
+  assert.match(allowed.result.messages[0].content.text, /never try to bypass the setting/);
 });
 
 test('semantic vault tools exclude documents assigned to disabled memory types', async () => {

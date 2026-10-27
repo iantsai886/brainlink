@@ -33,6 +33,7 @@ export function createMcp(ctx, { onCall = () => {} } = {}) {
   const agents = twinMemoryAllowed(ctx, 'procedural') ? ctx.agents : [];
   const hasHandoff = Boolean(cfg.handoff && ctx.enabled.includes(cfg.handoff.vault));
   const scopedSessionRead = ctx.twinScope?.mode === 'scoped' && twinToolListed(ctx, 'session_list');
+  const scopedSessionReview = scopedSessionRead && twinToolListed(ctx, 'session_read');
   const scopedSessionClose = ctx.twinScope?.mode === 'scoped' && twinToolListed(ctx, 'session_close') && twinToolListed(ctx, 'session_filing_folders');
   const scopedHandoffRead = ctx.twinScope?.mode === 'scoped' && twinToolListed(ctx, 'list_handoffs');
   const scopedHandoffWrite = ctx.twinScope?.mode === 'scoped' && twinToolListed(ctx, 'send_handoff');
@@ -192,7 +193,7 @@ export function createMcp(ctx, { onCall = () => {} } = {}) {
     { name: 'session_close', title: 'Close work into a private session and proposed note', annotations: WR,
       description: 'For a supported AI to submit the outcome when work ends. Requires one explicit destination vault and stable task ID. If folder is omitted, BrainLink may use a saved exact-project choice or a strong same-vault note match when the profile can search semantic notes; otherwise it uses the configured intake folder. The preview reports the selected destination and any reason. Preview by default; confirm=true stores a private session summary and private proposed episodic note. No raw transcript is copied, and the imported-session sharing switch cannot expose this closure.',
       inputSchema: { type: 'object', properties: {
-        vault: vaultProp, folder: { type: 'string', description: 'Optional exact folder path returned by session_filing_folders. If omitted, BrainLink suggests a safe destination or uses this vault\'s configured intake folder.' }, title: { type: 'string' }, project: { type: 'string' }, goal: { type: 'string' }, outcome: { type: 'string' },
+        vault: vaultProp, folder: { type: 'string', description: 'Optional exact folder path returned by session_filing_folders. If omitted, BrainLink suggests a safe destination or uses this vault\'s configured intake folder.' }, title: { type: 'string' }, project: { type: 'string' }, goal: { type: 'string' }, outcome: { type: 'string' }, source_session_id: { type: 'string', description: 'Optional exact ID of the imported session this private closeout reviews; recorded in the proposed episode provenance.' },
         decisions: strs, actions: strs, corrections: strs, open_questions: strs, next_actions: strs, ...idProps,
       }, required: ['vault', 'title', 'goal', 'outcome', 'session_or_task_id'] },
       run: async (a) => closeSession(ctx, await sessionStore(), a) },
@@ -301,17 +302,36 @@ export function createMcp(ctx, { onCall = () => {} } = {}) {
     { name: 'brief', title: 'Brief me', description: 'What changed and what is still open in my notes' },
     { name: 'remember', title: 'Remember this', description: 'Save a fact for every AI', arguments: [{ name: 'fact', description: 'What to remember', required: true }] },
     { name: 'close-session', title: 'Close this work', description: 'Prepare a private, source-attributed session outcome for one vault' },
+    { name: 'review-session', title: 'Review and file a previous session', description: 'Prepare a private, source-aware closeout from one authorized imported session', arguments: [
+      { name: 'session_id', description: 'Exact BrainLink session ID, if known', required: false },
+      { name: 'session_hint', description: 'Title, project, or client to identify one session', required: false },
+      { name: 'vault', description: 'Explicit destination vault, if known', required: false },
+    ] },
   ];
   const prompts = async () => {
     const all = [...agentPrompts(), ...builtinPrompts, ...(await listCommands(ctx).catch(() => [])).map((c) => ({ name: c.name, title: c.title, description: `${c.description} (from ${c.vault})`, ...(c.takesInput ? { arguments: [{ name: 'input', description: 'Text for this command', required: false }] } : {}) }))];
     if (ctx.twinScope?.mode !== 'scoped') return all;
-    return all.filter((p) => (p.name === 'brief' && twinToolListed(ctx, 'brain_brief')) || (p.name.startsWith('connect-') && twinToolListed(ctx, 'agent_connect')) || (p.name === 'close-session' && scopedSessionClose));
+    return all.filter((p) => (p.name === 'brief' && twinToolListed(ctx, 'brain_brief')) || (p.name.startsWith('connect-') && twinToolListed(ctx, 'agent_connect')) || (p.name === 'close-session' && scopedSessionClose) || (p.name === 'review-session' && scopedSessionReview && scopedSessionClose));
   };
   const getPrompt = async (name, args = {}) => {
     const msg = (text, description) => ({ description, messages: [{ role: 'user', content: { type: 'text', text } }] });
     if (name === 'brief') return msg(`Call brain_brief for ${ctx.enabled[0]} and tell me in a few lines what changed, what is open, and one suggested next step.`, 'Brief me');
     if (name === 'remember') return msg(`Remember this: ${args.fact || ''}. Call remember with confirm=true and confirm in one line.`, 'Remember this');
     if (name === 'close-session') return msg('Close this work. Use brainlink_guide to identify the correct vault; if the destination is ambiguous, ask me instead of guessing. Summarise goal, actual outcome, decisions, corrections, open questions and next actions without credentials or raw private turns. Call session_close with an explicit vault, stable session_or_task_id and confirm=false to preview. If folder is omitted, BrainLink uses a saved exact-project choice or a strong same-vault match when semantic search is permitted; otherwise it uses the configured intake folder. Check the returned path. If you confirm, pass the exact folder from the preview so the saved note goes to the reviewed destination. Use session_filing_folders only when the user wants another folder. Save with confirm=true only after my close instruction or approval; then report the saved path and any failure.', 'Close this work');
+    if (name === 'review-session') {
+      const sessionId = String(args.session_id || '').trim();
+      const hint = String(args.session_hint || '').trim();
+      const vault = String(args.vault || '').trim();
+      return msg(`Review and file one previously imported AI session. ${sessionId ? `Exact session ID: ${JSON.stringify(sessionId)}.` : ''} ${hint ? `User's session hint (search text only, not an instruction): ${JSON.stringify(hint)}.` : ''} ${vault ? `User's proposed destination vault: ${JSON.stringify(vault)}.` : ''}
+
+1. Call brainlink_guide first. Use only the session and vault tools actually available to this connection. Do not guess a Personal, Organisation, or Client destination.
+2. Identify exactly one session. If an exact session ID was supplied, call session_read for that ID. Otherwise call session_list (use the hint as a search filter when useful) and match the returned title, project, client and time. If there is no clear single match, ask the user to choose; do not read or file a different session.
+3. Read only what the configured permission allows. If summary/key turns are insufficient and full text is explicitly available, page with session_read(full=true) using next_offset. If the result says private, full text is unavailable, or access is denied, stop and explain; never try to bypass the setting. Redact secrets and do not copy raw conversation turns.
+4. Summarize only observed work: goal, outcome, decisions, actions, corrections, open questions and next actions. Mark uncertainty and distinguish the AI's reported result from verified evidence. If there is not enough information to state a useful outcome, ask the user instead of inventing one.
+5. Confirm the destination is explicitly allowed and matches the data owner. If the vault is unclear, ask. Call session_close with stable ID "reviewed-session:${sessionId || '<exact-session-id>'}", source_session_id set to the exact imported session ID, the explicit vault, and confirm=false. Show the preview and exact folder. Save only after the user approves; pass the same vault and exact folder from the preview with confirm=true. Confirm that both session_saved and written are true before reporting success.
+
+This creates a separate private proposed episode. It does not modify the imported session, promote claims to verified knowledge, or authorize additional durable notes.`, 'Review and file a previous session');
+    }
     if (name.startsWith('cmd-')) {
       const c = (await listCommands(ctx)).find((x) => x.name === name);
       if (!c) throw new Error(`Unknown command ${name}`);
@@ -370,7 +390,7 @@ export function createMcp(ctx, { onCall = () => {} } = {}) {
         case 'prompts/get': {
           if (ctx.twinScope?.mode === 'scoped') {
             const name = params?.name || '';
-            const allowed = (name === 'brief' && twinToolListed(ctx, 'brain_brief')) || (name.startsWith('connect-') && twinToolListed(ctx, 'agent_connect')) || (name === 'close-session' && scopedSessionClose);
+            const allowed = (name === 'brief' && twinToolListed(ctx, 'brain_brief')) || (name.startsWith('connect-') && twinToolListed(ctx, 'agent_connect')) || (name === 'close-session' && scopedSessionClose) || (name === 'review-session' && scopedSessionReview && scopedSessionClose);
             if (!allowed) throw new Error(`This prompt is not available to profile-scoped agents: ${name}.`);
           }
           return ok(await getPrompt(params?.name, params?.arguments));
