@@ -165,8 +165,9 @@ test('vault graph discovery is paged, scope-safe, excludes private records, and 
   const privatePath = path.join(home, 'private');
   await mkdir(vaultPath, { recursive: true });
   await mkdir(privatePath, { recursive: true });
-  await writeFile(path.join(vaultPath, 'Product Team.md'), '---\ntype: team\nid: team.product\nscope: organisation\nstatus: current\n---\n# Product Team\n\nProduct Team coordinates with Data Team every day.\n');
+  await writeFile(path.join(vaultPath, 'A Product Team.md'), '---\ntype: team\nid: team.product\nscope: organisation\nstatus: current\n---\n# Product Team\n\nProduct Team coordinates with Data Team every day.\n');
   await writeFile(path.join(vaultPath, 'Data Team.md'), '---\ntype: team\nid: team.data\nscope: organisation\nstatus: current\n---\n# Data Team\n');
+  for (let i = 0; i < 22; i++) await writeFile(path.join(vaultPath, `Generic ${String(i).padStart(2, '0')}.md`), `# Generic ${i}\n\nOrdinary note ${i}.\n`);
   await writeFile(path.join(vaultPath, 'Private Source.md'), '---\ntype: workflow\nid: workflow.private\nscope: organisation\nstatus: current\nprivate: true\n---\n# Private\n\nThis workflow runs PRIVATE_CANARY.\n');
   await writeFile(path.join(privatePath, 'Client Team.md'), '---\ntype: team\nid: team.client\nscope: client\nstatus: current\n---\n# Client Team\n');
   await writeFile(path.join(privatePath, 'Client Workflow.md'), '---\ntype: workflow\nid: workflow.client\nscope: client\nstatus: current\n---\n# Client work\n\nThis workflow runs Client Team.\n');
@@ -178,12 +179,17 @@ test('vault graph discovery is paged, scope-safe, excludes private records, and 
     assert.equal((await api('/api/vault', { path: vaultPath, name: 'Main', pack: 'simple', scaffold: false })).ok, true);
     assert.equal((await api('/api/vault', { path: privatePath, name: 'Client', private: true, pack: 'simple', scaffold: false })).ok, true);
     const first = await api('/api/graph3d/discover', { offset: 0 });
-    assert.equal(first.done, true);
-    assert.ok(first.candidates.some((c) => c.path === 'Product Team.md' && c.target_id === 'team.data'), JSON.stringify(first));
+    assert.equal(first.scanned, 20);
+    assert.equal(first.done, false);
+    assert.ok(first.candidates.some((c) => c.path === 'A Product Team.md' && c.target_id === 'team.data'), JSON.stringify(first));
     assert.doesNotMatch(JSON.stringify(first), /PRIVATE_CANARY|workflow\.client|team\.client|Client Team/);
+    const second = await api('/api/graph3d/discover', { offset: first.next_offset });
+    assert.equal(second.done, true);
+    assert.ok(second.next_offset > first.next_offset);
+    assert.equal(first.total_sources, second.total_sources);
     const badOffset = await api('/api/graph3d/discover', { offset: -1 });
     assert.match(badOffset.error, /offset is invalid/i);
-    const candidate = first.candidates.find((c) => c.path === 'Product Team.md');
+    const candidate = first.candidates.find((c) => c.path === 'A Product Team.md');
     const detail = await api('/api/graph3d/note', { vault: 'Main', path: candidate.path });
     const saved = await api('/api/graph3d/relationship/propose', { vault: 'Main', path: candidate.path, etag: detail.etag,
       target_id: candidate.target_id, predicate: candidate.predicate, evidence: candidate.evidence });
