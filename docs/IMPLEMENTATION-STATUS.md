@@ -9,6 +9,10 @@ Client discovery and runtime probe: Codex CLI `0.164.0-alpha.11.1` made a live B
 
 ## Current working-tree update (2026-10-27)
 
+### Install DeepSeek Harness Skills through named profiles
+
+BrainLink Skills can now be installed when the user connected DeepSeek Harness through named profiles only. The Skills remain shared in Harness's user-level `skills` folder, while MCP tokens and vault access stay isolated per profile. Setup now accepts an active `deepseek-harness@<profile>` connection as the connection gate for installing the generic Harness Skills; it does not create or widen any profile grant. The setup integration test uses a fictional named profile, verifies the separate profile connection and shared Skills install/remove flow, and still rejects installs for disconnected clients. Focused Windows validation: `node --import ./test/_preload.mjs --test test/agent-skills.test.mjs` passed 8/8. Live Harness Skills discovery and tool access remain unverified.
+
 ### Install portable Agent Skills into connected AI clients
 
 Setup shows the three versioned BrainLink skills for Claude Code, Codex CLI, Gemini CLI, Google Antigravity App/IDE, Antigravity CLI, Hermes Agent, and DeepSeek Harness. After connecting the client, the user can install or update the skills in that surface's user-level discovery folder, or remove BrainLink-managed copies. BrainLink records hashes so it only updates/removes unchanged files it installed; collisions, local edits, unsafe paths and damaged receipts fail closed. A pre-existing identical skill is reported as current and is not claimed. The two Antigravity surfaces use their separate documented global skill folders while sharing the connected Antigravity MCP configuration. DeepSeek Harness profiles share the configured user skill folder. Live discovery and AI use still need validation on the user's installed clients.

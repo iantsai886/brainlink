@@ -1255,7 +1255,9 @@ export async function startSetup(opts = {}) {
     'POST /api/skills/install': async (b) => {
       const clients = await detect(clientOpts());
       const connectedClient = b.client === 'antigravity-cli' ? 'antigravity' : b.client;
-      if (!clients[String(connectedClient || '')]?.connected) throw new Error('Connect this AI first.');
+      const namedHarnessConnected = b.client === 'deepseek-harness'
+        && Object.entries(clients).some(([id, client]) => id.startsWith('deepseek-harness@') && client.connected);
+      if (!clients[String(connectedClient || '')]?.connected && !namedHarnessConnected) throw new Error('Connect this AI first.');
       return installAgentSkills({ client: b.client, sourceRoot: path.join(ROOT, 'skills'), stateDir: appHome(env), home, env });
     },
     'POST /api/skills/remove': async (b) => removeAgentSkills({ client: b.client, stateDir: appHome(env), home, env }),

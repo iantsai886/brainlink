@@ -5,6 +5,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { inspectAgentSkills, installAgentSkills, removeAgentSkills, skillClientRoot } from '../src/agent-skills.mjs';
+import { connectClient } from '../src/connectors.mjs';
 import { startSetup } from '../src/setup.mjs';
 
 const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
@@ -127,6 +128,9 @@ test('Setup shows skill status and requires an authenticated, connected AI befor
   const antigravityConfig = path.join(f.home, '.gemini', 'config', 'mcp_config.json');
   await mkdir(path.dirname(antigravityConfig), { recursive: true });
   await writeFile(antigravityConfig, JSON.stringify({ mcpServers: { brainlink: { command: 'node', args: [], env: {} } } }));
+  const dshHome = f.env.DSH_HOME;
+  await mkdir(path.join(dshHome, 'profiles', 'work'), { recursive: true });
+  await connectClient('deepseek-harness@work', { home: f.home, os: 'win32', env: f.env, launch: { command: process.execPath, args: ['brainlink.mjs', 'serve'] }, extraEnv: { BRAINLINK_AGENT_TOKEN: 'fictional-profile-token' }, useCli: false });
   const app = await startSetup({ env, home: f.home, os: 'win32', port: 0, useCli: false });
   t.after(() => app.server.close());
   const base = `http://127.0.0.1:${app.port}`;
@@ -136,6 +140,7 @@ test('Setup shows skill status and requires an authenticated, connected AI befor
   const before = await (await api('GET', '/api/state')).json();
   assert.equal(before.clients['claude-code'].connected, true);
   assert.equal(before.clients.antigravity.connected, true, 'the shared Antigravity MCP config is the connection gate for both skill surfaces');
+  assert.equal(before.clients['deepseek-harness@work'].connected, true, 'the named Harness profile is connected without a shared home-level entry');
   assert.deepEqual(before.agent_skills['claude-code'].skills.map((item) => item.state), skillNames.map(() => 'missing'));
   assert.deepEqual(before.agent_skills.antigravity.skills.map((item) => item.state), skillNames.map(() => 'missing'));
   assert.deepEqual(before.agent_skills['antigravity-cli'].skills.map((item) => item.state), skillNames.map(() => 'missing'));
@@ -149,6 +154,9 @@ test('Setup shows skill status and requires an authenticated, connected AI befor
   assert.deepEqual((await (await api('GET', '/api/state')).json()).agent_skills['antigravity-cli'].skills.map((item) => item.state), skillNames.map(() => 'managed'));
   assert.equal((await api('POST', '/api/skills/remove', { client: 'antigravity-cli' })).status, 200);
   assert.deepEqual((await (await api('GET', '/api/state')).json()).agent_skills['antigravity-cli'].skills.map((item) => item.state), skillNames.map(() => 'missing'));
+  assert.equal((await api('POST', '/api/skills/install', { client: 'deepseek-harness' })).status, 200, 'a connected named Harness profile enables the shared user-level skills');
+  assert.deepEqual((await (await api('GET', '/api/state')).json()).agent_skills['deepseek-harness'].skills.map((item) => item.state), skillNames.map(() => 'managed'));
+  assert.equal((await api('POST', '/api/skills/remove', { client: 'deepseek-harness' })).status, 200);
   const installed = await (await api('POST', '/api/skills/install', { client: 'claude-code' })).json();
   assert.deepEqual(installed.installed, skillNames);
   const after = await (await api('GET', '/api/state')).json();
