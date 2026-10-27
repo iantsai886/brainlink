@@ -108,7 +108,7 @@
   "sessions.shared": "Partilhada",
   "sessions.noSummary": "(sem resumo)",
   "sessions.pendingCloseout": "Sessões aguardando encerramento",
-  "sessions.pendingCloseoutHint": "Estas sessões terminaram. Copie um pedido de revisão para uma IA ligada ao BrainLink ou abra a conversa aqui. Nada será guardado sem a sua aprovação.",
+  "sessions.pendingCloseoutHint": "Estas sessões terminaram. Abra aqui uma prévia privada do rascunho ou copie um pedido de revisão para uma IA ligada ao BrainLink. Nada será guardado sem a sua aprovação.",
   "sessions.reviewEndedSession": "Rever sessão",
   "sessions.copyReviewRequest": "Copiar pedido para a IA",
   "sessions.copyRequestCopied": "Pedido copiado. Cole-o numa IA ligada ao BrainLink.",

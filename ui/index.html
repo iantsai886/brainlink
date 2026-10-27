@@ -703,7 +703,7 @@ async function showFiledSummaryEditor() {
 async function loadSessionEndCues() {
   try {
     const { cues } = await api('POST', '/api/sessions/end-cues', {});
-    const html = cues.length ? `<div class="card"><b>${esc(t('sessions.pendingCloseout'))}</b><p class="muted">${esc(t('sessions.pendingCloseoutHint'))}</p>${cues.map((cue) => `<div class="row"><span>${esc(clientLabel(cue.client))} · ${esc(new Date(cue.ended_at).toLocaleString(LOCALE))}</span>${cue.session_ref ? `<button class="link" data-sess-read="${esc(cue.session_ref)}" data-sess-private-read="1">${esc(t('sessions.reviewEndedSession'))}</button><button class="link" data-cue-review-request="${esc(cue.session_ref)}">${esc(t('sessions.copyReviewRequest'))}</button>` : `<span class="muted">${esc(t('sessions.endedSessionNotImported'))}</span>`}<button class="link" data-cue-dismiss="${esc(cue.id)}">${esc(t('sessions.dismissCue'))}</button></div>`).join('')}</div>` : '';
+    const html = cues.length ? `<div class="card"><b>${esc(t('sessions.pendingCloseout'))}</b><p class="muted">${esc(t('sessions.pendingCloseoutHint'))}</p>${cues.map((cue) => `<div class="row"><span>${esc(clientLabel(cue.client))} · ${esc(new Date(cue.ended_at).toLocaleString(LOCALE))}</span>${cue.session_ref ? `<button class="primary" data-sess-file="${esc(cue.session_ref)}">${esc(t('sessions.fileSummary'))}</button><button class="link" data-cue-review-request="${esc(cue.session_ref)}">${esc(t('sessions.copyReviewRequest'))}</button>` : `<span class="muted">${esc(t('sessions.endedSessionNotImported'))}</span>`}<button class="link" data-cue-dismiss="${esc(cue.id)}">${esc(t('sessions.dismissCue'))}</button></div>`).join('')}</div>` : '';
     if ($('session-end-cues').innerHTML !== html) $('session-end-cues').innerHTML = html;
   } catch (e) { $('session-end-cues').innerHTML = `<p class="error-box">${esc(e.message)}</p>`; }
 }
@@ -740,6 +740,16 @@ function renderSessions(list) {
       </div></div>`;
   }
   $('sessions-list').innerHTML = html;
+}
+async function previewSessionFile(id) {
+  const vault = $('session-file-vault').value;
+  const folder = $('session-file-folder').value;
+  const result = await api('POST', '/api/sessions/file', { id, vault, folder, confirm: false });
+  if (!result.ok) throw new Error((result.errors || []).join('; ') || t('sessions.previewFirst'));
+  $('session-file-preview').textContent = result.preview || '';
+  $('session-file-preview').dataset.vault = vault;
+  $('session-file-preview').dataset.folder = folder;
+  document.querySelector('[data-file-confirm]').hidden = false;
 }
 
 // P0: two-AI handoff receipt. /api/handoffs already drops anything private or under an
@@ -1515,18 +1525,16 @@ document.addEventListener('click', (e) => {
         document.querySelector('[data-file-confirm]').hidden = true;
       } catch (e) { toast(e.message); }
     };
+    $('session-file-folder').onchange = () => {
+      $('session-file-preview').textContent = '';
+      $('session-file-preview').dataset.vault = '';
+      $('session-file-preview').dataset.folder = '';
+      document.querySelector('[data-file-confirm]').hidden = true;
+    };
+    if (choices) await previewSessionFile(id).catch((error) => toast(error.message, true));
     if (!choices) $('session-detail').textContent = t('sessions.noDestination');
   })(d.sessFile);
-  if (d.filePreview) act(async () => {
-    const vault = $('session-file-vault').value;
-    const folder = $('session-file-folder').value;
-    const result = await api('POST', '/api/sessions/file', { id: d.filePreview, vault, folder, confirm: false });
-    if (!result.ok) throw new Error((result.errors || []).join('; '));
-    $('session-file-preview').textContent = result.preview || '';
-    $('session-file-preview').dataset.vault = vault;
-    $('session-file-preview').dataset.folder = folder;
-    document.querySelector('[data-file-confirm]').hidden = false;
-  });
+  if (d.filePreview) act(() => previewSessionFile(d.filePreview));
   if (d.fileConfirm) act(async () => {
     const vault = $('session-file-vault').value;
     const folder = $('session-file-folder').value;

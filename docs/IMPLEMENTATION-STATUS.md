@@ -662,3 +662,7 @@ In a disposable `node:24-bookworm` container with Node.js 24.22.1, ran `npm ci -
 ### Full regression run after release package cleanup (2026-10-28)
 
 On Windows with Node.js 24.22.1, `npm run test:all` at commit `75b10805fb20ca540fadb94057167b89f16f7c58` passed: core 469 tests (463 passed, 0 failed, 6 platform/privilege skips) and UI 29/29. This run includes the packaging-runtime regression checks and covers the current source branch. It is local automated verification; hosted Actions, live Claude-to-Codex continuation, signed release, and installed-user acceptance remain unverified.
+
+### One-step session-end filing preview (2026-10-28)
+
+A matched session-end reminder now opens the filing form and prepares a private preview in one action. Choosing another folder clears the preview, and saving remains a separate explicit action. Updated English, Traditional Chinese and Portuguese wording. On Windows with Node.js 24.22.1, focused session cue, filing, locale and UI-safety checks passed 29/29; the embedded Setup JavaScript syntax parse and `git diff --check` passed. This improves closeout UX but does not generate a new summary or verify the imported content; live session-hook and client acceptance remain unverified.

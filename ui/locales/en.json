@@ -108,7 +108,7 @@
   "sessions.shared": "Shared",
   "sessions.noSummary": "(no summary)",
   "sessions.pendingCloseout": "Sessions awaiting closeout",
-  "sessions.pendingCloseoutHint": "These sessions ended. Copy a review request into an AI connected to BrainLink, or open the transcript here. Nothing is saved until you approve it.",
+  "sessions.pendingCloseoutHint": "These sessions ended. Open a private draft preview here, or copy a review request into an AI connected to BrainLink. Nothing is saved until you approve it.",
   "sessions.reviewEndedSession": "Review session",
   "sessions.copyReviewRequest": "Copy request for AI",
   "sessions.copyRequestCopied": "Request copied. Paste it into an AI connected to BrainLink.",

@@ -14,6 +14,11 @@ const hookEvent = (extra = {}) => JSON.stringify({ hook_event_name: 'SessionEnd'
 test('pending session cue offers a safe copy request for an authorized AI', async () => {
   const html = await readFile(new URL('../ui/index.html', import.meta.url), 'utf8');
   assert.match(html, /data-cue-review-request="\$\{esc\(cue\.session_ref\)\}"/);
+  assert.match(html, /data-sess-file="\$\{esc\(cue\.session_ref\)\}"/);
+  assert.match(html, /if \(choices\) await previewSessionFile\(id\)/, 'opening a closeout from the reminder prepares a private preview immediately');
+  assert.match(html, /async function previewSessionFile\(id\)[\s\S]*confirm: false/);
+  assert.match(html, /document\.querySelector\('\[data-file-confirm\]'\)\.hidden = false/);
+  assert.match(html, /if \(d\.fileConfirm\) act\(async \(\) =>/);
   assert.match(html, /Use BrainLink to review this exact imported session ID \$\{JSON\.stringify\(id\)\}/);
   assert.match(html, /Read only what my current BrainLink permissions allow/);
   assert.match(html, /do not save until I approve/);

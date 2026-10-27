@@ -108,7 +108,7 @@
   "sessions.shared": "共用",
   "sessions.noSummary": "（沒有摘要）",
   "sessions.pendingCloseout": "等待收尾的對話",
-  "sessions.pendingCloseoutHint": "這些對話已結束。你可以把檢查要求複製到已連接 BrainLink 的 AI，或在這裡打開對話。未經你同意，不會儲存任何內容。",
+  "sessions.pendingCloseoutHint": "這些對話已結束。你可以在這裡開啟私人草稿預覽，或把檢查要求複製到已連接 BrainLink 的 AI。未經你同意，不會儲存任何內容。",
   "sessions.reviewEndedSession": "查看這次對話",
   "sessions.copyReviewRequest": "複製給 AI 的檢查要求",
   "sessions.copyRequestCopied": "已複製。請貼到已連接 BrainLink 的 AI。",
