@@ -4,6 +4,7 @@ import { mkdtemp, readFile, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { createRsiLedger } from '../src/rsi-ledger.mjs';
+import { findSecrets } from '../src/core.mjs';
 import { startSetup } from '../src/setup.mjs';
 import { logActivity } from '../src/runtime.mjs';
 
@@ -54,7 +55,8 @@ test('RSI acceptance requires recorded evidence, reviewer, promotion commit and 
   assert.equal(monitored.status, 'accepted', 'monitoring never changes promotion status');
   assert.equal(monitored.monitoring.length, 1);
   assert.equal(monitored.monitoring[0].decision, 'stable');
-  assert.match(monitored.monitoring[0].monitoring_id, /^BL-RSI-MON-\d{8}-[a-f0-9-]{8,36}$/);
+  assert.match(monitored.monitoring[0].monitoring_id, /^BL-RSI-MON-\d{8}-x[a-f0-9-]{8,36}$/);
+  assert.deepEqual(findSecrets(monitored.monitoring[0].monitoring_id), [], 'generated receipt ID must not resemble an account number to the privacy scanner');
   await assert.rejects(ledger.recordMonitoring({ id: idea.id, expected_revision: accepted.revision, monitoring }), /changed/);
   const rollback = { restored_commit_sha: 'b'.repeat(40), restored_version: '1.2.8', reason: 'Regression in a fresh test set.', reviewer: 'Independent reviewer', evidence_ref: 'https://example.org/rollback/receipt-1' };
   await assert.rejects(ledger.update({ id: idea.id, expected_revision: monitored.revision, status: 'rolled_back' }), /rollback receipt/);

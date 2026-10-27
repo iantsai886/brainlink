@@ -300,7 +300,9 @@ export function createRsiLedger({ home, now = () => new Date() }) {
       if (!metric || typeof metric !== 'object' || Array.isArray(metric) || Object.keys(metric).length !== 3 || typeof metric.name !== 'string' || !metric.name.trim() || metric.name.length > 80 || ![metric.baseline, metric.observed].every(value => typeof value === 'number' && Number.isFinite(value) && Math.abs(value) <= 1e9)) throw new Error('Monitoring primary metric is invalid.');
       if (!Array.isArray(input.guardrails) || input.guardrails.length < 1 || input.guardrails.length > 12 || input.guardrails.some(value => typeof value !== 'string' || !value.trim() || value.length > 160)) throw new Error('Monitoring guardrails must be a list of 1 to 12 short results.');
       const receipt = {
-        schema: 1, monitoring_id: `BL-RSI-MON-${now().toISOString().slice(0, 10).replaceAll('-', '')}-${randomUUID().slice(0, 8)}`,
+        // Keep a letter between the date and random hex so the account-number scanner does not
+        // mistake the generated ID for a long numeric value when the suffix starts with digits.
+        schema: 1, monitoring_id: `BL-RSI-MON-${now().toISOString().slice(0, 10).replaceAll('-', '')}-x${randomUUID().slice(0, 8)}`,
         recorded_at: recordedAt, monitored_commit_sha: sha.toLowerCase(), window_start: input.window_start, window_end: input.window_end,
         test_set_version: testSet, sample_count: input.sample_count, decision: input.decision,
         primary_metric: { name: metric.name.trim(), baseline: metric.baseline, observed: metric.observed },
@@ -309,7 +311,10 @@ export function createRsiLedger({ home, now = () => new Date() }) {
       };
       const scanReceipt = { ...receipt, monitored_commit_sha: '' };
       const text = JSON.stringify(scanReceipt);
-      if (text.length > 8000 || findSecrets(text).length || /<(?:script|iframe)\b/i.test(text)) throw new Error('Monitoring evidence contains disallowed or sensitive text.');
+      if (text.length > 8000) throw new Error('Monitoring evidence is too large.');
+      const secretTypes = findSecrets(text);
+      if (secretTypes.length) throw new Error(`Monitoring evidence contains sensitive content (${secretTypes.join(', ')}).`);
+      if (/<(?:script|iframe)\b/i.test(text)) throw new Error('Monitoring evidence contains disallowed markup.');
       await append({ kind: 'monitoring', idea_id: id, at: receipt.recorded_at, receipt });
       return project(await readEvents(file)).find(x => x.id === id);
     }),
