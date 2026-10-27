@@ -4,16 +4,17 @@ const ENTITY_TYPES = new Set(['person', 'team', 'workflow', 'dataset', 'artifact
 const PREDICATES = new Set(['owned_by', 'runs', 'consumes', 'produces', 'depends_on', 'part_of', 'assigned_to', 'informed_by', 'communicates_with']);
 const SCOPES = new Set(['personal', 'organisation', 'client']);
 const ID = /^[a-z][a-z0-9._:-]{1,127}$/;
+const phrase = (pattern, cjk = '') => new RegExp(`(?<![\\p{L}\\p{N}_])(?:${pattern})(?![\\p{L}\\p{N}_])${cjk ? `|(?:${cjk})` : ''}`, 'iu');
 const DISCOVERY_RULES = [
-  { predicate: 'owned_by', targets: ['team', 'person'], phrase: /\b(?:owned by|owner is|belongs to)\b/i },
-  { predicate: 'runs', targets: ['workflow'], phrase: /\b(?:runs|operates|executes)\b/i },
-  { predicate: 'consumes', targets: ['dataset', 'artifact'], phrase: /\b(?:consumes|uses|reads|takes in)\b/i },
-  { predicate: 'produces', targets: ['dataset', 'artifact'], phrase: /\b(?:produces|creates|outputs|generates)\b/i },
-  { predicate: 'depends_on', targets: ['workflow', 'dataset', 'project'], phrase: /\b(?:depends on|requires|relies on)\b/i },
-  { predicate: 'part_of', targets: ['team', 'project'], phrase: /\b(?:part of|belongs to)\b/i },
-  { predicate: 'assigned_to', targets: ['person', 'team'], phrase: /\bassigned to\b/i },
-  { predicate: 'informed_by', targets: ['artifact', 'dataset', 'concept'], phrase: /\b(?:informed by|based on|derived from)\b/i },
-  { predicate: 'communicates_with', targets: ['person', 'team'], phrase: /\b(?:communicates with|talks to|coordinates with|hands off to)\b/i },
+  { predicate: 'owned_by', targets: ['team', 'person'], phrase: phrase('owned by|owner is|belongs to|gerido por|responsável é|pertence a|所有者是|負責人是|负责人是') },
+  { predicate: 'runs', targets: ['workflow'], phrase: phrase('runs|operates|executes|executa|opera|realiza', '執行|执行|運行|运行') },
+  { predicate: 'consumes', targets: ['dataset', 'artifact'], phrase: phrase('consumes|uses|reads|takes in|consome|usa|utiliza|lê', '消耗|使用|讀取|读取') },
+  { predicate: 'produces', targets: ['dataset', 'artifact'], phrase: phrase('produces|creates|outputs|generates|produz|cria|gera', '產生|产生|生成|輸出|输出') },
+  { predicate: 'depends_on', targets: ['workflow', 'dataset', 'project'], phrase: phrase('depends on|requires|relies on|depende de|requer|necessita de', '依賴|依赖|需要') },
+  { predicate: 'part_of', targets: ['team', 'project'], phrase: phrase('part of|belongs to|parte de|faz parte de', '屬於|属于') },
+  { predicate: 'assigned_to', targets: ['person', 'team'], phrase: phrase('assigned to|atribuído a|atribuída a|designado a', '分配給|分配给|指派給|指派给') },
+  { predicate: 'informed_by', targets: ['artifact', 'dataset', 'concept'], phrase: phrase('informed by|based on|derived from|informado por|com base em|derivado de|baseado em', '根據|根据|依據|依据') },
+  { predicate: 'communicates_with', targets: ['person', 'team'], phrase: phrase('communicates with|talks to|coordinates with|hands off to|comunica com|fala com|coordena com|encaminha para', '(?:與|和)[^。！？.!?]{0,80}?(?:溝通|沟通|協作|协作|交接給|交接给)') },
 ];
 
 function scalar(value) {
@@ -152,7 +153,9 @@ export function discoverTypedRelationshipCandidates(notes, sourceIndex, { limit 
     const title = targetNote.title || pathTitle(targetNote.rel);
     if (!title) continue;
     const escaped = title.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-    const mention = new RegExp(`(^|[^\\p{L}\\p{N}_])${escaped}(?=$|[^\\p{L}\\p{N}_])`, 'iu');
+    const mention = /[\p{Script=Han}\p{Script=Hiragana}\p{Script=Katakana}]/u.test(title)
+      ? new RegExp(escaped, 'iu')
+      : new RegExp(`(^|[^\\p{L}\\p{N}_])${escaped}(?=$|[^\\p{L}\\p{N}_])`, 'iu');
     for (const sentence of paragraphs) {
       const evidence = sentence.trim().replace(/^[-*#>\s]+/, '').replace(/\s+/g, ' ');
       if (!evidence || evidence.length > 320 || !mention.test(evidence)) continue;

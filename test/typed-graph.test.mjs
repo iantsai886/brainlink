@@ -146,6 +146,20 @@ test('workflow graph suggests explicit team communication links without auto-ver
   assert.deepEqual(deriveTypedRelations([{ ...notes[0], raw: proposed }, notes[1]]), [], 'suggestion must be reviewed before becoming a graph edge');
 });
 
+test('typed relationship discovery recognizes explicit Portuguese and Chinese workflow sentences', () => {
+  const portuguese = [
+    { rel: 'Equipe de Produto.md', title: 'Equipe de Produto', body: 'A Equipe de Produto coordena com a Equipe de Dados durante a triagem.', raw: '---\ntype: team\nid: team.produto\nscope: organisation\nstatus: current\n---\n' },
+    { rel: 'Equipe de Dados.md', title: 'Equipe de Dados', body: '', raw: '---\ntype: team\nid: team.dados\nscope: organisation\nstatus: current\n---\n' },
+  ];
+  assert.deepEqual(discoverTypedRelationshipCandidates(portuguese, 0).map(({ predicate, target_id }) => [predicate, target_id]), [['communicates_with', 'team.dados']]);
+
+  const chinese = [
+    { rel: '問題工作流程.md', title: '問題工作流程', body: '問題工作流程使用問題資料來整理回覆。', raw: '---\ntype: workflow\nid: workflow.questions-zh\nscope: organisation\nstatus: current\n---\n' },
+    { rel: '問題資料.md', title: '問題資料', body: '', raw: '---\ntype: dataset\nid: dataset.questions-zh\nscope: organisation\nstatus: current\n---\n' },
+  ];
+  assert.deepEqual(discoverTypedRelationshipCandidates(chinese, 0).map(({ predicate, target_id }) => [predicate, target_id]), [['consumes', 'dataset.questions-zh']]);
+});
+
 test('automatic relationship candidates are saved as proposed YAML and never verified automatically', () => {
   const raw = '---\ntype: workflow\nid: workflow.questions\nscope: organisation\nstatus: current\n---\n# Questions\n';
   const saved = appendTypedRelationProposal(raw, { predicate: 'consumes', target_id: 'dataset.questions', evidence: 'Consumes Question data.', confidence: 0.72 });
