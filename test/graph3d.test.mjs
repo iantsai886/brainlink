@@ -192,6 +192,16 @@ test('typed relationship review requires a current note revision and adds only t
 
     const repeated = await api('/api/graph3d/relationship/approve', { vault: 'Main', path: 'Workflow.md', etag: approved.etag, relation_index: 0 });
     assert.match(repeated.error, /no longer an eligible suggestion/i);
+
+    const staleRollback = await api('/api/graph3d/relationship/reopen', { vault: 'Main', path: 'Workflow.md', etag: detail.etag, relation_index: 0 });
+    assert.match(staleRollback.error, /changed since it was opened/i);
+    const reopened = await api('/api/graph3d/relationship/reopen', { vault: 'Main', path: 'Workflow.md', etag: approved.etag, relation_index: 0 });
+    assert.equal(reopened.ok, true, JSON.stringify(reopened));
+    const reopenedRaw = await fs.readFile(path.join(vaultPath, 'Workflow.md'), 'utf8');
+    assert.match(reopenedRaw, /^    review: proposed$/m);
+    assert.match(reopenedRaw, /^    source: "Operations handbook section 2"$/m);
+    assert.ok(!(await api('/api/graph3d', {})).links.some((link) => link.predicate === 'runs'));
+    assert.equal((await api('/api/graph3d/reviews', {})).total, 1, 'undo returns the link to review');
   } finally { s.server.close(); }
 });
 
@@ -333,6 +343,8 @@ test('graph UI exposes a confirmation-gated action for reviewing a suggested rel
   assert.match(src, /window\.confirm\(tr\('notes3d\.rejectConfirm'\)\)/);
   assert.match(src, /api\('\/api\/graph3d\/relationship\/approve'/);
   assert.match(src, /api\('\/api\/graph3d\/relationship\/reject'/);
+  assert.match(src, /api\('\/api\/graph3d\/relationship\/reopen'/);
+  assert.match(src, /data-reopen-relation/);
   assert.match(src, /data-reject-queued/);
   assert.match(src, /api\('\/api\/graph3d\/relationship\/propose'/);
   assert.match(src, /notes3d\.saveSuggestionConfirm/);

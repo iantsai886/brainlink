@@ -147,7 +147,7 @@
         const parts = [];
         if (detail.backlinks.length) parts.push(`<div class="muted" style="font-size:12px;margin-top:10px">Linked from</div><div class="row">${detail.backlinks.map((n) => chip(n, 'backlink')).join('')}</div>`);
         if (detail.outlinks.length) parts.push(`<div class="muted" style="font-size:12px;margin-top:10px">Links to</div><div class="row">${detail.outlinks.map((n) => chip(n, 'link')).join('')}</div>`);
-        if (detail.relationships?.length) parts.push(`<div class="muted" style="font-size:12px;margin-top:10px">Typed relationships</div>${detail.relationships.map((r) => `<div style="margin:5px 0"><div><b>${esc(r.predicate)}</b> · ${esc(r.direction)}</div><div class="row">${chip(r.note, 'related record')}</div><small class="muted">${esc(r.evidence)} · confidence ${esc(r.confidence)}</small></div>`).join('')}`);
+        if (detail.relationships?.length) parts.push(`<div class="muted" style="font-size:12px;margin-top:10px">Typed relationships</div>${detail.relationships.map((r) => `<div style="margin:5px 0"><div><b>${esc(r.predicate)}</b> · ${esc(r.direction)}</div><div class="row">${chip(r.note, 'related record')}</div><small class="muted">${esc(r.evidence)} · confidence ${esc(r.confidence)}</small>${detail.writable && r.direction === 'outgoing' ? `<div style="margin-top:8px"><button type="button" class="chip" data-reopen-relation="${esc(r.relation_index)}">${esc(tr('notes3d.undoApproval'))}</button></div>` : ''}</div>`).join('')}`);
         if (detail.proposed_relationships?.length) parts.push(`<div class="muted" style="font-size:12px;margin-top:12px"><b>${esc(tr('notes3d.proposedRelationships'))}</b></div><p class="muted">${esc(tr('notes3d.proposedHint'))}</p>${detail.proposed_relationships.map((r) => `<div class="card" style="margin:6px 0"><div><b>${esc(r.predicate)}</b></div><div class="row">${chip(r.note, tr('notes3d.suggestedTarget'))}</div><small class="muted">${esc(r.evidence)} · ${esc(tr('notes3d.confidence', { confidence: r.confidence }))}</small>${detail.writable ? `<div class="row" style="margin-top:8px"><button type="button" class="chip" data-review-relation="${esc(r.relation_index)}">${esc(tr('notes3d.approveRelationship'))}</button><button type="button" class="chip" data-reject-relation="${esc(r.relation_index)}">${esc(tr('notes3d.rejectRelationship'))}</button></div>` : ''}</div>`).join('')}`);
         if (detail.discovered_relationships?.length) parts.push(`<div class="muted" style="font-size:12px;margin-top:12px"><b>${esc(tr('notes3d.discoveredRelationships'))}</b></div><p class="muted">${esc(tr('notes3d.discoveredHint'))}</p>${detail.discovered_relationships.map((r) => `<div class="card" style="margin:6px 0"><div><b>${esc(r.predicate)}</b></div><div class="row">${chip(r.note, tr('notes3d.suggestedTarget'))}</div><small class="muted">${esc(r.evidence)} · ${esc(tr('notes3d.patternOnly'))}</small>${detail.writable ? `<div style="margin-top:8px"><button type="button" class="chip" data-save-suggestion="${esc(r.target_id)}" data-predicate="${esc(r.predicate)}" data-evidence="${esc(r.evidence)}">${esc(tr('notes3d.saveSuggestion'))}</button></div>` : ''}</div>`).join('')}`);
         document.getElementById('notes3d-links').innerHTML = parts.join('');
@@ -272,6 +272,15 @@
         api('/api/graph3d/relationship/reject', { vault: currentDetail.vault, path: currentDetail.path, etag: currentDetail.etag, relation_index: Number(reject.dataset.rejectRelation) })
           .then(() => { toast(tr('notes3d.rejectedToast')); return refreshGraph(); })
           .catch((err) => { reject.disabled = false; toast(err.message, true); });
+        return;
+      }
+      const reopen = e.target.closest('[data-reopen-relation]');
+      if (reopen) {
+        if (!currentDetail || !window.confirm(tr('notes3d.undoApprovalConfirm'))) return;
+        reopen.disabled = true;
+        api('/api/graph3d/relationship/reopen', { vault: currentDetail.vault, path: currentDetail.path, etag: currentDetail.etag, relation_index: Number(reopen.dataset.reopenRelation) })
+          .then(() => { toast(tr('notes3d.undoApprovalToast')); return refreshGraph(); })
+          .catch((err) => { reopen.disabled = false; toast(err.message, true); });
         return;
       }
       const queuedReview = e.target.closest('[data-approve-queued]');

@@ -29,7 +29,7 @@ import { sessionsService } from './host.mjs';
 import { addAgent, renameAgent, removeAgent, revokeAgent, markConnected, findAgentByToken, publicAgent, localAgentSnippet, remoteAgentSnippet, generateAgentToken, hashToken } from './mcp-agents.mjs';
 import { analyzeActivitySignals } from './rsi-observations.mjs';
 import { buildGraph3D, noteDetail3D, listProposedTypedRelations } from './graph3d.mjs';
-import { deriveProposedTypedRelations, discoverTypedRelationshipCandidates, appendTypedRelationProposal, approveTypedRelation, rejectTypedRelation } from './typed-graph.mjs';
+import { deriveTypedRelations, deriveProposedTypedRelations, discoverTypedRelationshipCandidates, appendTypedRelationProposal, approveTypedRelation, rejectTypedRelation, reopenTypedRelation } from './typed-graph.mjs';
 import { snapshotSettings, chooseSnapshot, suggestSnapshotFolder, clearSnapshot, startSnapshotWatcher, writeSnapshotOnce, loadSnapshotStatus, saveSnapshotStatus } from './snapshot.mjs';
 import { listHandoffs } from './writes.mjs';
 import { backupOnce, verifyBackup, restoreBackupToEmpty, loadBackupStatus, saveBackupStatus, pruneBackups, listVerifiedBackups } from './backup.mjs';
@@ -1382,6 +1382,31 @@ export async function startSetup(opts = {}) {
       const etag = createHash('sha256').update(raw).digest('hex');
       if (typeof b.etag !== 'string' || b.etag !== etag) throw new Error('This note changed since it was opened. Reload it before reviewing the relationship.');
       const next = rejectTypedRelation(raw, relationIndex);
+      const tmp = `${full}.brainlink-${randomBytes(6).toString('hex')}.tmp`;
+      try { await writeFile(tmp, next, 'utf8'); await rename(tmp, full); }
+      catch (e) { try { await unlink(tmp); } catch {} throw e; }
+      return { ok: true, etag: createHash('sha256').update(next).digest('hex') };
+    },
+    'POST /api/graph3d/relationship/reopen': async (b) => {
+      const cfg = await loadConfig(file);
+      const ctx = localContext(cfg, { ...env, BRAINLINK_SEMANTIC: '0' });
+      if (!b.vault || !ctx.enabled.includes(b.vault)) throw new Error('Unknown vault.');
+      const vault = ctx.byName.get(b.vault);
+      if (vault.private) throw new Error('Relationships in a private vault cannot be reviewed in the shared graph.');
+      if (ctx.readOnly || vault.writes !== 'on') throw new Error('This vault does not allow relationship review.');
+      const current = await readNote(ctx, b.vault, String(b.path || ''));
+      const index = await loadVault(ctx, b.vault);
+      const sourceIndex = index.byRel.get(current.path);
+      if (sourceIndex === undefined || index.notes[sourceIndex].generated) throw new Error('This record cannot be reviewed.');
+      if (!Number.isSafeInteger(b.relation_index) || b.relation_index < 0) throw new Error('Invalid relationship selection.');
+      const relationIndex = b.relation_index;
+      const candidate = deriveTypedRelations(index.notes).find((edge) => edge.source === sourceIndex && edge.relation_index === relationIndex);
+      if (!candidate) throw new Error('That verified relationship is no longer eligible for rollback. Reload the note and review it again.');
+      const full = safeJoin(vaultRoot(ctx, b.vault), current.path);
+      const raw = await readFile(full, 'utf8');
+      const etag = createHash('sha256').update(raw).digest('hex');
+      if (typeof b.etag !== 'string' || b.etag !== etag) throw new Error('This note changed since it was opened. Reload it before reviewing the relationship.');
+      const next = reopenTypedRelation(raw, relationIndex);
       const tmp = `${full}.brainlink-${randomBytes(6).toString('hex')}.tmp`;
       try { await writeFile(tmp, next, 'utf8'); await rename(tmp, full); }
       catch (e) { try { await unlink(tmp); } catch {} throw e; }

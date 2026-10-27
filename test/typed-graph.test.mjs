@@ -6,7 +6,7 @@ import path from 'node:path';
 import { normalize } from '../src/config.mjs';
 import { createContext, loadVault } from '../src/core.mjs';
 import { buildGraph3D, noteDetail3D } from '../src/graph3d.mjs';
-import { deriveTypedRelations, discoverTypedRelationshipCandidates, appendTypedRelationProposal, approveTypedRelation, rejectTypedRelation } from '../src/typed-graph.mjs';
+import { deriveTypedRelations, discoverTypedRelationshipCandidates, appendTypedRelationProposal, approveTypedRelation, rejectTypedRelation, reopenTypedRelation } from '../src/typed-graph.mjs';
 import { proposeNote } from '../src/writes.mjs';
 import { createMcp } from '../src/server.mjs';
 
@@ -55,6 +55,17 @@ test('rejecting a proposed relationship preserves source evidence and does not v
   assert.match(rejected, /^    source: "Operations handbook section 2"$/m);
   assert.deepEqual(deriveTypedRelations([{ rel: 'Workflow.md', raw: rejected }]), []);
   assert.throws(() => rejectTypedRelation(rejected, 0), /no longer awaiting review/i);
+});
+
+test('reopening an approved relationship returns it to proposal state and preserves evidence', () => {
+  const raw = `---\ntype: workflow\nid: workflow.collect\nscope: organisation\nstatus: proposed\nrelations:\n  - predicate: runs\n    target: team.product\n    review: proposed\n    source: "Operations handbook section 2"\n    confidence: 0.8\n---\n# Collect questions\n`;
+  const approved = approveTypedRelation(raw, 0);
+  const reopened = reopenTypedRelation(approved, 0);
+  assert.match(reopened, /^status: current$/m, 'undoing an edge does not demote the already approved record');
+  assert.match(reopened, /^    review: proposed$/m);
+  assert.match(reopened, /^    source: "Operations handbook section 2"$/m);
+  assert.deepEqual(deriveTypedRelations([{ rel: 'Workflow.md', raw: reopened }]), []);
+  assert.throws(() => reopenTypedRelation(reopened, 0), /no longer awaiting review/i);
 });
 
 test('typed graph relationship suggestions are saved as proposed and become edges only after explicit review', async () => {

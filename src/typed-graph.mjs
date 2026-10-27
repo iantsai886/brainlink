@@ -83,7 +83,8 @@ export function deriveTypedRelations(notes) {
     const record = records[source];
     const { meta } = record;
     if (!ENTITY_TYPES.has(meta.type) || !ID.test(meta.id || '') || !SCOPES.has(meta.scope) || meta.status !== 'current' || record.note.generated || duplicates.has(meta.id)) continue;
-    for (const relation of record.relations) {
+    for (let relation_index = 0; relation_index < record.relations.length; relation_index++) {
+      const relation = record.relations[relation_index];
       const target = byId.get(relation.target);
       if (target === undefined || target === source) continue;
       const targetMeta = records[target].meta;
@@ -91,7 +92,7 @@ export function deriveTypedRelations(notes) {
       const confidence = Number(confidenceText);
       if (!PREDICATES.has(relation.predicate) || relation.review !== 'verified' || !relation.source ||
           relation.source.length > 300 || !/^(?:0(?:\.\d+)?|1(?:\.0+)?)$/.test(confidenceText) || !Number.isFinite(confidence) || confidence < 0 || confidence > 1 || targetMeta.scope !== meta.scope) continue;
-      edges.push({ source, target, predicate: relation.predicate, evidence: relation.source, confidence });
+      edges.push({ source, target, relation_index, predicate: relation.predicate, evidence: relation.source, confidence });
     }
   }
   return edges;
@@ -169,9 +170,9 @@ function pathTitle(rel) { return String(rel || '').split(/[\\/]/).pop()?.replace
 
 // Change only the selected review marker and (when needed) the source record's status.
 // The caller must first revalidate the target and compare a content hash.
-function resolveTypedRelation(raw, relationIndex, decision) {
+function resolveTypedRelation(raw, relationIndex, decision, expectedReview = 'proposed') {
   if (!Number.isInteger(relationIndex) || relationIndex < 0) throw new Error('Invalid relationship selection.');
-  if (!['verified', 'rejected'].includes(decision)) throw new Error('Invalid relationship decision.');
+  if (!['verified', 'rejected', 'proposed'].includes(decision) || !['proposed', 'verified', 'rejected'].includes(expectedReview)) throw new Error('Invalid relationship decision.');
   const match = String(raw || '').match(/^(\uFEFF?---[^\S\r\n]*\r?\n)([\s\S]*?)(\r?\n---[^\S\r\n]*(?:\r?\n|$))/);
   if (!match) throw new Error('This note has no valid frontmatter.');
   const lines = match[2].split(/\r?\n/);
@@ -190,7 +191,7 @@ function resolveTypedRelation(raw, relationIndex, decision) {
   if (start === undefined) throw new Error('The selected relationship no longer exists.');
   const end = starts[relationIndex + 1] ?? lines.findIndex((line, i) => i > start && /^[A-Za-z_][\w-]*:\s*/.test(line));
   const stop = end < 0 ? lines.length : end;
-  const reviewLine = lines.findIndex((line, i) => i > start && i < stop && /^\s{4}review:\s*["']?proposed["']?\s*$/.test(line));
+  const reviewLine = lines.findIndex((line, i) => i > start && i < stop && new RegExp(`^\\s{4}review:\\s*["']?${expectedReview}["']?\\s*$`).test(line));
   if (reviewLine < 0) throw new Error('This relationship is no longer awaiting review.');
   lines[reviewLine] = `    review: ${decision}`;
   return `${match[1]}${lines.join(raw.includes('\r\n') ? '\r\n' : '\n')}${match[3]}${String(raw).slice(match[0].length)}`;
@@ -200,6 +201,7 @@ function resolveTypedRelation(raw, relationIndex, decision) {
 // the source, target, and evidence so the user can inspect or correct it later.
 export function approveTypedRelation(raw, relationIndex) { return resolveTypedRelation(raw, relationIndex, 'verified'); }
 export function rejectTypedRelation(raw, relationIndex) { return resolveTypedRelation(raw, relationIndex, 'rejected'); }
+export function reopenTypedRelation(raw, relationIndex) { return resolveTypedRelation(raw, relationIndex, 'proposed', 'verified'); }
 
 export function appendTypedRelationProposal(raw, proposal) {
   if (!PREDICATES.has(proposal?.predicate) || !ID.test(String(proposal?.target_id || '')) ||

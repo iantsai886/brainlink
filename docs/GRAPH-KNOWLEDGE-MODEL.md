@@ -99,7 +99,7 @@ Minimum acceptance gates:
 
 - Every returned edge resolves to authorized source and target records; unknown targets and predicates abstain visibly.
 - Synthetic Personal, Organisation, and Client canaries never cross scopes in search, graph expansion, excerpts, handoffs, or logs.
-- Users can inspect, correct, approve, and reject generated relationships; rejection preserves Markdown evidence. Rollback of already verified relationships still requires editing the source note.
+- Users can inspect, correct, approve, and reject generated relationships. They can undo an approval from the source note panel; BrainLink returns the link to review, removes it from graph retrieval, and keeps its source evidence.
 - Broken and stale relations are detected without auto-deleting original notes or source evidence.
 - Typed graph retrieval improves answer success or reduces tokens at equal success on a frozen evaluation set; publish sample size, baseline, failures, and limits.
 
