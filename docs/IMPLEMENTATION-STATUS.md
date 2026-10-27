@@ -21,7 +21,7 @@ Local Windows validation: `npm run test:all` passed on source commit `46cc1a5`: 
 
 ### Windows installer build receipt (2026-10-27)
 
-The current source at `326044c` compiled successfully with Inno Setup 6.7.3 on Windows/PowerShell 7.6.5. Artifact: `dist/BrainLink-Setup-1.2.8.exe`, SHA-256 `0AAC7C26884F35A2CCB5392CEB3B132758435E0009C7C1E80992F83C94EF2681`. This proves the current installer definition and staged app package compile. I did not run the installer, so installed launch, upgrade, uninstall, registry/PATH cleanup, signing and user acceptance are still unverified.
+The current source at `326044c` compiled successfully with Inno Setup 6.7.3 on Windows/PowerShell 7.6.5. Artifact: `dist/BrainLink-Setup-1.2.8.exe`, SHA-256 `0AAC7C26884F35A2CCB5392CEB3B132758435E0009C7C1E80992F83C94EF2681`. This proves the current installer definition and staged app package compile. A local install/run/uninstall attempt was rejected by the environment policy before it ran; the staged-runtime check was also rejected. No installer-side effects occurred. Installed launch, upgrade, uninstall, registry/PATH cleanup, signing and user acceptance remain unverified.
 
 ### Support Antigravity and verify Hermes Skill paths on Windows
 
