@@ -20,7 +20,7 @@ On Windows with Node.js 24.22.1, ran `npm run test:all` from clean source commit
 
 ### Versioned RSI discovery-method provenance (2026-10-28)
 
-New discovery proposals record `method_version: lexical-overlap-v1`; the ledger rejects missing, malformed, or path-like method labels. The follow-up fixed synthetic evaluation now detects 3 false positives while blocking both hostile examples. It provides a reproducible baseline only. The next RSI step is to review the labels and build a separately held-out test set before attempting a new discovery method. Full-suite verification after the RSI additions is still pending.
+New discovery proposals record a versioned relevance method; the current method is `lexical-topic-gate-v2`. It requires overlap with the configured search topic and problem signal, as well as a BrainLink workflow term. The development fixture now catches the three known lexical-only false positives; this is not held-out proof. Full-suite verification after this change is still pending.
 
 ### Windows installer build and isolated install/uninstall smoke test (2026-10-28)
 
@@ -711,4 +711,8 @@ A matched session-end reminder now opens the filing form and prepares a private 
 
 ### Fixed RSI discovery quality check (2026-10-28)
 
-Added a deterministic, offline benchmark for the current RSI research relevance filter. On the 28 benign fictional cases it scored 12 true positives, 3 false positives, 0 false negatives and 13 true negatives (precision 0.800, recall 1.000); both hostile examples were blocked. The result is bound to fixture SHA-256 `6a54dcc7eeab7c9e3d346d8bf8b196beccee9abd12466b9a834db4b864c98778` and method `lexical-overlap-v1`. Focused discovery and RSI-ledger tests passed 38/38 and `npm run evaluate:rsi-discovery` completed. The command reads no vault, makes no network requests and cannot change live discovery. This is a small synthetic baseline, not held-out evidence or proof of recursive improvement. The matcher should be improved against the false positives and then rechecked on new independent examples.
+Added a deterministic offline baseline for RSI research relevance. The historical `lexical-overlap-v1` result on 28 benign fictional cases was 12 true positives, 3 false positives, 0 false negatives and 13 true negatives (precision 0.800, recall 1.000); both hostile examples were blocked. The historical receipt was bound to fixture SHA-256 `6a54dcc7eeab7c9e3d346d8bf8b196beccee9abd12466b9a834db4b864c98778`. This was a synthetic baseline, not held-out evidence or proof of recursive improvement.
+
+### RSI discovery now checks the configured topic too (2026-10-28)
+
+Research candidates must now match both the user's problem signal and the topic used for the public-source search, in addition to a BrainLink workflow term. The rule is recorded as `lexical-topic-gate-v2`; Chinese topic terms use the existing overlapping-bigram matcher. An offline fixture covers 28 benign fictional examples and two hostile examples. Current score: 12 true positives, 0 false positives, 0 false negatives and 16 true negatives; both hostile items are blocked. Fixture SHA-256: `c443ba9359b4c10c9a298b4966c5c7ace92a67b552ccf23171aad48a44bacdb0`. The three known false positives informed the new topic labels, so this is a development regression check, not an independent or held-out result. Focused discovery, evaluator and ledger tests passed 40/40 on Windows with Node.js 24.22.1; `npm run evaluate:rsi-discovery` and `git diff --check` passed. Full-suite verification and a separate unseen set remain pending; this does not prove broad research relevance or autonomous self-improvement.

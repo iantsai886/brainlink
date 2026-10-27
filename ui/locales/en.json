@@ -872,7 +872,7 @@
   "rsi.save": "Save idea",
   "rsi.duplicates": "These existing ideas look similar. Save this as a separate proposal anyway?",
   "rsi.discovery.title": "Research discovery (opt-in)",
-  "rsi.discovery.hint": "When turned on, BrainLink checks the selected public research and project sources for your topics and files relevant papers or projects here as <b>Discovered</b> proposals. Discoveries are never tested, accepted or released without your review.",
+  "rsi.discovery.hint": "When turned on, BrainLink checks selected public sources. A result must match both a search topic and one of your problems. It is saved only as a <b>Discovered</b> proposal; nothing is tested or adopted without your review.",
   "rsi.discovery.enabled": "Turn on discovery",
   "rsi.discovery.sourceLabel": "Public research and project sources",
   "rsi.discovery.topics": "Search topics sent to selected sources (one per line, up to 5)",

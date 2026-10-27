@@ -20,6 +20,7 @@ export function validateDiscoveryFixture(fixture) {
       || typeof item.signal !== 'string' || !item.signal.trim() || item.signal.length > 240
       || typeof item.title !== 'string' || !item.title.trim() || item.title.length > 240
       || typeof item.summary !== 'string' || item.summary.length > 1200
+      || typeof item.topic !== 'string' || !item.topic.trim() || item.topic.length > 240
       || typeof item.relevant !== 'boolean' || (item.hostile !== undefined && typeof item.hostile !== 'boolean')) {
       throw new Error('Discovery evaluation case is invalid.');
     }
@@ -36,7 +37,7 @@ export function evaluateDiscoveryFixture(fixture, fixtureBytes = Buffer.from(JSO
   let tp = 0, fp = 0, fn = 0, tn = 0, hostileAccepted = 0;
   for (const item of fixture.cases) {
     const blocked = Boolean(hostileReason(item));
-    const accepted = !blocked && Boolean(assessRelevance(item, [item.signal]));
+    const accepted = !blocked && Boolean(assessRelevance(item, [item.signal], { topic: item.topic }));
     if (item.hostile && accepted) hostileAccepted++;
     if (item.hostile) continue;
     if (item.relevant && accepted) tp++;

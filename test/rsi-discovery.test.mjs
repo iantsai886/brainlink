@@ -197,6 +197,17 @@ test('relevance requires both a user problem statement and a BrainLink memory/ag
   assert.equal(assessRelevance({ title: 'Agent memory benchmarks', summary: 'Vision models for robots.' }, [SIGNAL]), null, 'no user problem overlap');
 });
 
+test('relevance also requires the result to match the configured research topic', () => {
+  const restaurant = { title: 'Agent workflow for restaurant orders', summary: 'A dispatch agent handles order continuation between kitchen shifts.' };
+  assert.ok(assessRelevance(restaurant, ['agent workflow continuation']), 'legacy direct checks without a topic keep their original behavior');
+  assert.equal(assessRelevance(restaurant, ['agent workflow continuation'], { topic: 'agent memory' }), null,
+    'an unrelated feed result cannot pass only because its wording matches a broad problem signal');
+  const onTopic = { title: 'Agent memory for session handoff', summary: 'Compact memory helps an agent resume work after context loss.' };
+  const match = assessRelevance(onTopic, ['agent handoff memory'], { topic: 'agent memory' });
+  assert.ok(match);
+  assert.deepEqual(match.topic_matched_terms, ['agent', 'memory']);
+});
+
 test('research relevance supports Chinese phrases without spaces and reports matching memory types', () => {
   const signal = '降低 AI 知識檢索成本並改善智能體交接';
   const relevant = assessRelevance({ title: 'AI 智能體的知識檢索與交接', summary: '精簡上下文能降低檢索成本。' }, [signal]);
@@ -209,6 +220,9 @@ test('research relevance supports Chinese phrases without spaces and reports mat
   const simplified = assessRelevance({ title: '人工智能知识检索与智能体交接', summary: '知识检索能缩短上下文。' }, ['降低人工智能知识检索成本并改善智能体交接']);
   assert.ok(simplified, 'Simplified Chinese text should also match when the same characters are used');
   assert.ok(simplified.memory_types.includes('semantic') && simplified.memory_types.includes('working'));
+  assert.ok(assessRelevance({ title: '人工智能知識檢索與智能體交接', summary: '記憶系統可壓縮上下文。' }, [signal], { topic: '知識檢索' }));
+  assert.equal(assessRelevance({ title: '台灣知識分類與旅行筆記', summary: '人工智慧智能體交接不相關。' }, [signal], { topic: '知識檢索' }), null,
+    'a topical partial match still needs enough shared topic terms');
 });
 
 test('Chinese relevance rejects unrelated text that has no matching multi-character concepts', () => {
@@ -236,7 +250,7 @@ test('a run files relevant entries as discovered proposals with full provenance 
   assert.equal(idea.status, 'discovered');
   assert.equal(idea.origin, 'discovery');
   assert.equal(idea.discovery.run_id, receipt.run_id);
-  assert.equal(idea.discovery.method_version, 'lexical-overlap-v1');
+  assert.equal(idea.discovery.method_version, 'lexical-topic-gate-v2');
   assert.equal(idea.discovery.source, 'arxiv');
   assert.equal(idea.discovery.topic, 'agent memory');
   assert.equal(idea.discovery.signal, SIGNAL);
@@ -261,6 +275,15 @@ test('a run files relevant entries as discovered proposals with full provenance 
   const sent = JSON.stringify(fetchImpl.calls.map(c => ({ url: c.url, headers: c.init.headers })));
   assert.match(decodeURIComponent(fetchImpl.calls[0].url), /all:"agent[+ ]memory"/);
   for (const word of ['lose', 'context after', 'repeat the same']) assert.ok(!decodeURIComponent(sent).includes(word), word);
+});
+
+test('a feed result matching the problem signal but not the research topic is dropped', async () => {
+  const feed = atom(entry({ title: 'Agent workflow for restaurant orders', summary: 'A dispatch agent handles order continuation between kitchen shifts.' }));
+  const { discovery } = await service(feed);
+  await discovery.configure({ ...settings, signals: ['agent workflow continuation'] });
+  const receipt = await discovery.run();
+  assert.equal(receipt.created.length, 0);
+  assert.equal(receipt.dropped.irrelevant, 1);
 });
 
 test('discovery ledger rejects missing or malformed method-version lineage', async () => {
@@ -378,7 +401,7 @@ test('opt-in source refresh checks only old selected-source proposals, is capped
     entry({ id: '2610.00014', title: 'Episodic session memory tracks task outcomes', summary: 'Agents resume prior work after handoffs without repeating retrieval searches.' }),
   );
   const { discovery, fetchImpl, ledger } = await service(feed, { now: () => new Date(clock) });
-  await discovery.configure({ ...settings, enabled: true, refresh_existing: true });
+  await discovery.configure({ ...settings, topics: ['agent retrieval'], enabled: true, refresh_existing: true });
   const run = await discovery.run();
   assert.equal(run.created.length, 4);
   clock = new Date('2026-12-01T00:00:00Z');

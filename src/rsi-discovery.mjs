@@ -318,7 +318,7 @@ export function parseGitHub(json, { single = false } = {}) {
 
 // Keep the discovery strategy in each saved proposal so future method changes can be
 // compared against the method that found an earlier idea.
-export const DISCOVERY_METHOD_VERSION = 'lexical-overlap-v1';
+export const DISCOVERY_METHOD_VERSION = 'lexical-topic-gate-v2';
 
 const stem = (w) => w.length > 3 ? w.replace(/(?:ies)$/, 'y').replace(/(?<!s)s$/, '') : w;
 const tokens = (text) => {
@@ -339,12 +339,17 @@ const containsPhrase = (haystack, phrase) => {
   const escaped = phrase.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
   return new RegExp('(?:^|[^\\p{L}\\p{N}])' + escaped + 's?(?:$|[^\\p{L}\\p{N}])', 'iu').test(haystack);
 };
-export function assessRelevance(entry, signals) {
+export function assessRelevance(entry, signals, { topic = '' } = {}) {
   const text = `${entry.title} ${entry.summary}`.toLowerCase();
   const memoryTypes = Object.entries(WORKFLOW_TERMS).filter(([, terms]) => terms.some(t => containsPhrase(text, t))).map(([type]) => type);
   const workflowTerms = [...Object.values(WORKFLOW_TERMS).flat(), ...GENERAL_TERMS].filter(t => containsPhrase(text, t)).slice(0, 8);
   if (!workflowTerms.length) return null;
   const entryWords = new Set(words(text));
+  // Search results must match both the user's problem statement and their research topic.
+  // Search APIs can return loosely related entries, so do not trust the query alone.
+  const topicWords = [...new Set(words(topic))];
+  const topicMatched = topicWords.filter((word) => entryWords.has(word));
+  if (topicWords.length && topicMatched.length < Math.min(2, topicWords.length)) return null;
   let best = null;
   for (const signal of signals) {
     // Match on stems, but show the reviewer the words as they appear in their own statement.
@@ -358,7 +363,7 @@ export function assessRelevance(entry, signals) {
     if (!best || score > best.score) best = { signal, matched_terms: matched.slice(0, 8), score };
   }
   if (!best) return null;
-  return { ...best, workflow_terms: workflowTerms, memory_types: memoryTypes };
+  return { ...best, topic_matched_terms: topicMatched.slice(0, 8), workflow_terms: workflowTerms, memory_types: memoryTypes };
 }
 
 export function hostileReason(entry) {
@@ -454,7 +459,7 @@ export function createRsiDiscovery({ home, ledger, fetchImpl, lookup, now = () =
               const hostile = hostileReason(entry);
               if (hostile) { receipt.dropped[hostile]++; continue; }
               if (seen.has(entry.url)) continue;
-              const relevance = assessRelevance(entry, settings.signals);
+              const relevance = assessRelevance(entry, settings.signals, { topic });
               if (!relevance) { receipt.dropped.irrelevant++; continue; }
               seen.add(entry.url);
               candidates.push({ score: relevance.score, candidate: candidateFor(entry, relevance, { runId, sourceId, topic, accessedAt }) });

@@ -5,9 +5,9 @@ import { evaluateDiscoveryFixture, runDiscoveryEvaluation, validateDiscoveryFixt
 test('fixed discovery fixture produces a bounded, private aggregate receipt', async () => {
   const result = await runDiscoveryEvaluation();
   assert.equal(result.suite, 'rsi-discovery-v1');
-  assert.equal(result.method_version, 'lexical-overlap-v1');
+  assert.equal(result.method_version, 'lexical-topic-gate-v2');
   assert.equal(result.sample_count, 28);
-  assert.deepEqual(result.metrics, { precision: 0.8, recall: 1, f1: 0.889, true_positive: 12, false_positive: 3, false_negative: 0, true_negative: 13 });
+  assert.deepEqual(result.metrics, { precision: 1, recall: 1, f1: 1, true_positive: 12, false_positive: 0, false_negative: 0, true_negative: 16 });
   assert.equal(result.guardrails.hostile_entries_accepted, 0);
   assert.match(result.fixture_sha256, /^[a-f0-9]{64}$/);
   assert.ok(result.metrics.precision >= 0 && result.metrics.precision <= 1);

@@ -872,7 +872,7 @@
   "rsi.save": "儲存想法",
   "rsi.duplicates": "這些現有想法可能相似。仍要另存為一項提案嗎？",
   "rsi.discovery.title": "研究探索（需自行開啟）",
-  "rsi.discovery.hint": "開啟後，BrainLink 會在你選擇的公開研究與專案來源搜尋主題，並把相關論文或專案記錄為<b>已發現</b>提案。未經你審查，探索結果絕不會被測試、採納或發布。",
+  "rsi.discovery.hint": "開啟後，BrainLink 會搜尋你選擇的公開來源。結果必須同時符合搜尋主題和一項問題，才會成為<b>已發現</b>提案。未經你審查，不會測試或採用。",
   "rsi.discovery.enabled": "開啟探索",
   "rsi.discovery.sourceLabel": "公開研究與專案來源",
   "rsi.discovery.topics": "傳送給已選來源的搜尋主題（每行一個，最多 5 個）",
