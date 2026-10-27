@@ -22,4 +22,13 @@ The manifest follows the [Agent Skills specification](https://agentskills.io/spe
 - **Validation:** manifest, byte-identical discovery-copy, memory-type distinction, provenance, scope, and separate-approval assertions pass locally. No live model/client closeout, automatic transcript reading, or real-world filing accuracy is claimed.
 - **Rollback:** revert the Git change to the canonical skill and both client copies. No vault migration is needed.
 
+## `brainlink-graph-curation` 1.0.0
+
+- **Purpose:** guide an AI to turn one selected source into separate typed entities and evidence-backed relationship proposals in the existing Markdown graph.
+- **Clients:** any Agent Skills-compatible client connected to BrainLink MCP; Claude Code and Codex have repository discovery copies. Setup can install it for the supported connected clients listed above.
+- **Tools:** `brainlink_guide`, `vault_search`, `vault_read_note`, and `propose_note`.
+- **Scope:** one authorized vault at a time; stable typed IDs; exact source evidence; only same-vault, same-scope current targets; every new entity and edge stays proposed until human review. It does not edit existing notes or claim measured token savings.
+- **Validation:** Agent Skills manifest, client-copy parity, scope, evidence, and approval workflow assertions pass locally. Live client discovery and extraction quality remain unverified.
+- **Rollback:** revert the canonical Skill, the two discovery copies, documentation, and tests. No vault migration is needed.
+
 To validate the files and client copies, run `node --test test/skills.test.mjs`. To run the fictional two-client MCP flow, run `node --import ./test/_preload.mjs --test test/cross-client-handoff.test.mjs`. It exercises the real MCP tools without simulating model behavior or claiming live client completion.

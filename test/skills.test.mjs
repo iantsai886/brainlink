@@ -96,3 +96,23 @@ test('portable session-closeout Skill is identical across clients and preserves 
   assert.match(body, /saving a session does not authorize these additional durable notes/i);
   assert.match(body, /If no durable candidate qualifies, say none was proposed/);
 });
+
+test('portable graph-curation Skill keeps entities separate, scoped, evidence-backed and review-gated', async () => {
+  const id = 'brainlink-graph-curation';
+  const skillPaths = [`skills/${id}/SKILL.md`, `.agents/skills/${id}/SKILL.md`, `.claude/skills/${id}/SKILL.md`];
+  const contents = await Promise.all(skillPaths.map((file) => readFile(path.join(ROOT, file), 'utf8')));
+  assert.equal(new Set(contents).size, 1, 'canonical skill and client copies must stay byte-identical');
+  const { fields, body } = parseSkill(contents[0], skillPaths[0]);
+  assert.equal(fields.metadata.version, '1.0.0');
+  assert.match(fields.metadata['applicable-clients'], /Any AI client/);
+  for (const tool of ['brainlink_guide', 'vault_search', 'vault_read_note', 'propose_note']) assert.ok(fields.compatibility.includes(tool) || fields.metadata['required-tools'].includes(tool), tool);
+  for (const type of ['person', 'team', 'workflow', 'dataset', 'artifact', 'project', 'policy', 'concept']) assert.ok(body.includes('`' + type + '`'), type);
+  assert.match(body, /one vault/);
+  assert.match(body, /short exact source excerpt/);
+  assert.match(body, /stores new typed entities and relationships as proposed/i);
+  assert.match(body, /confirm=false/);
+  assert.match(body, /wait for the user's approval/);
+  assert.match(body, /do not link to it yet/);
+  assert.match(body, /Never cross Personal, Organisation, and Client boundaries/);
+  assert.match(body, /Do not claim token savings/);
+});

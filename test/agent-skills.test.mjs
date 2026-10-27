@@ -10,7 +10,7 @@ import { startSetup } from '../src/setup.mjs';
 
 const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const sourceSkills = path.join(repoRoot, 'skills');
-const skillNames = ['brainlink-cross-ai-handoff', 'brainlink-raw-to-wiki', 'brainlink-session-closeout'];
+const skillNames = ['brainlink-cross-ai-handoff', 'brainlink-graph-curation', 'brainlink-raw-to-wiki', 'brainlink-session-closeout'];
 
 async function fixture(t) {
   const base = await mkdtemp(path.join(os.tmpdir(), 'brainlink-agent-skills-'));
@@ -80,7 +80,7 @@ test('install is repeatable, updates only files BrainLink still owns, and preser
   const extra = path.join(root, updatedName, 'user-reference.txt');
   await writeFile(extra, 'keep this user file');
   const removed = await removeAgentSkills({ client: 'codex', stateDir: f.stateDir, home: f.home, env: f.env });
-  assert.deepEqual(removed.removed, [updatedName, skillNames[2]]);
+  assert.deepEqual(removed.removed, skillNames.filter((name) => name !== locallyChanged).sort());
   assert.deepEqual(removed.changed, [locallyChanged]);
   assert.equal(await readFile(changedFile, 'utf8'), edited);
   assert.equal(await readFile(extra, 'utf8'), 'keep this user file');
