@@ -43,6 +43,7 @@ test('buildGraph3D: a note with frontmatter "private: true" never appears as a n
   const g = await buildGraph3D(ctx, 'Main');
   const titles = g.nodes.map((n) => n.title);
   assert.ok(!titles.includes('Hidden Note'), JSON.stringify(titles));
+  assert.equal(g.total, 2, 'the total count must not disclose the private note');
   const alpha = g.nodes.find((n) => n.title === 'Alpha');
   const beta = g.nodes.find((n) => n.title === 'Beta');
   // No link can target a node that was never added to the node list.
@@ -59,6 +60,7 @@ test('buildGraph3D: a whole private vault is omitted even when another vault is 
   const g = await buildGraph3D(ctx); // no vault filter: every enabled vault
   assert.ok(!g.nodes.some((n) => n.vault === 'Diary'), JSON.stringify(g.nodes));
   assert.ok(g.nodes.some((n) => n.vault === 'Main'));
+  assert.equal(g.total, 2, 'the total count must not disclose notes in the private vault');
 });
 
 test('noteDetail3D: refuses a private note, an excluded-folder note, and a private vault', async () => {
@@ -131,6 +133,7 @@ test('/api/graph3d and /api/graph3d/note: same exclusion guarantee over HTTP', a
 
     const g = await api('/api/graph3d', {});
     const titles = g.nodes.map((n) => n.title);
+    assert.equal(g.total, 3, 'the HTTP graph total counts only public, non-generated notes');
     assert.ok(!titles.includes('Hidden Note') && !titles.includes('Buried'), JSON.stringify(titles));
     assert.ok(titles.includes('External') && !titles.includes('External Private'), JSON.stringify(titles));
     const available = await api('/api/graph3d/vaults', {});
@@ -138,6 +141,7 @@ test('/api/graph3d and /api/graph3d/note: same exclusion guarantee over HTTP', a
     assert.ok(available.vaults[0].notes >= titles.length);
     const filtered = await api('/api/graph3d', { vault: 'Main' });
     assert.deepEqual(filtered.nodes.map((n) => n.title), titles);
+    assert.equal(filtered.total, g.total);
 
     const note = await api('/api/graph3d/note', { vault: 'Main', path: 'Beta.md' });
     assert.match(note.body, /Backlinked from Alpha/);

@@ -41,8 +41,10 @@ export async function buildGraph3D(ctx, vaultName, { limit = 2000 } = {}) {
   for (const { name, index } of vaults) {
     for (let i = 0; i < index.notes.length; i++) {
       const n = index.notes[i];
-      total++;
       if (n.generated || isPrivateNote(n)) continue;
+      // Even an aggregate count can reveal the presence of private material. Count only notes
+      // eligible for the caller's graph, just as listGraphVaults() does.
+      total++;
       keep.push({ name, index, i });
     }
   }

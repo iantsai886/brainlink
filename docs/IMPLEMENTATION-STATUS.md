@@ -14,6 +14,10 @@ On Windows with Node.js 24.22.1, `npm run test:all` passed on commit `476d636cb7
 
 Built `dist/BrainLink-Setup-1.2.8.exe` from source commit `3acb1b5ed2efb9ea66d249e6d3445cb5e4dd5eaa` using Inno Setup 6.7.3 and bundled Node.js 24.22.1. SHA-256: `528DC9C56150D8A5EE22872B5EE67FCB325CD9AEFC7513FCFA0F7B247F5D5AA1`. Staged checks confirmed version 1.2.8, `ui/index.html` hash matches source, UI development tests are absent, and the session-closeout and graph-curation Skills are present. Authenticode status is `NotSigned`. The installer was built and inspected but not installed; desktop shortcut acceptance, code signing, hosted builds, live AI-client use, and public release remain unverified.
 
+### Hide private-note counts from the 3D graph response (2026-10-28)
+
+The 3D graph already excluded private and generated notes from nodes and edges, but its aggregate `total` included them. The count now includes only visible, non-generated notes, matching the graph-vault list. Regression tests cover a private note, a private vault, and both authenticated graph API responses. `test/graph3d.test.mjs` passed 19/19 on Windows with Node.js 24.22.1; `git diff --check` passed. The full suite was not rerun for this focused change. No real vault data was used.
+
 ### Full regression verification after visible RSI topic evidence (2026-10-28)
 
 On Windows with Node.js 24.22.1, `npm run test:all` passed on the code now committed at `075d60de5b00d36fb30992de7eedfd7f483bb7ce`: core 483 total (477 passed, 0 failed, 6 platform/privilege skips) and UI 29/29. Focused discovery, ledger, evaluator, locale and UI checks passed 53/53 before this run. This remains local automated evidence; hosted CI and real client/runtime acceptance remain unverified.
