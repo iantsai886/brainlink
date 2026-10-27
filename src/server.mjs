@@ -198,7 +198,7 @@ export function createMcp(ctx, { onCall = () => {} } = {}) {
       run: async (a) => closeSession(ctx, await sessionStore(), a) },
     ...(agents.length ? [
       { name: 'agent_connect', title: 'Activate an agent ("Connect to …")', annotations: RO,
-        description: `Use when the user says an activation phrase (${agents.map((a) => `"${a.activation[0]}"`).join(', ')}). Loads the agent's role, live notes, recent captures and stale-source warnings from its own vault.`,
+        description: `Use when the user says an activation phrase (${agents.map((a) => `"${a.activation[0]}"`).join(', ')}). Loads the agent's role and only the context sections allowed by this Twin's memory policy; disabled memory types are omitted.`,
         inputSchema: { type: 'object', properties: { agent: agentProp, ai_platform: idProps.ai_platform }, required: ['agent'] },
         run: (a) => connectAgent(ctx, a) },
       { name: 'agent_close_loop', title: 'Close the loop for an agent ("… close loop")', annotations: WR,
@@ -320,7 +320,7 @@ export function createMcp(ctx, { onCall = () => {} } = {}) {
     const a = agents.find((x) => name === `connect-${slugOf(x)}` || name === `close-loop-${slugOf(x)}`);
     if (!a) throw new Error(`Unknown prompt ${name}`);
     const text = name.startsWith('connect-')
-      ? `${a.activation[0]}. Call agent_connect with agent="${a.name}", then confirm ${a.name}'s role and ready scope in a few lines: role, what changed, live priorities and open loops, decisions awaiting me. Label stale sources. Do not start new workflows.`
+      ? `${a.activation[0]}. Call agent_connect with agent="${a.name}", then confirm ${a.name}'s role and ready scope in a few lines. Report only context sections actually returned; do not assume recent notes, priorities, open loops, or captures are available. Label stale sources. Do not start new workflows.`
       : `${a.close[0]}${args.focus ? ` — ${args.focus}` : ''}. Treat the discussion as complete. Call agent_close_loop with agent="${a.name}", your identity, and the durable outcome (decisions, actions, corrections, unresolved questions, source, confidence, privacy boundary, links, smallest next actions; decision_needed only if a blocker remains) with confirm=true. Then give me a concise completion summary and ask only a necessary question.`;
     return msg(text, a.name);
   };

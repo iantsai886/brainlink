@@ -646,9 +646,13 @@ test('agent_connect applies each Twin memory-type switch to its mixed connection
       grants: [{ name: 'Acme Studio', operations: ['read_note', 'search'] }],
     };
     const mcp = createMcp(ctx);
+    const listed = await mcp.handle({ jsonrpc: '2.0', id: 2, method: 'tools/list' });
+    const activation = listed.result.tools.find((tool) => tool.name === 'agent_connect');
+    assert.match(activation.description, /only the context sections allowed by this Twin's memory policy/);
     const result = await mcp.handle({ jsonrpc: '2.0', id: 1, method: 'tools/call', params: { name: 'agent_connect', arguments: { agent: 'Chief of Staff' } } });
     assert.equal(result.result.isError, false, JSON.stringify(result));
     const packet = JSON.stringify(result.result.structuredContent);
+    assert.match(result.result.structuredContent.instructions, /Mention only changes and open items present in the returned context/);
     const expected = {
       working: 'WORKING_MEMORY_CANARY',
       semantic: 'SEMANTIC_MEMORY_CANARY|RECENT_SEMANTIC_CANARY',
@@ -658,6 +662,11 @@ test('agent_connect applies each Twin memory-type switch to its mixed connection
       if (type === disabled) assert.doesNotMatch(packet, new RegExp(canary), `${type} content must be omitted when its policy is off`);
       else assert.match(packet, new RegExp(canary), `${type} content remains available when its policy is on`);
     }
+    const prompts = await mcp.handle({ jsonrpc: '2.0', id: 3, method: 'prompts/list' });
+    const connectPrompt = prompts.result.prompts.find((prompt) => prompt.name === 'connect-chief-of-staff');
+    assert.ok(connectPrompt);
+    const prompt = await mcp.handle({ jsonrpc: '2.0', id: 4, method: 'prompts/get', params: { name: connectPrompt.name } });
+    assert.match(prompt.result.messages[0].content.text, /Report only context sections actually returned/);
   }
 });
 
