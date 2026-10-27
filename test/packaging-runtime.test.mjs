@@ -58,6 +58,9 @@ test('every native installer bundles all production dependencies and portable Br
     assert.match(job, /connectors\.mjs/, `${jobName} must smoke-test the packaged YAML connector runtime`);
   }
   assert.match(workflow, /Install, run and uninstall Windows package/, 'Windows CI must exercise install and uninstall');
+  assert.match(workflow, /Installer did not create the BrainLink desktop shortcut/, 'Windows package smoke test must verify the installed desktop shortcut');
+  assert.match(workflow, /Desktop shortcut does not open the BrainLink Setup launcher/, 'Windows package smoke test must verify what the shortcut opens');
+  assert.match(workflow, /Uninstaller left the BrainLink desktop shortcut behind/, 'Windows package smoke test must verify shortcut cleanup');
   assert.match(workflow, /Install and smoke-test macOS package/, 'macOS CI must install and run the packaged app');
   assert.match(workflow, /Remove macOS smoke-test installation/, 'macOS CI must clean up its installed package');
   assert.match(workflow, /test ! -e \/opt\/brainlink/, 'Linux CI must verify package removal');
