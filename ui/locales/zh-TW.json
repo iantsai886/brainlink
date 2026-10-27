@@ -686,6 +686,7 @@
   "twinProfiles.operation.search": "搜尋筆記",
   "twinProfiles.operation.read_note": "開啟筆記",
   "twinProfiles.operation.read_session": "讀取已授權的工作階段",
+  "twinProfiles.operation.log_session": "儲存私人工作階段筆記",
   "twinProfiles.operation.propose_note": "提議新增筆記",
   "twinProfiles.operation.handoff_read": "讀取此 Twin 的交接內容",
   "twinProfiles.operation.write_handoff": "以此 Twin 傳送交接內容",

@@ -100,16 +100,17 @@ export async function sessionRead(store, a = {}) {
 }
 
 // a: { title?, text, role?, session_id?, project?, private? }. platform = ctx.platform (BRAINLINK_AI_PLATFORM).
-export async function sessionLog(store, a = {}, platform = '') {
+export async function sessionLog(store, a = {}, platform = '', scope = {}) {
   if (!a.text) throw new Error('text is required');
   const text = redactText(String(a.text));
   const role = ['note', 'user', 'assistant'].includes(a.role) ? a.role : 'note';
+  const profileId = scope.profile_id ? String(scope.profile_id) : null;
   if (a.session_id) {
-    const r = await store.appendSession(a.session_id, [{ role, text }]);
+    const r = await store.appendSession(a.session_id, [{ role, text }], profileId ? { profile_id: profileId } : {});
     return { id: r.id, message_count: r.message_count };
   }
   const client = clientIdFor(platform);
-  const source_id = `${client}-${new Date().toISOString().slice(0, 10)}`;
-  const r = await store.appendSession({ client, source_id, project: a.project || '', title: a.title || clip(text, 20), private: a.private !== false }, [{ role, text }]);
+  const source_id = profileId ? `${client}-${profileId}-${new Date().toISOString().slice(0, 10)}` : `${client}-${new Date().toISOString().slice(0, 10)}`;
+  const r = await store.appendSession({ client, source_id, profile_id: profileId, project: a.project || '', title: a.title || clip(text, 20), private: profileId ? true : a.private !== false }, [{ role, text }], profileId ? { profile_id: profileId } : {});
   return { id: r.id, message_count: r.message_count };
 }

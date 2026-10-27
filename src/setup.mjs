@@ -133,7 +133,7 @@ function startVaultChangeWatcher(vaults, onChange, { debounceMs = 300, pollMs = 
 function assertTwinActionsMatchMemory(agentAccess, memoryPolicy) {
   const requiredMemory = {
     search: 'semantic', read_note: 'semantic',
-    read_session: 'episodic', propose_note: 'semantic',
+    read_session: 'episodic', log_session: 'episodic', propose_note: 'semantic',
     handoff_read: 'working', write_handoff: 'working',
   };
   for (const grant of agentAccess.flatMap((agent) => agent.vaults)) {
@@ -797,7 +797,7 @@ export async function startSetup(opts = {}) {
       : ['session_list', 'list_handoffs', 'brainlink_guide'].find((name) => toolNames.includes(name))
         || (toolNames.includes('propose_note') ? 'tools/list' : null);
     const tool = ctx.twinScope.mode === 'scoped' ? (scopedTool || 'tools/list') : 'brainlink_guide';
-    const expectedByAction = { search: 'vault_search', read_note: 'vault_read_note', read_session: 'session_list', propose_note: 'propose_note', handoff_read: 'list_handoffs', write_handoff: 'send_handoff' };
+    const expectedByAction = { search: 'vault_search', read_note: 'vault_read_note', read_session: 'session_list', log_session: 'session_log', propose_note: 'propose_note', handoff_read: 'list_handoffs', write_handoff: 'send_handoff' };
     const scopeHasLiveTool = ctx.twinScope.mode !== 'scoped' || ctx.twinScope.grants
       .filter((grant) => ctx.enabled.includes(grant.name))
       .flatMap((grant) => grant.operations)
@@ -836,12 +836,12 @@ export async function startSetup(opts = {}) {
       const vault = cfg.vaults.find((entry) => entry.name === name);
       const operations = Array.isArray(item?.operations) ? [...new Set(item.operations)] : [];
       if (!profileVault || !vault || vault.private || seen.has(name)) throw new Error('Choose only non-private vaults already included in this Twin profile.');
-      if (!operations.length || operations.some((action) => !['search', 'read_note', 'read_session', 'propose_note', 'handoff_read', 'write_handoff'].includes(action))) throw new Error('Choose supported search, note, session, or handoff actions.');
+      if (!operations.length || operations.some((action) => !['search', 'read_note', 'read_session', 'log_session', 'propose_note', 'handoff_read', 'write_handoff'].includes(action))) throw new Error('Choose supported search, note, session, or handoff actions.');
       const needsSemantic = operations.some((action) => ['search', 'read_note', 'propose_note'].includes(action));
       const needsEpisodic = operations.includes('read_session');
       const needsWorking = operations.some((action) => ['handoff_read', 'write_handoff'].includes(action));
       if (needsSemantic && profile.memory_policy?.semantic !== true) throw new Error('Turn on semantic memory in this Twin profile before granting note or search access.');
-      if (needsEpisodic && profile.memory_policy?.episodic !== true) throw new Error('Turn on episodic memory in this Twin profile before granting session access.');
+      if ((needsEpisodic || operations.includes('log_session')) && profile.memory_policy?.episodic !== true) throw new Error('Turn on episodic memory in this Twin profile before granting session access.');
       if (needsWorking && profile.memory_policy?.working !== true) throw new Error('Turn on working memory in this Twin profile before granting handoff access.');
       if (operations.some((action) => ['handoff_read', 'write_handoff'].includes(action)) && cfg.handoff?.vault !== name) throw new Error('Handoff access is available only in the vault configured as BrainLink’s handoff mailbox.');
       if (operations.some((action) => ['propose_note', 'write_handoff'].includes(action)) && profileVault.access !== 'propose') throw new Error('Choose propose access for a vault before allowing session closeouts or sending handoffs.');
@@ -849,6 +849,7 @@ export async function startSetup(opts = {}) {
       return { name, access: operations.some((action) => ['propose_note', 'write_handoff'].includes(action)) ? 'propose' : 'read', operations };
     });
     if (grants.some((grant) => grant.operations.includes('read_session')) && grants.some((grant) => !grant.operations.includes('read_session'))) throw new Error('Session history access applies across this Twin. Select session access for every vault granted to this AI, or remove the other vaults from its access.');
+    if (grants.some((grant) => grant.operations.includes('log_session')) && grants.some((grant) => !grant.operations.includes('log_session'))) throw new Error('Private session logging applies across this Twin. Select it for every vault granted to this AI, or remove the other vaults from its access.');
 
     let agent = cfg.ai_agents.find((item) => item.preset_client_id === clientId);
     const token = generateAgentToken();
@@ -1151,7 +1152,7 @@ export async function startSetup(opts = {}) {
         profileVaults.push({ name: vault.name, access: item.access });
       }
       if (new Set(profileVaults.map((item) => item.name)).size !== profileVaults.length) throw new Error('Choose each vault only once.');
-      const allowedOperations = new Set(['search', 'read_note', 'read_session', 'propose_note', 'handoff_read', 'write_handoff']);
+      const allowedOperations = new Set(['search', 'read_note', 'read_session', 'log_session', 'propose_note', 'handoff_read', 'write_handoff']);
       const rawAgents = Array.isArray(b.agent_access) ? b.agent_access : [];
       const agentIds = new Set();
       const agentAccess = rawAgents.map((entry) => {
@@ -1170,6 +1171,7 @@ export async function startSetup(opts = {}) {
           return { name: profileVault.name, access: operations.some((operation) => ['propose_note', 'write_handoff'].includes(operation)) ? 'propose' : 'read', operations };
         });
         if (vaultGrants.some((grant) => grant.operations.includes('read_session')) && vaultGrants.some((grant) => !grant.operations.includes('read_session'))) throw new Error('Session history access applies across this AI connection. Grant session access to every selected vault or remove the other vaults.');
+        if (vaultGrants.some((grant) => grant.operations.includes('log_session')) && vaultGrants.some((grant) => !grant.operations.includes('log_session'))) throw new Error('Private session logging applies across this AI connection. Grant it for every selected vault or remove the other vaults.');
         agentIds.add(agent.id);
         return { agent_id: agent.id, vaults: vaultGrants };
       });
@@ -1210,7 +1212,7 @@ export async function startSetup(opts = {}) {
       if (new Set(profileVaults.map((item) => item.name)).size !== profileVaults.length) throw new Error('Choose each vault only once.');
       const assignmentVault = profile.github_repository?.vault;
       if (assignmentVault && !profileVaults.some((item) => item.name === assignmentVault)) throw new Error('Clear this profile’s GitHub assignment before removing its assigned vault.');
-      const allowedOperations = new Set(['search', 'read_note', 'read_session', 'propose_note', 'handoff_read', 'write_handoff']);
+      const allowedOperations = new Set(['search', 'read_note', 'read_session', 'log_session', 'propose_note', 'handoff_read', 'write_handoff']);
       const rawAgents = Array.isArray(b.agent_access) ? b.agent_access : [];
       const agentIds = new Set();
       const agentAccess = rawAgents.map((entry) => {
@@ -1229,6 +1231,7 @@ export async function startSetup(opts = {}) {
           return { name: profileVault.name, access: operations.some((operation) => ['propose_note', 'write_handoff'].includes(operation)) ? 'propose' : 'read', operations };
         });
         if (vaultGrants.some((grant) => grant.operations.includes('read_session')) && vaultGrants.some((grant) => !grant.operations.includes('read_session'))) throw new Error('Session history access applies across this AI connection. Grant session access to every selected vault or remove the other vaults.');
+        if (vaultGrants.some((grant) => grant.operations.includes('log_session')) && vaultGrants.some((grant) => !grant.operations.includes('log_session'))) throw new Error('Private session logging applies across this AI connection. Grant it for every selected vault or remove the other vaults.');
         agentIds.add(agent.id);
         return { agent_id: agent.id, vaults: vaultGrants };
       });

@@ -110,23 +110,25 @@ test('Twin permission controls disable and clear actions when their memory type 
   const end = html.indexOf("$('twin-new-memory').addEventListener", start);
   assert.ok(start >= 0 && end > start, 'permission helper is connected to memory changes');
   const memories = ['semantic', 'episodic', 'working', 'procedural'].map((key) => ({ dataset: { twinMemory: key }, checked: key === 'episodic' || key === 'procedural' }));
-  const operations = ['search', 'read_note', 'read_session', 'propose_note', 'handoff_read', 'write_handoff'].map((value) => ({ value, checked: true, disabled: false }));
+  const operations = ['search', 'read_note', 'read_session', 'log_session', 'propose_note', 'handoff_read', 'write_handoff'].map((value) => ({ value, checked: true, disabled: false }));
   const document = { querySelectorAll: (selector) => selector === '[data-twin-memory]' ? memories : operations };
   const helpers = new Function('document', `${html.slice(start, end)}; return { updateTwinPermissionControls, twinActionMemoryAllowed };`)(document);
   const update = helpers.updateTwinPermissionControls;
   update();
   assert.deepEqual(operations.map(({ disabled, checked }) => ({ disabled, checked })), [
     { disabled: true, checked: false }, { disabled: true, checked: false },
-    { disabled: false, checked: true }, { disabled: true, checked: false },
+    { disabled: false, checked: true }, { disabled: false, checked: true }, { disabled: true, checked: false },
     { disabled: true, checked: false }, { disabled: true, checked: false },
   ]);
   memories.find((item) => item.dataset.twinMemory === 'semantic').checked = true;
   memories.find((item) => item.dataset.twinMemory === 'working').checked = true;
   update();
-  assert.deepEqual(operations.map(({ disabled }) => disabled), [false, false, false, false, false, false]);
+  assert.deepEqual(operations.map(({ disabled }) => disabled), [false, false, false, false, false, false, false]);
   memories.find((item) => item.dataset.twinMemory === 'episodic').checked = false;
   update();
-  assert.deepEqual(operations.map(({ disabled }) => disabled), [false, false, true, false, false, false], 'semantic note proposals remain available when episodic memory is off');
+  assert.deepEqual(operations.map(({ disabled }) => disabled), [false, false, true, true, false, false, false], 'semantic note proposals remain available when episodic memory is off');
+  assert.equal(helpers.twinActionMemoryAllowed('log_session', { episodic: true }), true);
+  assert.equal(helpers.twinActionMemoryAllowed('log_session', { episodic: false }), false);
   assert.equal(helpers.twinActionMemoryAllowed('propose_note', { semantic: true, episodic: false }), true);
   assert.equal(helpers.twinActionMemoryAllowed('propose_note', { semantic: false, episodic: true }), false);
 });
@@ -154,6 +156,7 @@ test('profile-scoped agents see only granted vaults and only supported read tool
   assert.deepEqual(names.includes('vault_search') && listed.result.tools.find((tool) => tool.name === 'vault_search').inputSchema.properties.vault.enum, ['Fictional Org']);
   assert.ok(!names.includes('propose_note'));
   assert.ok(!names.includes('session_list'));
+  assert.ok(!names.includes('session_log'), 'session logging is hidden without its separate grant');
   assert.ok(!names.includes('send_handoff'));
   const promptList = await mcp.handle({ jsonrpc: '2.0', id: 5, method: 'prompts/list' });
   assert.deepEqual(promptList.result.prompts.map((prompt) => prompt.name), ['brief']);
@@ -185,6 +188,9 @@ test('profile-scoped agents see only granted vaults and only supported read tool
   const deniedSession = await mcp.handle({ jsonrpc: '2.0', id: 4, method: 'tools/call', params: { name: 'session_list', arguments: {} } });
   assert.equal(deniedSession.result.isError, true);
   assert.match(deniedSession.result.content[0].text, /does not allow read_session/);
+  const deniedLog = await mcp.handle({ jsonrpc: '2.0', id: 12, method: 'tools/call', params: { name: 'session_log', arguments: { text: 'must stay blocked' } } });
+  assert.equal(deniedLog.result.isError, true);
+  assert.match(deniedLog.result.content[0].text, /does not allow log_session/);
   const filingCfg = structuredClone(cfg);
   filingCfg.twin_profiles[0].agent_access[0].vaults[0].access = 'propose';
   filingCfg.twin_profiles[0].agent_access[0].vaults[0].operations.push('propose_note');
@@ -200,6 +206,38 @@ test('profile-scoped agents see only granted vaults and only supported read tool
   const unassigned = createContext(cfg, { env: { BRAINLINK_AGENT_TOKEN: 'unknown-token' } });
   assert.deepEqual(unassigned.enabled, []);
   assert.equal(unassigned.twinScope.mode, 'unassigned');
+});
+
+test('profile-scoped agents can save only private session notes owned by their Twin', async () => {
+  const root = await mkdtemp(path.join(tmpdir(), 'brainlink-twin-session-log-'));
+  const vaultPath = path.join(root, 'org');
+  const brainHome = path.join(root, 'brainlink-home');
+  await mkdir(vaultPath);
+  const cfg = fixture(vaultPath);
+  cfg.twin_profiles[0].allowed_actions.push('log_session');
+  cfg.twin_profiles[0].agent_access[0].vaults[0].operations.push('log_session');
+  const env = { BRAINLINK_HOME: brainHome, HOME: root, BRAINLINK_AGENT_TOKEN: 'fictional-agent-token', BRAINLINK_AI_PLATFORM: 'Codex' };
+  const mcp = createMcp(createContext(cfg, { env }));
+  const listed = await mcp.handle({ jsonrpc: '2.0', id: 1, method: 'tools/list' });
+  assert.ok(listed.result.tools.some((tool) => tool.name === 'session_log'));
+  const scope = await mcp.handle({ jsonrpc: '2.0', id: 2, method: 'tools/call', params: { name: 'brainlink_guide', arguments: {} } });
+  assert.equal(scope.result.structuredContent.twin_profile_scope.session_logging_available, true);
+  const logged = await mcp.handle({ jsonrpc: '2.0', id: 3, method: 'tools/call', params: { name: 'session_log', arguments: { title: 'Fictional private work', text: 'Finished a fictional project.', private: false } } });
+  assert.notEqual(logged.result.isError, true);
+  const record = JSON.parse(logged.result.content[0].text);
+  const store = await openSessionStore(env);
+  const listedSessions = await store.listSessions({ profile_id: 'org_twin_1', limit: 20 });
+  assert.equal(listedSessions.length, 1);
+  assert.equal(listedSessions[0].id, record.id);
+  assert.equal(listedSessions[0].profile_id, 'org_twin_1');
+  assert.equal(listedSessions[0].private, true, 'the agent cannot override the forced private flag');
+
+  const foreign = await store.appendSession({ client: 'other-agent', source_id: 'foreign-profile-session', vault: 'Sessions', profile_id: 'different_twin', private: true }, [{ role: 'note', text: 'Foreign private content.' }], { profile_id: 'different_twin' });
+  const deniedAppend = await mcp.handle({ jsonrpc: '2.0', id: 4, method: 'tools/call', params: { name: 'session_log', arguments: { session_id: foreign.id, text: 'attempted cross-profile append' } } });
+  assert.equal(deniedAppend.result.isError, true);
+  assert.doesNotMatch(JSON.stringify(deniedAppend), /Foreign private content/);
+  const after = await store.readSession(foreign.id, { profile_id: 'different_twin', offset: 0, limit: 5 });
+  assert.equal(after.session.message_count, 1, 'the denied append did not alter the foreign session');
 });
 
 test('scoped source organization prompt requires every read, search, write, and receipt grant', async () => {
@@ -837,10 +875,10 @@ test('Setup creates a validated Twin from explicit vault, agent, action and memo
       name: 'Fictional Personal Twin', mode: 'personal', owner: 'fictional-owner',
       vaults: [{ name: 'Fictional Personal', access: 'propose' }, { name: 'Fictional Other', access: 'read' }],
       agent_access: [{ agent_id: 'agent_personal', vaults: [
-        { name: 'Fictional Personal', operations: ['search', 'read_note', 'propose_note'] },
-        { name: 'Fictional Other', operations: ['search'] },
+        { name: 'Fictional Personal', operations: ['search', 'read_note', 'propose_note', 'log_session'] },
+        { name: 'Fictional Other', operations: ['search', 'log_session'] },
       ] }],
-      memory_policy: { working: true, semantic: true, procedural: false, episodic: false },
+      memory_policy: { working: true, semantic: true, procedural: false, episodic: true },
     };
     assert.equal((await api(request, false)).status, 401, 'local Setup token is required');
     const created = await api(request);
@@ -848,11 +886,11 @@ test('Setup creates a validated Twin from explicit vault, agent, action and memo
     assert.equal(created.body.profile.mode, 'personal');
     assert.deepEqual(created.body.profile.vaults, [{ name: 'Fictional Personal', access: 'propose' }, { name: 'Fictional Other', access: 'read' }]);
     assert.deepEqual(created.body.profile.memory_policy, request.memory_policy);
-    assert.deepEqual(created.body.profile.allowed_actions.sort(), ['propose_note', 'read_note', 'search']);
+    assert.deepEqual(created.body.profile.allowed_actions.sort(), ['log_session', 'propose_note', 'read_note', 'search']);
     assert.equal(created.body.profile.agents[0].name, 'Fictional Personal Agent');
     assert.deepEqual(created.body.profile.agents[0].vaults, [
-      { name: 'Fictional Personal', access: 'propose', operations: ['search', 'read_note', 'propose_note'] },
-      { name: 'Fictional Other', access: 'read', operations: ['search'] },
+      { name: 'Fictional Personal', access: 'propose', operations: ['search', 'read_note', 'propose_note', 'log_session'] },
+      { name: 'Fictional Other', access: 'read', operations: ['search', 'log_session'] },
     ]);
     assert.doesNotMatch(JSON.stringify(created.body), /fictional-second-agent-token|tokenHash/);
 
@@ -876,12 +914,24 @@ test('Setup creates a validated Twin from explicit vault, agent, action and memo
     const proposalWithoutSemantic = await api({ ...request, name: 'Should Refuse Proposal Without Semantic Memory', memory_policy: { ...request.memory_policy, semantic: false }, agent_access: [{ agent_id: 'agent_personal', vaults: [{ name: 'Fictional Personal', operations: ['propose_note'] }] }] });
     assert.equal(proposalWithoutSemantic.status, 400);
     assert.match(proposalWithoutSemantic.body.error, /Enable semantic memory/);
+    const sessionLogWithoutEpisodic = await api({ ...request, name: 'Should Refuse Session Log Without Episodic Memory', memory_policy: { ...request.memory_policy, episodic: false }, agent_access: [{ agent_id: 'agent_personal', vaults: [
+      { name: 'Fictional Personal', operations: ['log_session'] },
+      { name: 'Fictional Other', operations: ['log_session'] },
+    ] }] });
+    assert.equal(sessionLogWithoutEpisodic.status, 400);
+    assert.match(sessionLogWithoutEpisodic.body.error, /Enable episodic memory/);
     const mixedSessionScope = await api({ ...request, name: 'Should Refuse Session Scope', agent_access: [{ agent_id: 'agent_personal', vaults: [
       { name: 'Fictional Personal', operations: ['read_session'] },
       { name: 'Fictional Other', operations: ['search'] },
     ] }] });
     assert.equal(mixedSessionScope.status, 400);
     assert.match(mixedSessionScope.body.error, /Session history access applies across/);
+    const mixedLogScope = await api({ ...request, name: 'Should Refuse Mixed Session Log Scope', agent_access: [{ agent_id: 'agent_personal', vaults: [
+      { name: 'Fictional Personal', operations: ['log_session'] },
+      { name: 'Fictional Other', operations: ['search'] },
+    ] }] });
+    assert.equal(mixedLogScope.status, 400);
+    assert.match(mixedLogScope.body.error, /Private session logging applies across/);
     const saved = JSON.parse(await readFile(path.join(env.BRAINLINK_HOME, 'config.json'), 'utf8'));
     assert.equal(saved.twin_profiles.length, 2, 'rejected requests do not alter the stored profiles');
     assert.deepEqual(validate(saved), []);

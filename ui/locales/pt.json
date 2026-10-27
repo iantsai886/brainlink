@@ -686,6 +686,7 @@
   "twinProfiles.operation.search": "Pesquisar notas",
   "twinProfiles.operation.read_note": "Abrir notas",
   "twinProfiles.operation.read_session": "Ler sessões autorizadas",
+  "twinProfiles.operation.log_session": "Guardar notas privadas da sessão",
   "twinProfiles.operation.propose_note": "Propor novas notas",
   "twinProfiles.operation.handoff_read": "Ler as passagens deste Twin",
   "twinProfiles.operation.write_handoff": "Enviar passagens deste Twin",

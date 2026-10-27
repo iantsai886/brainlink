@@ -36,7 +36,7 @@ export function twinProfileStatus(cfg) {
     schema: 1,
     enforcement: 'scoped_agent_read_only',
     profiles,
-    next_gate: 'Named AI-agent tokens use profile-scoped vault and memory-type access. Working, semantic, procedural and episodic policies filter tools, prompts and resources. Session reads still require an explicit read_session grant and exact profile_id match; private closeouts require propose_note plus filing-folder access and are approval-gated. Handoff read/send require separate grants and carry a profile owner; append-only replies support ACKNOWLEDGED, IN_PROGRESS, BLOCKED, COMPLETED and CANCELLED, and can target only an available handoff owned by the same Twin. Same-time updates are flagged for human review, not auto-resolved. General note writes and free-form session logging remain unavailable. Live cross-client acceptance is still unverified.',
+    next_gate: 'Named AI-agent tokens use profile-scoped vault and memory-type access. Working, semantic, procedural and episodic policies filter tools, prompts and resources. Session reads require an explicit read_session grant and exact profile_id match. Private session logging is a separate opt-in log_session grant; entries are forced private and profile-owned. Private closeouts require propose_note plus filing-folder access and are approval-gated. Handoff read/send require separate grants and carry a profile owner; append-only replies support ACKNOWLEDGED, IN_PROGRESS, BLOCKED, COMPLETED and CANCELLED, and can target only an available handoff owned by the same Twin. Same-time updates are flagged for human review, not auto-resolved. General note writes remain unavailable. Live cross-client acceptance is still unverified.',
   };
 }
 
@@ -66,7 +66,7 @@ const READ_TOOL_MEMORY = Object.freeze({
   vault_recent: 'semantic', open_loops: 'semantic', brain_brief: 'semantic', vault_health: 'semantic',
   ingestion_queue: 'semantic', ingestion_record: 'semantic',
   list_handoffs: 'working', send_handoff: 'working',
-  session_list: 'episodic', session_read: 'episodic', session_close: 'episodic', session_filing_folders: 'episodic',
+  session_list: 'episodic', session_read: 'episodic', session_log: 'episodic', session_close: 'episodic', session_filing_folders: 'episodic',
 });
 
 export function twinMemoryAllowed(ctx, memoryType) {
@@ -113,7 +113,7 @@ const READ_TOOL_ACTION = Object.freeze({
   vault_search: 'search', vault_recent: 'search', open_loops: 'search', brain_brief: 'search',
   vault_health: 'search', vault_related: 'search', vault_read_note: 'read_note', propose_note: 'propose_note',
   ingestion_queue: 'search', ingestion_record: 'propose_note',
-  session_list: 'read_session', session_read: 'read_session', session_close: 'propose_note',
+  session_list: 'read_session', session_read: 'read_session', session_log: 'log_session', session_close: 'propose_note',
   list_handoffs: 'handoff_read', send_handoff: 'write_handoff',
   session_filing_folders: 'search', agent_connect: 'read_note', search: 'search', fetch: 'read_note',
 });

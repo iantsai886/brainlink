@@ -100,7 +100,7 @@ export function createMcp(ctx, { onCall = () => {} } = {}) {
     ],
     templates: Object.fromEntries(Object.entries(TEMPLATES).map(([k, t]) => [k, { folder: t.folder, fields: t.fields }])),
     ...(guideHasHandoff ? { handoff_mailbox: `${cfg.handoff.vault}/${cfg.handoff.folder}` } : {}),
-    ...(ctx.twinScope?.mode === 'scoped' ? { twin_profile_scope: { profile_id: ctx.twinScope.profile_id, permitted_vaults: ctx.enabled, memory_policy: { ...ctx.twinScope.memory_policy }, available_operations: [...new Set(ctx.twinScope.grants.flatMap((grant) => grant.operations))], writes_available: false, note_proposals_available: twinToolListed(ctx, 'propose_note'), proposal_vaults: twinToolVaultChoices(ctx, 'propose_note'), session_history_available: scopedSessionRead, session_close_available: scopedSessionClose, handoffs_available: scopedHandoffRead || scopedHandoffWrite } } : {}),
+    ...(ctx.twinScope?.mode === 'scoped' ? { twin_profile_scope: { profile_id: ctx.twinScope.profile_id, permitted_vaults: ctx.enabled, memory_policy: { ...ctx.twinScope.memory_policy }, available_operations: [...new Set(ctx.twinScope.grants.flatMap((grant) => grant.operations))], writes_available: false, note_proposals_available: twinToolListed(ctx, 'propose_note'), proposal_vaults: twinToolVaultChoices(ctx, 'propose_note'), session_history_available: scopedSessionRead, session_logging_available: twinToolListed(ctx, 'session_log'), session_close_available: scopedSessionClose, handoffs_available: scopedHandoffRead || scopedHandoffWrite } } : {}),
   });
 
   const vaultProp = { type: 'string', enum: ctx.enabled, description: 'Which vault. Vaults are never mixed.' };
@@ -183,11 +183,12 @@ export function createMcp(ctx, { onCall = () => {} } = {}) {
       // Settings choice) are always overwritten after the caller's arguments, never honoured from them.
       run: async (a) => sessionRead(await sessionStore(), { ...a, include_private: false, allow_imported_private: cfg.sessions.shareSummaries, allow_imported_full_private: cfg.sessions.shareFullText, profile_id: ctx.twinScope?.mode === 'scoped' ? ctx.twinScope.profile_id : undefined, allow_profile_private: ctx.twinScope?.mode === 'scoped' }) },
     { name: 'session_log', title: 'Log a note to an AI session', annotations: WR,
-      description: 'For clients with no readable local history (ChatGPT, Claude Desktop, Grok…): append a short note/turn to a session, creating one for today if session_id is omitted. Secret-filtered before it is stored; defaults to private.',
+      description: 'For clients with no readable local history: append a short note/turn to a session, creating one for today if session_id is omitted. Secret-filtered before storage. Profile-scoped agents need the separate log_session permission; their entries are always private and owned by that profile, and they can append only to their own sessions.',
       inputSchema: { type: 'object', properties: {
         title: { type: 'string' }, text: { type: 'string' }, role: { type: 'string', enum: ['note', 'user', 'assistant'], default: 'note' },
         session_id: { type: 'string' }, project: { type: 'string' }, private: { type: 'boolean', default: true } }, required: ['text'] },
-      run: async (a) => sessionLog(await sessionStore(), a, ctx.platform) },
+      run: async (a) => sessionLog(await sessionStore(), ctx.twinScope?.mode === 'scoped' ? { ...a, private: true } : a, ctx.platform,
+        ctx.twinScope?.mode === 'scoped' ? { profile_id: ctx.twinScope.profile_id } : {}) },
     { name: 'session_filing_folders', title: 'List safe session filing folders', annotations: RO,
       description: 'List existing non-hidden, non-protected, non-excluded folders in one explicitly chosen enabled vault. Use these choices to suggest a destination at session close; this tool only lists folder names and never writes.',
       inputSchema: { type: 'object', properties: { vault: vaultProp }, required: ['vault'] },

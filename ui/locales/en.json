@@ -686,6 +686,7 @@
   "twinProfiles.operation.search": "Search notes",
   "twinProfiles.operation.read_note": "Open notes",
   "twinProfiles.operation.read_session": "Read approved sessions",
+  "twinProfiles.operation.log_session": "Save private session notes",
   "twinProfiles.operation.propose_note": "Propose new notes",
   "twinProfiles.operation.handoff_read": "Read this Twin's handoffs",
   "twinProfiles.operation.write_handoff": "Send handoffs from this Twin",

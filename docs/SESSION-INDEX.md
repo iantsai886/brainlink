@@ -24,6 +24,13 @@ the store contract itself (so existing callers/fixtures that never set it are un
 milestone rule that imported sessions default to private. `session_log`-created sessions also pass
 `private: true` by default (same reasoning: no history client should default to shared).
 
+For profile-scoped AI agents, `session_log` is hidden unless the profile grants the separate
+`log_session` action and enables episodic memory. The server forces those entries to remain
+private and stamps the Twin's `profile_id`; a supplied `session_id` can be appended only if that
+same profile owns it. The action is profile-wide, so Setup requires it on every vault granted to
+that AI. This saves short notes to BrainLink's local session store; it does not write a note into
+an Obsidian vault or import full client transcripts.
+
 ## 2. SessionRecord — the lean projection
 
 Declared in `brainlink-store/interface.d.ts` (`SessionRecord`) and built by
