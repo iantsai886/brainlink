@@ -39,6 +39,7 @@ done
 
 # 2. App files: only what customers need to run it (no test/, docs, vendor tools or issuer keys).
 cp -R "$ROOT/bin" "$ROOT/src" "$ROOT/ui" "$ROOT/samples" "$ROOT/skills" "$STAGE/app/"
+rm -rf "$STAGE/app/ui/app/test"
 cp "$ROOT/package.json" "$ROOT/LICENSE.txt" "$ROOT/README.md" "$STAGE/app/"
 
 # 3. Vendor brainlink-store so the bare `import ... from 'brainlink-store'` resolves with no

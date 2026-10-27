@@ -36,6 +36,7 @@ cp "$WORK/node/arm64/LICENSE" "$APP/Contents/Resources/node/LICENSE"
 # 2. App files (only what customers need: no tests, tools, vendor or issuer keys).
 mkdir -p "$APP/Contents/Resources/app"
 cp -R "$ROOT/bin" "$ROOT/src" "$ROOT/ui" "$ROOT/samples" "$ROOT/skills" "$ROOT/package.json" "$ROOT/LICENSE.txt" "$ROOT/README.md" "$APP/Contents/Resources/app/"
+rm -rf "$APP/Contents/Resources/app/ui/app/test"
 mkdir -p "$APP/Contents/Resources/app/node_modules/brainlink-store"
 cp "$ROOT/vendor/brainlink-store/memory-store.mjs" "$ROOT/vendor/brainlink-store/errors.mjs" "$ROOT/vendor/brainlink-store/package.json" "$APP/Contents/Resources/app/node_modules/brainlink-store/"
 mkdir -p "$APP/Contents/Resources/app/node_modules/yaml"

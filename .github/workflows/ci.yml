@@ -79,6 +79,7 @@ jobs:
           $installCode = Start-Process -FilePath $installer -ArgumentList '/VERYSILENT','/SUPPRESSMSGBOXES','/NORESTART' -Wait -PassThru
           if ($installCode.ExitCode -ne 0) { throw "Installer failed with $($installCode.ExitCode)" }
           $installRoot = Join-Path $env:LOCALAPPDATA 'Programs/BrainLink'
+          if (Test-Path (Join-Path $installRoot 'app/ui/app/test')) { throw 'Windows installer included development UI tests' }
           $desktopShortcut = Join-Path ([Environment]::GetFolderPath('Desktop')) 'BrainLink.lnk'
           if (-not (Test-Path $desktopShortcut)) { throw 'Installer did not create the BrainLink desktop shortcut' }
           $shortcut = (New-Object -ComObject WScript.Shell).CreateShortcut($desktopShortcut)
@@ -133,6 +134,7 @@ jobs:
           resources="${app%/app/bin/brainlink.mjs}"
           test "$("$resources/node/bin/node" "$app" --version)" = "$(node -p "require('./package.json').version")"
           app_root="${app%/bin/brainlink.mjs}"
+          test ! -e "$app_root/ui/app/test"
           test -f "$app_root/skills/brainlink-session-closeout/SKILL.md"
           test -f "$app_root/skills/brainlink-graph-curation/SKILL.md"
           (cd "$app_root" && "$resources/node/bin/node" --input-type=module -e "await import('./src/connectors.mjs')")
@@ -144,6 +146,7 @@ jobs:
           test "$(/usr/local/bin/brainlink --version)" = "$version"
           test -f "/Applications/BrainLink.app/Contents/Resources/app/skills/brainlink-session-closeout/SKILL.md"
           test -f "/Applications/BrainLink.app/Contents/Resources/app/skills/brainlink-graph-curation/SKILL.md"
+          test ! -e "/Applications/BrainLink.app/Contents/Resources/app/ui/app/test"
           "/Applications/BrainLink.app/Contents/Resources/node/bin/node" --input-type=module -e "await import('/Applications/BrainLink.app/Contents/Resources/app/src/connectors.mjs')"
 
       - name: Remove macOS smoke-test installation
@@ -192,6 +195,7 @@ jobs:
           test "$(brainlink --version)" = "$(node -p "require('./package.json').version")"
           test -f /opt/brainlink/app/skills/brainlink-session-closeout/SKILL.md
           test -f /opt/brainlink/app/skills/brainlink-graph-curation/SKILL.md
+          test ! -e /opt/brainlink/app/ui/app/test
           /opt/brainlink/node/bin/node --input-type=module -e "await import('/opt/brainlink/app/src/connectors.mjs')"
           mkdir -p "$RUNNER_TEMP/brainlink-smoke-vault"
           BRAINLINK_HOME="$RUNNER_TEMP/brainlink-smoke-home" brainlink init --vault "$RUNNER_TEMP/brainlink-smoke-vault" --name Smoke
@@ -207,6 +211,7 @@ jobs:
           archive=$(printf '%s\n' dist/brainlink-*-linux-x64.tar.gz)
           tar -xzf "$archive" -C "$RUNNER_TEMP/brainlink-tarball"
           bundle="$RUNNER_TEMP/brainlink-tarball/$(basename "${archive%.tar.gz}")"
+          test ! -e "$bundle/app/ui/app/test"
           export HOME="$RUNNER_TEMP/brainlink-tar-home"
           export XDG_DATA_HOME="$HOME/.local/share"
           export XDG_CONFIG_HOME="$HOME/.config"

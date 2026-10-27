@@ -75,7 +75,7 @@ done
 echo "ok: executable bits preserved through the zip"
 
 echo "== excluded paths and secrets =="
-for bad in app/test app/docs app/.git app/dist; do
+for bad in app/test app/ui/app/test app/docs app/.git app/dist; do
   [ -e "$BASE/$bad" ] && { echo "FAIL: excluded path present: $bad" >&2; exit 1; }
 done
 HITS="$(find "$BASE" -type f \( -iname '*.pem' -o -iname '*secret*' -o -iname 'id_rsa*' -o -iname '*.key' \) || true)"

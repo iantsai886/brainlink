@@ -35,6 +35,7 @@ for ARCH in x64 arm64; do
   mv "$WORK/node-v$NODE_VERSION-linux-$ARCH/LICENSE" "$S/node/LICENSE"
   rm -rf "$WORK/node-v$NODE_VERSION-linux-$ARCH"
   cp -R "$ROOT/bin" "$ROOT/src" "$ROOT/ui" "$ROOT/samples" "$ROOT/skills" "$ROOT/package.json" "$ROOT/LICENSE.txt" "$ROOT/README.md" "$S/app/"
+  rm -rf "$S/app/ui/app/test"
   mkdir -p "$S/app/node_modules/brainlink-store"
   cp "$ROOT/vendor/brainlink-store/memory-store.mjs" "$ROOT/vendor/brainlink-store/errors.mjs" "$ROOT/vendor/brainlink-store/package.json" "$S/app/node_modules/brainlink-store/"
   mkdir -p "$S/app/node_modules/yaml"

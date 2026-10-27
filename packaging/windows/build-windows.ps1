@@ -27,6 +27,7 @@ Copy-Item "$Root\build\windows\node-unzip\$NodeArchivePrefix-win-x64\node.exe", 
 
 # 2. App files (no tests, tools, vendor or keys).
 foreach ($p in "bin", "src", "ui", "samples", "skills", "package.json", "LICENSE.txt", "README.md") { Copy-Item -Recurse "$Root\$p" "$Stage\app\" }
+Remove-Item -Recurse -Force "$Stage\app\ui\app\test" -ErrorAction SilentlyContinue
 $Store = "$Stage\app\node_modules\brainlink-store"
 New-Item -ItemType Directory -Force $Store | Out-Null
 foreach ($p in "memory-store.mjs", "errors.mjs", "package.json") { Copy-Item "$Root\vendor\brainlink-store\$p" $Store }

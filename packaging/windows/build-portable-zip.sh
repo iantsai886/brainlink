@@ -12,7 +12,8 @@ NAME="BrainLink-Preview-$VERSION"
 STAGE="$WORK/$NAME"
 
 rm -rf "$WORK" && mkdir -p "$STAGE/brainlink-src/vendor" "$DIST"
-cp -R "$ROOT/bin" "$ROOT/src" "$ROOT/ui" "$ROOT/samples" "$ROOT/docs" "$ROOT/package.json" "$ROOT/LICENSE.txt" "$ROOT/README.md" "$STAGE/brainlink-src/"
+cp -R "$ROOT/bin" "$ROOT/src" "$ROOT/ui" "$ROOT/samples" "$ROOT/docs" "$ROOT/skills" "$ROOT/package.json" "$ROOT/LICENSE.txt" "$ROOT/README.md" "$STAGE/brainlink-src/"
+rm -rf "$STAGE/brainlink-src/ui/app/test"
 cp -R "$ROOT/vendor/brainlink-store" "$STAGE/brainlink-src/vendor/"
 
 cat > "$STAGE/GETTING-STARTED-WINDOWS.txt" <<'TXT'

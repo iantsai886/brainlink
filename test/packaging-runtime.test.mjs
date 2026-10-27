@@ -23,7 +23,11 @@ test('every native installer bundles all production dependencies and portable Br
     assert.match(source, /skills/, `${label} must ship the versioned SKILL.md files`);
     assert.match(source, /yaml/, `${label} must bundle the YAML runtime dependency`);
     assert.match(source, /brainlink-store/, `${label} must bundle the local store dependency`);
+    assert.match(source, /ui[\\/]app[\\/]test/, `${label} must exclude development UI tests from the package`);
   }
+  const windowsPreview = await read('packaging/windows/build-portable-zip.sh');
+  assert.match(windowsPreview, /skills/, 'Windows portable preview must ship versioned BrainLink skills');
+  assert.match(windowsPreview, /ui[\\/]app[\\/]test/, 'Windows portable preview must exclude development UI tests');
   assert.ok(pkg.dependencies.yaml, 'YAML connector dependency must remain a production dependency');
 
   const windowsBuilder = await read('packaging/windows/build-windows.ps1');
@@ -42,6 +46,7 @@ test('every native installer bundles all production dependencies and portable Br
   assert.match(macZipTest, /app\/node_modules\/yaml\/dist\/index\.js/, 'the macOS package smoke test must check a loadable YAML runtime');
   assert.match(macZipTest, /app\/skills\/brainlink-session-closeout\/SKILL\.md/, 'the macOS package smoke test must check a shipped skill');
   assert.match(macZipTest, /app\/skills\/brainlink-graph-curation\/SKILL\.md/, 'the macOS package smoke test must check the graph-curation skill');
+  assert.match(macZipTest, /app\/ui\/app\/test/, 'the macOS package smoke test must reject development UI tests');
 
   const workflow = await read('.github/workflows/ci.yml');
   const packageJobs = ['windows-package:', 'macos-package:', 'linux-package:'];
@@ -61,13 +66,17 @@ test('every native installer bundles all production dependencies and portable Br
   }
   assert.match(workflow, /Install, run and uninstall Windows package/, 'Windows CI must exercise install and uninstall');
   assert.match(workflow, /Installer did not create the BrainLink desktop shortcut/, 'Windows package smoke test must verify the installed desktop shortcut');
+  assert.match(workflow, /Windows installer included development UI tests/, 'Windows package smoke test must reject development UI tests');
   assert.match(workflow, /Desktop shortcut does not open the BrainLink Setup launcher/, 'Windows package smoke test must verify what the shortcut opens');
   assert.match(workflow, /Uninstaller left the BrainLink desktop shortcut behind/, 'Windows package smoke test must verify shortcut cleanup');
   assert.match(workflow, /Install and smoke-test macOS package/, 'macOS CI must install and run the packaged app');
+  assert.match(workflow, /test ! -e "\$app_root\/ui\/app\/test"/, 'macOS package smoke test must reject development UI tests');
   assert.match(workflow, /Remove macOS smoke-test installation/, 'macOS CI must clean up its installed package');
   assert.match(workflow, /test ! -e \/opt\/brainlink/, 'Linux CI must verify package removal');
   assert.match(workflow, /Verify Linux package checksums and runtime architectures/, 'Linux CI must check package digests and both runtime architectures');
   assert.match(workflow, /Install and smoke-test per-user Linux tarball/, 'Linux CI must exercise the no-root installer and its removal path');
+  assert.match(workflow, /test ! -e \/opt\/brainlink\/app\/ui\/app\/test/, 'Linux package smoke test must reject development UI tests');
+  assert.match(workflow, /test ! -e "\$bundle\/app\/ui\/app\/test"/, 'Linux tarball smoke test must reject development UI tests');
   assert.match(workflow, /test ! -e "\$XDG_DATA_HOME\/brainlink"/, 'Linux CI must verify tarball uninstall removes the application only');
 });
 
