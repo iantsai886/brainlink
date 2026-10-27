@@ -406,13 +406,18 @@ test('connectors: named Harness connection blocks an existing home-level shared 
   const home = await tmp('dsh-profile-block-shared');
   const dshHome = path.join(home, '.dsh');
   await mkdir(path.join(dshHome, 'profiles', 'web'), { recursive: true });
-  await writeFile(path.join(dshHome, 'cordis.patch.yml'), '- insert:\n    - id: mcp-brainlink\n      name: "@deepseek-ai/dsh-mcp-client"\n      config: { serverName: brainlink, transport: stdio, command: node, args: [], env: { BRAINLINK_AGENT_TOKEN: old-shared-token } }\n');
+  const homePatch = '- insert:\n    - id: preserved-plugin\n      name: example/plugin\n      config: {}\n    - id: user-renamed-brainlink\n      name: "@deepseek-ai/dsh-mcp-client"\n      config: { serverName: brainlink-shared, transport: stdio, command: node, args: [], env: { BRAINLINK_AGENT_TOKEN: old-shared-token } }\n';
+  await writeFile(path.join(dshHome, 'cordis.patch.yml'), homePatch);
   await writeFile(path.join(dshHome, 'profiles', 'web', 'cordis.patch.yml'), '[]\n');
   const opts = { home, os: 'win32', env: { DSH_HOME: dshHome }, launch: { command: process.execPath, args: [] }, useCli: false };
   const result = await connect('deepseek-harness@web', opts);
   assert.equal(result.ok, false);
   assert.match(result.message, /old shared DeepSeek Harness connection/);
   assert.equal(await readFile(path.join(dshHome, 'profiles', 'web', 'cordis.patch.yml'), 'utf8'), '[]\n');
+  assert.equal((await detect(opts))['deepseek-harness'].connected, true, 'renamed shared entries must remain visible for cleanup');
+  assert.equal((await disconnect('deepseek-harness', opts)).ok, true);
+  const remainingHomeRows = parse(await readFile(path.join(dshHome, 'cordis.patch.yml'), 'utf8')).flatMap((patch) => patch.insert || []);
+  assert.deepEqual(remainingHomeRows.map((row) => row.id), ['preserved-plugin']);
 });
 
 // ---- bin/brainlink.mjs: connect --all and sync ----

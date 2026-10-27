@@ -71,6 +71,11 @@ const exists = (p) => stat(p).then(() => true, () => false);
 
 function deepSeekProfileId(name) { return `deepseek-harness@${name}`; }
 
+function isBrainLinkDshEntry(entry) {
+  return entry?.name === '@deepseek-ai/dsh-mcp-client'
+    && (entry.id === 'mcp-brainlink' || String(entry.config?.serverName || '').startsWith('brainlink'));
+}
+
 function deepSeekProfileClient(name) {
   if (!/^[A-Za-z0-9_-]{1,64}$/.test(name)) return null;
   const readable = name.toLowerCase().replace(/[^a-z0-9_-]/g, '-').slice(0, 13);
@@ -132,7 +137,11 @@ export async function detect(opts) {
   if (profiles.length) {
     for (const profile of profiles) { const id = deepSeekProfileId(profile); out[id] = await detectOne(id, deepSeekProfileClient(profile), opts); }
     const legacy = await detectOne('deepseek-harness', CLIENTS['deepseek-harness'], opts);
-    if (legacy.present || legacy.connected) out['deepseek-harness'] = { ...legacy, canConnect: false, note: 'Old shared Harness connection. Disconnect it before using profile-specific connections.' };
+    if (legacy.present || legacy.connected) {
+      const raw = await exists(legacy.file) ? await readFile(legacy.file, 'utf8') : '';
+      const hasSharedBrainLink = raw && (() => { try { return dshEntries(parseDocument(raw, { uniqueKeys: true })).some(isBrainLinkDshEntry); } catch { return legacy.connected; } })();
+      if (hasSharedBrainLink) out['deepseek-harness'] = { ...legacy, connected: true, canConnect: false, note: 'Old shared Harness connection. Disconnect it before using profile-specific connections.' };
+    }
   } else out['deepseek-harness'] = await detectOne('deepseek-harness', CLIENTS['deepseek-harness'], opts);
   for (const [id, c] of Object.entries(UNSUPPORTED)) out[id] = { title: c.title, file: null, present: false, connected: false, unsupported: true, note: c.note };
   return out;
@@ -190,6 +199,7 @@ function dshEntries(doc) {
 }
 
 function updateDshPatch(raw, entry, entryId = 'mcp-brainlink') {
+  const removeIds = new Set(Array.isArray(entryId) ? entryId : [entryId]);
   const doc = parseDocument(raw || '[]', { uniqueKeys: true });
   dshEntries(doc); // Validate the full document and every insert patch before changing anything.
   const rows = [];
@@ -198,7 +208,7 @@ function updateDshPatch(raw, entry, entryId = 'mcp-brainlink') {
     if (!Array.isArray(patch?.items)) { rows.push(patch); continue; }
     const insertPair = patch.items.find((pair) => pair.key?.value === 'insert');
     if (!insertPair) { rows.push(patch); continue; }
-    insertPair.value.items = insertPair.value.items.filter((node) => node?.toJSON?.()?.id !== entryId);
+    insertPair.value.items = insertPair.value.items.filter((node) => !removeIds.has(node?.toJSON?.()?.id));
     rows.push(patch);
   }
   if (entry) {
@@ -276,7 +286,7 @@ export async function connectClient(id, opts) {
     if (c.profile) {
       const sharedFile = CLIENTS['deepseek-harness'].file(opts);
       const sharedRaw = await exists(sharedFile) ? await readFile(sharedFile, 'utf8') : '';
-      if (sharedRaw && dshEntries(parseDocument(sharedRaw, { uniqueKeys: true })).some((row) => row.id === 'mcp-brainlink')) throw new Error('Disconnect the old shared DeepSeek Harness connection before connecting named profiles. This prevents its shared access token from reaching every profile.');
+      if (sharedRaw && dshEntries(parseDocument(sharedRaw, { uniqueKeys: true })).some(isBrainLinkDshEntry)) throw new Error('Disconnect the old shared DeepSeek Harness connection before connecting named profiles. This prevents its shared access token from reaching every profile.');
     }
     text = updateDshPatch(raw, { id: entryId, name: '@deepseek-ai/dsh-mcp-client', config: { serverName: c.serverName || SERVER_KEY, transport: 'stdio', command: entry.command, args: entry.args, env: entry.env } }, entryId);
   }
@@ -310,9 +320,10 @@ export async function disconnectClient(id, opts) {
   if (c.format === 'toml') text = codexToml(raw, null);
   else if (c.format === 'dsh-yaml') {
     const doc = parseDocument(raw, { uniqueKeys: true });
-    const entryId = c.entryId || 'mcp-brainlink';
-    if (!dshEntries(doc).some((entry) => entry.id === entryId)) return { client: id, removed: false };
-    text = updateDshPatch(raw, null, entryId);
+    const entries = dshEntries(doc);
+    const entryIds = c.profile ? [c.entryId] : entries.filter(isBrainLinkDshEntry).map((entry) => entry.id);
+    if (!entryIds.length || !entries.some((entry) => entryIds.includes(entry.id))) return { client: id, removed: false };
+    text = updateDshPatch(raw, null, entryIds);
   }
   else if (c.format === 'yaml') {
     const { doc, value } = parseYaml(raw, file);
