@@ -19,9 +19,7 @@ Setup can now add, detect, and remove BrainLink's local stdio MCP entry in DeepS
 
 ### Regression receipt for the current working changes
 
-Windows `npm run test:all` on the current working tree ran 431 core tests: 423 passed, 2 failed during the loaded full run, and 6 platform/privilege tests were skipped. The failures were a temporary Git clone cleanup lock (`EBUSY`) and a daily-scan timing assertion that saw three runs instead of one. Running those two test files alone immediately afterward passed 5/5. The UI suite passed 29/29. The isolated rerun supports a load-sensitive test issue; the full suite is not recorded as green.
-
-Follow-up: the daily-scan test now allows a 500 ms retry window and waits up to 10 seconds for its success receipt; its isolated file passed 4/4. The scheduled Git sync integration test now has a 60-second bounded wait and retries temporary Windows `EBUSY`/`EPERM` cleanup; after that adjustment it passed 1/1 in 63 seconds. These targeted passes validate the test fixes, but the full suite has not been rerun since them; hosted CI remains separately blocked.
+Fresh Windows `npm run test:all` on commit `466ffa0491d0e1b3444cd8489b5332d5dc283f2a` passed: core 431 tests (425 passed, 0 failed, 6 platform/privilege skips) and UI 29/29. The six skips require unavailable Linux behavior or Windows symlink privileges. Earlier under-load failures in Git cleanup and daily-scan timing led to bounded cleanup retries and a longer fixture retry interval; the current complete local run is green. This is local automated evidence, not hosted CI or live Harness validation.
 
 An independent review found that client config writes did not set restrictive file modes. DeepSeek Harness config and backup writes now use POSIX mode `0600`; the Harness tests assert both files are private on Unix. The checks passed on this Windows host, but Windows ACL inheritance and Unix mode assertions still need verification on their respective systems. The review also confirmed the home-level Harness patch shares one Twin-scoped token across its profiles; separate per-profile scopes are not implemented. The UI and setup note disclose this limit.
 
