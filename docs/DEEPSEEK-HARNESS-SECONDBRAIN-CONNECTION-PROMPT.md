@@ -19,12 +19,12 @@ Let the Harness search and read only the Second Brain vaults and tools that Brai
 
 ## Step 2: Connect using BrainLink's supported route
 
-1. Prefer BrainLink Setup's detected-client connection flow if it recognizes this Harness. It merges the BrainLink entry and backs up the existing client config. Do not replace the whole config.
-2. If the Harness supports MCP but BrainLink has no built-in connector for it, use only the Harness's documented generic MCP configuration. Obtain the exact BrainLink command and arguments from the installed BrainLink Setup/CLI or its repository documentation. Do not guess paths, transport, or config keys.
-3. Use a named BrainLink agent/Twin profile with the minimum required vaults, memory types, and operations. Begin with read-only access if supported. Do not grant broad Personal, Organisation, or Client access just to make a connection work.
-4. For local stdio, confirm BrainLink and the Harness run in the same operating-system environment. A Windows-local process, WSL/container, and remote agent may have different paths and cannot necessarily reach one another.
-5. Never expose BrainLink's loopback service to the public internet. If remote HTTPS access is required, stop and explain the need for a separately approved, authenticated relay and its security trade-offs. Do not set one up automatically.
-6. Never put tokens or credentials in chat, this prompt, source code, Git, shell history, screenshots, or logs. Use the supported local credential/config flow. Do not ask Ian to paste secrets into chat.
+1. Check BrainLink Setup's detected-client connection flow. If it recognizes the Harness, use that flow; it merges the BrainLink entry and backs up the existing client config. Do not replace the whole config.
+2. If it is not detected, but the Harness documentation confirms it supports local stdio MCP, use BrainLink's existing generic agent setup: open **Agents** in BrainLink Setup, choose **Add AI agent**, enter `DeepSeek Harness`, select **Local** only if both apps run in the same OS environment, and add it. BrainLink shows a JSON MCP snippet and a newly generated key once. Put that snippet in the Harness's documented MCP client config, merging it with existing entries. Use the exact command, arguments, and environment values BrainLink generated; do not guess paths or edit the source snippet.
+3. If Harness supports only remote MCP, do not choose Local. Use BrainLink's **Remote** agent option only after confirming the supported transport and reachability. BrainLink's current remote snippet uses loopback and is not reachable from a cloud or remote machine. Do not expose it with a tunnel yourself.
+4. In BrainLink Setup, assign the new named agent to an appropriate Personal, Organisation, or Client Twin profile with only the needed vaults, memory types, and operations. If Ian has not chosen the profile/scope, stop before searching note content and ask him to choose. Begin with read-only operations if supported.
+5. For local stdio, confirm BrainLink and the Harness run in the same operating-system environment. A Windows-local process, WSL/container, and remote agent may have different paths and cannot necessarily reach one another.
+6. Never put tokens or credentials in chat, this prompt, source code, Git, shell history, screenshots, or logs. Save the generated key only through the Harness's documented local secret/config flow. Do not ask Ian to paste secrets into chat.
 
 ## Step 3: Verify with a harmless read-only check
 
