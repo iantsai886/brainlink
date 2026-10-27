@@ -44,7 +44,7 @@ test('portable handoff Skill follows Agent Skills manifest constraints and suppo
   const { fields, body } = parseSkill(contents[0], paths[0]);
   assert.equal(fields.metadata.version, '0.2.0');
   assert.equal(fields.metadata.owner, 'Iango');
-  for (const client of ['Claude Code', 'Codex CLI', 'Gemini CLI', 'Hermes Agent', 'DeepSeek Harness']) assert.ok(fields.metadata['applicable-clients'].includes(client), client);
+  for (const client of ['Claude Code', 'Codex CLI', 'Gemini CLI', 'Google Antigravity', 'Hermes Agent', 'DeepSeek Harness']) assert.ok(fields.metadata['applicable-clients'].includes(client), client);
   assert.match(fields.metadata['test-status'], /Local fictional MCP handoff and Git checkpoint fixtures pass/);
   assert.match(fields.metadata['test-status'], /live behavior must be validated for each client/);
   assert.match(body, /confirm=false/);

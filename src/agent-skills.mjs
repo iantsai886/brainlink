@@ -5,7 +5,7 @@ import path from 'node:path';
 import { parseDocument } from 'yaml';
 
 const RECEIPT_VERSION = 1;
-const supported = new Set(['claude-code', 'codex', 'gemini', 'hermes', 'deepseek-harness']);
+const supported = new Set(['claude-code', 'codex', 'gemini', 'antigravity', 'hermes', 'deepseek-harness']);
 const digest = (value) => createHash('sha256').update(value).digest('hex');
 const inside = (root, target) => {
   const rel = path.relative(path.resolve(root), path.resolve(target));
@@ -17,6 +17,7 @@ export function skillClientRoot(client, { home = os.homedir(), env = process.env
   if (client === 'claude-code') return path.join(home, '.claude', 'skills');
   if (client === 'codex') return path.join(env.CODEX_HOME || path.join(home, '.codex'), 'skills');
   if (client === 'gemini') return path.join(home, '.gemini', 'skills');
+  if (client === 'antigravity') return path.join(home, '.gemini', 'config', 'skills');
   if (client === 'hermes') {
     const configDir = env.HERMES_HOME || path.join(home, '.hermes');
     return path.join(configDir, 'skills');
@@ -106,7 +107,7 @@ function receiptHash(record, name) {
 
 export async function installAgentSkills({ client, sourceRoot, stateDir, home, env = process.env } = {}) {
   const clientId = String(client || '').startsWith('deepseek-harness@') ? 'deepseek-harness' : String(client || '');
-  if (!supported.has(clientId)) throw new Error('Choose Claude Code, Codex, Gemini CLI, Hermes Agent, or DeepSeek Harness.');
+  if (!supported.has(clientId)) throw new Error('Choose Claude Code, Codex, Gemini CLI, Google Antigravity, Hermes Agent, or DeepSeek Harness.');
   const targetRoot = skillClientRoot(client, { home, env });
   if (!path.isAbsolute(targetRoot)) throw new Error('The AI skill folder must resolve to an absolute path.');
   const sourceSkills = await loadCatalog(sourceRoot);
@@ -163,7 +164,7 @@ export async function installAgentSkills({ client, sourceRoot, stateDir, home, e
 
 export async function removeAgentSkills({ client, stateDir, home, env = process.env } = {}) {
   const clientId = String(client || '').startsWith('deepseek-harness@') ? 'deepseek-harness' : String(client || '');
-  if (!supported.has(clientId)) throw new Error('Choose Claude Code, Codex, Gemini CLI, Hermes Agent, or DeepSeek Harness.');
+  if (!supported.has(clientId)) throw new Error('Choose Claude Code, Codex, Gemini CLI, Google Antigravity, Hermes Agent, or DeepSeek Harness.');
   const receiptFile = path.join(stateDir, 'agent-skills.json');
   const release = await acquireLock(receiptFile);
   try {

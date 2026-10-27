@@ -27,11 +27,22 @@ test('BrainLink skills use each supported client’s user skill folder', () => {
   assert.equal(skillClientRoot('codex', { home, env }), path.join(env.CODEX_HOME, 'skills'));
   assert.equal(skillClientRoot('codex', { home, env: {} }), path.join(home, '.codex', 'skills'));
   assert.equal(skillClientRoot('gemini', { home, env }), path.join(home, '.gemini', 'skills'));
+  assert.equal(skillClientRoot('antigravity', { home, env }), path.join(home, '.gemini', 'config', 'skills'));
   assert.equal(skillClientRoot('hermes', { home, env }), path.join(env.HERMES_HOME, 'skills'));
   assert.equal(skillClientRoot('hermes', { home, env: { LOCALAPPDATA: path.join(home, 'AppData', 'Local') } }), path.join(home, '.hermes', 'skills'), 'Hermes documents ~/.hermes as the default skill root on Windows too');
   assert.equal(skillClientRoot('deepseek-harness', { home, env }), path.join(env.DSH_HOME, 'skills'));
   assert.equal(skillClientRoot('deepseek-harness@research', { home, env }), path.join(env.DSH_HOME, 'skills'));
   assert.throws(() => skillClientRoot('unknown', { home, env }), /not supported/);
+});
+
+test('Antigravity installs global Agent Skills in its documented user folder', async (t) => {
+  const f = await fixture(t);
+  const installed = await installAgentSkills({ client: 'antigravity', sourceRoot: f.bundled, stateDir: f.stateDir, home: f.home, env: f.env });
+  assert.deepEqual(installed.installed, skillNames);
+  const status = await inspectAgentSkills({ client: 'antigravity', sourceRoot: f.bundled, stateDir: f.stateDir, home: f.home, env: f.env });
+  assert.deepEqual(status.skills.map((item) => item.state), skillNames.map(() => 'managed'));
+  const removed = await removeAgentSkills({ client: 'antigravity', stateDir: f.stateDir, home: f.home, env: f.env });
+  assert.deepEqual(removed.removed, skillNames);
 });
 
 test('install is repeatable, updates only files BrainLink still owns, and preserves extra user files', async (t) => {
@@ -111,7 +122,9 @@ test('Setup shows skill status and requires an authenticated, connected AI befor
   const before = await (await api('GET', '/api/state')).json();
   assert.equal(before.clients['claude-code'].connected, true);
   assert.deepEqual(before.agent_skills['claude-code'].skills.map((item) => item.state), skillNames.map(() => 'missing'));
+  assert.deepEqual(before.agent_skills.antigravity.skills.map((item) => item.state), skillNames.map(() => 'missing'));
   assert.equal((await api('POST', '/api/skills/install', { client: 'codex' })).status, 400, 'unconnected clients cannot receive BrainLink skills');
+  assert.equal((await api('POST', '/api/skills/install', { client: 'antigravity' })).status, 400, 'unconnected Antigravity cannot receive BrainLink skills');
   const installed = await (await api('POST', '/api/skills/install', { client: 'claude-code' })).json();
   assert.deepEqual(installed.installed, skillNames);
   const after = await (await api('GET', '/api/state')).json();
