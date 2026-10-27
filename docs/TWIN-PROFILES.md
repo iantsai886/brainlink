@@ -6,6 +6,8 @@ The `brainlink_guide` response separates `writes_available` (general memory writ
 
 In Setup and the built-in AI connection dialog, `propose_note` is a semantic-memory action; `read_session` and private session closeout are episodic. Turning episodic memory off therefore does not hide an explicitly granted semantic note proposal. The UI says “Propose new notes” so this action is not confused with the separate private-session-closeout flow.
 
+Setup's connection check also permits an AI that has only `propose_note`: it checks that the granted tool is listed and does not create a test note. The profile create, edit, and connect endpoints all enforce the same semantic-versus-episodic mapping as the UI.
+
 ### Creating a profile in Setup
 
 The Twin section in local Setup lets a user choose a name, type, owner, available non-private vaults, maximum vault access, named AI agents, each agent's allowed operations, and the four memory switches. The app asks for confirmation before saving. The authenticated `POST /api/twins/create` endpoint rechecks every choice, rejects private or unavailable vaults and unsupported operations, validates the resulting full configuration, and returns only the public profile view. New profiles default to private-by-default sources, required provenance, and metadata-only session capture. Creating a profile does not connect an AI agent, assign a GitHub repository, grant access to private vaults, or prove isolation for clients outside the named-agent token path. The owner label defaults to the profile name if left blank.

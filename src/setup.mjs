@@ -132,14 +132,13 @@ function startVaultChangeWatcher(vaults, onChange, { debounceMs = 300, pollMs = 
 function assertTwinActionsMatchMemory(agentAccess, memoryPolicy) {
   const requiredMemory = {
     search: 'semantic', read_note: 'semantic',
-    read_session: 'episodic', propose_note: 'episodic',
+    read_session: 'episodic', propose_note: 'semantic',
     handoff_read: 'working', write_handoff: 'working',
   };
   for (const grant of agentAccess.flatMap((agent) => agent.vaults)) {
     for (const operation of grant.operations) {
       const memoryType = requiredMemory[operation];
       if (memoryType && memoryPolicy[memoryType] !== true) throw new Error(`Enable ${memoryType} memory before granting ${operation} access.`);
-      if (operation === 'propose_note' && memoryPolicy.semantic !== true) throw new Error('Enable semantic memory before granting propose_note access.');
     }
   }
 }
@@ -781,9 +780,10 @@ export async function startSetup(opts = {}) {
       ? ctx.twinScope.grants.find((grant) => grant.operations.includes('search') && ctx.twinScope.memory_policy?.semantic && ctx.enabled.includes(grant.name))
       : null;
     const scopedTool = scopedGrant ? 'vault_search'
-      : ['session_list', 'list_handoffs', 'brainlink_guide'].find((name) => toolNames.includes(name));
+      : ['session_list', 'list_handoffs', 'brainlink_guide'].find((name) => toolNames.includes(name))
+        || (toolNames.includes('propose_note') ? 'tools/list' : null);
     const tool = ctx.twinScope.mode === 'scoped' ? (scopedTool || 'tools/list') : 'brainlink_guide';
-    const expectedByAction = { search: 'vault_search', read_note: 'vault_read_note', read_session: 'session_list', propose_note: 'session_close', handoff_read: 'list_handoffs', write_handoff: 'send_handoff' };
+    const expectedByAction = { search: 'vault_search', read_note: 'vault_read_note', read_session: 'session_list', propose_note: 'propose_note', handoff_read: 'list_handoffs', write_handoff: 'send_handoff' };
     const scopeHasLiveTool = ctx.twinScope.mode !== 'scoped' || ctx.twinScope.grants
       .filter((grant) => ctx.enabled.includes(grant.name))
       .flatMap((grant) => grant.operations)
@@ -824,7 +824,7 @@ export async function startSetup(opts = {}) {
       if (!profileVault || !vault || vault.private || seen.has(name)) throw new Error('Choose only non-private vaults already included in this Twin profile.');
       if (!operations.length || operations.some((action) => !['search', 'read_note', 'read_session', 'propose_note', 'handoff_read', 'write_handoff'].includes(action))) throw new Error('Choose supported search, note, session, or handoff actions.');
       const needsSemantic = operations.some((action) => ['search', 'read_note', 'propose_note'].includes(action));
-      const needsEpisodic = operations.some((action) => ['read_session', 'propose_note'].includes(action));
+      const needsEpisodic = operations.includes('read_session');
       const needsWorking = operations.some((action) => ['handoff_read', 'write_handoff'].includes(action));
       if (needsSemantic && profile.memory_policy?.semantic !== true) throw new Error('Turn on semantic memory in this Twin profile before granting note or search access.');
       if (needsEpisodic && profile.memory_policy?.episodic !== true) throw new Error('Turn on episodic memory in this Twin profile before granting session access.');

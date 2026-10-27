@@ -554,3 +554,7 @@ The `brainlink_guide` response now reports per-vault `note_proposals_available` 
 ### Twin setup memory-action mapping (2026-10-27)
 
 Corrected the profile and built-in-app setup screens: `propose_note` now follows semantic memory, while session reads remain episodic. Previously, disabling episodic memory could incorrectly disable note proposals. The UI label is now “Propose new notes,” distinct from private session closeout. The Twin profile suite passed 21/21 and the UI suite passed 29/29; all shipped locale JSON files passed through the UI test suite. This confirms local UI behavior and fixtures, not live client pickup or end-to-end cross-AI use.
+
+### Server-side Twin proposal mapping and connection check (2026-10-27)
+
+The server now uses the same memory mapping during Twin create, edit, and built-in-app connection: `propose_note` requires semantic memory, and only `read_session` requires episodic memory. A profile with proposal access but no search permission can still pass the connection check through its advertised MCP tool list; this check makes no vault write. Tests cover create/edit rejection when semantic memory is off, acceptance when episodic memory is off, proposal-only app connection, and no generated note. Twin suite: 21/21; UI suite: 29/29; `git diff --check` passed. This is local test evidence; actual client loading remains unverified.

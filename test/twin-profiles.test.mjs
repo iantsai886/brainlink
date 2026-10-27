@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtemp, mkdir, readFile, writeFile, stat } from 'node:fs/promises';
+import { mkdtemp, mkdir, readFile, readdir, writeFile, stat } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { normalize, validate, saveConfig } from '../src/config.mjs';
@@ -628,7 +628,7 @@ test('preset AI apps receive only the selected Twin permissions and disconnect r
     { name: 'Ian Private', path: privatePath, private: true },
   ], twin_profiles: [{
     id: 'org_scope', name: 'Example Org', mode: 'organisation', owner: 'synthetic-owner',
-    vaults: [{ name: 'Example Org', access: 'read' }],
+    vaults: [{ name: 'Example Org', access: 'propose' }],
     source_policy: { private_default: true, provenance_required: true, session_capture: 'metadata-only' },
     memory_policy: { working: false, semantic: true, procedural: false, episodic: false },
     allowed_actions: [], agent_access: [],
@@ -667,6 +667,17 @@ test('preset AI apps receive only the selected Twin permissions and disconnect r
     const after = JSON.parse(await readFile(path.join(env.BRAINLINK_HOME, 'config.json'), 'utf8'));
     assert.equal(after.ai_agents.find((agent) => agent.preset_client_id === 'cursor').tokenHash, null);
     assert.equal(after.twin_profiles[0].agent_access.length, 0);
+
+    const proposalConnected = await api('/api/connect', { client: 'cursor', profile_id: 'org_scope', vaults: [{ name: 'Example Org', operations: ['propose_note'] }] });
+    assert.equal(proposalConnected.status, 200, JSON.stringify(proposalConnected.body));
+    assert.equal(proposalConnected.body.health.ok, true, JSON.stringify(proposalConnected.body));
+    assert.equal(proposalConnected.body.health.tool, 'tools/list');
+    assert.deepEqual(await readdir(vaultPath), ['Public.md'], 'the permission health check previews but never saves a note');
+    const finalDisconnect = await api('/api/disconnect', { client: 'cursor' });
+    assert.equal(finalDisconnect.status, 200);
+    const final = JSON.parse(await readFile(path.join(env.BRAINLINK_HOME, 'config.json'), 'utf8'));
+    assert.equal(final.ai_agents.find((agent) => agent.preset_client_id === 'cursor').tokenHash, null);
+    assert.equal(final.twin_profiles[0].agent_access.length, 0);
   } finally { setup.server.close(); }
 });
 
@@ -829,7 +840,7 @@ test('Setup creates a validated Twin from explicit vault, agent, action and memo
         { name: 'Fictional Personal', operations: ['search', 'read_note', 'propose_note'] },
         { name: 'Fictional Other', operations: ['search'] },
       ] }],
-      memory_policy: { working: true, semantic: true, procedural: false, episodic: true },
+      memory_policy: { working: true, semantic: true, procedural: false, episodic: false },
     };
     assert.equal((await api(request, false)).status, 401, 'local Setup token is required');
     const created = await api(request);
@@ -862,6 +873,9 @@ test('Setup creates a validated Twin from explicit vault, agent, action and memo
     const disabledMemory = await api({ ...request, name: 'Should Refuse Disabled Memory', memory_policy: { ...request.memory_policy, semantic: false }, agent_access: [{ agent_id: 'agent_personal', vaults: [{ name: 'Fictional Personal', operations: ['search'] }] }] });
     assert.equal(disabledMemory.status, 400);
     assert.match(disabledMemory.body.error, /Enable semantic memory/);
+    const proposalWithoutSemantic = await api({ ...request, name: 'Should Refuse Proposal Without Semantic Memory', memory_policy: { ...request.memory_policy, semantic: false }, agent_access: [{ agent_id: 'agent_personal', vaults: [{ name: 'Fictional Personal', operations: ['propose_note'] }] }] });
+    assert.equal(proposalWithoutSemantic.status, 400);
+    assert.match(proposalWithoutSemantic.body.error, /Enable semantic memory/);
     const mixedSessionScope = await api({ ...request, name: 'Should Refuse Session Scope', agent_access: [{ agent_id: 'agent_personal', vaults: [
       { name: 'Fictional Personal', operations: ['read_session'] },
       { name: 'Fictional Other', operations: ['search'] },
@@ -894,8 +908,8 @@ test('Setup edits a Twin without changing its identity or source policy and refu
   try {
     const request = {
       profile_id: 'org_twin_1', name: 'Fictional Organisation Twin Revised', mode: 'organisation', owner: 'fictional-owner',
-      vaults: [{ name: 'Fictional Org', access: 'read' }],
-      agent_access: [{ agent_id: 'agent_unassigned', operations: ['search', 'read_note'] }],
+      vaults: [{ name: 'Fictional Org', access: 'propose' }],
+      agent_access: [{ agent_id: 'agent_unassigned', operations: ['search', 'read_note', 'propose_note'] }],
       memory_policy: { working: false, semantic: true, procedural: true, episodic: false },
     };
     assert.equal((await api(request, false)).status, 401);
@@ -915,6 +929,9 @@ test('Setup edits a Twin without changing its identity or source policy and refu
     const disabledMemory = await api({ ...request, name: 'Invalid memory grant', agent_access: [{ agent_id: 'agent_unassigned', operations: ['read_session'] }], memory_policy: { working: false, semantic: true, procedural: true, episodic: false } });
     assert.equal(disabledMemory.status, 400);
     assert.match(disabledMemory.body.error, /Enable episodic memory/);
+    const proposalWithoutSemantic = await api({ ...request, name: 'Invalid note proposal memory grant', agent_access: [{ agent_id: 'agent_unassigned', operations: ['propose_note'] }], memory_policy: { working: false, semantic: false, procedural: true, episodic: true } });
+    assert.equal(proposalWithoutSemantic.status, 400);
+    assert.match(proposalWithoutSemantic.body.error, /Enable semantic memory/);
     assert.equal(await readFile(path.join(env.BRAINLINK_HOME, 'config.json'), 'utf8'), savedBeforeRefusal);
     const privateVault = await api({ ...request, name: 'Must Not Save', vaults: [{ name: 'Fictional Private', access: 'read' }] });
     assert.equal(privateVault.status, 400);
