@@ -27,6 +27,14 @@ still comes from the connection's enabled vaults and the note privacy gate.
 The caller must not paste private data into free-text fields; automated
 content classification is not claimed here.
 
+Preview and confirmation: the preview returns the exact handoff path. Pass it
+back as `preview_path` with `confirm=true`; BrainLink verifies that it stays in
+the configured mailbox and matches the sender, recipient and subject. If the
+path was claimed after preview, BrainLink refuses the write and asks for a new
+preview. Existing same-minute names receive a numeric suffix. This prevents an
+approved preview from silently changing paths and prevents concurrent writers
+from overwriting a handoff.
+
 The fictional-company regression creates a structured handoff to Codex,
 checks the fields and public source link, then tries a private source link and
 checks that no second handoff was written. It is an API-level local test, not

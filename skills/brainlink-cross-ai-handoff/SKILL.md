@@ -4,7 +4,7 @@ description: Transfer a task between AI clients through BrainLink. Use when paus
 compatibility: Requires a connected BrainLink MCP server with brainlink_guide and, when configured, send_handoff and list_handoffs tools.
 metadata:
   owner: Iango
-  version: "0.2.0"
+  version: "0.3.0"
   applicable-clients: "Claude Code; Codex CLI; Gemini CLI; Google Antigravity; Hermes Agent; DeepSeek Harness"
   required-tools: "BrainLink MCP: brainlink_guide, send_handoff, list_handoffs"
   test-status: "Local fictional MCP handoff and Git checkpoint fixtures pass; live behavior must be validated for each client and Twin configuration"
@@ -21,7 +21,7 @@ Use BrainLink's existing handoff mailbox. Do not create a parallel handoff store
 2. Summarize only work you actually observed. Include the goal, current state, decisions, files changed, commands and results, open questions, and the smallest next steps. Mark reported or inferred claims as such. Never claim a command passed unless you saw its result.
 3. Keep the handoff within the configured connection and project scope. Do not include credentials, private-note contents, customer data outside the authorized scope, or raw conversation transcripts. Add `source_refs` only for Markdown notes in the handoff vault that you can read and that are relevant to the next AI.
 4. If the task is in a Git repository, you may include `git: {repo, branch, head, dirty, ahead}` using values you directly checked. `repo` must be the `owner/name` label, not a URL or local path. These values are reported by the sender; BrainLink cannot verify them. Never include credentials or remote URLs.
-5. Call `send_handoff` with an explicit recipient (`Claude Code`, `Codex`, or the configured agent name), a concise subject, and the structured fields. Use `confirm=false` first. Show the preview to the user; write only after their approval or an instruction that clearly authorizes sending this handoff. Then call again with the same content and `confirm=true`.
+5. Call `send_handoff` with an explicit recipient (`Claude Code`, `Codex`, or the configured agent name), a concise subject, and the structured fields. Use `confirm=false` first. Show the preview to the user; write only after their approval or an instruction that clearly authorizes sending this handoff. Then call again with the same content, `preview_path` copied exactly from the preview, and `confirm=true`. If another message takes that path first, BrainLink refuses to overwrite it; make a fresh preview.
 6. Report the saved handoff path and accurately distinguish sent from picked up. Sending does not prove the other AI received or completed it.
 
 ## Pick up work from another AI

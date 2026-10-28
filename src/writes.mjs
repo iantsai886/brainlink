@@ -137,10 +137,14 @@ export async function proposeNote(ctx, a, now = new Date()) {
 export async function commitNew(ctx, vaultName, rel, content, confirm) {
   const v = vault(ctx, vaultName);
   const full = safeJoin(vaultRoot(ctx, vaultName), rel);
-  if (await exists(full)) return { ok: false, errors: [`refused: ${vaultName}/${rel} already exists; never overwrite — use a new dated note or an append tool`] };
+  if (await exists(full)) return { ok: false, conflict: true, path: `${vaultName}/${rel}`, errors: [`refused: ${vaultName}/${rel} already exists; never overwrite — choose a new path`] };
   if (v.writes === 'proposal-only') return { ok: true, written: false, path: `${vaultName}/${rel}`, preview: content, next: `${vaultName} is proposal-only: show this to the user; do not write it elsewhere.` };
   if (!confirm) return { ok: true, written: false, path: `${vaultName}/${rel}`, preview: content, next: 'Show the preview to the user; call again with confirm=true after approval.' };
-  await writeFile(full, content, { flag: 'wx' });
+  try { await writeFile(full, content, { flag: 'wx' }); }
+  catch (error) {
+    if (error.code === 'EEXIST') return { ok: false, conflict: true, path: `${vaultName}/${rel}`, errors: [`refused: ${vaultName}/${rel} was created after preview; no file was overwritten — preview again`] };
+    throw error;
+  }
   await safeUpdateMap(ctx, vaultName);
   return { ok: true, written: true, path: `${vaultName}/${rel}` };
 }
@@ -363,7 +367,30 @@ export async function sendHandoff(ctx, a, now = new Date()) {
   }
   if (errors.length) return { ok: false, errors };
   const ts = zonedNow(ctx.tz, now);
-  const rel = `${h.folder}/${ts.slice(0, 10)}-${ts.slice(11, 13)}${ts.slice(14, 16)}-from-${slug(id.ai_platform)}-to-${slug(a.to)}-${slug(subject).slice(0, 60)}.md`;
+  const root = vaultRoot(ctx, h.vault);
+  const nameTail = `from-${slug(id.ai_platform)}-to-${slug(a.to)}-${slug(subject).slice(0, 60)}`;
+  const baseName = `${ts.slice(0, 10)}-${ts.slice(11, 13)}${ts.slice(14, 16)}-${nameTail}`;
+  let rel;
+  if (a.preview_path !== undefined) {
+    const supplied = String(a.preview_path);
+    const prefix = `${h.vault}/`;
+    const relative = supplied.startsWith(prefix) ? supplied.slice(prefix.length) : supplied;
+    const parts = relative.split('/');
+    const fileName = parts.at(-1) || '';
+    const timestampedTail = fileName.match(/^\d{4}-\d{2}-\d{2}-\d{4}-(.*)\.md$/)?.[1];
+    const validName = timestampedTail === nameTail || (timestampedTail?.startsWith(`${nameTail}-`) && /^\d+$/.test(timestampedTail.slice(nameTail.length + 1)));
+    if (supplied.includes('\\') || parts.length !== h.folder.split('/').length + 1 || !relative.startsWith(`${h.folder}/`) || parts.some((part) => !part || part === '.' || part === '..')
+      || !HANDOFF_RE.test(fileName) || !validName) {
+      return { ok: false, errors: ['preview_path must be the exact preview path for this recipient, subject, and mailbox'] };
+    }
+    rel = relative;
+  } else {
+    rel = `${h.folder}/${baseName}.md`;
+    for (let suffix = 2; await exists(safeJoin(root, rel)); suffix++) {
+      if (suffix > 10000) return { ok: false, errors: ['could not find an unused handoff filename; retry the preview'] };
+      rel = `${h.folder}/${baseName}-${suffix}.md`;
+    }
+  }
   const fm = ['---', 'type: handoff', 'handoff_schema: 1', `status: ${status}`, `ai_platform: ${q(id.ai_platform)}`, `agent_or_role: ${q(id.agent_or_role)}`,
     `session_or_task_id: ${q(id.session_or_task_id)}`, `written_at: ${ts}`, `to: ${q(a.to)}`, `priority: ${a.priority || 'P2'}`, `subject: ${q(subject)}`,
     `decision_needed: ${a.decision_needed ? 'yes' : 'no'}`, `deadline: ${a.deadline || ''}`, `ack_of: ${a.ack_of || ''}`, `source: ${q(a.source || 'handoff')}`,

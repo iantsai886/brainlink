@@ -50,7 +50,7 @@ test('fictional Claude-to-Codex handoff previews, filters private sources, conti
     const persistedBeforeApproval = await readFile(path.join(mailbox, path.basename(preview.value.path)), 'utf8').catch(() => null);
     assert.equal(persistedBeforeApproval, null);
 
-    const sent = await call(claude, 'send_handoff', { ...payload, confirm: true });
+    const sent = await call(claude, 'send_handoff', { ...payload, preview_path: preview.value.path, confirm: true });
     assert.equal(sent.value.written, true);
     assert.equal(sent.value.path, preview.value.path);
     const note = await readFile(path.join(mailbox, path.basename(sent.value.path)), 'utf8');

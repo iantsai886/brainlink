@@ -536,6 +536,35 @@ test('structured handoff keeps scope and evidence, and refuses private source li
   assert.equal((await listHandoffs(ctx, { to: 'Codex' })).length, 1);
 });
 
+test('handoff confirmation keeps its preview path, resolves filename collisions, and never overwrites a race winner', async () => {
+  const { cfg, company } = await fixture();
+  const ctx = ctxOf(cfg);
+  const args = { to: 'Codex', subject: 'Continue fictional demo', goal: 'Finish the local demo', confirm: false };
+  const firstPreview = await sendHandoff(ctx, args, NOW);
+  const first = await sendHandoff(ctx, { ...args, preview_path: firstPreview.path, confirm: true }, NOW);
+  assert.equal(first.written, true);
+  assert.equal(first.path, firstPreview.path);
+
+  const secondPreview = await sendHandoff(ctx, args, NOW);
+  assert.notEqual(secondPreview.path, firstPreview.path);
+  assert.match(secondPreview.path, /continue-fictional-demo-2\.md$/);
+  const second = await sendHandoff(ctx, { ...args, preview_path: secondPreview.path, confirm: true }, new Date(NOW.getTime() + 60000));
+  assert.equal(second.written, true);
+  assert.equal(second.path, secondPreview.path, 'the exact reviewed path survives a later confirmation');
+
+  const wrongSubject = await sendHandoff(ctx, { ...args, subject: 'Different subject', preview_path: secondPreview.path, confirm: true }, NOW);
+  assert.equal(wrongSubject.ok, false);
+  assert.match(wrongSubject.errors.join(' '), /exact preview path/);
+
+  const racePreview = await sendHandoff(ctx, { ...args, subject: 'Race check' }, NOW);
+  const raceFile = path.join(company, racePreview.path.split('/').slice(1).join('/'));
+  await writeFile(raceFile, 'another sender won this path');
+  const race = await sendHandoff(ctx, { ...args, subject: 'Race check', preview_path: racePreview.path, confirm: true }, NOW);
+  assert.equal(race.ok, false);
+  assert.equal(race.conflict, true);
+  assert.equal(await readFile(raceFile, 'utf8'), 'another sender won this path');
+});
+
 test('handoff replies are append-only and use a constrained lifecycle status', async () => {
   const { cfg, company } = await fixture();
   const ctx = ctxOf(cfg);
