@@ -3,31 +3,84 @@ import assert from 'node:assert/strict';
 import { mkdtemp, mkdir, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
-import { normalize } from '../src/config.mjs';
+import { normalize, validate } from '../src/config.mjs';
 import { createContext } from '../src/core.mjs';
 import { createMcp } from '../src/server.mjs';
+import { hashToken } from '../src/mcp-agents.mjs';
 
 async function call(mcp, name, args = {}) {
   const response = await mcp.handle({ jsonrpc: '2.0', id: 1, method: 'tools/call', params: { name, arguments: args } });
   assert.equal(response.error, undefined, `${name} transport call must succeed`);
   const result = response.result;
-  const value = JSON.parse(result.content[0].text);
+  let value;
+  try { value = JSON.parse(result.content[0].text); } catch { value = result.content[0].text; }
   return { isError: result.isError, value };
 }
 
 test('fictional Claude-to-Codex handoff previews, filters private sources, continues, and acknowledges', async () => {
   const root = await mkdtemp(path.join(tmpdir(), 'brainlink-cross-client-'));
-  const vault = path.join(root, 'company-vault');
-  const mailbox = path.join(vault, 'Handoffs');
-  await mkdir(mailbox, { recursive: true });
-  await writeFile(path.join(vault, 'Public-Plan.md'), '---\ntitle: Public plan\n---\nApproved fictional scope: build a local demo only.');
-  await writeFile(path.join(vault, 'Private-Plan.md'), '---\nprivate: true\ntitle: Fictional private note\n---\nZQXPRIVATE_HANDOFF_CANARY');
-  const cfg = normalize({ vaults: [{ name: 'Fictional Company', path: vault }], handoff: { vault: 'Fictional Company', folder: 'Handoffs' } });
-  const makeClient = (platform) => createMcp(createContext(cfg, { env: {
-    HOME: root, BRAINLINK_HOME: path.join(root, 'app'), BRAINLINK_AI_PLATFORM: platform, BRAINLINK_SEMANTIC: '0',
+  const companyVault = path.join(root, 'company-vault');
+  const personalVault = path.join(root, 'personal-vault');
+  const mailboxVault = path.join(root, 'shared-handoff-vault');
+  const mailbox = path.join(mailboxVault, 'Handoffs');
+  await Promise.all([companyVault, personalVault, mailbox].map((folder) => mkdir(folder, { recursive: true })));
+  await writeFile(path.join(companyVault, 'Public-Plan.md'), '---\ntitle: Public plan\n---\nApproved fictional scope: build a local demo only.');
+  await writeFile(path.join(companyVault, 'Private-Plan.md'), '---\nprivate: true\ntitle: Fictional private note\n---\nZQXPRIVATE_HANDOFF_CANARY');
+  await writeFile(path.join(personalVault, 'Personal-Note.md'), '---\nprivate: true\ntitle: Personal note\n---\nZQXPERSONAL_VAULT_CANARY');
+  const cfg = normalize({
+    version: 2,
+    vaults: [
+      { name: 'Fictional Company', path: companyVault },
+      { name: 'Fictional Personal', path: personalVault, private: true },
+      { name: 'Shared Handoff Mailbox', path: mailboxVault },
+    ],
+    handoff: { vault: 'Shared Handoff Mailbox', folder: 'Handoffs' },
+    ai_agents: [
+      { id: 'claude_code', name: 'Fictional Claude Code', tokenHash: hashToken('fictional-claude-token') },
+      { id: 'codex', name: 'Fictional Codex', tokenHash: hashToken('fictional-codex-token') },
+      { id: 'personal_ai', name: 'Fictional Personal AI', tokenHash: hashToken('fictional-personal-token') },
+      { id: 'unassigned', name: 'Unassigned Agent', tokenHash: hashToken('fictional-unassigned-token') },
+    ],
+    twin_profiles: [
+      {
+        id: 'fictional_org_twin', name: 'Fictional Organisation Twin', mode: 'organisation', owner: 'fictional-owner',
+        vaults: [{ name: 'Fictional Company', access: 'propose' }, { name: 'Shared Handoff Mailbox', access: 'propose' }],
+        source_policy: { private_default: true, provenance_required: true, session_capture: 'summary-proposal' },
+        memory_policy: { working: true, semantic: true, procedural: true, episodic: true },
+        allowed_actions: ['search', 'read_note', 'handoff_read', 'write_handoff'],
+        agent_access: ['claude_code', 'codex'].map((agent_id) => ({
+          agent_id,
+          vaults: [
+            { name: 'Fictional Company', access: 'propose', operations: ['search', 'read_note'] },
+            { name: 'Shared Handoff Mailbox', access: 'propose', operations: ['handoff_read', 'write_handoff'] },
+          ],
+        })),
+      },
+      {
+        id: 'fictional_personal_twin', name: 'Fictional Personal Twin', mode: 'personal', owner: 'fictional-personal-owner',
+        vaults: [{ name: 'Fictional Personal', access: 'read' }, { name: 'Shared Handoff Mailbox', access: 'propose' }],
+        source_policy: { private_default: true, provenance_required: true, session_capture: 'summary-proposal' },
+        memory_policy: { working: true, semantic: true, procedural: true, episodic: true },
+        allowed_actions: ['search', 'read_note', 'handoff_read', 'write_handoff'],
+        agent_access: [{
+          agent_id: 'personal_ai',
+          vaults: [
+            { name: 'Fictional Personal', access: 'read', operations: ['search', 'read_note'] },
+            { name: 'Shared Handoff Mailbox', access: 'propose', operations: ['handoff_read', 'write_handoff'] },
+          ],
+        }],
+      },
+    ],
+  });
+  assert.deepEqual(validate(cfg), [], 'the isolated sender and recipient have valid, explicit Twin grants');
+  const makeClient = (platform, token) => createMcp(createContext(cfg, { env: {
+    HOME: root, BRAINLINK_HOME: path.join(root, `app-${platform}`), BRAINLINK_AI_PLATFORM: platform,
+    BRAINLINK_AGENT_TOKEN: token, BRAINLINK_SEMANTIC: '0',
   } }));
-  const claude = makeClient('Claude Code');
-  const codex = makeClient('Codex');
+  const claude = makeClient('Claude Code', 'fictional-claude-token');
+  const codex = makeClient('Codex', 'fictional-codex-token');
+  const personal = makeClient('Personal AI', 'fictional-personal-token');
+  const unassigned = makeClient('Unassigned Agent', 'fictional-unassigned-token');
   const taskId = 'fictional-cross-client-task-01';
   const payload = {
     to: 'Codex', subject: 'Continue fictional local demo', goal: 'Finish the isolated demo UI',
@@ -36,17 +89,23 @@ test('fictional Claude-to-Codex handoff previews, filters private sources, conti
     tests: ['node --test test/demo.test.mjs — passed'], open_questions: ['Check keyboard navigation'],
     next_steps: ['Run the local accessibility check', 'Report its actual result'],
     git: { repo: 'iantsai886/fictional-demo', branch: 'feature/local-demo', head: 'abcdef1234567', dirty: true, ahead: 2 },
-    source_refs: ['Public-Plan.md'], scope: 'company', confidence: 'reported',
+    source_refs: ['Fictional Company::Public-Plan.md'], scope: 'company', confidence: 'reported',
     ai_platform: 'Claude Code', agent_or_role: 'implementation agent', session_or_task_id: taskId,
   };
   try {
-    assert.equal((await call(claude, 'brainlink_guide')).value.handoff_mailbox, 'Fictional Company/Handoffs');
-    const rejected = await call(claude, 'send_handoff', { ...payload, source_refs: ['Private-Plan.md'] });
+    const deniedTools = await unassigned.handle({ jsonrpc: '2.0', id: 1, method: 'tools/list' });
+    assert.equal(deniedTools.result.tools.some((tool) => tool.name === 'list_handoffs'), false, 'an unassigned agent is not offered handoff tools');
+    const denied = await unassigned.handle({ jsonrpc: '2.0', id: 2, method: 'tools/call', params: { name: 'list_handoffs', arguments: { to: 'Codex' } } });
+    assert.equal(denied.error?.code, -32602, 'direct attempts by an unassigned agent are refused');
+    assert.doesNotMatch(JSON.stringify(denied), /Fictional Company|ZQXPRIVATE_HANDOFF_CANARY/);
+    const guide = await call(claude, 'brainlink_guide');
+    assert.equal(guide.value.handoff_mailbox, 'Shared Handoff Mailbox/Handoffs', JSON.stringify(guide));
+    const rejected = await call(claude, 'send_handoff', { ...payload, source_refs: ['Fictional Company::Private-Plan.md'] });
     assert.equal(rejected.value.ok, false);
     const preview = await call(claude, 'send_handoff', { ...payload, confirm: false });
-    assert.equal(preview.value.ok, true);
+    assert.equal(preview.value.ok, true, JSON.stringify(preview));
     assert.equal(preview.value.written, false);
-    assert.match(preview.value.path, /^Fictional Company\/Handoffs\/\d{4}-\d{2}-\d{2}-\d{4}-from-claude-code-to-codex-continue-fictional-local-demo\.md$/);
+    assert.match(preview.value.path, /^Shared Handoff Mailbox\/Handoffs\/\d{4}-\d{2}-\d{2}-\d{4}-from-claude-code-to-codex-continue-fictional-local-demo\.md$/);
     const persistedBeforeApproval = await readFile(path.join(mailbox, path.basename(preview.value.path)), 'utf8').catch(() => null);
     assert.equal(persistedBeforeApproval, null);
 
@@ -58,7 +117,7 @@ test('fictional Claude-to-Codex handoff previews, filters private sources, conti
     assert.match(note, /git_checkpoint_schema: 1/);
     assert.match(note, /Git checkpoint \(reported by sender; not verified by BrainLink\)/);
     assert.match(note, /Working tree dirty: true/);
-    assert.match(note, /\[\[Public-Plan\]\]/);
+    assert.match(note, /`Fictional Company::Public-Plan\.md`/);
     assert.doesNotMatch(note, /ZQXPRIVATE_HANDOFF_CANARY/);
 
     const pickup = await call(codex, 'list_handoffs', { to: 'Codex' });
@@ -86,6 +145,21 @@ test('fictional Claude-to-Codex handoff previews, filters private sources, conti
     const malformed = await call(codex, 'list_handoffs', { to: 'Codex' });
     const malformedItem = malformed.value.find(item => item.path === sent.value.path);
     assert.equal(malformedItem.git_checkpoint, undefined);
+
+    const personalInbox = await call(personal, 'list_handoffs', { to: 'Codex' });
+    assert.deepEqual(personalInbox.value, [], 'a Personal Twin does not receive the Organisation Twin handoff');
+    const crossTwinSource = await call(personal, 'send_handoff', {
+      to: 'Codex', subject: 'Attempt to cite company source', goal: 'Must be refused',
+      source_refs: ['Fictional Company::Public-Plan.md'], scope: 'personal', confidence: 'reported',
+      ai_platform: 'Personal AI', agent_or_role: 'personal assistant', session_or_task_id: `${taskId}-cross-twin`, confirm: false,
+    });
+    assert.equal(crossTwinSource.value.ok, false, 'a Personal Twin cannot cite a Company note through the shared mailbox');
+    assert.doesNotMatch(JSON.stringify(crossTwinSource), /Approved fictional scope|ZQXPRIVATE_HANDOFF_CANARY/);
+    const personalTools = await personal.handle({ jsonrpc: '2.0', id: 3, method: 'tools/list' });
+    assert.equal(personalTools.result.tools.some((tool) => tool.name === 'vault_search'), true);
+    const wrongScopeRead = await personal.handle({ jsonrpc: '2.0', id: 4, method: 'tools/call', params: { name: 'vault_search', arguments: { vault: 'Fictional Company', query: 'Public plan' } } });
+    assert.equal(wrongScopeRead.result?.isError, true, 'Personal agent cannot search the company vault');
+    assert.doesNotMatch(JSON.stringify(wrongScopeRead), /Approved fictional scope|ZQXPRIVATE_HANDOFF_CANARY/);
   } finally { await rm(root, { recursive: true, force: true }); }
 });
 

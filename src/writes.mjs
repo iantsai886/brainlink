@@ -359,10 +359,18 @@ export async function sendHandoff(ctx, a, now = new Date()) {
     }
   }
   const refs = a.source_refs || [];
-  if (!Array.isArray(refs) || refs.length > 8 || refs.some((ref) => typeof ref !== 'string' || !ref.endsWith('.md') || /[\r\n\[\]]/.test(ref))) errors.push('source_refs must be up to 8 Markdown paths in the handoff vault');
+  if (!Array.isArray(refs) || refs.length > 8 || refs.some((ref) => typeof ref !== 'string' || !(ref.includes('::') ? ref.split('::')[1]?.endsWith('.md') : ref.endsWith('.md')) || /[\r\n\[\]]/.test(ref))) errors.push('source_refs must be up to 8 Markdown paths, optionally qualified as Vault::path.md');
   if (!(await isDir(safeJoin(vaultRoot(ctx, h.vault), h.folder)))) errors.push(`handoff folder "${h.folder}" does not exist in ${h.vault}`);
   if (!errors.length) for (const ref of refs) {
-    try { await readNote(ctx, h.vault, ref); }
+    try {
+      const [sourceVault, ...pathParts] = ref.includes('::') ? ref.split('::') : [h.vault, ref];
+      const sourcePath = pathParts.join('::');
+      const grant = ctx.twinScope?.mode === 'scoped'
+        ? ctx.twinScope.grants?.find((item) => item.name === sourceVault && item.operations.includes('read_note'))
+        : true;
+      if (!grant || !ctx.enabled.includes(sourceVault)) throw new Error('source is outside the sender read scope');
+      await readNote(ctx, sourceVault, sourcePath);
+    }
     catch { errors.push('source_refs contains a missing, excluded, or private note'); break; }
   }
   if (errors.length) return { ok: false, errors };
@@ -399,7 +407,7 @@ export async function sendHandoff(ctx, a, now = new Date()) {
     ...(ctx.twinScope?.mode === 'scoped' ? [`twin_profile_id: ${q(ctx.twinScope.profile_id)}`] : []), '---'].join('\n');
   const sections = HANDOFF_FIELDS.map(([field, label]) => handoffSection(label, a[field])).join('');
   const gitSection = git.value ? handoffSection('Git checkpoint (reported by sender; not verified by BrainLink)', `Repository: ${git.value.repo}\nBranch: ${git.value.branch}\nCommit: ${git.value.head}\nWorking tree dirty: ${git.value.dirty}\nCommits ahead: ${git.value.ahead}`) : '';
-  const sources = refs.length ? handoffSection('Sources', refs.map((ref) => `[[${ref.replace(/\.md$/i, '')}]]`)) : '';
+  const sources = refs.length ? handoffSection('Sources', refs.map((ref) => `\`${ref}\``)) : '';
   const body = a.body ? handoffSection('Body', a.body) : '';
   return commitNew(ctx, h.vault, rel, `${fm}\n\n# ${subject}\n\n${madeBy(id)}\n${sections}${gitSection}${sources}${body}`, a.confirm);
 }

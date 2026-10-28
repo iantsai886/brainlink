@@ -134,6 +134,11 @@ export function twinToolAuthorization(ctx, name, args = {}) {
   if (!action) return { allowed: false, reason: `This operation is not available to profile-scoped agents yet: ${name}.` };
   const memoryType = READ_TOOL_MEMORY[name];
   if (!twinMemoryAllowed(ctx, memoryType)) return { allowed: false, reason: `Twin profile policy does not allow ${memoryType || 'unclassified'} memory access.` };
+  // This tool returns scoped configuration and usage rules, not note bodies. A profile with a
+  // dedicated handoff-only vault still needs the guide to learn the approved mailbox workflow.
+  if (name === 'brainlink_guide') return ctx.enabled.length > 0
+    ? { allowed: true }
+    : { allowed: false, reason: 'This Twin profile has no enabled vault grants.' };
   if (HANDOFF_TOOLS.has(name)) return handoffGrant(ctx, action)
     ? { allowed: true }
     : { allowed: false, reason: `Twin profile scope does not allow ${action} in its handoff vault.` };
@@ -156,6 +161,7 @@ export function twinToolListed(ctx, name) {
   if (!twinMemoryAllowed(ctx, READ_TOOL_MEMORY[name])) return false;
   const action = READ_TOOL_ACTION[name];
   if (!action) return false;
+  if (name === 'brainlink_guide') return ctx.enabled.length > 0;
   if (HANDOFF_TOOLS.has(name)) return handoffGrant(ctx, action);
   if (VAULT_ARGUMENT_TOOLS.has(name)) return scope.grants.some((grant) => ctx.enabled.includes(grant.name) && grant.operations.includes(action));
   return ctx.enabled.length > 0 && ctx.enabled.every((vault) => scope.grants.some((grant) => grant.name === vault && grant.operations.includes(action)));

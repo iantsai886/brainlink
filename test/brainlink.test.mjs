@@ -529,7 +529,7 @@ test('structured handoff keeps scope and evidence, and refuses private source li
   assert.match(saved, /handoff_schema: 1/);
   assert.match(saved, /scope: "company"/);
   assert.match(saved, /## Tests and results\n\n- Local preview passed/);
-  assert.match(saved, /\[\[Home\]\]/);
+  assert.match(saved, /`Home\.md`/);
   const privateRef = await sendHandoff(ctx, { ...args, subject: 'Must not write', source_refs: ['Secret Note.md'] }, NOW);
   assert.equal(privateRef.ok, false);
   assert.match(privateRef.errors.join(' '), /private note/);

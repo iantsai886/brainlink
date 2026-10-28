@@ -18,10 +18,15 @@ own checkout and reports a match, behind state, divergence, or sender-reported
 uncommitted work. This does not run Git commands for the sender or switch the
 receiver's branch.
 
-`source_refs` accepts up to eight Markdown paths inside the handoff vault.
-Each path must pass the existing read gate before the handoff is written.
-Missing, excluded, symlinked, and private notes are rejected with one generic
-error; source contents are never copied into the handoff. A `scope` label is
+`source_refs` accepts up to eight Markdown references. Use `path/to/note.md`
+for the configured mailbox vault, or `Vault Name::path/to/note.md` for another
+vault. BrainLink checks each source with the sender's `read_note` grant before
+saving the handoff. Missing, excluded, private, or out-of-scope notes all fail
+with the same error. Cross-vault references are stored as text; they are not
+claimed to be working cross-vault Obsidian links. Each path passes the existing
+read gate before the handoff is written. Missing, excluded, symlinked, and
+private notes are rejected with one generic error; source contents are never
+copied into the handoff. A `scope` label is
 descriptive metadata, **not** a new authorization mechanism. Effective access
 still comes from the connection's enabled vaults and the note privacy gate.
 The caller must not paste private data into free-text fields; automated
@@ -36,11 +41,12 @@ approved preview from silently changing paths and prevents concurrent writers
 from overwriting a handoff.
 
 The fictional-company regression creates a structured handoff to Codex,
-checks the fields and public source link, then tries a private source link and
-checks that no second handoff was written. It is an API-level local test, not
-proof that Claude Code and Codex have completed a real handoff together.
+checks the fields and qualified public source reference, then tries a private
+source reference and checks that no second handoff was written. It is an
+API-level local test, not proof that Claude Code and Codex have completed a
+real handoff together.
 
-`test/cross-client-handoff.test.mjs` adds a local two-client protocol fixture. It creates separate Claude Code and Codex MCP contexts over fictional company data, verifies preview-before-confirm, blocks a private source reference, has Codex pick up the saved task, and returns an acknowledgement through `ack_of`. It also checks a sender-reported Git checkpoint and rejects unsafe checkpoint values. Recipient filtering reads only bounded frontmatter before opening the body, and correctly supports hyphenated names such as “Claude Code.” This verifies BrainLink's MCP behavior and handoff format; it does not run either AI model or establish live client interoperability.
+`test/cross-client-handoff.test.mjs` adds a local protocol fixture using separate registered agent tokens, fictional Company and Personal vaults, and a dedicated shared handoff mailbox. It verifies preview-before-confirm, permits only a qualified source note covered by the sender's read grant, blocks private sources and cross-Twin citations, has Codex pick up the saved task, and returns an acknowledgement through `ack_of`. It also checks a sender-reported Git checkpoint and rejects unsafe checkpoint values. Recipient filtering reads only bounded frontmatter before opening the body, and correctly supports hyphenated names such as “Claude Code.” This verifies BrainLink's MCP behavior and handoff format; it does not run either AI model or establish live client interoperability.
 
 ### Isolated CLI probe (2026-10-26)
 
