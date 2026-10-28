@@ -50,7 +50,7 @@ test('Windows recovery key removes broad ACL access and keeps the current user a
     const user = execFileSync('whoami.exe', [], { encoding: 'utf8', windowsHide: true }).trim();
     return {
       user: acl.split(/\r?\n/).some((row) => row.toLowerCase().includes(user.toLowerCase())),
-      broad: /(?:\\*S-1-1-0|\\*S-1-5-11|\\*S-1-5-32-545|Everyone|Authenticated Users|BUILTIN\\Users)/i.test(acl),
+      broad: /(?:\*S-1-1-0|\*S-1-5-11|\*S-1-5-32-545|Everyone|Authenticated Users|BUILTIN\\Users)/i.test(acl),
     };
   };
 
