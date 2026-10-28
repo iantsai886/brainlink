@@ -101,6 +101,7 @@ Clean-room implementations of the strongest patterns in Obsidian Copilot, Khoj a
 | **Auto-linking** | Every note an AI writes gets a Related section: existing notes it mentions by name, then the most similar notes. Close-loop captures get a Related line. Old notes are never edited. | Obsidian unlinked mentions; TF-IDF similarity |
 | **Home map** | `BrainLink/Home.md` links every note, recent changes and unlinked notes; rebuilt after each write; never replaces a user's own note | Obsidian MOC practice |
 | **Meaning-based search** | If Ollama with an embedding model is installed, search fuses keyword and meaning results; vectors cached per chunk hash on this computer; off otherwise | Khoj bi-encoder + hash-incremental index |
+| **Context packets** | For a question, return a small, cited set of bounded excerpts; open the exact source only when more detail is needed | BrainLink |
 | **Smarter keyword search** | Stemming, `#tag` and `[[Note]]` guaranteed hits, rephrasings fused (RRF), folder / tag / date filters, graph boost from links, co-citations and shared tags | Copilot v3 search, query expansion, graph boost |
 | **Memories** | "Remember that…" saves a fact every AI sees when it connects; duplicates skipped | Copilot saved memories |
 | **Open loops & brief** | Unchecked tasks, next actions, unresolved questions, decisions waiting; "Brief me" combines changes, open items and link health. Setup can run it on demand or daily for one explicitly chosen vault, including a private vault; private data stays in the local Setup app. | Khoj automations |

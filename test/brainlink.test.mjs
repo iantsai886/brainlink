@@ -471,7 +471,7 @@ test('vault_search defaults to compact output without dropping sources, citation
   const args = { vault: 'Acme Studio', query: 'launch package', limit: 8 };
   const compact = await searchTool.run(args);
   const full = await searchTool.run({ ...args, detail: 'full' });
-  const contextFields = ['path', 'title', 'date', 'status', 'historical', 'superseded_by', 'match', 'heading', 'snippet'];
+  const contextFields = ['path', 'title', 'date', 'status', 'confidence', 'historical', 'superseded_by', 'match', 'heading', 'snippet'];
   assert.equal(compact.status, full.status);
   assert.equal(compact.coverage, full.coverage);
   assert.equal(compact.note, full.note);
@@ -479,6 +479,29 @@ test('vault_search defaults to compact output without dropping sources, citation
   assert.ok(compact.results.length > 0);
   assert.ok(JSON.stringify(compact).length < JSON.stringify(full).length, 'compact output removes ranking metadata while preserving every result');
   for (const result of compact.results) for (const key of ['score', 'graph_boost', 'coverage', 'collection', 'tags']) assert.equal(Object.hasOwn(result, key), false, key);
+});
+
+test('context_packet returns bounded cited excerpts and keeps private notes out', async () => {
+  const { cfg, company } = await fixture();
+  await writeFile(path.join(company, 'Packet Source.md'), `---\nstatus: current\nconfidence: verified\n---\n# Packet Source\n\n${'Fictional context packet retrieval test. '.repeat(18)}`);
+  await writeFile(path.join(company, 'Private Packet.md'), '---\nprivate: true\n---\n# Private Packet\n\nPRIVATE_PACKET_CANARY_9137 context packet retrieval test.');
+  const ctx = ctxOf(cfg);
+  const packetTool = createMcp(ctx).tools.find((tool) => tool.name === 'context_packet');
+  const packet = await packetTool.run({ vault: 'Acme Studio', query: 'context packet retrieval test', max_sources: 2, excerpt_chars: 90 });
+  assert.equal(packet.vault, 'Acme Studio');
+  assert.ok(['hits', 'weak'].includes(packet.status));
+  assert.ok(packet.sources.length <= 2);
+  assert.ok(packet.sources.some((source) => source.path === 'Packet Source.md'));
+  const source = packet.sources.find((item) => item.path === 'Packet Source.md');
+  assert.equal(source.confidence, 'verified');
+  assert.ok(source.excerpt.length <= 90);
+  assert.equal(source.excerpt_truncated, true);
+  assert.match(packet.next_step, /vault_read_note/);
+  assert.doesNotMatch(JSON.stringify(packet), /PRIVATE_PACKET_CANARY_9137|private diary|pricing and agent memory/);
+  const empty = await packetTool.run({ vault: 'Acme Studio', query: 'zzqv-no-matching-record-771' });
+  assert.equal(empty.status, 'not_in_brain');
+  assert.equal(empty.sources.length, 0);
+  assert.match(empty.next_step, /do not guess/);
 });
 
 // ---- writes ----

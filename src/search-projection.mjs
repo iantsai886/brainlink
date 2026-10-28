@@ -1,7 +1,7 @@
 // The MCP compact mode and offline evaluator share this lossless context projection.
 // Keep every selected source, citation field and full snippet; omit diagnostics only.
 export const COMPACT_SEARCH_FIELDS = Object.freeze([
-  'path', 'title', 'date', 'status', 'historical', 'superseded_by', 'match', 'heading', 'snippet',
+  'path', 'title', 'date', 'status', 'confidence', 'historical', 'superseded_by', 'match', 'heading', 'snippet',
 ]);
 
 export function compactSearchResult(result) {

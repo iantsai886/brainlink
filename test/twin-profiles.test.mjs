@@ -150,6 +150,7 @@ test('profile-scoped agents see only granted vaults and only supported read tool
   const listed = await mcp.handle({ jsonrpc: '2.0', id: 1, method: 'tools/list' });
   const names = listed.result.tools.map((tool) => tool.name);
   assert.ok(names.includes('vault_search'));
+  assert.ok(names.includes('context_packet'), 'context packets follow the same semantic search grant');
   assert.ok(names.includes('vault_read_note'));
   assert.ok(names.includes('ingestion_queue'), 'source scanning follows the profile search grant');
   assert.ok(!names.includes('ingestion_record'), 'filing receipts require a separate propose_note grant');
@@ -419,6 +420,9 @@ test('semantic vault tools exclude documents assigned to disabled memory types',
     assert.equal(search.result.isError, false, JSON.stringify(search));
     const searchText = JSON.stringify(search.result.structuredContent);
     for (const marker of canaries[disabled]) assert.doesNotMatch(searchText, new RegExp(marker), `${marker} must not enter the semantic search index`);
+    const packet = await call('context_packet', { vault: 'Fictional Org', query: canaries[disabled].join(' ') });
+    assert.equal(packet.result.isError, false, JSON.stringify(packet));
+    for (const marker of canaries[disabled]) assert.doesNotMatch(JSON.stringify(packet.result.structuredContent), new RegExp(marker), `${marker} must not enter a context packet`);
     const semantic = await call('vault_search', { vault: 'Fictional Org', query: 'SEMANTIC_CANARY' });
     assert.match(JSON.stringify(semantic.result.structuredContent), /Knowledge\.md|SEMANTIC_CANARY/, 'semantic knowledge remains searchable');
 
@@ -821,6 +825,7 @@ test('preset AI apps can receive scoped session and handoff tools without semant
     assert.ok(names.includes('list_handoffs'));
     assert.ok(names.includes('send_handoff'));
     assert.equal(names.includes('vault_search'), false, 'semantic note access remains off');
+    assert.equal(names.includes('context_packet'), false, 'context packets remain off with semantic memory disabled');
     const handoffs = await mcp.handle({ jsonrpc: '2.0', id: 2, method: 'tools/call', params: { name: 'list_handoffs', arguments: { limit: 1 } } });
     assert.equal(handoffs.result.isError, false);
   } finally { setup.server.close(); }

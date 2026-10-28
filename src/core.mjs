@@ -386,7 +386,9 @@ function bm25(index, qTerms, c, k1 = 1.2, b = 0.75) {
 
 export function summarize(index, i, extra = {}) {
   const n = index.notes[i];
-  return { path: n.rel, title: n.title, date: n.date, status: n.meta.status || '', collection: collection(n.rel), ...(n.tags.size ? { tags: [...n.tags] } : {}), historical: n.historical, ...(n.meta.superseded_by ? { superseded_by: n.meta.superseded_by } : {}), ...extra };
+  const confidence = ['verified', 'reported', 'inferred', 'unknown'].includes(String(n.meta.confidence || '').toLowerCase())
+    ? String(n.meta.confidence).toLowerCase() : undefined;
+  return { path: n.rel, title: n.title, date: n.date, status: n.meta.status || '', ...(confidence ? { confidence } : {}), collection: collection(n.rel), ...(n.tags.size ? { tags: [...n.tags] } : {}), historical: n.historical, ...(n.meta.superseded_by ? { superseded_by: n.meta.superseded_by } : {}), ...extra };
 }
 
 // Filter predicate from {folder, tag, since, until}.
