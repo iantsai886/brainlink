@@ -4,6 +4,7 @@ import { mkdtemp, cp, mkdir, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { zstdCompressSync } from 'node:zlib';
 
 import { normalize, CONFIG_SCHEMA_VERSION, loadConfig, saveConfig } from '../src/config.mjs';
 import { createContext } from '../src/core.mjs';
@@ -24,17 +25,32 @@ async function mcpWithHome(extraEnv = {}) {
   return { mcp: createMcp(ctx), ctx, env };
 }
 
-// Imported Claude Code / Codex history lives under the real OS home (~/.claude, ~/.codex — see
-// defaultRoot in src/sessions/claude-code.mjs / codex.mjs), not under BRAINLINK_HOME. A fake HOME
-// with the test fixtures copied in is the only way to exercise the real import path end to end.
+// Imported Claude Code / Codex / DeepSeek Harness history lives under the real OS home (see each
+// importer's defaultRoot), not under BRAINLINK_HOME. A fake HOME with synthetic data exercises the
+// import path without reading real client histories.
 async function withFakeHome(run) {
   const fakeHome = await tmp('fake-home');
   await cp(path.join(FIXTURES, 'claude-code', 'projects'), path.join(fakeHome, '.claude', 'projects'), { recursive: true });
   await cp(path.join(FIXTURES, 'codex', 'sessions'), path.join(fakeHome, '.codex', 'sessions'), { recursive: true });
   await cp(path.join(FIXTURES, 'codex', 'history.jsonl'), path.join(fakeHome, '.codex', 'history.jsonl'));
+  const dshDir = path.join(fakeHome, '.dsh', 'sessions', '--fictional-project--', 'fictional-session-id');
+  await mkdir(dshDir, { recursive: true });
+  const dshAt = Date.parse('2026-10-20T14:00:00.000Z');
+  const dshRecords = [
+    { type: 'session', version: 4, id: 'fictional-session-id', cwd: '/fictional/project', createdAt: dshAt, isSeeded: false },
+    { type: 'user/message', seq: 0, time: dshAt, data: { role: 'user', source: { kind: 'user' }, content: [{ type: 'text', text: 'Fictional DeepSeek Harness task.' }] } },
+    { type: 'assistant/message', seq: 1, time: dshAt + 1000, data: { message: { role: 'assistant', provider: 'fixture', model: 'fixture', content: [{ type: 'text', text: 'Fictional Harness task result.' }] } } },
+  ].map((row) => zstdCompressSync(Buffer.from(JSON.stringify(row) + '\n')));
+  await writeFile(path.join(dshDir, 'session.v4.jsonl.zstd'), Buffer.concat(dshRecords));
   const savedHome = process.env.HOME;
+  const savedDshHome = process.env.DSH_HOME;
   process.env.HOME = fakeHome;
-  try { return await run(fakeHome); } finally { process.env.HOME = savedHome; }
+  process.env.DSH_HOME = path.join(fakeHome, '.dsh');
+  try { return await run(fakeHome); } finally {
+    process.env.HOME = savedHome;
+    if (savedDshHome === undefined) delete process.env.DSH_HOME;
+    else process.env.DSH_HOME = savedDshHome;
+  }
 }
 
 async function call(mcp, name, args = {}) {
@@ -52,7 +68,7 @@ test('session_log creates a private-by-default session; session_list hides it ev
   assert.deepEqual((await call(mcp, 'session_list', { include_private: true })).sessions, []);
   // session_read returns a clear "it's private" result, not a thrown error — and a caller-supplied
   // include_private has no effect: session_log entries are never relaxed by the imported-sessions
-  // Settings toggle (only Claude Code / Codex imports are, see src/sessions/mcp.mjs isRelaxableImport).
+  // Settings toggle (only supported local transcript imports are, see isRelaxableImport).
   const blocked1 = await call(mcp, 'session_read', { id: logged.id });
   assert.equal(blocked1.private, true);
   assert.match(blocked1.message, /private/i);
@@ -223,6 +239,33 @@ test('session sharing settings: shareSummaries=true opts in to imported-session 
   });
 });
 
+test('DeepSeek Harness session sharing uses the same explicit summary and full-text consent as other imports', async () => {
+  await withFakeHome(async () => {
+    const off = await mcpWithHome({ HOME: process.env.HOME });
+    await call(off.mcp, 'session_list', {}); // performs the normal local transcript refresh
+    const offStore = await openSessionStore(off.env);
+    const dsh = (await offStore.listSessions({ limit: 20 })).find((session) => session.client === 'deepseek-harness');
+    assert.ok(dsh, 'fictional DeepSeek Harness session is imported');
+    const hidden = await call(off.mcp, 'session_read', { id: dsh.id });
+    assert.equal(hidden.private, true);
+    assert.equal(hidden.summary, undefined);
+
+    const summaryCtx = createContext(normalize({ version: CONFIG_SCHEMA_VERSION, sessions: { shareSummaries: true, shareFullText: false } }), { env: off.env });
+    const summaryMcp = createMcp(summaryCtx);
+    const visible = await call(summaryMcp, 'session_read', { id: dsh.id });
+    assert.equal(visible.private, true);
+    assert.match(visible.summary, /Fictional DeepSeek Harness task/);
+    assert.deepEqual(visible.key_turns, [], 'summary consent does not reveal transcript excerpts');
+    const noFullConsent = await call(summaryMcp, 'session_read', { id: dsh.id, full: true });
+    assert.equal(noFullConsent.messages, undefined);
+
+    const fullCtx = createContext(normalize({ version: CONFIG_SCHEMA_VERSION, sessions: { shareSummaries: true, shareFullText: true } }), { env: off.env });
+    const fullMcp = createMcp(fullCtx);
+    const full = await call(fullMcp, 'session_read', { id: dsh.id, full: true });
+    assert.match(JSON.stringify(full), /Fictional Harness task result/);
+  });
+});
+
 test('private imported transcript needs full-text consent before excerpts appear', async () => {
   const { env } = await mcpWithHome();
   const store = await openSessionStore(env);
@@ -274,7 +317,7 @@ test('regression: session_log (deliberately-private, non-imported) sessions are 
   const { mcp } = await mcpWithHome();
   const logged = await call(mcp, 'session_log', { text: 'A private quick note, not an import.' });
   // Even with full sharing cfg, client-created private notes stay private: the toggle only ever
-  // applies to the "claude-code" / "codex" import clients (see isRelaxableImport in src/sessions/mcp.mjs).
+  // applies only to supported imported clients (see isRelaxableImport in src/sessions/mcp.mjs).
   assert.deepEqual((await call(mcp, 'session_list', {})).sessions, []);
   const read = await call(mcp, 'session_read', { id: logged.id });
   assert.equal(read.private, true);
