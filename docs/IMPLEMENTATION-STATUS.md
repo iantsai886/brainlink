@@ -903,3 +903,7 @@ Built `dist/BrainLink-Setup-1.2.8.exe` with Inno Setup 6.7.3 from code at `9416d
 ### Production dependency audit on current integration code (2026-10-28)
 
 `npm audit --omit=dev --audit-level=moderate` on code revision `5efc923` completed with exit code 0 and reported 0 production dependency vulnerabilities. This checks the locked production dependency tree against npm's current advisory data; it is not a source-code security review or penetration test.
+
+### Full regression run on current pushed integration revision (2026-10-28)
+
+On Windows with Node.js 24.22.1, `npm run test:all` passed on exact commit `bdca0591de659ba8e02e2b4ee3bfee0c6b001f08`: core 505 total (499 passed, 0 failed, 6 platform/privilege skips) and UI 29/29. The six core skips require Linux behavior or Windows symlink privileges unavailable in this run. The suite covers vault/privacy gates, Personal/Organisation/Client separation, graph review, scheduled backup and restore, folder scanning, session filing/handoffs, client connectors including Harness, GitHub sync, and RSI evidence workflows. This is local automated evidence only; live cross-client continuation, Harness session closeout, provider-measured savings, hosted Actions, user-desktop acceptance, physical second-device recovery, and signed commercial release remain unverified. `git diff --check` passed after recording this receipt.
