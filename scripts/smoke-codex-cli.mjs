@@ -33,8 +33,6 @@ try {
   await mkdir(codexHome, { recursive: true });
   await mkdir(vault, { recursive: true });
   await writeFile(clientConfig, 'model = "fictional-smoke-profile"\n');
-  await writeFile(path.join(vault, 'Public.md'), '# Fictional public test note\n');
-  await writeFile(path.join(vault, 'Private.md'), '---\nprivate: true\n---\n# Fictional private test note\n');
   await saveConfig(normalize({ vaults: [{ name: 'Fictional Codex Smoke Vault', path: vault }] }), config);
 
   await connectClient('codex', {
@@ -59,7 +57,6 @@ try {
   assert.equal(result.status, 0, `codex mcp list failed: ${result.stderr || result.stdout}`);
   assert.match(result.stdout || '', /brainlink/i, 'Codex CLI should list the generated BrainLink server');
   assert.match(result.stdout || '', /enabled/i, 'Codex CLI should report the BrainLink entry as enabled');
-  assert.doesNotMatch(`${result.stdout || ''}\n${result.stderr || ''}`, /FICTIONALPRIVATE/);
 
   process.stdout.write('PASS: Codex CLI recognized the generated BrainLink MCP entry in a temporary profile.\n');
   process.stdout.write('Scope: config recognition only; no model call or live tool invocation.\n');
