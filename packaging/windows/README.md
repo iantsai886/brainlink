@@ -14,3 +14,9 @@ GitHub Actions builds the unsigned installer and retains it as a short-lived wor
 On Windows, Claude Code is connected by editing `%USERPROFILE%\.claude.json` (with a backup), because Node can't safely run the `claude.cmd` shim without a shell.
 
 Signing: without Authenticode, SmartScreen warns on first run. Use Azure Trusted Signing or an OV/EV certificate and set `WINDOWS_SIGN_CMD` (see build-windows.sh). `build-windows.ps1` plus `BrainLink.iss` (Inno Setup) remain as an alternative for building on Windows itself.
+
+## Installed-app smoke test (Windows / Inno Setup)
+
+After `packaging/windows/build-windows.ps1` creates `build/windows/stage`, run `npm run smoke:installed:win`. The script compiles a separate QA installer with its own Inno Setup app ID and shortcut names, installs it under a temporary folder, starts the bundled Node runtime on a free loopback port, checks Setup health and its authenticated UI, then uninstalls it. It verifies the QA shortcuts are removed, the pre-test user PATH is restored, and files in the isolated BrainLink data folder survive uninstall. It refuses to replace existing QA shortcuts. A successful run removes its temporary test files; failures leave logs in a named temporary folder. The QA app registration is separate from a normal BrainLink installation.
+
+This smoke checks the installed Inno Setup package path. It does not test Authenticode, SmartScreen reputation, Windows upgrades over a prior customer install, or human usability. The normal installer remains unsigned until signing is configured.

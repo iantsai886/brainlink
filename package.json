@@ -12,6 +12,7 @@
     "test:all": "npm test && npm run test:ui",
     "smoke:codex-cli": "node scripts/smoke-codex-cli.mjs",
     "smoke:claude-code": "node scripts/smoke-claude-code.mjs",
+    "smoke:installed:win": "pwsh -NoProfile -File scripts/smoke-installed-windows.ps1",
     "evaluate:rsi-discovery": "node bin/rsi-discovery-eval.mjs",
     "setup": "node bin/brainlink.mjs setup",
     "build:mac": "bash packaging/macos/build-pkg.sh",

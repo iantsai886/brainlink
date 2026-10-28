@@ -2,19 +2,34 @@
 ; Built by build-windows.ps1, which stages files into ..\..\build\windows\stage.
 #define AppVersion GetEnv("BRAINLINK_VERSION")
 #define Stage "..\..\build\windows\stage"
+#ifdef BRAINLINK_SMOKE_TEST
+#define ProductAppId "{{D4A160C8-6D2C-4F44-9D35-8D10A92F7B31}"
+#define ProductName "BrainLink QA Smoke"
+#define ProductDir "{localappdata}\Programs\BrainLink-QA-Smoke"
+#define ProductGroup "BrainLink QA Smoke"
+#define ProductShortcut "BrainLink QA Smoke"
+#define ProductOutput "BrainLink-QA-Smoke-Setup-" + AppVersion
+#else
+#define ProductAppId "{{6F2B8E4C-9A51-4C1E-B7D3-2B1A9E5C7F40}"
+#define ProductName "BrainLink"
+#define ProductDir "{localappdata}\Programs\BrainLink"
+#define ProductGroup "BrainLink"
+#define ProductShortcut "BrainLink"
+#define ProductOutput "BrainLink-Setup-" + AppVersion
+#endif
 
 [Setup]
-AppId={{6F2B8E4C-9A51-4C1E-B7D3-2B1A9E5C7F40}
-AppName=BrainLink
+AppId={#ProductAppId}
+AppName={#ProductName}
 AppVersion={#AppVersion}
 AppPublisher=Iango
-DefaultDirName={localappdata}\Programs\BrainLink
-DefaultGroupName=BrainLink
+DefaultDirName={#ProductDir}
+DefaultGroupName={#ProductGroup}
 PrivilegesRequired=lowest
 ArchitecturesAllowed=x64compatible
 ArchitecturesInstallIn64BitMode=x64compatible
 OutputDir=..\..\dist
-OutputBaseFilename=BrainLink-Setup-{#AppVersion}
+OutputBaseFilename={#ProductOutput}
 LicenseFile=..\..\LICENSE.txt
 SetupIconFile=BrainLink.ico
 UninstallDisplayIcon={app}\BrainLink.ico
@@ -37,8 +52,8 @@ Source: "BrainLink.vbs"; DestDir: "{app}"; Flags: ignoreversion
 Source: "BrainLink.ico"; DestDir: "{app}"; Flags: ignoreversion
 
 [Icons]
-Name: "{group}\BrainLink"; Filename: "{sys}\wscript.exe"; Parameters: """{app}\BrainLink.vbs"""; IconFilename: "{app}\BrainLink.ico"
-Name: "{autodesktop}\BrainLink"; Filename: "{sys}\wscript.exe"; Parameters: """{app}\BrainLink.vbs"""; IconFilename: "{app}\BrainLink.ico"
+Name: "{group}\{#ProductShortcut}"; Filename: "{sys}\wscript.exe"; Parameters: """{app}\BrainLink.vbs"""; IconFilename: "{app}\BrainLink.ico"
+Name: "{autodesktop}\{#ProductShortcut}"; Filename: "{sys}\wscript.exe"; Parameters: """{app}\BrainLink.vbs"""; IconFilename: "{app}\BrainLink.ico"
 Name: "{group}\Uninstall BrainLink"; Filename: "{uninstallexe}"
 
 [Registry]
