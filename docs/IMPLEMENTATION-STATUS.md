@@ -949,3 +949,9 @@ On Windows with Node.js 24.22.1, `npm run test:all` passed on exact source commi
 ### Run the isolated Windows shortcut smoke in hosted CI (2026-10-28)
 
 Commit `5cd309d` adds `npm run smoke:installed:win` to the Windows package job, after the staged runtime check and before the existing production installer exercise. The packaging workflow assertion passed 2/2 locally. The workflow change is pushed; its GitHub-hosted result has not been verified in this environment, so it is not counted as a hosted CI pass.
+
+### Remove only BrainLink-owned Windows sign-in entry during uninstall (2026-10-28)
+
+Commit `3064249` updates the Inno Setup uninstaller to remove `BrainLink Background.vbs` only when its contents contain BrainLink's ownership marker; it leaves unrelated or user-edited entries untouched. The isolated QA build uses a separate startup filename and plants a harmless marker file in the current user's Startup folder. `npm run smoke:installed:win` passed with Inno Setup 6.7.3: the installed launcher and authenticated Setup UI worked, and uninstall removed the app, shortcuts, QA startup marker and PATH entry while preserving the isolated BrainLink data file. The smoke refuses to replace an existing QA startup file and cleans its own marker on failure.
+
+The focused packaging tests passed 2/2, PowerShell parsing and `git diff --check` passed. The normal production Inno branch compiled successfully with Inno Setup 6.7.3. `dist/BrainLink-Setup-1.2.8.exe` SHA-256 is `070BCB9C9323832431F2CC2AC19EF4396011B50DAE3A92DA0447E1D8C066313F`; Authenticode status is `NotSigned`. This verifies build and the isolated QA uninstall path, not an upgrade over a real installation, SmartScreen trust, human desktop acceptance, or a signed commercial release. The full test suite was not rerun for this installer-only change.
