@@ -899,3 +899,7 @@ Checked the current official Harness session, hook, and Claude Code Mods documen
 ### Current Windows package and staged privacy check (2026-10-28)
 
 Built `dist/BrainLink-Setup-1.2.8.exe` with Inno Setup 6.7.3 from code at `9416d17` (the only later working-tree edits are documentation). SHA-256: `A3D7591613BCBAA2FA3EDED66C96DC6BAD77889042D22256CDF2FB962AACBB95`. The staged application passed `node scripts/smoke-staged-runtime.mjs --node .\build\windows\stage\node\node.exe --app .\build\windows\stage\app --version 1.2.8`: the bundled runtime initialized MCP, found a fictional public note, and excluded a planted private-note canary; required Skills were present and development UI tests were absent. Authenticode status is `NotSigned`. The installer was not run, so desktop shortcut, upgrade/uninstall, and user acceptance are unverified; this is not a signed customer-ready release.
+
+### Production dependency audit on current integration code (2026-10-28)
+
+`npm audit --omit=dev --audit-level=moderate` on code revision `5efc923` completed with exit code 0 and reported 0 production dependency vulnerabilities. This checks the locked production dependency tree against npm's current advisory data; it is not a source-code security review or penetration test.
