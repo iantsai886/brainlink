@@ -11,6 +11,8 @@ At commit `ec9ef58f74788582c47a4b4908f919442d4ee793`, `list_handoffs` compares a
 
 Windows/Node.js 24.22.1: `npm run test:all` passed on the source tree committed as `ec9ef58` — core 505 total (499 passed, 0 failed, 6 platform/privilege skips), UI 29/29. Focused handoff, Git checkpoint, Twin-profile and Skill tests also passed. This is local automated evidence using fictional Git repositories; live Claude/Codex/DeepSeek Harness model handoff and hosted CI remain unverified.
 
+Follow-up hardening at the current handoff implementation: Git environment overrides are removed, global/system config is ignored, optional index writes are disabled, and fsmonitor helpers are off. If a local custom clean/process filter exists, working-tree inspection is skipped and reported as unknown. Windows/Node.js 24.22.1 focused handoff, Git verification, Twin-profile and Skill suites passed 30/30 after this hardening. The full suite above predates this follow-up.
+
 ### Invalidate cached public notes after privacy-preserving file replacement (2026-10-28)
 
 `loadVault` now includes filesystem change time at nanosecond precision in its cache key, and rechecks the active Twin's note-memory permission before reusing cached text. This prevents a same-size note replacement that preserves modified time from leaving its old public text in retrieval after it becomes private. A regression changes `public: false` to `private: true` without changing byte length, restores the original modified time, verifies the filesystem change time changed, and confirms search removes the cached content and direct read is denied.

@@ -3,13 +3,33 @@ import { realpathSync } from 'node:fs';
 import path from 'node:path';
 import { resolveGitHubScope, githubRemoteIdentity } from './sync/github-assignment.mjs';
 
+function gitEnvironment() {
+  const env = { ...process.env };
+  for (const key of Object.keys(env)) if (key.toUpperCase().startsWith('GIT_')) delete env[key];
+  Object.assign(env, {
+    GIT_OPTIONAL_LOCKS: '0',
+    GIT_CONFIG_NOSYSTEM: '1',
+    GIT_CONFIG_GLOBAL: process.platform === 'win32' ? 'NUL' : '/dev/null',
+  });
+  return env;
+}
+
 function git(cwd, args) {
-  const result = spawnSync('git', args, {
+  const result = spawnSync('git', ['-c', 'core.fsmonitor=false', ...args], {
     cwd, encoding: 'utf8', windowsHide: true, timeout: 5000, maxBuffer: 1024 * 1024,
-    stdio: ['ignore', 'pipe', 'ignore'],
+    stdio: ['ignore', 'pipe', 'ignore'], env: gitEnvironment(),
   });
   if (result.error || result.status !== 0) return null;
   return (result.stdout || '').trim();
+}
+
+function hasExternalFilters(cwd) {
+  const result = spawnSync('git', ['-c', 'core.fsmonitor=false', 'config', '--local', '--get-regexp', '^filter\\..*\\.(clean|process)$'], {
+    cwd, encoding: 'utf8', windowsHide: true, timeout: 5000, maxBuffer: 1024 * 1024,
+    stdio: ['ignore', 'pipe', 'ignore'], env: gitEnvironment(),
+  });
+  if (result.error || ![0, 1].includes(result.status)) return null;
+  return result.status === 0;
 }
 
 function samePath(a, b) {
@@ -21,14 +41,15 @@ function readAssignedCheckout(cwd) {
   try {
     const top = git(cwd, ['rev-parse', '--show-toplevel']);
     if (!top || !samePath(realpathSync(cwd), realpathSync(top))) return null;
-    const repo = githubRemoteIdentity(git(cwd, ['remote', 'get-url', 'origin']));
+    const repo = githubRemoteIdentity(git(cwd, ['config', '--local', '--get', 'remote.origin.url']));
     const branch = git(cwd, ['branch', '--show-current']);
     const head = git(cwd, ['rev-parse', '--verify', 'HEAD^{commit}']);
-    const status = git(cwd, ['status', '--porcelain=v1', '--untracked-files=all']);
-    if (!repo || !branch || !/^[a-f0-9]{40}$/i.test(head || '') || status === null) return null;
+    const filters = hasExternalFilters(cwd);
+    const status = filters === false ? git(cwd, ['status', '--porcelain=v1', '--untracked-files=all']) : null;
+    if (!repo || !branch || !/^[a-f0-9]{40}$/i.test(head || '')) return null;
     const aheadText = git(cwd, ['rev-list', '--count', '@{upstream}..HEAD']);
     const ahead = /^(0|[1-9]\d{0,4})$/.test(aheadText || '') ? Number(aheadText) : null;
-    return { repo, branch, head: head.toLowerCase(), clean: status === '', ahead };
+    return { repo, branch, head: head.toLowerCase(), clean: status === null ? null : status === '', ahead };
   } catch {
     return null;
   }
@@ -70,7 +91,7 @@ export function createHandoffGitVerifier(ctx) {
       repository: current.local.repo === reported.repo.toLowerCase(),
       branch: current.local.branch === reported.branch,
       commit: current.local.head.startsWith(reported.head.toLowerCase()),
-      working_tree: current.local.clean === !reported.dirty,
+      working_tree: current.local.clean === null ? null : current.local.clean === !reported.dirty,
       ahead: current.local.ahead === null ? null : current.local.ahead === reported.ahead,
     };
     const values = Object.values(checks);

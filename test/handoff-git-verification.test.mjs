@@ -57,6 +57,18 @@ test('handoff Git checkpoint matches the same Twin assigned local clone without 
     assert.deepEqual(match.checks, { repository: true, branch: true, commit: true, working_tree: true, ahead: true });
     assert.doesNotMatch(JSON.stringify(match), /fictional-repo|[A-Z]:\\/i, 'verification never reveals the local checkout path');
 
+    runGit(repo, 'config', 'core.fsmonitor', 'brainlink-test-fsmonitor-helper');
+    const fsmonitor = verifyHandoffGitCheckpoint(ctx, reported);
+    assert.equal(fsmonitor.status, 'matched', 'repository fsmonitor helpers are disabled for the read-only check');
+    assert.equal(runGit(repo, 'config', '--local', '--get', 'core.fsmonitor'), 'brainlink-test-fsmonitor-helper', 'verification does not rewrite repository config');
+    runGit(repo, 'config', '--unset', 'core.fsmonitor');
+
+    runGit(repo, 'config', 'filter.brainlink-test.clean', 'brainlink-test-filter-must-not-run');
+    const customFilter = verifyHandoffGitCheckpoint(ctx, reported);
+    assert.equal(customFilter.status, 'partial');
+    assert.equal(customFilter.checks.working_tree, null, 'working-tree state stays unknown when custom filters could execute');
+    runGit(repo, 'config', '--unset', 'filter.brainlink-test.clean');
+
     const mismatch = verifyHandoffGitCheckpoint(ctx, { ...reported, branch: 'main' });
     assert.equal(mismatch.status, 'mismatch');
     assert.equal(mismatch.checks.branch, false);

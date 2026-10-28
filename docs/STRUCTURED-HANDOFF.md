@@ -22,6 +22,11 @@ path, fetches from GitHub, or changes branches. A local match does not prove
 the remote GitHub branch is current. The receiving agent should still inspect
 its own checkout before editing.
 
+Verification runs with external Git environment overrides removed, optional
+index locks disabled, and filesystem-monitor hooks off. If the assigned clone
+has custom clean/process filters configured, BrainLink skips working-tree
+inspection and marks that field unknown instead of running the filter command.
+
 `source_refs` accepts up to eight Markdown references. Use `path/to/note.md`
 for the configured mailbox vault, or `Vault Name::path/to/note.md` for another
 vault. BrainLink checks each source with the sender's `read_note` grant before
