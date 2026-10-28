@@ -1,6 +1,6 @@
 # Structured cross-AI handoff
 
-Status: implemented and locally tested through a two-client MCP integration fixture. A live Codex CLI privacy probe passed, and Claude Code's MCP health check connected; the full model-driven Claude Code ↔ Codex handoff remains unverified and unreleased.
+Status: implemented and locally tested through a two-client MCP integration fixture. Live Codex CLI privacy and Hermes MCP tool-discovery checks have passed. Claude Code's earlier MCP health check connected in a prior fixture, but the current development host reports no Claude MCP servers configured. A full model-driven cross-AI handoff remains unverified and unreleased.
 
 `send_handoff` now accepts either the original free-form `body` or a structured
 handoff with `goal`. Optional fields are `current_state`, `decisions`,

@@ -115,6 +115,10 @@ Built from source commit `0ce31f5` with Inno Setup 6.7.3. `pwsh -NoProfile -File
 
 The connector detector found a BrainLink entry in Hermes configuration and found the DeepSeek Harness `desktop` profile, but no BrainLink entry for that Harness profile. This check reads only configuration presence; it does not test that either model loaded the tools or can make a live call. No tokens were printed and no client configuration or access scope was changed. A live Harness handoff still requires configuring its intended Twin scope, reloading Harness, and testing from inside that client.
 
+### Live Hermes MCP connection and tool discovery (2026-10-28)
+
+Hermes Agent v0.21.0 ran `hermes mcp test brainlink` on the Windows development host and exited successfully; the response listed BrainLink's `brainlink_guide` tool. This confirms Hermes can launch the configured MCP server and discover at least that tool. It did not invoke an AI model or read/write vault notes, so it is not a completed cross-AI handoff or privacy acceptance test. The same host's current `claude mcp list` reports no MCP servers configured; Claude Code pickup remains unverified here. No client configuration was changed for these checks.
+
 ### Full Windows regression run on current integration revision (2026-10-28)
 
 On Windows with Node.js 24.22.1, `npm run test:all` on source commit `6467d4d0249cb1e5df1701885ae3883d195690b6` passed: core 467 total (461 passed, 0 failed, 6 platform/privilege skips) and UI 29/29. The six core skips require Linux behavior or Windows symlink privileges unavailable in this run. Coverage includes backup and restore, source scanning, memory-type gates, private canaries, profile-scoped sessions and handoffs, DeepSeek Harness setup, GitHub profile sync, graph review, RSI discovery and evaluation, and packaged runtime checks. This is local automated evidence; hosted Actions, live Claude-to-Codex continuation, live user GitHub access, second-device recovery, installed-app acceptance, and release readiness remain unverified.
