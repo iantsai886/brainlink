@@ -2,7 +2,7 @@
 // experiments, fetches sources, changes vault content, or promotes a candidate into live behavior.
 // Opt-in discovery (src/rsi-discovery.mjs) and scheduled aggregate observation may append
 // `discovered` proposals; their origin and provenance are fixed at creation.
-import { appendFile, mkdir, readFile, open, unlink } from 'node:fs/promises';
+import { appendFile, mkdir, readFile, open, unlink, lstat } from 'node:fs/promises';
 import path from 'node:path';
 import { createHash, randomUUID } from 'node:crypto';
 import { setTimeout as delay } from 'node:timers/promises';
@@ -183,7 +183,15 @@ export function createRsiLedger({ home, now = () => new Date() }) {
         handle = await open(lockFile, 'wx', 0o600);
         await handle.writeFile(JSON.stringify({ pid: process.pid, owner, created_at: new Date().toISOString() }));
       } catch (error) {
-        if (error.code !== 'EEXIST') { await handle?.close().catch(() => {}); throw error; }
+        if (error.code !== 'EEXIST') {
+          // Windows may report EPERM/EACCES when another process already created the
+          // exclusive lock file. Treat it as contention only when lstat confirms a
+          // regular lock file exists; unrelated permission failures and symlinks fail closed.
+          const existing = ['EPERM', 'EACCES'].includes(error.code)
+            ? await lstat(lockFile).catch(() => null)
+            : null;
+          if (!existing?.isFile() || existing.isSymbolicLink()) { await handle?.close().catch(() => {}); throw error; }
+        }
         // Recover only a lock whose recorded process is definitely gone. Unknown/malformed locks
         // fail closed instead of risking concurrent writes to the hash chain.
         const prior = await readFile(lockFile, 'utf8').then(JSON.parse).catch(() => null);
