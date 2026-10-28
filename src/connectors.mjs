@@ -386,7 +386,15 @@ export async function connectClient(id, opts) {
       const sharedRaw = await exists(sharedFile) ? await readFile(sharedFile, 'utf8') : '';
       if (sharedRaw && dshEntries(parseDocument(sharedRaw, { uniqueKeys: true })).some(isBrainLinkDshEntry)) throw new Error('Disconnect the old shared DeepSeek Harness connection before connecting named profiles. This prevents its shared access token from reaching every profile.');
     }
-    text = updateDshPatch(raw, { id: entryId, name: '@deepseek-ai/dsh-mcp-client', config: { serverName: c.serverName || SERVER_KEY, transport: 'stdio', command: entry.command, args: entry.args, env: entry.env } }, entryId);
+    text = updateDshPatch(raw, { id: entryId, name: '@deepseek-ai/dsh-mcp-client', config: {
+      serverName: c.serverName || SERVER_KEY,
+      transport: 'stdio',
+      command: entry.command,
+      args: entry.args,
+      env: entry.env,
+      toolCallTimeoutMs: 60_000,
+      failOnStartupError: true,
+    } }, entryId);
   }
   else if (c.format === 'yaml') {
     const { doc, value } = parseYaml(raw, file);

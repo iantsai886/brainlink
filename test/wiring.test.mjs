@@ -490,6 +490,8 @@ test('connectors: DeepSeek Harness adds one profile patch entry, preserves other
   assert.equal(brainlink.name, '@deepseek-ai/dsh-mcp-client');
   assert.equal(brainlink.config.serverName, 'brainlink');
   assert.equal(brainlink.config.transport, 'stdio');
+  assert.equal(brainlink.config.toolCallTimeoutMs, 60_000);
+  assert.equal(brainlink.config.failOnStartupError, true, 'Harness should report a failed BrainLink handshake instead of silently loading without its tools');
   assert.equal(brainlink.config.env.BRAINLINK_AGENT_TOKEN, 'fictional-dsh-token');
   assert.equal((await detect(opts))['deepseek-harness'].connected, true);
   assert.equal(await readClientAgentToken('deepseek-harness', opts), 'fictional-dsh-token');
