@@ -29,6 +29,18 @@ export const clientIdFor = (platform) => {
 const summaryOf = (s) => ({ id: s.id, client: s.client, project: s.project, title: s.title, summary: s.summary,
   started_at: s.started_at, updated_at: s.updated_at, message_count: s.message_count, note_refs: s.note_refs, private: s.private });
 
+// Read session metadata without loading any transcript messages. Closeout uses this to verify
+// optional provenance references before it writes an episode; visibility follows the same
+// profile and imported-session sharing rules as session_read.
+export async function sessionMetadata(store, id, a = {}) {
+  if (!id) throw new Error('id is required');
+  const scope = a.profile_id ? { profile_id: a.profile_id } : {};
+  const { session } = await store.readSession(id, { ...scope, limit: 0 });
+  const profilePrivate = Boolean(a.allow_profile_private && a.profile_id && session.profile_id === a.profile_id);
+  const allowed = !session.private || a.include_private || profilePrivate || (a.allow_imported_private && isRelaxableImport(session));
+  return { accessible: allowed, session: allowed ? summaryOf(session) : null };
+}
+
 // Keep adding messages while the running total (measured on the serialized message, so JSON
 // struct overhead counts too) stays under budget; always keep at least one message (even an
 // oversized one) so pagination can never stall.

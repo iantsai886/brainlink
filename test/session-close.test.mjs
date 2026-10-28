@@ -31,19 +31,21 @@ test('MCP close previews, then saves one scoped private episode without exposing
   const cfg = normalize({ version: CONFIG_SCHEMA_VERSION, vaults: [{ name: 'Company', path: company }, { name: 'Personal', path: personal }], sessions: { shareSummaries: true, shareFullText: true } });
   const ctx = createContext(cfg, { env });
   const mcp = createMcp(ctx);
+  const sessionStore = await openSessionStore(env);
+  const source = await sessionStore.putSession({ client: 'codex', source_id: 'fictional-source', title: 'Fictional source session', project: 'fictional-project', summary: 'A private fictional source summary.', started_at: '2026-10-28T00:00:00.000Z', note_refs: [], private: true, messages: [] });
   const choices = await call(mcp, 'session_filing_folders', { vault: 'Company' });
   assert.equal(choices.error, false);
   assert.ok(choices.value.some((folder) => folder.path === 'Projects/Fictional Launch'));
   const forbiddenChoices = await call(mcp, 'session_filing_folders', { vault: 'Personal' });
   assert.equal(forbiddenChoices.error, true, 'a connection cannot enumerate a vault outside its enabled scope');
-  const args = { vault: 'Company', folder: 'Projects/Fictional Launch', title: 'Fictional launch', goal: 'Plan the fictional launch', outcome: 'Drafted a plan; no deployment.', decisions: ['Review next week'], next_actions: ['Get approval'], session_or_task_id: 'fake-task-1', source_session_id: 's_fictional123' };
+  const args = { vault: 'Company', folder: 'Projects/Fictional Launch', title: 'Fictional launch', goal: 'Plan the fictional launch', outcome: 'Drafted a plan; no deployment.', decisions: ['Review next week'], next_actions: ['Get approval'], project: 'fictional-project', session_or_task_id: 'fake-task-1', source_session_id: source.id };
   const preview = await call(mcp, 'session_close', args);
-  assert.equal(preview.error, false);
+  assert.equal(preview.error, false, JSON.stringify(preview.value));
   assert.equal(preview.value.written, false);
   assert.equal(preview.value.session_saved, false);
   assert.match(preview.value.preview, /private: true/);
   assert.equal((await readdir(path.join(company, 'Projects', 'Fictional Launch'))).length, 0);
-  assert.equal((await (await openSessionStore(env)).listSessions()).length, 0);
+  assert.equal((await (await openSessionStore(env)).listSessions({ client: 'brainlink-close-codex' })).length, 0, 'preview does not save a closeout session');
 
   const wrong = await call(mcp, 'session_close', { ...args, vault: 'Personal', confirm: true });
   assert.equal(wrong.error, true);
@@ -56,10 +58,10 @@ test('MCP close previews, then saves one scoped private episode without exposing
   const note = await readFile(path.join(company, ...rel.split('/')), 'utf8');
   assert.match(note, /private: true/);
   assert.match(note, /Plan the fictional launch/);
-  assert.match(note, /Imported BrainLink session s_fictional123/);
-  assert.match(note, /source_session_id: "s_fictional123"/);
+  assert.match(note, new RegExp(`Imported BrainLink session ${source.id}`));
+  assert.match(note, new RegExp(`source_session_id: "${source.id}"`));
   await assert.rejects(readNote(ctx, 'Company', rel), /private/i);
-  assert.deepEqual((await call(mcp, 'session_list')).value.sessions, [], 'global import sharing cannot expose a closed private session');
+  assert.equal((await call(mcp, 'session_list', { client: 'brainlink-close-codex' })).value.sessions.length, 0, 'global import sharing cannot expose a closed private session');
   assert.equal((await call(mcp, 'session_read', { id: written.value.session_id })).value.private, true);
   const duplicate = await call(mcp, 'session_close', { ...args, outcome: 'A conflicting later claim', confirm: true });
   assert.equal(duplicate.error, true);
@@ -67,6 +69,32 @@ test('MCP close previews, then saves one scoped private episode without exposing
   const stored = await (await openSessionStore(env)).readSession(written.value.session_id, {});
   assert.doesNotMatch(stored.session.summary, /conflicting later claim/);
   assert.equal((await readdir(path.join(personal, 'Inbox'))).length, 0);
+});
+
+test('MCP close refuses missing, private, and wrong-project source-session references', async () => {
+  const root = await mkdtemp(path.join(tmpdir(), 'bl-close-source-validation-'));
+  const company = path.join(root, 'company');
+  await mkdir(path.join(company, 'Inbox'), { recursive: true });
+  const env = { BRAINLINK_HOME: path.join(root, 'app'), HOME: root, BRAINLINK_AI_PLATFORM: 'Codex' };
+  const cfg = normalize({ version: CONFIG_SCHEMA_VERSION, vaults: [{ name: 'Company', path: company }], sessions: { shareSummaries: true } });
+  const mcp = createMcp(createContext(cfg, { env }));
+  const store = await openSessionStore(env);
+  const visible = await store.putSession({ client: 'codex', source_id: 'visible-source', title: 'Visible source', project: 'project-a', summary: 'Visible fictional summary.', started_at: '2026-10-28T00:00:00.000Z', note_refs: [], private: true, messages: [] });
+  const hidden = await store.putSession({ client: 'brainlink-local', source_id: 'hidden-source', title: 'Private log', project: 'project-a', summary: 'Private fictional log.', started_at: '2026-10-28T00:00:00.000Z', note_refs: [], private: true, messages: [] });
+  const base = { vault: 'Company', title: 'Fictional closeout', goal: 'Review a fictional task', outcome: 'Prepared a draft.', session_or_task_id: 'source-validation' };
+  try {
+    const missing = await call(mcp, 'session_close', { ...base, source_session_id: 's_0000000000000000' });
+    assert.equal(missing.error, true);
+    assert.match(missing.value.errors.join(' '), /existing session visible/);
+    const privateLog = await call(mcp, 'session_close', { ...base, source_session_id: hidden.id, session_or_task_id: 'private-log-validation' });
+    assert.equal(privateLog.error, true);
+    assert.match(privateLog.value.errors.join(' '), /visible to this AI connection/);
+    const wrongProject = await call(mcp, 'session_close', { ...base, source_session_id: visible.id, project: 'project-b', session_or_task_id: 'wrong-project-validation' });
+    assert.equal(wrongProject.error, true);
+    assert.match(wrongProject.value.errors.join(' '), /project must match/);
+    assert.equal((await readdir(path.join(company, 'Inbox'))).length, 0, 'invalid provenance never creates a note');
+    assert.equal((await store.listSessions({ client: 'brainlink-close-codex', limit: 20 })).length, 0, 'invalid provenance never creates a closeout session');
+  } finally { await rm(root, { recursive: true, force: true }); }
 });
 
 test('MCP close reuses only an exact saved project vault for its preview and confirmed filing', async () => {

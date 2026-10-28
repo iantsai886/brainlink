@@ -3,7 +3,7 @@
 import { createHash } from 'node:crypto';
 import { vault } from '../core.mjs';
 import { checkCommon, resolveIdentity } from '../writes.mjs';
-import { clientIdFor } from './mcp.mjs';
+import { clientIdFor, sessionMetadata } from './mcp.mjs';
 import { fileSessionSummary } from './filing.mjs';
 import { suggestedSessionFolder } from './folders.mjs';
 import { twinToolAuthorization } from '../twin-profiles.mjs';
@@ -49,17 +49,34 @@ export async function closeSession(ctx, store, args, now = new Date(), { fileSum
   const id = resolveIdentity(ctx, args);
   const sourceId = String(args.session_or_task_id || '').trim();
   const errors = checkCommon(ctx, destinationVault, { ...args, source: 'session_close' }, id);
+  const profileId = ctx.twinScope?.mode === 'scoped' ? ctx.twinScope.profile_id : null;
   if (!sourceId || sourceId.length > 120 || /[\r\n]/.test(sourceId)) errors.push('stable session_or_task_id is required (up to 120 characters)');
   if (args.source_session_id !== undefined && (typeof args.source_session_id !== 'string' || !/^[A-Za-z0-9_-]{1,160}$/.test(args.source_session_id))) errors.push('source_session_id must be an exact safe BrainLink session ID');
   if (!String(args.title || '').trim()) errors.push('title is required');
   if (!lines(args.goal).length || !lines(args.outcome).length) errors.push('goal and outcome are required');
+  let sourceSession = null;
+  if (args.source_session_id !== undefined && typeof args.source_session_id === 'string' && /^[A-Za-z0-9_-]{1,160}$/.test(args.source_session_id)) {
+    try {
+      const sourceAccess = await sessionMetadata(store, args.source_session_id, {
+        allow_imported_private: ctx.cfg.sessions?.shareSummaries === true,
+        profile_id: profileId || undefined,
+        allow_profile_private: Boolean(profileId),
+      });
+      if (!sourceAccess.accessible) errors.push('source_session_id must refer to a session visible to this AI connection');
+      else {
+        sourceSession = sourceAccess.session;
+        if (args.project && args.project !== sourceSession.project) errors.push('project must match the referenced source session');
+      }
+    } catch {
+      errors.push('source_session_id must refer to an existing session visible to this AI connection');
+    }
+  }
   const summary = closeSummary(args);
   if (summary.length > 6000) errors.push('closure summary must be at most 6000 characters');
   if (errors.length) return { ok: false, errors };
 
   // Prefix deliberately differs from imported "codex" / "claude-code" clients. Their global
   // sharing toggle must never turn an explicitly private closure into a visible imported session.
-  const profileId = ctx.twinScope?.mode === 'scoped' ? ctx.twinScope.profile_id : null;
   const profileTag = profileId ? `profile-${createHash('sha256').update(profileId).digest('hex').slice(0, 12)}-` : '';
   const client = `brainlink-${profileTag}close-${clientIdFor(id.ai_platform)}`;
   const sessionId = 's_' + createHash('sha256').update(`${client}:${sourceId}`).digest('hex').slice(0, 16);
