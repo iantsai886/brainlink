@@ -8,6 +8,9 @@ test('local summary UI explains opt-in, local processing, and review requirement
   assert.match(html, /id="sess-local-summary-enabled"/);
   assert.match(html, /id="sess-local-summary-auto"/);
   assert.match(html, /id="sess-local-summary-model"/);
+  assert.match(html, /id="sess-local-summary-find"/);
+  assert.match(html, /POST', '\/api\/sessions\/local-summary\/models'/);
+  assert.match(html, /sess-local-summary-model-options/);
   assert.match(html, /sessions\.localSummaryHint/);
   assert.match(html, /sessions\.localSummaryEnable/);
   assert.match(html, /sessions\.localSummaryAuto/);
@@ -22,6 +25,9 @@ test('automatic local-summary wording explains the Harness idle guess in every s
     const catalog = JSON.parse(await readFile(new URL(`../ui/locales/${locale}.json`, import.meta.url), 'utf8'));
     assert.match(catalog['sessions.localSummaryAuto'], /30/);
     assert.match(catalog['sessions.localSummaryAuto'], /Harness/i);
+    for (const key of ['sessions.localSummaryFind', 'sessions.localSummaryFound', 'sessions.localSummaryNone', 'sessions.localSummaryUnavailable']) {
+      assert.equal(typeof catalog[key], 'string', `${locale} must define ${key}`);
+    }
   }
 });
 

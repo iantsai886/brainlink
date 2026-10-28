@@ -9,6 +9,39 @@ import { HARNESS_AUTO_DRAFT_IDLE_MS, recordSessionEndCue, sessionEndCueId } from
 import { readLocalSummaryDraft, saveLocalSummaryDraft } from '../src/sessions/local-summary.mjs';
 import { startSetup } from '../src/setup.mjs';
 
+test('local model discovery is authenticated, local-only, and returns sanitized installed model names', async () => {
+  const home = await mkdtemp(path.join(tmpdir(), 'brainlink-local-models-'));
+  const env = { BRAINLINK_HOME: path.join(home, 'app'), HOME: home, BRAINLINK_SEMANTIC: '0' };
+  let requestedUrl = '';
+  const app = await startSetup({ env, home, os: 'win32', port: 0, useCli: false, localSummaryModelsFetch: async (url) => {
+    requestedUrl = url;
+    return { ok: true, json: async () => ({ models: [
+      { name: 'qwen2.5:3b' }, { name: 'llama3.2:latest' }, { name: 'qwen2.5:3b' },
+      { name: '../outside' }, { name: 'x'.repeat(161) }, { name: 42 },
+    ] }) };
+  } });
+  const api = (token = app.token) => fetch(`http://127.0.0.1:${app.port}/api/sessions/local-summary/models`, {
+    method: 'POST', headers: { 'Content-Type': 'application/json', 'X-BrainLink-Token': token }, body: '{}',
+  });
+  try {
+    assert.equal((await api('bad-token')).status, 401);
+    assert.deepEqual(await (await api()).json(), { available: true, models: ['llama3.2:latest', 'qwen2.5:3b'] });
+    assert.equal(requestedUrl, 'http://127.0.0.1:11434/api/tags');
+  } finally { await new Promise((resolve) => app.server.close(resolve)); }
+});
+
+test('local model discovery hides local service errors and reports unavailable', async () => {
+  const home = await mkdtemp(path.join(tmpdir(), 'brainlink-local-models-offline-'));
+  const env = { BRAINLINK_HOME: path.join(home, 'app'), HOME: home, BRAINLINK_SEMANTIC: '0' };
+  const app = await startSetup({ env, home, os: 'win32', port: 0, useCli: false, localSummaryModelsFetch: async () => { throw new Error('private local service detail'); } });
+  try {
+    const response = await fetch(`http://127.0.0.1:${app.port}/api/sessions/local-summary/models`, {
+      method: 'POST', headers: { 'Content-Type': 'application/json', 'X-BrainLink-Token': app.token }, body: '{}',
+    });
+    assert.deepEqual(await response.json(), { available: false, models: [] });
+  } finally { await new Promise((resolve) => app.server.close(resolve)); }
+});
+
 test('local summary API requires opt-in, generates private draft, and files only after preview and confirmation', async () => {
   const home = await mkdtemp(path.join(tmpdir(), 'brainlink-local-summary-api-'));
   const appHome = path.join(home, 'app'), vault = path.join(home, 'vault');

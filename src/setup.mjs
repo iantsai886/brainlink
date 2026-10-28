@@ -40,7 +40,7 @@ import { isStartupEnabled, setStartupEnabled } from './startup.mjs';
 import { recommendSessionVault } from './sessions/routing.mjs';
 import { harnessCueIsIdle, listSessionEndCues, dismissSessionEndCue, sessionEndCueId, matchSessionEndCue } from './sessions/end-cue.mjs';
 import { listSessionFilingFolders, suggestedSessionFolder } from './sessions/folders.mjs';
-import { generateLocalSessionSummary, readLocalSummaryDraft, saveLocalSummaryDraft, validLocalModelName } from './sessions/local-summary.mjs';
+import { generateLocalSessionSummary, LOCAL_OLLAMA_URL, readLocalSummaryDraft, saveLocalSummaryDraft, validLocalModelName } from './sessions/local-summary.mjs';
 import { sessionHookStatus, setSessionHook } from './sessions/hooks.mjs';
 import { twinProfileStatus, profileScopeEditable } from './twin-profiles.mjs';
 import { createRsiLedger } from './rsi-ledger.mjs';
@@ -1746,6 +1746,21 @@ export async function startSetup(opts = {}) {
       localSummaryAutoDraftKeepsAlive = Boolean(enabled && autoDraftOnEnd);
       touch();
       return { ok: true, settings: next.sessions.localSummary };
+    },
+    'POST /api/sessions/local-summary/models': async () => {
+      const controller = new AbortController();
+      const timer = setTimeout(() => controller.abort(), 4000);
+      timer.unref?.();
+      try {
+        const response = await (opts.localSummaryModelsFetch || fetch)(`${LOCAL_OLLAMA_URL}/api/tags`, { signal: controller.signal });
+        if (!response?.ok) return { available: false, models: [] };
+        const payload = await response.json();
+        const models = [...new Set((Array.isArray(payload?.models) ? payload.models : [])
+          .map((model) => typeof model?.name === 'string' ? model.name.trim() : '')
+          .filter((name) => validLocalModelName(name)))].sort();
+        return { available: true, models };
+      } catch { return { available: false, models: [] }; }
+      finally { clearTimeout(timer); }
     },
     'POST /api/sessions/local-summary/generate': async (b) => {
       const cfg = await loadConfig(file);
