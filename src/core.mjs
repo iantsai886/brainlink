@@ -292,37 +292,43 @@ export async function loadVault(ctx, name) {
     const rel = path.relative(root, full).split(path.sep).join('/');
     seen.add(rel);
     const prev = state.files.get(rel);
-    if (prev) { const st = await stat(full); if (st.mtimeMs === prev.mtime && st.size === prev.bytes) continue; }
-    const stNow = await stat(full);
+    // Use ctime at nanosecond precision as well as size/mtime. Sync tools can preserve
+    // mtime while replacing a note; without this check a cached public copy could survive
+    // a change to `private: true` and still appear in search until restart.
+    const stNow = await stat(full, { bigint: true });
+    const mtime = Number(stNow.mtimeNs) / 1e6;
+    const bytes = Number(stNow.size);
+    const ctime = String(stNow.ctimeNs);
     // Configured paths such as the handoff mailbox and capture log have known types;
     // exclude them before even opening their Markdown body.
     if (!twinNoteMemoryAllowed(ctx, name, rel)) {
-      changed = true;
-      state.files.set(rel, { hash: null, mtime: stNow.mtimeMs, bytes: stNow.size, note: null });
+      if (prev?.note) changed = true;
+      state.files.set(rel, { hash: null, mtime, bytes, ctime, note: null });
       continue;
     }
-    const header = await readIndexableHeader(full, stNow.size);
+    if (prev?.note && prev.mtime === mtime && prev.bytes === bytes && prev.ctime === ctime &&
+        twinNoteMemoryAllowed(ctx, name, rel, prev.note.meta)) continue;
+    const header = await readIndexableHeader(full, bytes);
     if (!header.indexable || !twinNoteMemoryAllowed(ctx, name, rel, header.meta)) {
-      changed = true;
-      state.files.set(rel, { hash: null, mtime: stNow.mtimeMs, bytes: stNow.size, note: null });
+      if (prev?.note) changed = true;
+      state.files.set(rel, { hash: null, mtime, bytes, ctime, note: null });
       continue;
     }
     const raw = await readFile(full, 'utf8');
     const hash = createHash('sha1').update(raw).digest('hex');
-    if (prev?.hash === hash) { prev.mtime = stNow.mtimeMs; prev.bytes = stNow.size; continue; }
+    if (prev?.hash === hash) { prev.mtime = mtime; prev.bytes = bytes; prev.ctime = ctime; continue; }
     changed = true;
     const { meta, body, frontmatter } = parseFrontmatter(raw);
-    const mtime = stNow.mtimeMs;
     const title = path.posix.basename(rel).replace(/\.md$/i, '');
     const aliases = listValue(meta.aliases);
     const names = [title, ...aliases].join(' ');
     const chunks = chunkMarkdown(body).map((c, i) => ({ ...c, id: `${rel}#${i}`, tokens: termFrequencies(`${names} ${c.heading} ${c.text}`) }));
     // Recheck after the full read in case the file changed between the header and body reads.
     if (isPrivateMeta(meta) || fmSaysPrivate(frontmatter) || !twinNoteMemoryAllowed(ctx, name, rel, meta)) {
-      state.files.set(rel, { hash: null, mtime: stNow.mtimeMs, bytes: stNow.size, note: null });
+      state.files.set(rel, { hash: null, mtime, bytes, ctime, note: null });
       continue;
     }
-    state.files.set(rel, { hash, mtime, bytes: stNow.size, note: { rel, title, aliases, raw, meta, body, chunks, mtime, minor: isMinor(rel, title), date: noteDate(rel, meta, mtime), tags: extractTags(body, meta), generated: meta.generated_by === 'brainlink' || /^BrainLink\/Commands\//i.test(rel), historical: isHistorical(rel, meta), private: false } });
+    state.files.set(rel, { hash, mtime, bytes, ctime, note: { rel, title, aliases, raw, meta, body, chunks, mtime, minor: isMinor(rel, title), date: noteDate(rel, meta, mtime), tags: extractTags(body, meta), generated: meta.generated_by === 'brainlink' || /^BrainLink\/Commands\//i.test(rel), historical: isHistorical(rel, meta), private: false } });
   }
   for (const rel of [...state.files.keys()]) if (!seen.has(rel)) { state.files.delete(rel); changed = true; }
   if (changed) state.index = buildIndex([...state.files.values()].map((f) => f.note).filter(Boolean).sort((a, b) => a.rel.localeCompare(b.rel)));

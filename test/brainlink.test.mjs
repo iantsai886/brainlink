@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtemp, mkdir, writeFile, readFile, readdir, cp, utimes } from 'node:fs/promises';
+import { mkdtemp, mkdir, writeFile, readFile, readdir, cp, utimes, stat } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { spawn } from 'node:child_process';
 import { request } from 'node:http';
@@ -335,6 +335,29 @@ test('BOM and leading-blank-line private notes are hidden from readNote and sear
   await assert.rejects(readNote(ctx, 'Acme Studio', 'Secret Blank Lines.md'), /private/i);
   const r = await search(ctx, 'Acme Studio', 'Initech Umbrella quietly');
   assert.ok(!r.some((x) => /Secret BOM|Secret Blank Lines/.test(x.path)));
+});
+
+test('a same-size public-to-private edit invalidates the cached note even when mtime is preserved', async () => {
+  const vault = await tmp('cached-privacy-transition');
+  const file = path.join(vault, 'Cache transition.md');
+  const publicText = '---\npublic: false\n---\n# Cache transition\n\nZQX_PUBLIC_CACHE_CANARY should be searchable.\n';
+  const privateText = publicText.replace('public: false', 'private: true');
+  assert.equal(Buffer.byteLength(publicText), Buffer.byteLength(privateText), 'the privacy flip keeps file size unchanged');
+  const fixedTime = new Date('2026-10-28T00:00:00.000Z');
+  await writeFile(file, publicText);
+  await utimes(file, fixedTime, fixedTime);
+  const original = await stat(file);
+  const ctx = ctxOf(normalize({ vaults: [{ name: 'Company', path: vault }] }));
+  assert.equal((await search(ctx, 'Company', 'ZQX_PUBLIC_CACHE_CANARY')).some((note) => note.path === 'Cache transition.md'), true);
+
+  await writeFile(file, privateText);
+  await utimes(file, fixedTime, fixedTime);
+  const current = await stat(file);
+  assert.equal(current.size, Buffer.byteLength(publicText));
+  assert.equal(current.mtimeMs, fixedTime.getTime(), 'the original mtime is restored exactly');
+  assert.notEqual(current.ctimeMs, original.ctimeMs, 'the filesystem change time reveals the replacement');
+  assert.deepEqual(await search(ctx, 'Company', 'ZQX_PUBLIC_CACHE_CANARY'), [], 'the cached public content is removed from retrieval');
+  await assert.rejects(readNote(ctx, 'Company', 'Cache transition.md'), /private/i);
 });
 
 test('S1: a private note never surfaces in search, related notes or the 2D graph', async () => {
