@@ -69,6 +69,41 @@ test('MCP close previews, then saves one scoped private episode without exposing
   assert.equal((await readdir(path.join(personal, 'Inbox'))).length, 0);
 });
 
+test('MCP close reuses only an exact saved project vault for its preview and confirmed filing', async () => {
+  const root = await mkdtemp(path.join(tmpdir(), 'bl-close-saved-vault-'));
+  const company = path.join(root, 'company');
+  const personal = path.join(root, 'personal');
+  await mkdir(path.join(company, 'Inbox'), { recursive: true });
+  await mkdir(path.join(personal, 'Inbox'), { recursive: true });
+  const env = { BRAINLINK_HOME: path.join(root, 'app'), HOME: root, BRAINLINK_AI_PLATFORM: 'Codex', BRAINLINK_VAULTS: 'Company,Personal' };
+  const cfg = normalize({ version: CONFIG_SCHEMA_VERSION,
+    vaults: [{ name: 'Company', path: company }, { name: 'Personal', path: personal }],
+    session_filing: { projectVaults: { 'fictional-project-id': 'Company' } },
+  });
+  const mcp = createMcp(createContext(cfg, { env }));
+  const args = { title: 'Fictional closeout', project: 'fictional-project-id', goal: 'File to the saved project', outcome: 'Prepared a private review note.', session_or_task_id: 'saved-project-route' };
+  try {
+    const preview = await call(mcp, 'session_close', args);
+    assert.equal(preview.error, false, JSON.stringify(preview.value));
+    assert.equal(preview.value.written, false);
+    assert.deepEqual(preview.value.vault_suggestion, { vault: 'Company', reason: 'Suggested from your saved choice for this exact project.' });
+    assert.match(preview.value.path, /^Company\/Inbox\//);
+    assert.equal((await readdir(path.join(company, 'Inbox'))).length, 0, 'preview does not write');
+    assert.equal((await readdir(path.join(personal, 'Inbox'))).length, 0, 'other vault stays untouched');
+
+    const saved = await call(mcp, 'session_close', { ...args, confirm: true });
+    assert.equal(saved.error, false);
+    assert.equal(saved.value.written, true);
+    assert.equal(saved.value.vault_suggestion.vault, 'Company');
+    assert.match(saved.value.path, /^Company\/Inbox\//);
+
+    const nearMatch = await call(mcp, 'session_close', { ...args, project: 'fictional-project-id-copy', session_or_task_id: 'no-fuzzy-route' });
+    assert.equal(nearMatch.error, true);
+    assert.match(nearMatch.value.errors.join(' '), /Choose a destination vault/);
+    assert.equal((await readdir(path.join(personal, 'Inbox'))).length, 0);
+  } finally { await rm(root, { recursive: true, force: true }); }
+});
+
 test('MCP close rejects unsafe or incomplete outcomes before saving', async () => {
   const root = await mkdtemp(path.join(tmpdir(), 'bl-close-invalid-'));
   await mkdir(path.join(root, 'Inbox'));

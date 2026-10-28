@@ -485,6 +485,7 @@ test('profile-scoped session reads stay inside the profile and closeouts remain 
   profile.vaults[0].access = 'propose';
   profile.allowed_actions.push('read_session', 'propose_note');
   profile.agent_access[0].vaults[0] = { name: 'Fictional Org', access: 'propose', operations: ['search', 'read_note', 'read_session', 'propose_note'] };
+  cfg.session_filing = { projectVaults: { 'fictional-org-project': 'Fictional Org', 'fictional-personal-project': 'Fictional Personal' } };
   const addScopedProfile = ({ id, name, mode, owner, vault, agentId, token }) => {
     cfg.ai_agents.push({ id: agentId, name: `${name} agent`, kind: 'local', tokenHash: hashToken(token), connected: true });
     cfg.twin_profiles.push({
@@ -531,10 +532,15 @@ test('profile-scoped session reads stay inside the profile and closeouts remain 
       assert.doesNotMatch(JSON.stringify(denied), /ORG_MESSAGE_CANARY_77|PERSONAL_MESSAGE_CANARY_88|CLIENT_MESSAGE_CANARY_98|UNASSIGNED_MESSAGE_CANARY_99/);
     }
   }
-  const closeArgs = { vault: 'Fictional Org', title: 'Fictional scoped close', goal: 'Verify scoped closure', outcome: 'Stored only as a profile-owned private summary.', session_or_task_id: 'scoped-close-1' };
+  const closeArgs = { title: 'Fictional scoped close', project: 'fictional-org-project', goal: 'Verify scoped closure', outcome: 'Stored only as a profile-owned private summary.', session_or_task_id: 'scoped-close-1' };
   const preview = await mcp.handle({ jsonrpc: '2.0', id: 24, method: 'tools/call', params: { name: 'session_close', arguments: closeArgs } });
+  assert.equal(preview.result.isError, false, JSON.stringify(preview));
   assert.equal(preview.result.structuredContent.session_saved, false);
   assert.equal(preview.result.structuredContent.written, false);
+  assert.deepEqual(preview.result.structuredContent.vault_suggestion, { vault: 'Fictional Org', reason: 'Suggested from your saved choice for this exact project.' });
+  const foreignRoute = await mcp.handle({ jsonrpc: '2.0', id: 24, method: 'tools/call', params: { name: 'session_close', arguments: { ...closeArgs, project: 'fictional-personal-project', session_or_task_id: 'foreign-saved-route' } } });
+  assert.equal(foreignRoute.result.isError, true);
+  assert.doesNotMatch(JSON.stringify(foreignRoute), /Fictional Personal|PERSONAL_SESSION_CANARY_88/);
   const saved = await mcp.handle({ jsonrpc: '2.0', id: 25, method: 'tools/call', params: { name: 'session_close', arguments: { ...closeArgs, confirm: true } } });
   assert.equal(saved.result.structuredContent.session_saved, true);
   const savedSession = await (await openSessionStore(env)).readSession(saved.result.structuredContent.session_id, { profile_id: 'org_twin_1' });

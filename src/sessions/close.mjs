@@ -7,6 +7,7 @@ import { clientIdFor } from './mcp.mjs';
 import { fileSessionSummary } from './filing.mjs';
 import { suggestedSessionFolder } from './folders.mjs';
 import { twinToolAuthorization } from '../twin-profiles.mjs';
+import { recommendSessionVault } from './routing.mjs';
 
 const lines = (value) => (Array.isArray(value) ? value : value ? [value] : []).map((x) => String(x).trim()).filter(Boolean);
 const section = (label, value) => {
@@ -39,11 +40,15 @@ export function closeSummary(args) {
 }
 
 export async function closeSession(ctx, store, args, now = new Date(), { fileSummary = fileSessionSummary } = {}) {
-  if (!args.vault) return { ok: false, errors: ['destination vault is required'] };
-  vault(ctx, args.vault);
+  const route = !args.vault ? recommendSessionVault({ project: args.project }, ctx.cfg) : null;
+  const destinationVault = String(args.vault || route?.vault || '').trim();
+  if (!destinationVault) return { ok: false, errors: ['Choose a destination vault; BrainLink can use a saved destination only for an exact project match.'] };
+  const destinationAuthorization = twinToolAuthorization(ctx, 'session_close', { vault: destinationVault, project: args.project });
+  if (!destinationAuthorization.allowed) return { ok: false, errors: ['This AI connection is not allowed to close a session into that destination.'] };
+  vault(ctx, destinationVault);
   const id = resolveIdentity(ctx, args);
   const sourceId = String(args.session_or_task_id || '').trim();
-  const errors = checkCommon(ctx, args.vault, { ...args, source: 'session_close' }, id);
+  const errors = checkCommon(ctx, destinationVault, { ...args, source: 'session_close' }, id);
   if (!sourceId || sourceId.length > 120 || /[\r\n]/.test(sourceId)) errors.push('stable session_or_task_id is required (up to 120 characters)');
   if (args.source_session_id !== undefined && (typeof args.source_session_id !== 'string' || !/^[A-Za-z0-9_-]{1,160}$/.test(args.source_session_id))) errors.push('source_session_id must be an exact safe BrainLink session ID');
   if (!String(args.title || '').trim()) errors.push('title is required');
@@ -67,19 +72,20 @@ export async function closeSession(ctx, store, args, now = new Date(), { fileSum
     const identity = { ...id, session_or_task_id: sourceId };
     let folderSuggestion = null;
     if (typeof args.folder !== 'string') {
-      const canSearchNotes = twinToolAuthorization(ctx, 'vault_search', { vault: args.vault }).allowed;
-      folderSuggestion = await suggestedSessionFolder(ctx, session, args.vault, { allowContentSuggestions: canSearchNotes });
+      const canSearchNotes = twinToolAuthorization(ctx, 'vault_search', { vault: destinationVault }).allowed;
+      folderSuggestion = await suggestedSessionFolder(ctx, session, destinationVault, { allowContentSuggestions: canSearchNotes });
     }
     const folder = typeof args.folder === 'string' ? args.folder : folderSuggestion?.folder;
     const suggestionReceipt = folderSuggestion ? { folder_suggestion: folderSuggestion } : {};
-    const draft = await fileSummary(ctx, session, args.vault, false, identity, folder);
-    if (!draft.ok || !args.confirm) return { ...draft, ...suggestionReceipt, session_id: sessionId, session_saved: false };
+    const vaultSuggestion = route?.vault ? { vault_suggestion: { vault: destinationVault, reason: route.reason } } : {};
+    const draft = await fileSummary(ctx, session, destinationVault, false, identity, folder);
+    if (!draft.ok || !args.confirm) return { ...draft, ...vaultSuggestion, ...suggestionReceipt, session_id: sessionId, session_saved: false };
 
     const stored = await sessionStore.putSession({ client, source_id: sourceId, profile_id: profileId, project: session.project, title: session.title,
       summary, started_at: now.toISOString(), note_refs: [], private: true, messages: [] }, profileId ? { profile_id: profileId } : {});
     let note;
     try {
-      note = await fileSummary(ctx, { ...session, id: stored.id }, args.vault, true, identity, folder);
+      note = await fileSummary(ctx, { ...session, id: stored.id }, destinationVault, true, identity, folder);
     } catch {
       // The session store and Markdown vault are separate persistence systems. Never hide a
       // successful private session write behind a generic tool error; give the client a safe,
@@ -90,6 +96,7 @@ export async function closeSession(ctx, store, args, now = new Date(), { fileSum
         session_id: stored.id,
         session_saved: true,
         filing_status: 'unknown',
+        ...vaultSuggestion,
         ...suggestionReceipt,
         next: 'Open Sessions in BrainLink, review this saved session, then use File summary to finish filing it.',
       };
@@ -103,11 +110,12 @@ export async function closeSession(ctx, store, args, now = new Date(), { fileSum
         session_id: stored.id,
         session_saved: true,
         filing_status: 'not_written',
+        ...vaultSuggestion,
         ...suggestionReceipt,
         next: 'Open Sessions in BrainLink, review this saved session and choose a writable destination before using File summary.',
       };
     }
-    return { ...note, ...suggestionReceipt, session_id: stored.id, session_saved: true };
+    return { ...note, ...vaultSuggestion, ...suggestionReceipt, session_id: stored.id, session_saved: true };
   };
   return typeof store.withExclusive === 'function'
     ? store.withExclusive(close)

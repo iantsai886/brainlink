@@ -1,4 +1,5 @@
 // Profile declarations and the first runtime enforcement gate for named agent tokens.
+import { recommendSessionVault } from './sessions/routing.mjs';
 export function profileScopeEditable(profile) {
   const profileVaults = new Set((profile?.vaults || []).map((item) => item.name));
   return (profile?.agent_access || []).every((agent) => {
@@ -142,11 +143,16 @@ export function twinToolAuthorization(ctx, name, args = {}) {
   if (HANDOFF_TOOLS.has(name)) return handoffGrant(ctx, action)
     ? { allowed: true }
     : { allowed: false, reason: `Twin profile scope does not allow ${action} in its handoff vault.` };
-  const targetVault = args.vault || (name === 'fetch' ? String(args.id || '').split('::')[0] : null);
+  const savedSessionVault = name === 'session_close' && !args.vault
+    ? recommendSessionVault({ project: args.project }, ctx.cfg).vault
+    : null;
+  const targetVault = args.vault || savedSessionVault || (name === 'fetch' ? String(args.id || '').split('::')[0] : null);
   if (targetVault) {
     const grant = scope.grants.find((item) => item.name === targetVault);
     const permitted = ctx.enabled.includes(targetVault) && grant?.operations.includes(action);
-    return permitted ? { allowed: true } : { allowed: false, reason: `Twin profile scope does not allow ${action} in vault "${targetVault}".` };
+    if (permitted) return { allowed: true };
+    if (name === 'session_close' && !args.vault && savedSessionVault) return { allowed: false, reason: 'Twin profile scope does not allow the saved destination for this session.' };
+    return { allowed: false, reason: `Twin profile scope does not allow ${action} in vault "${targetVault}".` };
   }
   // Cross-vault tools are available only when every enabled vault has the same operation grant.
   // This keeps a tool that searches the whole connection from quietly widening a narrower grant.
