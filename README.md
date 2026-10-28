@@ -1,6 +1,6 @@
 # BrainLink MCP
 
-One Obsidian / Markdown vault that every AI can search and write to safely: Claude Desktop and Claude Code, ChatGPT Codex, Cursor, Gemini CLI, Google Antigravity, Hermes Agent, Windsurf, and any Streamable-HTTP MCP client (such as Grok bots). Product spec: [docs/PRODUCT-SPEC.md](docs/PRODUCT-SPEC.md). Typed company/workflow graph design: [docs/GRAPH-KNOWLEDGE-MODEL.md](docs/GRAPH-KNOWLEDGE-MODEL.md).
+Obsidian / Markdown vaults that authorized AI agents can search and write to safely: Claude Desktop and Claude Code, ChatGPT Codex, Cursor, Gemini CLI, Google Antigravity, Hermes Agent, DeepSeek Harness, Windsurf, and any Streamable-HTTP MCP client (such as Grok bots). Product spec: [docs/PRODUCT-SPEC.md](docs/PRODUCT-SPEC.md). Typed company/workflow graph design: [docs/GRAPH-KNOWLEDGE-MODEL.md](docs/GRAPH-KNOWLEDGE-MODEL.md).
 
 ## For customers
 
@@ -21,9 +21,13 @@ brainlink setup | init | connect <client|all> | disconnect <client> | clients | 
 
 - **Auto-linking:** every note an AI writes links the notes it mentions or is about, and `BrainLink/Home.md` links everything, so notes connect even without Obsidian.
 - **Search:** keyword (stemmed, filters, `#tag`, `[[Note]]`, fused rephrasings) plus meaning-based search when Ollama is installed (`ollama pull nomic-embed-text`).
+- **Separate workspaces:** connect multiple vaults and Personal, Organisation, or Client Twins with their own allowed data and memory types.
+- **Four memory types:** BrainLink organizes current work, past sessions, lasting knowledge, and reusable skills in the background. Users do not need to sort every note by hand.
 - **Tools:** `brain_brief`, `vault_recent`, `open_loops`, `vault_health`, `remember`, `append_daily`, `propose_note` templates (meeting, decision, person, project, idea), and the Raw-to-Wiki review flow (`ingestion_queue` / `ingestion_record`). Setup can scan one selected non-private folder manually or once daily; scans only prepare a review queue and never file knowledge automatically. `session_list` and `session_read` access approved local AI history; `session_log` saves short notes. For profile-scoped AIs, session logging is a separate opt-in permission; entries are forced private and tied to that Personal, Organisation, or Client profile. See `docs/SESSION-INDEX.md`.
 - **Shared commands:** notes in `BrainLink/Commands/` become slash commands in every AI.
 - **Portable Agent Skills:** `brainlink-session-closeout`, `brainlink-raw-to-wiki`, and `brainlink-cross-ai-handoff` are versioned in Git, with Claude/Codex-compatible copies. Desktop installers include these skills and all runtime packages.
+- **Scheduled backup:** choose a backup folder and schedule. BrainLink checks each backup; restore tools help recover a vault when needed. Encrypted backups use a recovery key.
+- **Governed improvement:** optional RSI research and health checks create review proposals. They do not change code, permissions, or vault content by themselves.
 
 ## How it is safe
 
