@@ -12,11 +12,15 @@ handoffs remain readable.
 The optional `git` object records `{repo, branch, head, dirty, ahead}`. The
 repository is an `owner/name` label only; URLs and local paths are refused.
 Branch names, commit SHAs, booleans and counts are checked before preview or
-write. BrainLink cannot inspect the sender's checkout, so the note labels these
-values as reported by the sender. On pickup, the receiving agent checks its
-own checkout and reports a match, behind state, divergence, or sender-reported
-uncommitted work. This does not run Git commands for the sender or switch the
-receiver's branch.
+write. The note labels these values as reported by the sender. On pickup,
+BrainLink now compares them read-only with the same Twin's confirmed local
+GitHub clone when the receiving agent also has `read_note` access to the
+assigned project vault. It checks repository, branch, commit, working-tree
+cleanliness, and local upstream-ahead count when available. The result is
+`matched`, `mismatch`, `partial`, or `not_checked`; it never exposes the clone
+path, fetches from GitHub, or changes branches. A local match does not prove
+the remote GitHub branch is current. The receiving agent should still inspect
+its own checkout before editing.
 
 `source_refs` accepts up to eight Markdown references. Use `path/to/note.md`
 for the configured mailbox vault, or `Vault Name::path/to/note.md` for another

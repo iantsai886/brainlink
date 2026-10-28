@@ -248,7 +248,7 @@ export function createMcp(ctx, { onCall = () => {} } = {}) {
           to: { type: 'string' }, subject: { type: 'string' }, body: { type: 'string' }, priority: { type: 'string', enum: ['P0', 'P1', 'P2', 'P3'] },
           goal: { type: 'string' }, current_state: { type: 'string' }, decisions: strs, modified_files: strs, tests: strs,
           open_questions: strs, next_steps: strs, source_refs: { ...strs, description: 'Up to 8 Markdown references. Use path/to/note.md for the mailbox vault, or Vault Name::path/to/note.md for another vault. Each note must be visible and within this agent’s read_note grant.' },
-          git: { type: 'object', description: 'Optional sender-reported repository checkpoint. BrainLink cannot verify another client’s checkout and never changes branches.', properties: {
+          git: { type: 'object', description: 'Optional sender-reported repository checkpoint. On pickup, BrainLink may compare it read-only with the same Twin’s confirmed, locally assigned clone if this agent has read permission. No network check or branch change is performed.', properties: {
             repo: { type: 'string', description: 'GitHub owner/name label only; no URL or path.' }, branch: { type: 'string' }, head: { type: 'string', description: '7–40 character commit SHA.' }, dirty: { type: 'boolean' }, ahead: { type: 'integer', minimum: 0, maximum: 10000 },
           }, required: ['repo', 'branch', 'head', 'dirty', 'ahead'], additionalProperties: false },
           scope: { type: 'string', enum: ['personal', 'company', 'client'] },

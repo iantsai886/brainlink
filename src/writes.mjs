@@ -7,6 +7,7 @@ import { TEMPLATES, renderTemplate } from './templates.mjs';
 import { suggestLinks, relatedSection, safeUpdateMap } from './links.mjs';
 import { vault, vaultRoot, safeJoin, findSecrets, zonedNow, parseFrontmatter, isExcludedPath, isPrivateMeta, fmSaysPrivate, readNote, loadVault } from './core.mjs';
 import { typedEntityMetadataMap } from './typed-graph.mjs';
+import { createHandoffGitVerifier } from './handoff-git.mjs';
 
 export const slug = (s) => String(s || '').toLowerCase().replace(/[^a-z0-9㐀-鿿]+/g, '-').replace(/^-|-$/g, '') || 'unknown';
 
@@ -417,6 +418,7 @@ export async function sendHandoff(ctx, a, now = new Date()) {
 // must never surface here either -- same fail-closed check readNote() uses for ordinary notes.
 export async function listHandoffs(ctx, { to, limit = 10 } = {}) {
   const h = handoffBox(ctx);
+  const verifyCheckpoint = createHandoffGitVerifier(ctx);
   const root = vaultRoot(ctx, h.vault);
   const dir = safeJoin(root, h.folder);
   let names = [];
@@ -440,7 +442,8 @@ export async function listHandoffs(ctx, { to, limit = 10 } = {}) {
     const { meta, body } = document;
     const dm = f.match(/^(\d{4}-\d{2}-\d{2})-(\d{2})(\d{2})-/);
     const sent_at = meta.written_at || (dm ? `${dm[1]}T${dm[2]}:${dm[3]}:00` : '');
-    out.push({ path: `${h.vault}/${rel}`, from: m?.[1], to: recipient, status: meta.status || '', priority: meta.priority || '', subject: meta.subject || f, decision_needed: meta.decision_needed || '', excerpt: body.trim().slice(0, 300), ...(gitCheckpointFromMeta(meta) ? { git_checkpoint: gitCheckpointFromMeta(meta) } : {}), ack_of: meta.ack_of || '', sent_at });
+    const gitCheckpoint = gitCheckpointFromMeta(meta);
+    out.push({ path: `${h.vault}/${rel}`, from: m?.[1], to: recipient, status: meta.status || '', priority: meta.priority || '', subject: meta.subject || f, decision_needed: meta.decision_needed || '', excerpt: body.trim().slice(0, 300), ...(gitCheckpoint ? { git_checkpoint: gitCheckpoint, git_checkpoint_verification: verifyCheckpoint(gitCheckpoint) } : {}), ack_of: meta.ack_of || '', sent_at });
     if (out.length >= limit) break;
   }
   return out;
