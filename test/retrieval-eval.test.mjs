@@ -12,6 +12,8 @@ import { createMcp } from '../src/server.mjs';
 import { VectorStore, fillVectors } from '../src/embed.mjs';
 import { evaluateRetrieval, validateRetrievalFixture, decideIndependentComparison } from '../src/retrieval-eval.mjs';
 import { estTokens } from '../src/sessions/tokens.mjs';
+import { compactSearchResponse } from '../src/search-projection.mjs';
+import { buildContextPacket } from '../src/context-packet.mjs';
 const execFileAsync = promisify(execFile);
 
 test('RSI comparison gates prioritize privacy, sample size, and quality before efficiency', () => {
@@ -145,6 +147,45 @@ test('compact vault_search preserves every source and snippet across the indepen
     compactTokens += estTokens(JSON.stringify(compact));
   }
   assert.ok(compactTokens < fullTokens);
+});
+
+test('default context packet preserves frozen-set task success and source recall with a smaller cited response', async () => {
+  const fixture = JSON.parse(await readFile(path.resolve('samples/evaluation/retrieval-independent-v1.json'), 'utf8'));
+  const ctx = createContext(normalize({ vaults: [{ name: fixture.vault, path: path.resolve('samples/evaluation/independent-vault') }] }), { env: { BRAINLINK_SEMANTIC: '0' } });
+  const searchTool = createMcp(ctx).tools.find((item) => item.name === 'vault_search');
+  const packetTool = createMcp(ctx).tools.find((item) => item.name === 'context_packet');
+  let baseSuccess = 0, packetSuccess = 0, baseRecall = 0, packetRecall = 0, expectedSources = 0;
+  let baseTokens = 0, packetTokens = 0, privacyHits = 0;
+  const succeeds = (results, status, item) => {
+    if (!item.answerable) return status !== 'hits';
+    const text = results.map((source) => `${source.title || ''}\n${source.heading || ''}\n${source.snippet || source.excerpt || ''}`).join('\n').toLowerCase();
+    return status === 'hits' && item.expected.every((source) => results.some((result) => result.path === source))
+      && (item.required_context || []).every((phrase) => text.includes(phrase.toLowerCase()));
+  };
+  for (const item of fixture.cases) {
+    const args = { vault: fixture.vault, query: item.query, limit: fixture.topK };
+    const baseline = await searchTool.run(args);
+    const packet = await packetTool.run({ vault: fixture.vault, query: item.query });
+    const compact = compactSearchResponse(baseline);
+    const packetResults = packet.sources.map((source) => ({ ...source, snippet: source.excerpt }));
+    baseSuccess += Number(succeeds(compact.results, compact.status, item));
+    packetSuccess += Number(succeeds(packetResults, packet.status, item));
+    if (item.answerable) {
+      expectedSources += item.expected.length;
+      baseRecall += item.expected.filter((source) => compact.results.some((result) => result.path === source)).length;
+      packetRecall += item.expected.filter((source) => packetResults.some((result) => result.path === source)).length;
+    }
+    privacyHits += (item.forbidden || []).filter((source) => packetResults.some((result) => result.path === source)).length;
+    baseTokens += estTokens(JSON.stringify(compact));
+    packetTokens += estTokens(JSON.stringify(packet));
+  }
+  assert.equal(packetTool.inputSchema.properties.max_sources.default, 4);
+  assert.equal(packetTool.inputSchema.properties.excerpt_chars.default, 300);
+  assert.equal(baseSuccess, 17);
+  assert.equal(packetSuccess, baseSuccess);
+  assert.equal(packetRecall, baseRecall);
+  assert.equal(privacyHits, 0);
+  assert.ok(packetTokens < baseTokens * 0.85, `packet tokens ${packetTokens} should be at least 15% below compact search ${baseTokens}`);
 });
 
 test('independent retrieval CLI accepts an explicit fictional vault and emits an exact-byte reproducibility receipt', async () => {
