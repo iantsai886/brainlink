@@ -65,6 +65,10 @@ jobs:
           & $node scripts/smoke-staged-runtime.mjs --node $node --app $appRoot --version $version
           if ($LASTEXITCODE -ne 0) { throw 'Staged runtime MCP/privacy smoke failed' }
 
+      - name: Smoke-test isolated Windows shortcut install and uninstall
+        shell: pwsh
+        run: npm run smoke:installed:win
+
       - name: Install, run and uninstall Windows package
         shell: pwsh
         run: |

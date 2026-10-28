@@ -95,6 +95,7 @@ test('every native installer bundles all production dependencies and portable Br
     assert.match(job, /smoke-staged-runtime\.mjs/, `${jobName} must run the packaged MCP/privacy smoke`);
   }
   assert.match(workflow, /Install, run and uninstall Windows package/, 'Windows CI must exercise install and uninstall');
+  assert.match(workflow, /Smoke-test isolated Windows shortcut install and uninstall[\s\S]*?npm run smoke:installed:win/, 'Windows CI must run the isolated shortcut acceptance test');
   assert.match(workflow, /Installer did not create the BrainLink desktop shortcut/, 'Windows package smoke test must verify the installed desktop shortcut');
   assert.match(workflow, /Windows installer included development UI tests/, 'Windows package smoke test must reject development UI tests');
   assert.match(workflow, /Desktop shortcut does not open the BrainLink Setup launcher/, 'Windows package smoke test must verify what the shortcut opens');
