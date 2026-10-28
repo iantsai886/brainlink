@@ -36,6 +36,57 @@ async function readBackupManifest(root, encryptionKey) {
   return JSON.parse(await readFile(path.join(root, 'manifest.json'), 'utf8'));
 }
 
+function relativeManifestPath(value) {
+  return typeof value === 'string' && value.length > 0 && !path.isAbsolute(value)
+    && !value.split('/').some((part) => !part || part === '.' || part === '..' || part.includes('\\'));
+}
+
+function validateBackupMappings(manifest, encrypted) {
+  if (manifest.format !== 'brainlink-backup-v1' || !Array.isArray(manifest.vaults) || !manifest.vaults.length
+      || !Array.isArray(manifest.files) || (manifest.artifacts !== undefined && !Array.isArray(manifest.artifacts))) {
+    throw new Error('Unrecognized backup manifest.');
+  }
+  const errors = [];
+  const vaultFolders = new Map();
+  const folderIds = new Set();
+  for (const vault of manifest.vaults) {
+    if (!vault || typeof vault.name !== 'string' || !vault.name || typeof vault.folder !== 'string'
+        || !/^\d+-[a-zA-Z0-9_-]+$/.test(vault.folder) || vaultFolders.has(vault.name) || folderIds.has(vault.folder)) {
+      errors.push('Invalid vault mapping in backup.');
+      continue;
+    }
+    vaultFolders.set(vault.name, vault.folder);
+    folderIds.add(vault.folder);
+  }
+  const targets = new Set();
+  for (const file of manifest.files) {
+    if (!file || typeof file !== 'object' || !vaultFolders.has(file.vault) || !relativeManifestPath(file.path)) {
+      errors.push('Invalid backup file mapping.');
+      continue;
+    }
+    const folder = vaultFolders.get(file.vault);
+    const expected = `vaults/${folder}/${file.path}`;
+    if (encrypted ? !/^objects\/[a-f0-9]{32}\.bin$/.test(file.stored || '') : file.stored !== expected) {
+      errors.push('Invalid backup file mapping.');
+      continue;
+    }
+    const target = `${file.vault}\0${file.path}`;
+    if (targets.has(target)) errors.push('Duplicate backup file destination.');
+    targets.add(target);
+  }
+  for (const artifact of manifest.artifacts || []) {
+    if (!artifact || typeof artifact !== 'object' || !relativeManifestPath(artifact.path)
+        || (encrypted ? !/^objects\/[a-f0-9]{32}\.bin$/.test(artifact.stored || '') : artifact.stored !== `artifacts/${artifact.path}`)) {
+      errors.push('Invalid backup artifact mapping.');
+      continue;
+    }
+    const target = `BrainLink\0${artifact.path}`;
+    if (targets.has(target)) errors.push('Duplicate backup artifact destination.');
+    targets.add(target);
+  }
+  return errors;
+}
+
 export async function loadBackupStatus(file) {
   try {
     const value = JSON.parse(await readFile(file, 'utf8'));
@@ -146,10 +197,10 @@ export async function verifyBackup(backupDir, encryptionKey = null) {
   const root = await realpath(backupDir);
   const encrypted = await isEncryptedBackup(root);
   const manifest = await readBackupManifest(root, encryptionKey);
-  if (manifest.format !== 'brainlink-backup-v1' || !Array.isArray(manifest.files)) throw new Error('Unrecognized backup manifest.');
-  const errors = [];
+  const errors = validateBackupMappings(manifest, encrypted);
   for (const file of manifest.files) {
-    if (!file.stored || path.isAbsolute(file.stored) || file.stored.split('/').some((part) => !part || part === '.' || part === '..') || (encrypted ? !/^objects\/[a-f0-9]{32}\.bin$/.test(file.stored) : !file.stored.startsWith('vaults/'))) {
+    if (!file || typeof file !== 'object') { errors.push('Invalid backup file mapping.'); continue; }
+    if (typeof file.stored !== 'string' || !file.stored || path.isAbsolute(file.stored) || file.stored.split('/').some((part) => !part || part === '.' || part === '..') || (encrypted ? !/^objects\/[a-f0-9]{32}\.bin$/.test(file.stored) : !file.stored.startsWith('vaults/'))) {
       errors.push('Invalid backup file path'); continue;
     }
     const full = path.resolve(root, ...file.stored.split('/'));
@@ -164,6 +215,7 @@ export async function verifyBackup(backupDir, encryptionKey = null) {
     } catch { errors.push(`Missing file: ${file.stored}`); }
   }
   for (const artifact of manifest.artifacts || []) {
+    if (!artifact || typeof artifact !== 'object') { errors.push('Invalid backup artifact mapping.'); continue; }
     if (typeof artifact.path !== 'string' || artifact.path.split('/').some(part => !part || part === '.' || part === '..' || part.includes('\\')) || (encrypted ? !/^objects\/[a-f0-9]{32}\.bin$/.test(artifact.stored) : artifact.stored !== 'artifacts/' + artifact.path)) { errors.push('Invalid backup artifact path'); continue; }
     const full = path.resolve(root, ...artifact.stored.split('/'));
     if (!within(root, full)) { errors.push('Invalid backup artifact path'); continue; }
@@ -300,11 +352,7 @@ export async function restoreBackupToEmpty(backupDir, destination, encryptionKey
   const manifest = await readBackupManifest(source, encryptionKey);
   const stagingRoot = path.join(path.dirname(targetRoot), `.${path.basename(targetRoot)}.brainlink-restore-${randomBytes(8).toString('hex')}`);
   const placeholderRoot = path.join(path.dirname(targetRoot), `.${path.basename(targetRoot)}.brainlink-empty-${randomBytes(8).toString('hex')}`);
-  const folders = new Map();
-  for (const v of manifest.vaults) {
-    if (typeof v.name !== 'string' || typeof v.folder !== 'string' || !/^\d+-[a-zA-Z0-9_-]+$/.test(v.folder) || folders.has(v.name)) throw new Error('Invalid vault mapping in backup.');
-    folders.set(v.name, v.folder);
-  }
+  const folders = new Map(manifest.vaults.map((vault) => [vault.name, vault.folder]));
   for (const file of manifest.files) {
     const folder = folders.get(file.vault);
     if (!folder || typeof file.path !== 'string' || path.isAbsolute(file.path) ||

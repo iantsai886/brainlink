@@ -131,7 +131,42 @@ test('verified backup restores to an empty folder without touching the original'
   await assert.rejects(restoreBackupToEmpty(made.folder, recovered), /must be empty/);
 });
 
-test('failed restore removes its partial staging copy and keeps the chosen destination empty', async () => {
+test('verification and restore reject distinct vaults mapped to the same recovered folder', async () => {
+  const personal = await tmp('duplicate-folder-personal');
+  const company = await tmp('duplicate-folder-company');
+  const dest = await tmp('duplicate-folder-backup');
+  const recovered = await tmp('duplicate-folder-output');
+  await writeFile(path.join(personal, 'Personal.md'), 'personal fixture');
+  await writeFile(path.join(company, 'Company.md'), 'company fixture');
+  const made = await backupOnce([
+    { name: 'Personal', path: personal },
+    { name: 'Company', path: company },
+  ], dest);
+
+  const manifestPath = path.join(made.folder, 'manifest.json');
+  const manifest = JSON.parse(await readFile(manifestPath, 'utf8'));
+  const personalFolder = manifest.vaults.find((vault) => vault.name === 'Personal').folder;
+  const companyFile = manifest.files.find((file) => file.vault === 'Company');
+  const previousStored = path.join(made.folder, ...companyFile.stored.split('/'));
+  const mergedStored = `vaults/${personalFolder}/${companyFile.path}`;
+  const mergedPath = path.join(made.folder, ...mergedStored.split('/'));
+  await mkdir(path.dirname(mergedPath), { recursive: true });
+  await writeFile(mergedPath, await readFile(previousStored));
+  manifest.vaults.find((vault) => vault.name === 'Company').folder = personalFolder;
+  companyFile.stored = mergedStored;
+  await writeFile(manifestPath, JSON.stringify(manifest, null, 2) + '\n');
+
+  const verification = await verifyBackup(made.folder);
+  assert.equal(verification.ok, false, 'a hash-valid copy with an unusable restore mapping is not a verified backup');
+  assert.ok(verification.errors.includes('Invalid vault mapping in backup.'));
+  const history = await listVerifiedBackups(dest);
+  assert.deepEqual(history.backups, [], 'the Restore screen must not offer the unusable copy');
+  assert.equal(history.invalid_count, 1);
+  await assert.rejects(restoreBackupToEmpty(made.folder, recovered), /Invalid vault mapping/);
+  assert.deepEqual(await readdir(recovered), [], 'invalid vault mappings must be rejected before publishing recovered data');
+});
+
+test('verification rejects duplicate restore destinations before creating a partial copy', async () => {
   const root = await tmp('restore-failure-source');
   const dest = await tmp('restore-failure-backup');
   const recovered = await tmp('restore-failure-output');
@@ -141,10 +176,12 @@ test('failed restore removes its partial staging copy and keeps the chosen desti
   const manifest = JSON.parse(await readFile(manifestPath, 'utf8'));
   manifest.files.push({ ...manifest.files[0] });
   await writeFile(manifestPath, JSON.stringify(manifest, null, 2) + '\n');
-  assert.equal((await verifyBackup(made.folder)).ok, true, 'the duplicate entry has valid source bytes and hashes');
+  const verification = await verifyBackup(made.folder);
+  assert.equal(verification.ok, false, 'duplicate targets cannot be restored without data loss');
+  assert.ok(verification.errors.includes('Duplicate backup file destination.'));
 
-  await assert.rejects(restoreBackupToEmpty(made.folder, recovered), /EEXIST|already exists/i);
-  assert.deepEqual(await readdir(recovered), [], 'a failed restore must not leave a partial-looking result');
+  await assert.rejects(restoreBackupToEmpty(made.folder, recovered), /Duplicate backup file destination/);
+  assert.deepEqual(await readdir(recovered), [], 'a rejected restore must not leave a partial-looking result');
   const parentEntries = await readdir(path.dirname(recovered));
   const restorePrefix = `.${path.basename(recovered)}.brainlink-restore-`;
   const placeholderPrefix = `.${path.basename(recovered)}.brainlink-empty-`;
