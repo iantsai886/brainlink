@@ -701,13 +701,19 @@ test('RSI discovery UI has one form, selectable fixed sources, unique controls, 
   assert.match(html, /api\('GET', '\/api\/rsi\/export'\)/, 'download uses the authenticated local API helper');
   assert.match(html, /URL\.createObjectURL\(blob\)/, 'export is downloaded as a file');
   assert.match(html, /brainlink-rsi-review-/, 'export filename is recognizable and dated');
-  for (const id of ['rsi-discovery', 'rsi-discovery-form', 'rsi-discovery-sources', 'rsi-discovery-run', 'rsi-discovery-background', 'rsi-discovery-background-status', 'rsi-discovery-pause', 'rsi-discovery-resume', 'rsi-discovery-runs', 'rsi-discovery-status']) assert.equal((html.match(new RegExp(`id="${id}"`, 'g')) || []).length, 1, id);
+  for (const id of ['rsi-discovery', 'rsi-discovery-form', 'rsi-discovery-sources', 'rsi-discovery-starter', 'rsi-discovery-run', 'rsi-discovery-background', 'rsi-discovery-background-status', 'rsi-discovery-pause', 'rsi-discovery-resume', 'rsi-discovery-runs', 'rsi-discovery-status']) assert.equal((html.match(new RegExp(`id="${id}"`, 'g')) || []).length, 1, id);
   assert.match(html, /api\('POST', '\/api\/startup', \{ enabled: true \}\)/, 'background scheduling requires an explicit action');
   assert.match(html, /data-rsi-refresh/);
   assert.match(html, /name="refresh_existing"/);
   assert.match(html, /refresh_existing: f\.refresh_existing\.checked/);
   assert.match(html, /d\.topic_matched_terms/);
   assert.match(html, /sources: \[\.\.\.f\.querySelectorAll\('input\[name="sources"\]:checked'\)\]/);
+  const starter = html.slice(html.indexOf("$('rsi-discovery-starter').addEventListener"), html.indexOf("$('rsi-discovery-pause').addEventListener"));
+  assert.match(starter, /form\.elements\.enabled\.checked = false/, 'starter settings never enable external research by themselves');
+  assert.match(starter, /input\.checked = true/, 'starter selects the built-in public sources');
+  assert.match(starter, /form\.elements\.topics\.value = topics\.join/);
+  assert.match(starter, /form\.elements\.signals\.value = signals\.join/);
+  assert.match(starter, /form\.elements\.refresh_existing\.checked = false/);
   assert.doesNotMatch(html.match(/<form id="rsi-discovery-form"[\s\S]*?<\/form>/)[0], /type="url"|name="[^"]*url/i, 'discovery offers no URL field');
   const keys = [...html.matchAll(/t\('(rsi\.discovery\.[\w.]+)'/g), ...html.matchAll(/data-i18n="(rsi\.discovery\.[\w.]+)"/g)].map(m => m[1]).filter(key => !key.endsWith('.'));
   for (const locale of ['en', 'zh-TW', 'pt']) {

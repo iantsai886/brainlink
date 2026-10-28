@@ -311,6 +311,7 @@ main #ready, main #ask-panel, main #brain-panel, main #sessions-panel, main #s-c
       <p class="hint" data-i18n="rsi.discovery.hint"></p>
       <p id="rsi-discovery-status" class="muted" aria-live="polite"></p>
       <form id="rsi-discovery-form" style="margin-top:10px">
+        <div class="row"><button type="button" id="rsi-discovery-starter" data-i18n="rsi.discovery.starter">Fill BrainLink starter settings</button><span class="muted" data-i18n="rsi.discovery.starterHint"></span></div>
         <label class="muted" style="display:flex;flex-direction:row;gap:6px;align-items:center"><input type="checkbox" name="enabled" style="width:auto"><span data-i18n="rsi.discovery.enabled">Turn on discovery</span></label>
         <fieldset><legend data-i18n="rsi.discovery.sourceLabel">Public research sources</legend><div id="rsi-discovery-sources" class="row"></div></fieldset>
         <label><span data-i18n="rsi.discovery.topics">Search topics (one per line, up to 5)</span><textarea name="topics" rows="3" maxlength="320"></textarea></label>
@@ -995,6 +996,34 @@ $('rsi-discovery-form').addEventListener('submit', (e) => act(async () => {
   renderDiscovery((await api('POST', '/api/rsi/discovery/settings', { enabled: f.enabled.checked, refresh_existing: f.refresh_existing.checked, sources: [...f.querySelectorAll('input[name="sources"]:checked')].map(x => x.value), topics: rsiLines(f.topics.value), signals: rsiLines(f.signals.value), interval_hours: Number(f.interval_hours.value), max_new_per_run: Number(f.max_new_per_run.value) })).discovery);
   toast(t('rsi.discovery.saved'));
 }));
+$('rsi-discovery-starter').addEventListener('click', () => {
+  const form = $('rsi-discovery-form');
+  const topics = [
+    'AI agent memory retrieval',
+    'cross AI agent handoff',
+    'permission aware knowledge graph',
+    'token efficient context retrieval',
+    'recursive self improvement',
+  ];
+  const signals = [
+    'Reduce repeated reading and searching by giving AI agents short, cited, permission filtered context.',
+    'Let different AI agents continue the same task with decisions, source links, progress, and next steps.',
+    'Separate personal, company, and client knowledge while preventing cross-scope access.',
+    'Connect people, teams, projects, notes, and workflows with evidence-backed, reviewable graph links.',
+    'Save tokens without lowering answer quality by retrieving only the most useful sourced information.',
+    'File session outcomes into the correct vault and link related notes with clear provenance.',
+    'Improve BrainLink through measured experiments, held-out cases, privacy checks, human review, and rollback.',
+    'Manage versioned portable agent skills that work across AI clients.',
+  ];
+  form.elements.enabled.checked = false;
+  form.querySelectorAll('input[name="sources"]').forEach(input => { input.checked = true; });
+  form.elements.topics.value = topics.join('\n');
+  form.elements.signals.value = signals.join('\n');
+  form.elements.interval_hours.value = '24';
+  form.elements.max_new_per_run.value = '5';
+  form.elements.refresh_existing.checked = false;
+  toast(t('rsi.discovery.starterLoaded'));
+});
 $('rsi-discovery-pause').addEventListener('click', () => act(async () => { renderDiscovery((await api('POST', '/api/rsi/discovery/pause')).discovery); toast(t('rsi.discovery.pausedToast')); }));
 $('rsi-discovery-resume').addEventListener('click', () => act(async () => { renderDiscovery((await api('POST', '/api/rsi/discovery/resume')).discovery); toast(t('rsi.discovery.resumedToast')); }));
 $('rsi-discovery-background').addEventListener('click', () => act(async () => {
