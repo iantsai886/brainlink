@@ -60,15 +60,10 @@ jobs:
         shell: pwsh
         run: |
           $node = Join-Path $PWD 'build/windows/stage/node/node.exe'
-          $app = Join-Path $PWD 'build/windows/stage/app/bin/brainlink.mjs'
           $appRoot = Join-Path $PWD 'build/windows/stage/app'
-          $version = & $node $app --version
-          if ($version -ne (Get-Content package.json | ConvertFrom-Json).version) { throw "Staged runtime failed: $version" }
-          if (-not (Test-Path (Join-Path $appRoot 'skills/brainlink-session-closeout/SKILL.md'))) { throw 'Staged portable skill is missing' }
-          if (-not (Test-Path (Join-Path $appRoot 'skills/brainlink-graph-curation/SKILL.md'))) { throw 'Staged graph-curation skill is missing' }
-          Push-Location $appRoot
-          try { & $node --input-type=module -e "await import('./src/connectors.mjs'); await import('./src/update-manifest.mjs')"; if ($LASTEXITCODE -ne 0) { throw 'Staged connector or update verifier could not load' } }
-          finally { Pop-Location }
+          $version = (Get-Content package.json | ConvertFrom-Json).version
+          & $node scripts/smoke-staged-runtime.mjs --node $node --app $appRoot --version $version
+          if ($LASTEXITCODE -ne 0) { throw 'Staged runtime MCP/privacy smoke failed' }
 
       - name: Install, run and uninstall Windows package
         shell: pwsh
@@ -138,6 +133,7 @@ jobs:
           test -f "$app_root/skills/brainlink-session-closeout/SKILL.md"
           test -f "$app_root/skills/brainlink-graph-curation/SKILL.md"
           (cd "$app_root" && "$resources/node/bin/node" --input-type=module -e "await import('./src/connectors.mjs'); await import('./src/update-manifest.mjs')")
+          "$resources/node/bin/node" scripts/smoke-staged-runtime.mjs --node "$resources/node/bin/node" --app "$app_root" --version "$version"
 
       - name: Install and smoke-test macOS package
         run: |
@@ -148,6 +144,7 @@ jobs:
           test -f "/Applications/BrainLink.app/Contents/Resources/app/skills/brainlink-graph-curation/SKILL.md"
           test ! -e "/Applications/BrainLink.app/Contents/Resources/app/ui/app/test"
           "/Applications/BrainLink.app/Contents/Resources/node/bin/node" --input-type=module -e "await import('/Applications/BrainLink.app/Contents/Resources/app/src/connectors.mjs'); await import('/Applications/BrainLink.app/Contents/Resources/app/src/update-manifest.mjs')"
+          "/Applications/BrainLink.app/Contents/Resources/node/bin/node" scripts/smoke-staged-runtime.mjs --node "/Applications/BrainLink.app/Contents/Resources/node/bin/node" --app "/Applications/BrainLink.app/Contents/Resources/app" --version "$version"
 
       - name: Remove macOS smoke-test installation
         if: always()
@@ -200,6 +197,7 @@ jobs:
           mkdir -p "$RUNNER_TEMP/brainlink-smoke-vault"
           BRAINLINK_HOME="$RUNNER_TEMP/brainlink-smoke-home" brainlink init --vault "$RUNNER_TEMP/brainlink-smoke-vault" --name Smoke
           test -f "$RUNNER_TEMP/brainlink-smoke-home/config.json"
+          node scripts/smoke-staged-runtime.mjs --node /opt/brainlink/node/bin/node --app /opt/brainlink/app --version "$(node -p "require('./package.json').version")"
           sudo dpkg -r brainlink
           test ! -e /opt/brainlink
           test ! -e /usr/bin/brainlink

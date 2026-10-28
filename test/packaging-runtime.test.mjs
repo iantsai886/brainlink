@@ -50,6 +50,14 @@ test('every native installer bundles all production dependencies and portable Br
   assert.match(macZipTest, /app\/ui\/app\/test/, 'the macOS package smoke test must reject development UI tests');
 
   const workflow = await read('.github/workflows/ci.yml');
+  const stagedSmoke = await read('scripts/smoke-staged-runtime.mjs');
+  assert.match(stagedSmoke, /PRIVATE_CANARY_88420/, 'the staged runtime smoke must plant a private note canary');
+  assert.match(stagedSmoke, /PUBLIC_CANARY_56381/, 'the staged runtime smoke must prove an allowed note is searchable');
+  assert.match(stagedSmoke, /src\/connectors\.mjs/);
+  assert.match(stagedSmoke, /src\/update-manifest\.mjs/);
+  for (const skill of ['brainlink-cross-ai-handoff', 'brainlink-session-closeout', 'brainlink-graph-curation']) {
+    assert.ok(stagedSmoke.includes(skill), `staged smoke must check ${skill}`);
+  }
   const packageJobs = ['windows-package:', 'macos-package:', 'linux-package:'];
   for (const jobName of packageJobs) {
     const jobStart = workflow.indexOf(`  ${jobName}`);
@@ -61,9 +69,7 @@ test('every native installer bundles all production dependencies and portable Br
       .sort((a, b) => a - b)[0] ?? -1;
     const job = workflow.slice(jobStart, nextJob === -1 ? undefined : nextJob);
     assert.match(job, /npm ci --omit=dev/, `${jobName} must install production runtime dependencies before building`);
-    assert.match(job, /skills\/brainlink-session-closeout\/SKILL\.md/, `${jobName} must smoke-test the packaged Agent Skill`);
-    assert.match(job, /skills\/brainlink-graph-curation\/SKILL\.md/, `${jobName} must smoke-test the packaged graph-curation skill`);
-    assert.match(job, /connectors\.mjs/, `${jobName} must smoke-test the packaged YAML connector runtime`);
+    assert.match(job, /smoke-staged-runtime\.mjs/, `${jobName} must run the packaged MCP/privacy smoke`);
   }
   assert.match(workflow, /Install, run and uninstall Windows package/, 'Windows CI must exercise install and uninstall');
   assert.match(workflow, /Installer did not create the BrainLink desktop shortcut/, 'Windows package smoke test must verify the installed desktop shortcut');
