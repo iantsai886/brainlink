@@ -42,7 +42,7 @@ test('portable handoff Skill follows Agent Skills manifest constraints and suppo
   const contents = await Promise.all(paths.map((file) => readFile(path.join(ROOT, file), 'utf8')));
   assert.equal(new Set(contents).size, 1, 'canonical and client discovery copies must stay byte-identical');
   const { fields, body } = parseSkill(contents[0], paths[0]);
-  assert.equal(fields.metadata.version, '0.2.0');
+  assert.equal(fields.metadata.version, '0.3.0');
   assert.equal(fields.metadata.owner, 'Iango');
   for (const client of ['Claude Code', 'Codex CLI', 'Gemini CLI', 'Google Antigravity', 'Hermes Agent', 'DeepSeek Harness']) assert.ok(fields.metadata['applicable-clients'].includes(client), client);
   assert.match(fields.metadata['test-status'], /Local fictional MCP handoff and Git checkpoint fixtures pass/);
