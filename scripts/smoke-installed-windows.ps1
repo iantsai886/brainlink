@@ -27,6 +27,8 @@ $OriginalPathExists = Test-Path 'HKCU:\Environment'
 $OriginalPath = if ($OriginalPathExists) { (Get-ItemProperty 'HKCU:\Environment' -Name Path -ErrorAction SilentlyContinue).Path } else { $null }
 $OldBrainLinkHome = $env:BRAINLINK_HOME
 $OldBrainLinkVersion = $env:BRAINLINK_VERSION
+$OldSetupPort = $env:BRAINLINK_SETUP_PORT
+$OldNoOpen = $env:BRAINLINK_NO_OPEN
 $Process = $null
 $Installed = $false
 $Success = $false
@@ -61,31 +63,32 @@ try {
   $env:BRAINLINK_HOME = $BrainLinkHome
   New-Item -ItemType Directory -Path $BrainLinkHome -Force | Out-Null
   Set-Content -LiteralPath (Join-Path $BrainLinkHome 'qa-preserve.txt') -Value 'keep-local-settings-on-uninstall' -NoNewline
-  $Node = Join-Path $InstallDir 'node\node.exe'
-  $Entry = Join-Path $InstallDir 'app\bin\brainlink.mjs'
-  $reportedVersion = (& $Node $Entry --version).Trim()
-  if ($reportedVersion -ne $Version) { throw "Installed runtime version mismatch: $reportedVersion" }
+  $env:BRAINLINK_NO_OPEN = '1'
   $portProbe = [System.Net.Sockets.TcpListener]::new([Net.IPAddress]::Loopback, 0)
   $portProbe.Start()
   $setupPort = $portProbe.LocalEndpoint.Port
   $portProbe.Stop()
-  $stdout = Join-Path $TestRoot 'setup.stdout.log'
-  $stderr = Join-Path $TestRoot 'setup.stderr.log'
-  $Process = Start-Process -FilePath $Node -ArgumentList @($Entry, 'setup', '--app', '--no-open', '--port', "$setupPort") -WorkingDirectory $InstallDir -PassThru -WindowStyle Hidden -RedirectStandardOutput $stdout -RedirectStandardError $stderr
+  $env:BRAINLINK_SETUP_PORT = "$setupPort"
+  $shortcut = $shell.CreateShortcut($StartMenuShortcut)
+  Start-Process -FilePath $shortcut.TargetPath -ArgumentList $shortcut.Arguments -WorkingDirectory $InstallDir -WindowStyle Hidden
   $InstanceFile = Join-Path $BrainLinkHome 'setup-instance.json'
   $deadline = [DateTime]::UtcNow.AddSeconds(30)
   $health = $null
   while ([DateTime]::UtcNow -lt $deadline) {
     if (Test-Path -LiteralPath $InstanceFile) {
       $instance = Get-Content -LiteralPath $InstanceFile -Raw | ConvertFrom-Json
-      if ($instance.pid -ne $Process.Id) { throw 'Setup reused another process instead of starting from this isolated installation.' }
-      try { $health = Invoke-RestMethod "http://127.0.0.1:$($instance.port)/health" -TimeoutSec 2 } catch { $health = $null }
-      if ($health) { break }
+      $Process = Get-CimInstance Win32_Process -Filter "ProcessId = $($instance.pid)" -ErrorAction SilentlyContinue
+      $installPrefix = $InstallDir.TrimEnd('\') + '\'
+      if ($Process -and $Process.ExecutablePath -and -not $Process.ExecutablePath.StartsWith($installPrefix, [StringComparison]::OrdinalIgnoreCase)) { throw 'The installed shortcut started a process outside its isolated installation.' }
+      if ($Process -and $Process.CommandLine -notmatch [regex]::Escape("--port $setupPort")) { throw 'The installed shortcut did not pass its isolated loopback port.' }
+      if ($Process) {
+        try { $health = Invoke-RestMethod "http://127.0.0.1:$($instance.port)/health" -TimeoutSec 2 } catch { $health = $null }
+        if ($health) { break }
+      }
     }
-    $Process.Refresh()
-    if ($Process.HasExited) { throw "Installed Setup exited with code $($Process.ExitCode). stdout: $((Get-Content $stdout -Raw -ErrorAction SilentlyContinue)) stderr: $((Get-Content $stderr -Raw -ErrorAction SilentlyContinue))" }
     Start-Sleep -Milliseconds 250
   }
+  if (-not $Process) { throw 'The installed shortcut target did not start an isolated Setup process before the timeout.' }
   if ($health.app -ne 'brainlink' -or $health.version -ne $Version) { throw 'Installed Setup did not answer its loopback health check.' }
   $token = (Get-Content -LiteralPath (Join-Path $BrainLinkHome 'setup-token') -Raw).Trim()
   $page = Invoke-WebRequest "http://127.0.0.1:$($instance.port)/?t=$token" -Headers @{ 'X-BrainLink-Token' = $token } -TimeoutSec 5
@@ -94,7 +97,10 @@ try {
   $Success = $true
 } finally {
   try {
-    if ($Process) { $Process.Refresh(); if (-not $Process.HasExited) { $Process.Kill(); $Process.WaitForExit(5000) | Out-Null } }
+    if ($Process) {
+      Stop-Process -Id $Process.ProcessId -Force -ErrorAction SilentlyContinue
+      Wait-Process -Id $Process.ProcessId -Timeout 5 -ErrorAction SilentlyContinue
+    }
     if ($Installed) {
       $uninstaller = Join-Path $InstallDir 'unins000.exe'
       if (Test-Path -LiteralPath $uninstaller) {
@@ -111,6 +117,8 @@ try {
   } finally {
     $env:BRAINLINK_HOME = $OldBrainLinkHome
     $env:BRAINLINK_VERSION = $OldBrainLinkVersion
+    $env:BRAINLINK_SETUP_PORT = $OldSetupPort
+    $env:BRAINLINK_NO_OPEN = $OldNoOpen
   }
   if ($Success) { Remove-Item -LiteralPath $TestRoot -Recurse -Force -ErrorAction SilentlyContinue }
   else { Write-Warning "QA logs preserved for diagnosis at $TestRoot" }

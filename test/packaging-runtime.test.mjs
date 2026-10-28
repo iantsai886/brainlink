@@ -35,11 +35,16 @@ test('every native installer bundles all production dependencies and portable Br
   assert.match(windowsBuilder, /Inno Setup compiler failed with exit code/, 'Windows builder must report compiler failures');
   const windowsInstaller = await read('packaging/windows/BrainLink.iss');
   const installedWindowsSmoke = await read('scripts/smoke-installed-windows.ps1');
+  const windowsLauncher = await read('packaging/windows/BrainLink.vbs');
   assert.match(pkg.scripts['smoke:installed:win'], /smoke-installed-windows\.ps1/, 'Windows installed-app acceptance must have a repeatable command');
   assert.match(windowsInstaller, /BRAINLINK_SMOKE_TEST/, 'the test build must use an isolated Inno Setup identity');
   assert.match(windowsInstaller, /BrainLink QA Smoke/, 'the test installer must use isolated product and shortcut names');
   assert.match(installedWindowsSmoke, /TcpListener/, 'the installed-app smoke must use a port separate from a running BrainLink');
   assert.match(installedWindowsSmoke, /setup-instance\.json/, 'the smoke must verify it started its own Setup process');
+  assert.match(installedWindowsSmoke, /CreateShortcut\(\$StartMenuShortcut\)/, 'the smoke must read the installed Start menu shortcut settings');
+  assert.match(installedWindowsSmoke, /Start-Process -FilePath \$shortcut\.TargetPath -ArgumentList \$shortcut\.Arguments/, 'the smoke must execute the installed Start menu shortcut target and arguments');
+  assert.match(windowsLauncher, /BRAINLINK_SETUP_PORT/, 'the Windows shortcut launcher must support a controlled test port');
+  assert.match(windowsLauncher, /BRAINLINK_NO_OPEN/, 'the Windows shortcut launcher must support headless verification');
   assert.match(installedWindowsSmoke, /setup-token/, 'the smoke must authenticate its local Setup UI check');
   assert.match(installedWindowsSmoke, /restored the prior PATH/, 'the smoke must verify uninstall restores PATH');
   assert.match(installedWindowsSmoke, /preserved the isolated user home/, 'the smoke must verify uninstall preserves user data');
