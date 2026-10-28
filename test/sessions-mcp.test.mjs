@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtemp, cp, readFile } from 'node:fs/promises';
+import { mkdtemp, cp, mkdir, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -11,6 +11,7 @@ import { createMcp } from '../src/server.mjs';
 import { openSessionStore } from '../src/sessions/index.mjs';
 import { sessionList, sessionRead } from '../src/sessions/mcp.mjs';
 import { estTokens } from '../src/sessions/tokens.mjs';
+import { sessionsService } from '../src/host.mjs';
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const FIXTURES = path.join(ROOT, 'test', 'fixtures');
@@ -91,6 +92,25 @@ test('session_log appends to an existing session by id', async () => {
   const b = await call(mcp, 'session_log', { session_id: a.id, text: 'second' });
   assert.equal(b.id, a.id);
   assert.equal(b.message_count, 2);
+});
+
+test('Setup session imports stay inside its explicit home when HOME is not set', async (t) => {
+  const home = await tmp('setup-session-home');
+  const appHome = path.join(home, 'app');
+  const claudeProjects = path.join(home, '.claude', 'projects', 'fictional-project');
+  await mkdir(claudeProjects, { recursive: true });
+  await writeFile(path.join(claudeProjects, 'fictional-session.jsonl'), [
+    JSON.stringify({ type: 'user', timestamp: '2026-10-28T01:00:00.000Z', message: { role: 'user', content: 'Fictional setup-home session marker.' } }),
+    JSON.stringify({ type: 'assistant', timestamp: '2026-10-28T01:00:01.000Z', message: { role: 'assistant', content: 'Fictional reply.' } }),
+  ].join('\n'));
+  t.after(() => rm(home, { recursive: true, force: true }));
+
+  const service = sessionsService({ BRAINLINK_HOME: appHome }, home);
+  const result = await service.list({ include_private: true });
+  assert.equal(result.sessions.length, 1);
+  assert.equal(result.sessions[0].client, 'claude-code');
+  assert.equal(result.sessions[0].private, true);
+  assert.match(result.sessions[0].summary, /Fictional setup-home session marker/);
 });
 
 test('session_read: full=true pages long sessions at ~4k tokens via next_offset; default stays small', async () => {

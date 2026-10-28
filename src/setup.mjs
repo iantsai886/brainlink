@@ -189,7 +189,7 @@ export async function startSetup(opts = {}) {
   // Setup and its scheduled local jobs operate with the user's local authority. AI client
   // health checks intentionally use createContext() without this bypass.
   const localContext = (cfg, contextEnv = env) => createContext(cfg, { env: contextEnv, trustedLocal: true });
-  const sessions = sessionsService(env); // src/host.mjs: cross-session reads over src/sessions/* (importAll, session_list/read semantics)
+  const sessions = sessionsService(env, home); // src/host.mjs: imports only from this Setup user's home
   const rsiLedger = createRsiLedger({ home: appHome(env) });
   const rsiExperiments = createRsiExperiments({ env, ...(opts.rsiSourceState ? { sourceState: opts.rsiSourceState } : {}) });
   // Opt-in research discovery: off until the user enables it; runs only while this process is open.
