@@ -21,6 +21,7 @@ import { recordSessionEndCue, listSessionEndCues } from '../src/sessions/end-cue
 import { setSessionHook } from '../src/sessions/hooks.mjs';
 import { evaluateRetrieval, RETRIEVAL_EVALUATOR_VERSION } from '../src/retrieval-eval.mjs';
 import { evaluateSessionFiling } from '../src/sessions/filing-eval.mjs';
+import { evaluateTypedGraphDiscovery, TYPED_GRAPH_EVALUATOR_VERSION } from '../src/typed-graph-eval.mjs';
 
 // `brainlink brief | head` closes the pipe early: exit quietly instead of crashing.
 process.stdout.on('error', (e) => { if (e.code === 'EPIPE') process.exit(0); throw e; });
@@ -85,6 +86,7 @@ const HELP = `BrainLink MCP ${VERSION} — one Markdown brain for every AI
   brainlink brief [--vault V] [--days 7]  what changed and what is open
   brainlink eval --fixture FILE [--vault-root DIR --vault-name NAME]  compare labelled retrieval (read-only)
   brainlink eval-filing --fixture FILE evaluate session folder suggestions (read-only)
+  brainlink eval-graph --fixture FILE evaluate typed relationship proposals (read-only)
   brainlink map                        rebuild each vault's Home map
   brainlink sync                       one sync pass (local by default; set up in Setup)
   brainlink session-end-cue --client claude-code|codex  record a local, metadata-only end cue from stdin
@@ -251,6 +253,26 @@ async function main() {
       const fixture = JSON.parse(await readFile(path.resolve(fixtureFile), 'utf8'));
       const { ctx } = await openContext(process.env, { trustedLocal: true });
       out(JSON.stringify(await evaluateSessionFiling(ctx, fixture), null, 2));
+      return;
+    }
+    case 'eval-graph': {
+      const fixtureFile = opt('fixture');
+      if (!fixtureFile) fail('--fixture FILE is required');
+      const fixtureBytes = await readFile(path.resolve(fixtureFile));
+      const fixture = JSON.parse(fixtureBytes.toString('utf8'));
+      let sourceCommit = null, sourceBranch = null, workingTreeClean = null, trackedTreeClean = null, untrackedPathsPresent = null;
+      try {
+        sourceCommit = execFileSync('git', ['rev-parse', 'HEAD'], { cwd: ROOT, encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'] }).trim();
+        sourceBranch = execFileSync('git', ['branch', '--show-current'], { cwd: ROOT, encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'] }).trim() || null;
+        trackedTreeClean = gitClean(['diff-index', '--quiet', 'HEAD', '--'], ROOT) && gitClean(['diff', '--cached', '--quiet'], ROOT);
+        untrackedPathsPresent = Boolean(execFileSync('git', ['ls-files', '--others', '--exclude-standard'], { cwd: ROOT, encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'] }).trim());
+        workingTreeClean = trackedTreeClean && !untrackedPathsPresent;
+      } catch {}
+      const report = evaluateTypedGraphDiscovery(fixture, { fixtureBytes });
+      out(JSON.stringify({ ...report, source_commit: sourceCommit, source_branch: sourceBranch,
+        working_tree_clean: workingTreeClean, tracked_tree_clean: trackedTreeClean, untracked_paths_present: untrackedPathsPresent,
+        environment: { node: process.version, platform: process.platform, arch: process.arch }, package_version: VERSION,
+        evaluator_version: TYPED_GRAPH_EVALUATOR_VERSION }, null, 2));
       return;
     }
     case 'map': {

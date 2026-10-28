@@ -180,6 +180,7 @@ function discoverCandidatesWithIndex(notes, sourceIndex, entities, positions, li
         if (!rule.targets.includes(targetMeta.type) || existing.has(key) || found.has(key)) continue;
         const trigger = evidence.match(rule.phrase);
         if (!trigger) continue;
+        if (isNegatedRelation(evidence, trigger.index)) continue;
         const targetAt = evidence.search(mention);
         if (targetAt < trigger.index) continue;
         found.set(key, { target_id: targetMeta.entity_id, target_title: title, target_index: positions.get(targetNote), predicate: rule.predicate, evidence, confidence: 0.5 });
@@ -187,6 +188,16 @@ function discoverCandidatesWithIndex(notes, sourceIndex, entities, positions, li
     }
   }
   return [...found.values()].slice(0, Math.max(1, Math.min(30, Number(limit) || 12)));
+}
+
+// The phrase matcher is intentionally small, but it must not turn an explicit denial into
+// a proposed edge. This checks a short window immediately before the relation verb; it is not
+// a general-purpose language or sentiment model, so complex clauses still need human review.
+function isNegatedRelation(sentence, triggerIndex) {
+  const prefix = sentence.slice(Math.max(0, triggerIndex - 64), triggerIndex);
+  if (/\bnot\s+only\s+$/iu.test(prefix)) return false;
+  return /(?:^|[^\p{L}\p{N}_])(?:not|never|cannot|can't|doesn't|don't|didn't|não|nunca|sem)(?:\s+[\p{L}]+){0,2}\s*$/iu.test(prefix) ||
+    /(?:不|未|沒|没|無|无)$/u.test(prefix);
 }
 
 function pathTitle(rel) { return String(rel || '').split(/[\\/]/).pop()?.replace(/\.md$/i, '') || ''; }
