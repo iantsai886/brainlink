@@ -263,6 +263,17 @@ test('DeepSeek Harness session sharing uses the same explicit summary and full-t
     const fullMcp = createMcp(fullCtx);
     const full = await call(fullMcp, 'session_read', { id: dsh.id, full: true });
     assert.match(JSON.stringify(full), /Fictional Harness task result/);
+
+    const hermes = await offStore.putSession({ client: 'hermes', source_id: 'fictional-hermes-share', project: '/fictional',
+      title: 'Fictional Hermes task', summary: 'Fictional Hermes summary.', private: true,
+      started_at: '2026-10-28T03:00:00Z', note_refs: [], messages: [{ role: 'user', at: '2026-10-28T03:00:01Z', text: 'Fictional Hermes transcript.' }] });
+    const hermesHidden = await call(off.mcp, 'session_read', { id: hermes.id });
+    assert.equal(hermesHidden.summary, undefined, 'Hermes imports remain hidden by default');
+    const hermesSummary = await call(summaryMcp, 'session_read', { id: hermes.id });
+    assert.match(hermesSummary.summary, /Fictional Hermes summary/);
+    assert.deepEqual(hermesSummary.key_turns, [], 'Hermes summary consent must not expose transcript turns');
+    assert.equal((await call(summaryMcp, 'session_read', { id: hermes.id, full: true })).messages, undefined);
+    assert.match(JSON.stringify(await call(fullMcp, 'session_read', { id: hermes.id, full: true })), /Fictional Hermes transcript/);
   });
 });
 

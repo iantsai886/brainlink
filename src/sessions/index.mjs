@@ -6,12 +6,14 @@ import { createSessionStore } from './store.mjs';
 import { importClaudeCode, defaultRoot as claudeRoot } from './claude-code.mjs';
 import { importCodex, defaultRoot as codexRoot, defaultHistoryFile } from './codex.mjs';
 import { importDeepSeekHarness, defaultRoot as deepSeekHarnessRoot } from './deepseek-harness.mjs';
+import { importHermes, defaultRoot as hermesRoot } from './hermes.mjs';
 import { homedir } from 'node:os';
 
 export { createSessionStore, SESSIONS_VAULT } from './store.mjs';
 export { importClaudeCode } from './claude-code.mjs';
 export { importCodex } from './codex.mjs';
 export { importDeepSeekHarness } from './deepseek-harness.mjs';
+export { importHermes } from './hermes.mjs';
 
 export const sessionsDir = (env = process.env) => path.join(appHome(env), 'sessions');
 
@@ -46,11 +48,12 @@ export async function importAll({ store, env = process.env } = {}) {
   // Use the same caller-supplied home in tests and subprocesses. os.homedir() on Windows
   // ignores HOME, which previously caused a fictional test to import the user's real history.
   const sourceHome = env.HOME || env.USERPROFILE || homedir();
-  const [claudeCode, codex, deepSeekHarness] = await Promise.all([
+  const [claudeCode, codex, deepSeekHarness, hermes] = await Promise.all([
     importClaudeCode({ store: s, root: claudeRoot(sourceHome), cursorsFile: path.join(dir, 'cursors-claude-code.json') }),
     importCodex({ store: s, root: codexRoot(sourceHome), historyFile: defaultHistoryFile(sourceHome),
       cursorsFile: path.join(dir, 'cursors-codex.json') }),
     importDeepSeekHarness({ store: s, root: deepSeekHarnessRoot(sourceHome, env), cursorsFile: path.join(dir, 'cursors-deepseek-harness.json') }),
+    importHermes({ store: s, root: hermesRoot(sourceHome, env), cursorsFile: path.join(dir, 'cursors-hermes.json') }),
   ]);
-  return { 'claude-code': claudeCode, codex, 'deepseek-harness': deepSeekHarness };
+  return { 'claude-code': claudeCode, codex, 'deepseek-harness': deepSeekHarness, hermes };
 }

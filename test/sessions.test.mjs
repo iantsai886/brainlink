@@ -13,6 +13,7 @@ import { createSessionRefresher } from '../src/sessions/index.mjs';
 import { importClaudeCode, defaultRoot as defaultClaudeRoot } from '../src/sessions/claude-code.mjs';
 import { importCodex, defaultRoot as defaultCodexRoot, defaultHistoryFile } from '../src/sessions/codex.mjs';
 import { importDeepSeekHarness, defaultRoot as defaultDeepSeekHarnessRoot } from '../src/sessions/deepseek-harness.mjs';
+import { importHermes, defaultRoot as defaultHermesRoot } from '../src/sessions/hermes.mjs';
 import { autoSummary } from '../src/sessions/import-util.mjs';
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
@@ -49,6 +50,9 @@ test('session importer paths default under the real home (not exercised here) an
   assert.match(defaultHistoryFile('/home/x'), /\.codex[\/\\]history\.jsonl$/);
   assert.match(defaultDeepSeekHarnessRoot('/home/x', {}), /\.dsh[\/\\]sessions$/);
   assert.equal(defaultDeepSeekHarnessRoot('/home/x', { DSH_HOME: '/custom/dsh' }), path.join('/custom/dsh', 'sessions'));
+  assert.equal(defaultHermesRoot('/home/x', { HERMES_HOME: '/custom/hermes' }), path.resolve('/custom/hermes'));
+  assert.equal(defaultHermesRoot('/home/x', {}), path.resolve(process.platform === 'win32'
+    ? path.join('/home/x', 'AppData', 'Local', 'hermes') : '/home/x/.hermes'));
 });
 
 // ---- redact ----
@@ -258,6 +262,80 @@ test('DeepSeek Harness importer: supports raw v3 JSONL and leaves unsupported or
   const cursors = JSON.parse(await readFile(cursorsFile, 'utf8'));
   assert.equal(Object.keys(cursors).length, 1, 'unsupported data must not advance its cursor');
   assert.equal((await store.listSessions())[0].client, 'deepseek-harness');
+});
+
+test('Hermes importer reads only ended CLI active user/assistant text, redacts secrets, pages, and never writes source DB', async () => {
+  const { DatabaseSync } = await import('node:sqlite');
+  const dir = await tmp('hermes-import');
+  const root = path.join(dir, 'hermes');
+  const dbFile = path.join(root, 'state.db');
+  await mkdir(root, { recursive: true });
+  const db = new DatabaseSync(dbFile);
+  db.exec(`CREATE TABLE sessions(id TEXT PRIMARY KEY, source TEXT, title TEXT, cwd TEXT, started_at REAL, ended_at REAL);
+    CREATE TABLE messages(id INTEGER PRIMARY KEY, session_id TEXT, role TEXT, content TEXT, timestamp REAL,
+      active INTEGER, reasoning TEXT, tool_calls TEXT);
+    INSERT INTO sessions VALUES
+      ('cli-ended', 'cli', 'Fictional app work', '/fictional/project', 1793149200, 1793149260),
+      ('cli-open', 'cli', 'Still running', '/fictional/project', 1793149200, NULL),
+      ('telegram-ended', 'telegram', 'Private chat', NULL, 1793149200, 1793149260);
+    INSERT INTO messages VALUES
+      (1, 'cli-ended', 'user', 'Build a fictional garden app. API_TOKEN=synthetic-hermes-secret', 1793149201, 1, NULL, NULL),
+      (2, 'cli-ended', 'assistant', 'The fictional garden app is ready.', 1793149202, 1, 'PRIVATE_REASONING_CANARY', '[{"name":"tool_canary"}]'),
+      (3, 'cli-ended', 'assistant', 'Archived duplicate text.', 1793149203, 0, 'ARCHIVED_REASONING_CANARY', NULL),
+      (4, 'cli-ended', 'tool', 'PRIVATE_TOOL_CANARY', 1793149204, 1, NULL, NULL),
+      (5, 'telegram-ended', 'user', 'PRIVATE_TELEGRAM_CANARY', 1793149201, 1, NULL, NULL);`);
+  db.close();
+  const before = await readFile(dbFile);
+  const store = await createSessionStore({ dir: path.join(dir, 'brainlink') });
+  const cursorsFile = path.join(dir, 'brainlink', 'cursors.json');
+  const first = await importHermes({ store, root, cursorsFile });
+  assert.equal(first.imported, 1);
+  assert.deepEqual(first.errors, []);
+  const rows = await store.listSessions();
+  assert.equal(rows.length, 1);
+  assert.equal(rows[0].client, 'hermes');
+  assert.equal(rows[0].private, true);
+  assert.equal(rows[0].project, '/fictional/project');
+  const page = await store.readSession(rows[0].id, { limit: 20 });
+  assert.deepEqual(page.messages.map((m) => m.role), ['user', 'assistant']);
+  const visible = JSON.stringify(page);
+  assert.match(visible, /API_TOKEN=\[REDACTED\]/);
+  assert.match(visible, /fictional garden app is ready/);
+  assert.doesNotMatch(visible, /synthetic-hermes-secret|PRIVATE_REASONING|ARCHIVED_REASONING|PRIVATE_TOOL|PRIVATE_TELEGRAM|tool_canary/);
+  assert.deepEqual(await readFile(dbFile), before, 'read-only import must not change the Hermes database');
+
+  const later = new DatabaseSync(dbFile);
+  later.prepare('INSERT INTO sessions VALUES (?, ?, ?, ?, ?, ?)').run('cli-later', 'cli', 'Later session', '', 1793149300, 1793149360);
+  later.prepare('INSERT INTO messages VALUES (?, ?, ?, ?, ?, ?, ?, ?)').run(6, 'cli-later', 'user', 'A later fictional task.', 1793149301, 1, null, null);
+  later.close();
+  const second = await importHermes({ store, root, cursorsFile });
+  assert.equal(second.imported, 1, 'incremental cursor should pick up the next ended CLI session');
+  assert.equal((await store.listSessions()).length, 2);
+});
+
+test('Hermes importer safely skips when no local state database exists', async () => {
+  const dir = await tmp('hermes-empty');
+  const store = await createSessionStore({ dir });
+  const result = await importHermes({ store, root: path.join(dir, 'missing') });
+  assert.equal(result.files, 0);
+  assert.deepEqual(result.errors, []);
+  assert.deepEqual(await store.listSessions(), []);
+});
+
+test('Hermes importer refuses a database without an active-message marker', async () => {
+  const { DatabaseSync } = await import('node:sqlite');
+  const dir = await tmp('hermes-legacy-schema');
+  const root = path.join(dir, 'hermes');
+  await mkdir(root, { recursive: true });
+  const db = new DatabaseSync(path.join(root, 'state.db'));
+  db.exec(`CREATE TABLE sessions(id TEXT, source TEXT, started_at REAL, ended_at REAL);
+    CREATE TABLE messages(id INTEGER, session_id TEXT, role TEXT, content TEXT, timestamp REAL);`);
+  db.close();
+  const store = await createSessionStore({ dir: path.join(dir, 'brainlink') });
+  const result = await importHermes({ store, root });
+  assert.equal(result.imported, 0);
+  assert.match(result.errors[0].error, /missing active/);
+  assert.deepEqual(await store.listSessions(), []);
 });
 
 test('codex importer: falls back to history.jsonl when no rollout files exist, grouped by session_id', async () => {

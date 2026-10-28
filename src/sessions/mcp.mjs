@@ -6,6 +6,7 @@ import { redactText } from './redact.mjs';
 import { CLIENT as CLAUDE_CODE_CLIENT } from './claude-code.mjs';
 import { CLIENT as CODEX_CLIENT } from './codex.mjs';
 import { CLIENT as DEEPSEEK_HARNESS_CLIENT } from './deepseek-harness.mjs';
+import { CLIENT as HERMES_CLIENT } from './hermes.mjs';
 
 const FULL_PAGE_TOKENS = 3800; // leaves headroom for the summary fields wrapped around the page
 const FULL_PAGE_FETCH = 200; // messages fetched per page before trimming to the token budget
@@ -17,7 +18,7 @@ const MAX_KEY_TURNS = 3;
 // (cfg.sessions, src/config.mjs) relaxes. Anything logged by an AI via session_log keeps its
 // private flag fully opaque to every other AI client no matter that setting: it is a deliberate
 // per-note privacy choice, not the import default, and must not be loosened by a global toggle.
-const IMPORTED_CLIENTS = new Set([CLAUDE_CODE_CLIENT, CODEX_CLIENT, DEEPSEEK_HARNESS_CLIENT]);
+const IMPORTED_CLIENTS = new Set([CLAUDE_CODE_CLIENT, CODEX_CLIENT, DEEPSEEK_HARNESS_CLIENT, HERMES_CLIENT]);
 const isRelaxableImport = (s) => IMPORTED_CLIENTS.has(s.client);
 
 export const clientIdFor = (platform) => {

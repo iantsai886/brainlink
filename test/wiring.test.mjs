@@ -139,7 +139,7 @@ test('runSync: non-private sessions get scope "brain" so they reach the sync tar
 
 // ---- src/sessions/index.mjs: importAll wiring (DEMO-CRITICAL: it must have callers) ----
 
-test('importAll wiring: `brainlink sync` and `session_list` import Claude, Codex and DeepSeek Harness under a fake HOME', async () => {
+test('importAll wiring: `brainlink sync` and `session_list` import Claude, Codex, DeepSeek Harness and Hermes under fake homes', async () => {
   const home = await tmp('fake-home');
   await mkdir(path.join(home, '.claude', 'projects'), { recursive: true });
   await mkdir(path.join(home, '.codex', 'sessions'), { recursive: true });
@@ -154,7 +154,16 @@ test('importAll wiring: `brainlink sync` and `session_list` import Claude, Codex
     { type: 'assistant/message', seq: 1, time: dshAt + 1, data: { message: { role: 'assistant', provider: 'fixture', model: 'fixture', content: [{ type: 'text', text: 'Synthetic import is working.' }] } } },
   ].map((record) => JSON.stringify(record) + '\n');
   await writeFile(path.join(dshSessionDir, 'session.v4.jsonl.zstd'), Buffer.concat(dshRecords.map((record) => zstdCompressSync(Buffer.from(record)))));
-  const env = { ...process.env, HOME: home, BRAINLINK_AI_PLATFORM: 'Cursor' };
+  const hermesHome = path.join(home, '.hermes');
+  await mkdir(hermesHome, { recursive: true });
+  const { DatabaseSync } = await import('node:sqlite');
+  const hermesDb = new DatabaseSync(path.join(hermesHome, 'state.db'));
+  hermesDb.exec(`CREATE TABLE sessions(id TEXT PRIMARY KEY, source TEXT, title TEXT, cwd TEXT, started_at REAL, ended_at REAL);
+    CREATE TABLE messages(id INTEGER PRIMARY KEY, session_id TEXT, role TEXT, content TEXT, timestamp REAL, active INTEGER);
+    INSERT INTO sessions VALUES ('fictional-hermes-id', 'cli', 'Synthetic Hermes task', '/fictional/workspace', 1793149200, 1793149260);
+    INSERT INTO messages VALUES (1, 'fictional-hermes-id', 'user', 'Synthetic Hermes wiring check', 1793149201, 1);`);
+  hermesDb.close();
+  const env = { ...process.env, HOME: home, HERMES_HOME: hermesHome, BRAINLINK_AI_PLATFORM: 'Cursor' };
 
   // 1) `brainlink sync` must call importAll so the local session index is no longer empty.
   const syncEnv = { ...env, BRAINLINK_HOME: path.join(home, 'app-sync') };
@@ -165,8 +174,8 @@ test('importAll wiring: `brainlink sync` and `session_list` import Claude, Codex
     child.on('exit', (code) => (code === 0 ? resolve(buf) : reject(new Error(`exit ${code}: ${buf}`))));
   });
   const afterSync = await (await openSessionStore(syncEnv)).listSessions({ limit: 10 });
-  assert.equal(afterSync.length, 3, '`brainlink sync` must import Claude Code, Codex and DeepSeek Harness history into the local session index');
-  assert.deepEqual(afterSync.map((s) => s.client).sort(), ['claude-code', 'codex', 'deepseek-harness']);
+  assert.equal(afterSync.length, 4, '`brainlink sync` must import all four configured local session sources');
+  assert.deepEqual(afterSync.map((s) => s.client).sort(), ['claude-code', 'codex', 'deepseek-harness', 'hermes']);
 
   // 2) `brainlink serve`'s session_list must independently trigger its own lazy import, starting
   // from a fresh BRAINLINK_HOME with nothing imported yet. Imported sessions are private by
@@ -189,8 +198,8 @@ test('importAll wiring: `brainlink sync` and `session_list` import Claude, Codex
   assert.equal(result.sessions.length, 0, 'imported sessions stay hidden by default until the user opts in, and include_private from a caller has no effect');
 
   const afterServe = await (await openSessionStore(serveEnv)).listSessions({ limit: 10 });
-  assert.equal(afterServe.length, 3, 'session_list must still trigger its own lazy import behind the scenes');
-  assert.deepEqual(afterServe.map((s) => s.client).sort(), ['claude-code', 'codex', 'deepseek-harness']);
+  assert.equal(afterServe.length, 4, 'session_list must still trigger its own lazy import behind the scenes');
+  assert.deepEqual(afterServe.map((s) => s.client).sort(), ['claude-code', 'codex', 'deepseek-harness', 'hermes']);
 });
 
 // ---- connectors.mjs: {ok,message} wrappers + the ChatGPT honest note ----
