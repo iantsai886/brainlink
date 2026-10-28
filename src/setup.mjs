@@ -51,6 +51,7 @@ import { inspectAgentSkills, installAgentSkills, removeAgentSkills, skillClientR
 import { ingestionQueue } from './ingestion.mjs';
 import { INGESTION_MAX_ATTEMPTS, INGESTION_RETRY_DELAY_MS, ingestionScheduleDue, localDateAndTime, normalizeIngestionTargets, validateIngestionSchedule } from './ingestion-schedule.mjs';
 import { briefScheduleDue, validateBriefSchedule } from './brief-schedule.mjs';
+import { defaultRoot as hermesDefaultRoot } from './sessions/hermes.mjs';
 
 const UI_STATIC_TYPES = { '.js': 'text/javascript; charset=utf-8', '.css': 'text/css; charset=utf-8', '.json': 'application/json; charset=utf-8' };
 const UI_DIR = path.join(ROOT, 'ui');
@@ -818,6 +819,7 @@ export async function startSetup(opts = {}) {
       sync: { ...syncSettings(cfg), providers: PROVIDERS, provider_labels: PROVIDER_LABELS, suggested_folders: suggestFolders(home), status: syncStatus, running: syncRunning },
       sessions_sharing: cfg.sessions,
       sessions_local_summary: cfg.sessions.localSummary,
+      sessions_hermes_profile: { home: cfg.sessions.hermesHome, defaultHome: hermesDefaultRoot(home, env) },
       // P1a: imported sessions default to private, and a private session is invisible to every
       // connected AI while sessions.shareSummaries is off -- regardless of the "Show private
       // sessions" checkbox below, which only controls what this local Setup UI displays. Peeking
@@ -1770,6 +1772,28 @@ export async function startSetup(opts = {}) {
       const next = { ...cfg, sessions: { ...cfg.sessions, shareSummaries, shareFullText: shareSummaries && shareFullText } };
       await saveConfig(next, file);
       return { ok: true, sessions: next.sessions };
+    },
+    'POST /api/sessions/hermes-profile/pick': async () => {
+      const selected = await pickFolder(os, 'Choose the Hermes profile folder containing state.db');
+      return selected === undefined ? { path: null, unavailable: true } : { path: selected };
+    },
+    'POST /api/sessions/hermes-profile': async (b) => {
+      const requested = typeof b.home === 'string' ? b.home.trim() : '';
+      let hermesHome = null;
+      if (requested) {
+        if (!path.isAbsolute(requested)) throw new Error('Choose an absolute Hermes profile folder.');
+        const folderStat = await stat(requested).catch(() => null);
+        const databaseStat = await stat(path.join(requested, 'state.db')).catch(() => null);
+        if (!folderStat?.isDirectory() || !databaseStat?.isFile()) throw new Error('That folder does not contain a Hermes state.db profile.');
+        hermesHome = path.resolve(requested);
+      }
+      const cfg = await loadConfig(file);
+      const next = { ...cfg, sessions: { ...cfg.sessions, hermesHome } };
+      await saveConfig(next, file);
+      const store = await sessions.refresh({ force: true });
+      const imported = await store.listSessions({ client: 'hermes', limit: 100000 });
+      touch();
+      return { ok: true, profile: { home: hermesHome, defaultHome: hermesDefaultRoot(home, env) }, sessionCount: imported.length };
     },
     'POST /api/sessions/local-summary/settings': async (b) => {
       const cfg = await loadConfig(file);

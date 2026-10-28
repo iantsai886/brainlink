@@ -39,7 +39,7 @@ export const AGENT_KINDS = ['local', 'remote'];
 export const CONFIG_SCHEMA_VERSION = 2;
 
 export function emptyConfig() {
-  return { version: CONFIG_SCHEMA_VERSION, timezone: null, locale: null, vaults: [], agents: [], ai_agents: [], twin_profiles: [], handoff: null, platforms: DEFAULT_PLATFORMS, http: { port: 8765, token: null }, connections: {}, sessions: { shareSummaries: false, shareFullText: false, localSummary: { enabled: false, model: '', autoDraftOnEnd: false, autoFileOnEnd: false } }, session_filing: { projectVaults: {}, projectFolders: {} }, backup: { enabled: false, folder: null, intervalHours: 24, scheduleMode: 'interval', time: '02:00', last_scheduled_date: null, keepCount: 0, encrypted: false }, ingestion: { enabled: false, vault: null, folder: null, targets: [], time: '02:00', last_scheduled_date: null, retry_count: 0, retry_date: null, retry_after: null }, brief: { enabled: false, vault: null, time: '08:00', last_scheduled_date: null } };
+  return { version: CONFIG_SCHEMA_VERSION, timezone: null, locale: null, vaults: [], agents: [], ai_agents: [], twin_profiles: [], handoff: null, platforms: DEFAULT_PLATFORMS, http: { port: 8765, token: null }, connections: {}, sessions: { shareSummaries: false, shareFullText: false, hermesHome: null, localSummary: { enabled: false, model: '', autoDraftOnEnd: false, autoFileOnEnd: false } }, session_filing: { projectVaults: {}, projectFolders: {} }, backup: { enabled: false, folder: null, intervalHours: 24, scheduleMode: 'interval', time: '02:00', last_scheduled_date: null, keepCount: 0, encrypted: false }, ingestion: { enabled: false, vault: null, folder: null, targets: [], time: '02:00', last_scheduled_date: null, retry_count: 0, retry_date: null, retry_after: null }, brief: { enabled: false, vault: null, time: '08:00', last_scheduled_date: null } };
 }
 
 // Fill defaults so the rest of the code never checks for missing keys.
@@ -73,8 +73,8 @@ export function normalize(raw = {}) {
   // already saved with shareSummaries=true without the user ever having chosen that.
   const upgrading = !(Number(raw.version) >= CONFIG_SCHEMA_VERSION);
   cfg.sessions = upgrading
-    ? { shareSummaries: false, shareFullText: false, localSummary: { enabled: false, model: '', autoDraftOnEnd: false, autoFileOnEnd: false } }
-    : { shareSummaries: false, shareFullText: false, localSummary: { enabled: false, model: '', autoDraftOnEnd: false, autoFileOnEnd: false }, ...(raw.sessions || {}), localSummary: { enabled: false, model: '', autoDraftOnEnd: false, autoFileOnEnd: false, ...(raw.sessions?.localSummary || {}) } };
+    ? { shareSummaries: false, shareFullText: false, hermesHome: null, localSummary: { enabled: false, model: '', autoDraftOnEnd: false, autoFileOnEnd: false } }
+    : { shareSummaries: false, shareFullText: false, hermesHome: null, localSummary: { enabled: false, model: '', autoDraftOnEnd: false, autoFileOnEnd: false }, ...(raw.sessions || {}), localSummary: { enabled: false, model: '', autoDraftOnEnd: false, autoFileOnEnd: false, ...(raw.sessions?.localSummary || {}) } };
   cfg.version = CONFIG_SCHEMA_VERSION;
   return cfg;
 }
@@ -177,6 +177,7 @@ export function validate(cfg) {
   if (cfg.locale && !LOCALES.includes(cfg.locale)) errors.push(`locale must be one of ${LOCALES.join(', ')}`);
   if (typeof cfg.sessions?.shareSummaries !== 'boolean') errors.push('sessions.shareSummaries must be a boolean');
   if (typeof cfg.sessions?.shareFullText !== 'boolean') errors.push('sessions.shareFullText must be a boolean');
+  if (cfg.sessions?.hermesHome !== null && (typeof cfg.sessions?.hermesHome !== 'string' || !path.isAbsolute(cfg.sessions.hermesHome) || cfg.sessions.hermesHome.length > 4096)) errors.push('sessions.hermesHome must be null or an absolute folder path');
   if (typeof cfg.sessions?.localSummary?.enabled !== 'boolean' || typeof cfg.sessions?.localSummary?.model !== 'string' || cfg.sessions.localSummary.model.length > 160 || typeof cfg.sessions.localSummary?.autoDraftOnEnd !== 'boolean' || typeof cfg.sessions.localSummary?.autoFileOnEnd !== 'boolean' || (cfg.sessions.localSummary.enabled && !/^[A-Za-z0-9][A-Za-z0-9._:/-]{0,159}$/.test(cfg.sessions.localSummary.model)) || (cfg.sessions.localSummary.autoDraftOnEnd && !cfg.sessions.localSummary.enabled) || (cfg.sessions.localSummary.autoFileOnEnd && (!cfg.sessions.localSummary.enabled || !cfg.sessions.localSummary.autoDraftOnEnd))) errors.push('sessions.localSummary must contain valid enabled, model, autoDraftOnEnd, and autoFileOnEnd settings');
   if (typeof cfg.backup.enabled !== 'boolean') errors.push('backup.enabled must be a boolean');
   if (cfg.backup.enabled && (!cfg.backup.folder || !path.isAbsolute(cfg.backup.folder))) errors.push('backup.folder must be an absolute path when enabled');

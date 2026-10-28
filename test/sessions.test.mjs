@@ -9,7 +9,7 @@ import { zstdCompressSync } from 'node:zlib';
 import { redactText } from '../src/sessions/redact.mjs';
 import { estTokens, clip } from '../src/sessions/tokens.mjs';
 import { createSessionStore } from '../src/sessions/store.mjs';
-import { createSessionRefresher } from '../src/sessions/index.mjs';
+import { createSessionRefresher, importAll } from '../src/sessions/index.mjs';
 import { importClaudeCode, defaultRoot as defaultClaudeRoot } from '../src/sessions/claude-code.mjs';
 import { importCodex, defaultRoot as defaultCodexRoot, defaultHistoryFile } from '../src/sessions/codex.mjs';
 import { importDeepSeekHarness, defaultRoot as defaultDeepSeekHarnessRoot } from '../src/sessions/deepseek-harness.mjs';
@@ -336,6 +336,35 @@ test('Hermes importer refuses a database without an active-message marker', asyn
   assert.equal(result.imported, 0);
   assert.match(result.errors[0].error, /missing active/);
   assert.deepEqual(await store.listSessions(), []);
+});
+
+test('importAll follows the Hermes profile explicitly selected in BrainLink settings', async () => {
+  const { DatabaseSync } = await import('node:sqlite');
+  const dir = await tmp('hermes-selected-profile');
+  const app = path.join(dir, 'brainlink');
+  const env = { HOME: dir, HERMES_HOME: path.join(dir, 'hermes-default'), BRAINLINK_HOME: app };
+  const createHermes = async (root, id, message) => {
+    await mkdir(root, { recursive: true });
+    const db = new DatabaseSync(path.join(root, 'state.db'));
+    db.exec(`CREATE TABLE sessions(id TEXT, source TEXT, title TEXT, cwd TEXT, started_at REAL, ended_at REAL);
+      CREATE TABLE messages(id INTEGER, session_id TEXT, role TEXT, content TEXT, timestamp REAL, active INTEGER);`);
+    db.prepare('INSERT INTO sessions VALUES (?, ?, ?, ?, ?, ?)').run(id, 'cli', id, '/fictional', 1793149200, 1793149260);
+    db.prepare('INSERT INTO messages VALUES (?, ?, ?, ?, ?, ?)').run(1, id, 'user', message, 1793149201, 1);
+    db.close();
+  };
+  const defaultHome = env.HERMES_HOME;
+  const chosenHome = path.join(dir, 'hermes', 'profiles', 'fictional');
+  await createHermes(defaultHome, 'default-session', 'Default profile canary.');
+  await createHermes(chosenHome, 'chosen-session', 'Chosen fictional profile.');
+  await mkdir(app, { recursive: true });
+  await writeFile(path.join(app, 'config.json'), JSON.stringify({ version: 2, sessions: { hermesHome: chosenHome } }));
+  const store = await createSessionStore({ dir: path.join(app, 'sessions') });
+  await importAll({ store, env });
+  const rows = await store.listSessions({ client: 'hermes', limit: 20 });
+  assert.equal(rows.length, 1);
+  const selected = await store.readSession(rows[0].id, { limit: 5 });
+  assert.match(JSON.stringify(selected), /Chosen fictional profile/);
+  assert.doesNotMatch(JSON.stringify(selected), /Default profile canary/);
 });
 
 test('codex importer: falls back to history.jsonl when no rollout files exist, grouped by session_id', async () => {

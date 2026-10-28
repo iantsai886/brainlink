@@ -1,7 +1,7 @@
 // Entry point for the session store + importers: what bin/ and the MCP server (session_list,
 // session_read, session_log) actually call.
 import path from 'node:path';
-import { appHome } from '../config.mjs';
+import { appHome, configPath, loadConfig } from '../config.mjs';
 import { createSessionStore } from './store.mjs';
 import { importClaudeCode, defaultRoot as claudeRoot } from './claude-code.mjs';
 import { importCodex, defaultRoot as codexRoot, defaultHistoryFile } from './codex.mjs';
@@ -48,12 +48,14 @@ export async function importAll({ store, env = process.env } = {}) {
   // Use the same caller-supplied home in tests and subprocesses. os.homedir() on Windows
   // ignores HOME, which previously caused a fictional test to import the user's real history.
   const sourceHome = env.HOME || env.USERPROFILE || homedir();
+  const config = await loadConfig(configPath(env)).catch(() => null);
+  const selectedHermesHome = config?.sessions?.hermesHome;
   const [claudeCode, codex, deepSeekHarness, hermes] = await Promise.all([
     importClaudeCode({ store: s, root: claudeRoot(sourceHome), cursorsFile: path.join(dir, 'cursors-claude-code.json') }),
     importCodex({ store: s, root: codexRoot(sourceHome), historyFile: defaultHistoryFile(sourceHome),
       cursorsFile: path.join(dir, 'cursors-codex.json') }),
     importDeepSeekHarness({ store: s, root: deepSeekHarnessRoot(sourceHome, env), cursorsFile: path.join(dir, 'cursors-deepseek-harness.json') }),
-    importHermes({ store: s, root: hermesRoot(sourceHome, env), cursorsFile: path.join(dir, 'cursors-hermes.json') }),
+    importHermes({ store: s, root: selectedHermesHome || hermesRoot(sourceHome, env), cursorsFile: path.join(dir, 'cursors-hermes.json') }),
   ]);
   return { 'claude-code': claudeCode, codex, 'deepseek-harness': deepSeekHarness, hermes };
 }

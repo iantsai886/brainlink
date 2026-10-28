@@ -242,6 +242,13 @@ main #ready, main #ask-panel, main #brain-panel, main #sessions-panel, main #s-c
       <label class="muted" style="display:flex;flex-direction:row;gap:6px;align-items:center;margin-top:6px"><input type="checkbox" id="sess-share-full" style="width:auto"><span data-i18n="sessions.shareFullTextLabel"></span></label>
     </div>
     <div class="card" style="margin-bottom:10px">
+      <b data-i18n="sessions.hermesProfileTitle"></b>
+      <p class="muted" data-i18n="sessions.hermesProfileHint"></p>
+      <p class="mono muted" id="sessions-hermes-profile-path"></p>
+      <div class="row"><button class="secondary" id="sessions-hermes-profile-choose" data-i18n="sessions.hermesProfileChoose"></button><button class="link" id="sessions-hermes-profile-default" data-i18n="sessions.hermesProfileDefault"></button></div>
+      <p class="muted" data-i18n="sessions.hermesProfileHistoryNote"></p>
+    </div>
+    <div class="card" style="margin-bottom:10px">
       <b data-i18n="sessions.localSummaryTitle"></b>
       <p class="muted" data-i18n="sessions.localSummaryHint"></p>
       <label class="muted" style="display:flex;flex-direction:row;gap:6px;align-items:center;margin-top:6px"><input type="checkbox" id="sess-local-summary-enabled" style="width:auto"><span data-i18n="sessions.localSummaryEnable"></span></label>
@@ -1268,6 +1275,9 @@ async function load() {
   $('sessions-hint').innerHTML = t('sessions.hint', { call: '<span class="mono">session_read</span>' });
   $('sess-share-summaries').checked = Boolean(S.sessions_sharing?.shareSummaries);
   $('sess-share-full').checked = Boolean(S.sessions_sharing?.shareFullText);
+  const hermesProfile = S.sessions_hermes_profile || {};
+  $('sessions-hermes-profile-path').textContent = hermesProfile.home || t('sessions.hermesProfileDetected', { path: hermesProfile.defaultHome || '' });
+  $('sessions-hermes-profile-default').hidden = !hermesProfile.home;
   $('sess-local-summary-enabled').checked = Boolean(S.sessions_local_summary?.enabled);
   $('sess-local-summary-auto').checked = Boolean(S.sessions_local_summary?.autoDraftOnEnd);
   $('sess-local-summary-auto-file').checked = Boolean(S.sessions_local_summary?.autoFileOnEnd);
@@ -1698,6 +1708,21 @@ $('sess-share-full').onchange = () => act(async () => {
   const r = await api('POST', '/api/sessions/sharing', { shareSummaries: $('sess-share-summaries').checked, shareFullText: $('sess-share-full').checked });
   S.sessions_sharing = r.sessions;
   toast(t('sessions.shareToastSaved'));
+});
+$('sessions-hermes-profile-choose').onclick = () => act(async () => {
+  const result = await api('POST', '/api/sessions/hermes-profile/pick', {});
+  const home = result.path || (result.unavailable ? await window.promptForFolder() : '');
+  if (!home) return;
+  const saved = await api('POST', '/api/sessions/hermes-profile', { home });
+  S.sessions_hermes_profile = saved.profile;
+  toast(t('sessions.hermesProfileSaved', { count: saved.sessionCount }));
+  await loadSessions();
+});
+$('sessions-hermes-profile-default').onclick = () => act(async () => {
+  const saved = await api('POST', '/api/sessions/hermes-profile', { home: null });
+  S.sessions_hermes_profile = saved.profile;
+  toast(t('sessions.hermesProfileDefaultSaved', { count: saved.sessionCount }));
+  await loadSessions();
 });
 const updateLocalSummaryControls = () => {
   $('sess-local-summary-model').disabled = !$('sess-local-summary-enabled').checked;
