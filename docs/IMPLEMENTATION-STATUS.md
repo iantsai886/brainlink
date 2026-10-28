@@ -5,6 +5,12 @@ GitHub repository: `iantsai886/brainlink`
 Branch: `integration/brainlink-retrieval-evaluation` (integrates profile-scoped GitHub, RSI discovery, and independent retrieval evaluation)
 Code baseline: development target `1.2.8`, with `package.json` as the canonical version source. The `v1.2.7` tag belongs to the separate `wip/v1.2.7` release line; this branch continues from the full-source `main` history and does not move or recreate that tag.
 
+### Verify Git checkpoints when another AI picks up a handoff (2026-10-28)
+
+At commit `ec9ef58f74788582c47a4b4908f919442d4ee793`, `list_handoffs` compares a sender-reported repository, branch, commit, dirty state, and ahead count against the receiving Twin's confirmed local GitHub clone, but only if the agent has `read_note` permission for that assigned project vault. It returns `matched`, `mismatch`, `partial` (local upstream count unavailable), or `not_checked`, and does not return a local path, access GitHub, or change the checkout. This is a local-clone comparison, not proof of the remote branch's current state. The shared handoff Skill and its Claude/Codex discovery copies were updated together.
+
+Windows/Node.js 24.22.1: `npm run test:all` passed on the source tree committed as `ec9ef58` — core 505 total (499 passed, 0 failed, 6 platform/privilege skips), UI 29/29. Focused handoff, Git checkpoint, Twin-profile and Skill tests also passed. This is local automated evidence using fictional Git repositories; live Claude/Codex/DeepSeek Harness model handoff and hosted CI remain unverified.
+
 ### Invalidate cached public notes after privacy-preserving file replacement (2026-10-28)
 
 `loadVault` now includes filesystem change time at nanosecond precision in its cache key, and rechecks the active Twin's note-memory permission before reusing cached text. This prevents a same-size note replacement that preserves modified time from leaving its old public text in retrieval after it becomes private. A regression changes `public: false` to `private: true` without changing byte length, restores the original modified time, verifies the filesystem change time changed, and confirms search removes the cached content and direct read is denied.
