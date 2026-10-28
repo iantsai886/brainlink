@@ -62,3 +62,5 @@ Do not claim success until a real BrainLink tool call succeeds in the Harness.
 ## Maintainer note
 
 BrainLink's config merge is locally tested, and the official DeepSeek Harness docs describe the `@deepseek-ai/dsh-mcp-client` stdio configuration. A local config edit alone does not prove that an installed Harness profile loaded it or that a live BrainLink call succeeds. Verify the actual Harness version, profile, runtime, and Twin scope before claiming a live integration.
+
+BrainLink currently connects to Harness as an MCP server only; it does not install a native Cordis lifecycle plugin or automatically capture Harness transcripts. The Harness repository documents session events and a plugin system, but its Claude Code hook bridge does not support `SessionEnd`, and its `Stop` event is not a whole-conversation completion signal. Do not use `Stop` as a substitute. See [session filing boundaries and the research date](SESSION-FILING.md#deepseek-harness-lifecycle-boundary-2026-10-28).
