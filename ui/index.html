@@ -215,6 +215,8 @@ main #ready, main #ask-panel, main #brain-panel, main #sessions-panel, main #s-c
       <div id="twin-new-vaults" class="cards"></div>
       <p class="muted" data-i18n="twinProfiles.chooseAgents"></p>
       <div id="twin-new-agents" class="cards"></div>
+      <button type="button" id="twin-read-propose-preset" data-i18n="twinProfiles.readProposePreset"></button>
+      <span class="muted" data-i18n="twinProfiles.readProposePresetHint"></span>
       <p class="muted" data-i18n="twinProfiles.chooseMemory"></p>
       <div class="row" id="twin-new-memory"></div>
       <div class="notice" data-i18n="twinProfiles.privacyHint"></div>
@@ -2043,6 +2045,35 @@ $('twin-new-agents').addEventListener('change', (event) => {
   if (!grant) return;
   const scope = document.querySelector(`[data-twin-agent-scope="${CSS.escape(grant.dataset.twinAgentVault)}"][data-vault-scope="${CSS.escape(grant.dataset.vaultName)}"]`);
   if (scope) scope.hidden = !grant.checked;
+});
+$('twin-read-propose-preset').addEventListener('click', () => {
+  const selectedVaults = [...document.querySelectorAll('[data-twin-vault]:checked')];
+  const selectedAgents = [...document.querySelectorAll('[data-twin-agent]:checked')];
+  if (!selectedVaults.length || !selectedAgents.length) {
+    toast(t('twinProfiles.readProposePresetSelect'), true);
+    return;
+  }
+  for (const vault of selectedVaults) {
+    const access = document.querySelector(`[data-twin-vault-access="${CSS.escape(vault.dataset.twinVault)}"]`);
+    if (access) access.value = 'propose';
+  }
+  for (const agent of selectedAgents) {
+    const id = agent.dataset.twinAgent;
+    for (const vault of selectedVaults) {
+      const name = vault.dataset.twinVault;
+      const grant = document.querySelector(`[data-twin-agent-vault="${CSS.escape(id)}"][data-vault-name="${CSS.escape(name)}"]`);
+      if (grant) grant.checked = true;
+      const scope = document.querySelector(`[data-twin-agent-scope="${CSS.escape(id)}"][data-vault-scope="${CSS.escape(name)}"]`);
+      if (scope) scope.hidden = false;
+      document.querySelectorAll(`[data-twin-operation="${CSS.escape(id)}"][data-vault-name="${CSS.escape(name)}"]`).forEach((operation) => {
+        operation.checked = ['search', 'read_note', 'propose_note'].includes(operation.value);
+      });
+    }
+  }
+  const semantic = document.querySelector('[data-twin-memory="semantic"]');
+  if (semantic) semantic.checked = true;
+  updateTwinPermissionControls();
+  toast(t('twinProfiles.readProposePresetApplied'));
 });
 $('twin-create').onclick = async () => {
   const name = $('twin-new-name').value.trim();

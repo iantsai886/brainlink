@@ -31,6 +31,21 @@ test('every supported locale ships a JSON file with the exact same keys as Engli
   }
 });
 
+test('Twin read-and-propose preset affects only chosen agents and vaults and does not save', async () => {
+  const html = await readFile(path.join(ROOT, 'ui', 'index.html'), 'utf8');
+  assert.match(html, /id="twin-read-propose-preset"/);
+  const start = html.indexOf("$('twin-read-propose-preset').addEventListener");
+  const end = html.indexOf("$('twin-create').onclick", start);
+  assert.ok(start >= 0 && end > start, 'preset handler is present');
+  const handler = html.slice(start, end);
+  assert.match(handler, /\[data-twin-vault\]:checked/);
+  assert.match(handler, /\[data-twin-agent\]:checked/);
+  assert.match(handler, /access\.value = 'propose'/);
+  assert.match(handler, /\['search', 'read_note', 'propose_note'\]/);
+  assert.match(handler, /data-twin-memory="semantic"/);
+  assert.doesNotMatch(handler, /api\(|\.click\(\)|connect/);
+});
+
 test('connection wording distinguishes configured settings from an AI app that loaded them', async () => {
   const catalogs = Object.fromEntries(await Promise.all(LOCALES.map(async (id) => [id, await loadLocale(id)])));
   const en = catalogs.en;
