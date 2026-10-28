@@ -109,7 +109,7 @@ test('local cue UI API requires authentication, minimizes metadata, and preserve
     assert.equal((await call('', {}, 'wrong')).status, 401);
     const { cues } = await (await call('')).json();
     assert.equal(cues.length, 1);
-    assert.deepEqual(Object.keys(cues[0]).sort(), ['client', 'ended_at', 'id', 'session_ref', 'summary_failed', 'summary_ready']);
+    assert.deepEqual(Object.keys(cues[0]).sort(), ['client', 'ended_at', 'id', 'reason', 'session_ref', 'summary_failed', 'summary_ready']);
     assert.equal(cues[0].summary_ready, false);
     assert.equal(cues[0].summary_failed, false);
     assert.match(cues[0].session_ref, /^s_[a-f0-9]{16}$/);

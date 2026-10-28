@@ -4,6 +4,7 @@ import { readFile, writeFile, mkdir, copyFile, rename, stat, chmod, readdir, unl
 import { existsSync } from 'node:fs';
 import { execFileSync } from 'node:child_process';
 import { createHash, randomBytes } from 'node:crypto';
+import { fileURLToPath } from 'node:url';
 import path from 'node:path';
 import { parseDocument } from 'yaml';
 import { appHome } from './app-home.mjs';
@@ -220,6 +221,64 @@ function updateDshPatch(raw, entry, entryId = 'mcp-brainlink') {
   }
   root.items = rows;
   return doc.toString();
+}
+
+const DSH_CUE_ID = 'brainlink-session-end-cue';
+function harnessCuePaths(id, opts) {
+  const c = resolveClient(id);
+  if (!c?.profile) throw new Error('Choose a named DeepSeek Harness profile. Shared home-level profiles are not supported for session cues.');
+  const homeDir = opts.env?.DSH_HOME || path.join(opts.home, '.dsh');
+  const profileDir = path.join(homeDir, 'profiles', c.profile);
+  const pluginPath = path.join(appHome(opts.env || process.env, opts.os || process.platform, opts.home), 'plugins', 'deepseek-harness-session-cue.mjs');
+  const cueDir = path.join(appHome(opts.env || process.env, opts.os || process.platform, opts.home), 'sessions', 'end-cues');
+  return { client: c, profileDir, file: path.join(profileDir, 'cordis.patch.yml'), pluginPath, cueDir };
+}
+
+function readHarnessCueEntry(raw, file) {
+  const rows = dshEntries(parseDocument(raw, { uniqueKeys: true }));
+  const found = rows.filter((entry) => entry.id === DSH_CUE_ID);
+  if (found.length > 1) throw new Error(`${file} contains duplicate BrainLink session-cue entries; repair it before changing the integration.`);
+  return found[0] || null;
+}
+
+export async function deepSeekSessionCueStatus(id, opts) {
+  const target = harnessCuePaths(id, opts);
+  let raw = '';
+  try { raw = await readFile(target.file, 'utf8'); }
+  catch (error) { if (error.code !== 'ENOENT') throw error; }
+  const entry = raw ? readHarnessCueEntry(raw, target.file) : null;
+  const plugin = entry?.name === target.pluginPath ? await readFile(target.pluginPath, 'utf8').catch(() => '') : '';
+  const configured = Boolean(plugin && plugin.includes(`const cueDir = ${JSON.stringify(target.cueDir)};`));
+  return { client: id, configured, same_process_authority: true, requires_restart: true };
+}
+
+// Add an opt-in profile-local Cordis plugin. The plugin only emits a local
+// metadata cue, but Harness plugins run with the Harness process authority.
+export async function setDeepSeekSessionCue(id, enabled, opts) {
+  if (typeof enabled !== 'boolean') throw new Error('Choose whether Harness closeout reminders are enabled.');
+  const target = harnessCuePaths(id, opts);
+  const profile = await stat(target.profileDir).catch(() => null);
+  if (!profile?.isDirectory()) throw new Error(`DeepSeek Harness profile "${target.client.profile}" was not found on this computer.`);
+  let raw = '';
+  try { raw = await readFile(target.file, 'utf8'); }
+  catch (error) { if (error.code !== 'ENOENT') throw error; }
+  const existing = raw ? readHarnessCueEntry(raw, target.file) : null;
+  if (existing && existing.name !== target.pluginPath) throw new Error(`The ${DSH_CUE_ID} entry in ${target.file} is owned by another plugin; BrainLink will not replace it.`);
+  if (!enabled && !existing) return { ok: true, configured: false, changed: false, same_process_authority: true };
+
+  let entry = null;
+  if (enabled) {
+    const template = await readFile(fileURLToPath(new URL('./sessions/deepseek-harness-cue-plugin.mjs', import.meta.url)), 'utf8');
+    const source = template.replace('"__BRAINLINK_CUE_DIR__"', JSON.stringify(target.cueDir));
+    if (source === template) throw new Error('BrainLink Harness plugin template is missing its cue-directory marker.');
+    await atomicWrite(target.pluginPath, source, PRIVATE_CONFIG_MODE);
+    entry = { id: DSH_CUE_ID, name: target.pluginPath };
+  }
+  const text = updateDshPatch(raw, entry, DSH_CUE_ID);
+  if (text === raw) return { ok: true, configured: enabled, changed: false, same_process_authority: true };
+  const b = await backup(target.file, opts.now || new Date(), PRIVATE_CONFIG_MODE);
+  await atomicWrite(target.file, text, PRIVATE_CONFIG_MODE);
+  return { ok: true, configured: enabled, changed: true, file: target.file, backup: b, same_process_authority: true, requires_restart: true };
 }
 
 async function backup(file, now, mode = null) {

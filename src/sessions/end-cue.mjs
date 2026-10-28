@@ -2,8 +2,9 @@ import { createHash } from 'node:crypto';
 import { mkdir, readdir, readFile, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 
-const CLIENTS = new Set(['claude-code', 'codex']);
+const CLIENTS = new Set(['claude-code', 'codex', 'deepseek-harness']);
 const MAX_EVENT_BYTES = 32 * 1024;
+const MAX_HARNESS_CUE_AGE_MS = 14 * 24 * 60 * 60 * 1000;
 export const sessionEndCueId = (cue) => createHash('sha256').update(`${cue.client}\0${cue.session_id}`).digest('hex');
 
 // Match a minimal SessionEnd cue to an already imported transcript without opening its
@@ -13,10 +14,14 @@ export function matchSessionEndCue(cue, sessions) {
   if (!CLIENTS.has(cue?.client) || typeof cue.session_id !== 'string' || !Array.isArray(sessions)) return null;
   const expected = cue.client === 'claude-code'
     ? `${cue.session_id}.jsonl`
-    : `rollout-${cue.session_id}.jsonl`;
+    : cue.client === 'codex' ? `rollout-${cue.session_id}.jsonl` : null;
   const matches = sessions.filter((session) => {
     if (session?.client !== cue.client || typeof session.source_id !== 'string') return false;
     const source = session.source_id.replace(/\\/g, '/');
+    if (cue.client === 'deepseek-harness') {
+      const parts = source.split('/');
+      return parts.includes(cue.session_id) && /^session(?:\.v[1-9]\d*)?\.jsonl(?:\.zstd)?$/.test(parts.at(-1) || '');
+    }
     return source === expected || source.endsWith(`/${expected}`);
   });
   return matches.length === 1 ? matches[0].id : null;
@@ -30,7 +35,7 @@ export async function dismissSessionEndCue(dir, id) {
 }
 
 export function parseSessionEndEvent(input, client) {
-  if (!CLIENTS.has(client)) throw new Error('client must be claude-code or codex');
+  if (!CLIENTS.has(client) || client === 'deepseek-harness') throw new Error('client must be claude-code or codex');
   const text = Buffer.isBuffer(input) ? input.toString('utf8') : String(input ?? '');
   if (Buffer.byteLength(text, 'utf8') > MAX_EVENT_BYTES) throw new Error('hook event is too large');
   let event;
@@ -61,12 +66,17 @@ export async function recordSessionEndCue({ input, client, dir, now = new Date()
   }
 }
 
-export async function listSessionEndCues(dir) {
+export async function listSessionEndCues(dir, { now = Date.now() } = {}) {
   const names = await readdir(dir).catch((error) => error.code === 'ENOENT' ? [] : Promise.reject(error));
   const cues = [];
   const dismissed = new Set(names.filter((n) => n.endsWith('.dismissed')).map((n) => n.slice(0, -10)));
   for (const name of names.filter((n) => /^[a-f0-9]{64}\.json$/.test(n) && !dismissed.has(n.slice(0, -5)))) {
-    try { cues.push(JSON.parse(await readFile(path.join(dir, name), 'utf8'))); } catch {}
+    try {
+      const cue = JSON.parse(await readFile(path.join(dir, name), 'utf8'));
+      const ended = Date.parse(cue?.ended_at);
+      if (cue?.client === 'deepseek-harness' && (!Number.isFinite(ended) || now - ended > MAX_HARNESS_CUE_AGE_MS)) continue;
+      cues.push(cue);
+    } catch {}
   }
   return cues.sort((a, b) => String(b.ended_at).localeCompare(String(a.ended_at)));
 }

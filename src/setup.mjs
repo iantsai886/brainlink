@@ -11,7 +11,7 @@ import { homedir } from 'node:os';
 import path from 'node:path';
 import { loadConfig, saveConfig, configPath, normalize, validate, LOCALES, appHome } from './config.mjs';
 import { PACKS, buildPack, scaffold, mergePack } from './packs.mjs';
-import { CLIENTS, resolveClient, detect, connectClient, disconnectClient, readClientAgentToken, test } from './connectors.mjs';
+import { CLIENTS, resolveClient, detect, connectClient, disconnectClient, readClientAgentToken, test, deepSeekSessionCueStatus, setDeepSeekSessionCue } from './connectors.mjs';
 import { createContext, search, searchWithVerdict, readNote, ensureDefaultIgnore, readExcludedFolders, writeExcludedFolders, DEFAULT_EXCLUDED_FOLDERS, SUGGESTED_EXCLUDED_FOLDERS, safeJoin, vaultRoot } from './core.mjs';
 import { ROOT, launchSpec, readActivity, refreshMap, logActivity } from './runtime.mjs';
 import { detectEmbedder } from './embed.mjs';
@@ -254,6 +254,7 @@ export async function startSetup(opts = {}) {
       const imported = await store.listSessions({ limit: 100000 });
       const cues = await listSessionEndCues(path.join(appHome(env), 'sessions', 'end-cues'));
       for (const cue of cues) {
+        if (cue.client === 'deepseek-harness') continue; // A completed turn is a manual closeout suggestion, not a session-end approval for auto-drafting.
         const id = matchSessionEndCue(cue, imported);
         if (!id || await readLocalSummaryDraft(path.join(appHome(env), 'sessions', 'auto-summary'), id)) continue;
         const lastAttempt = localSummaryAutoDraftAttempts.get(id) || 0;
@@ -1590,10 +1591,25 @@ export async function startSetup(opts = {}) {
       if (!(await stat(dest).catch(() => null))) await cp(path.join(ROOT, 'samples', 'acme-studio'), dest, { recursive: true, errorOnExist: true, force: false });
       return { ok: true, path: dest };
     },
-    'POST /api/sessions/hooks': async () => ({ clients: await Promise.all(['claude-code', 'codex'].map(async (client) => {
-      try { return await sessionHookStatus(client, { home, env }); } catch (e) { return { client, error: e.message }; }
-    })) }),
-    'POST /api/sessions/hooks/set': (b) => setSessionHook(b.client, b.enabled, { home, env, os }),
+    'POST /api/sessions/hooks': async () => {
+      const base = await Promise.all(['claude-code', 'codex'].map(async (client) => {
+        try { return await sessionHookStatus(client, { home, env }); } catch (e) { return { client, error: e.message }; }
+      }));
+      const detected = await detect(clientOpts());
+      const harness = await Promise.all(Object.entries(detected).filter(([id, client]) => id.startsWith('deepseek-harness@') && client.connected).map(async ([client]) => {
+        try { return { ...await deepSeekSessionCueStatus(client, clientOpts()), title: detected[client].title }; }
+        catch (e) { return { client, title: detected[client].title, error: e.message }; }
+      }));
+      return { clients: [...base, ...harness] };
+    },
+    'POST /api/sessions/hooks/set': async (b) => {
+      if (String(b.client || '').startsWith('deepseek-harness@')) {
+        const detected = await detect(clientOpts());
+        if (!detected[b.client]?.connected) throw new Error('Connect this named Harness profile to BrainLink first.');
+        return setDeepSeekSessionCue(b.client, b.enabled, clientOpts());
+      }
+      return setSessionHook(b.client, b.enabled, { home, env, os });
+    },
     'POST /api/sessions/end-cues': async () => {
       const cues = (await listSessionEndCues(path.join(appHome(env), 'sessions', 'end-cues'))).slice(0, 100);
       await sessions.refresh();
@@ -1602,7 +1618,7 @@ export async function startSetup(opts = {}) {
       return { cues: await Promise.all(cues.map(async (cue) => {
         const id = matchSessionEndCue(cue, imported);
         const summary_ready = Boolean(id && await readLocalSummaryDraft(path.join(appHome(env), 'sessions', 'auto-summary'), id));
-        return { id: sessionEndCueId(cue), client: cue.client, ended_at: cue.ended_at, session_ref: id,
+        return { id: sessionEndCueId(cue), client: cue.client, ended_at: cue.ended_at, reason: cue.reason || null, session_ref: id,
           summary_ready, summary_failed: id ? localSummaryAutoDraftStatus.get(id) === 'failed' : false };
       })) };
     },
