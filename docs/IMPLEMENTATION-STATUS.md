@@ -5,6 +5,10 @@ GitHub repository: `iantsai886/brainlink`
 Branch: `integration/brainlink-retrieval-evaluation` (integrates profile-scoped GitHub, RSI discovery, and independent retrieval evaluation)
 Code baseline: development target `1.2.8`, with `package.json` as the canonical version source. The `v1.2.7` tag belongs to the separate `wip/v1.2.7` release line; this branch continues from the full-source `main` history and does not move or recreate that tag.
 
+### Corrected DeepSeek Harness host status (2026-10-28)
+
+Rechecked this Windows host: `C:\Users\iants\AppData\Local\Programs\DeepSeek Harness\DeepSeek Harness.exe` and its version file exist; the app reports `44.7.0`. A `dsh` command is not available on `PATH`. This corrects the older statement below that the app was not installed. BrainLink's Harness MCP connection and session importer still have not been exercised inside a live Harness profile; no Harness profile or private session data was changed or inspected for this check. Keep live tool use and cross-client closeout marked unverified.
+
 ### Reject unusable backup mappings before recovery (2026-10-28, source `b1d9d2f`)
 
 Backup verification now checks that each vault has a unique recovery folder, every file maps to that vault's folder, and restore targets are unique. Malformed or colliding mappings fail verification, so Restore history does not offer a hash-valid copy that would merge vaults or fail partway through recovery; retention also leaves such a copy untouched. A synthetic regression reproduces two distinct vaults mapped to one folder and verifies the copy is excluded from recovery history. On Windows with Node.js 24.22.1, the exact code commit passed `npm run test:all`: core 497 total (491 passed, 0 failed, 6 platform/permission skips), UI 29/29. Focused `test/backup.test.mjs` passed 17/17 runnable (1 Windows symlink-permission skip); `node --check src/backup.mjs` and `git diff --check` passed. This is local automated recovery evidence, not a physical second-device restore or full disaster-recovery acceptance.
@@ -13,7 +17,7 @@ Rebuilt the Windows 1.2.8 installer from the same code commit using Inno Setup 6
 
 ### Client connection status and Harness lifecycle research (2026-10-28, source `3832ba1`)
 
-On this Windows host, `npm run smoke:claude-code` passed: Claude Code started BrainLink and reported the local MCP connection healthy. `npm run smoke:codex-cli` passed: Codex CLI recognized the generated entry, but reported authentication as `Unsupported`; this is configuration recognition only. Neither smoke invoked a model or called a BrainLink tool. DeepSeek Harness is not installed or on PATH, so its configured connector has not been live-tested. The Harness lifecycle boundary and official documentation references are recorded in [session filing](SESSION-FILING.md#deepseek-harness-lifecycle-boundary-2026-10-28). No cross-client continuation or end-to-end user closeout is claimed.
+On this Windows host, `npm run smoke:claude-code` passed: Claude Code started BrainLink and reported the local MCP connection healthy. `npm run smoke:codex-cli` passed: Codex CLI recognized the generated entry, but reported authentication as `Unsupported`; this is configuration recognition only. Neither smoke invoked a model or called a BrainLink tool. At the time of this earlier record, Harness was incorrectly described as absent; the desktop-app presence check is corrected above. Its configured connector has not been live-tested. The Harness lifecycle boundary and official documentation references are recorded in [session filing](SESSION-FILING.md#deepseek-harness-lifecycle-boundary-2026-10-28). No cross-client continuation or end-to-end user closeout is claimed.
 
 ### Cross-vault source references in scoped handoffs (2026-10-28)
 
