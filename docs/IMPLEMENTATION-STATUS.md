@@ -9,7 +9,7 @@ Code baseline: development target `1.2.8`, with `package.json` as the canonical 
 
 `loadVault` now includes filesystem change time at nanosecond precision in its cache key, and rechecks the active Twin's note-memory permission before reusing cached text. This prevents a same-size note replacement that preserves modified time from leaving its old public text in retrieval after it becomes private. A regression changes `public: false` to `private: true` without changing byte length, restores the original modified time, verifies the filesystem change time changed, and confirms search removes the cached content and direct read is denied.
 
-Windows/Node.js 24.22.1 verification: the complete `test/brainlink.test.mjs` file passed 78 tests with 1 platform skip; after the final cache-check ordering adjustment, the focused core, graph, and Twin suites passed 119 tests with 1 platform skip. `npm run test:all` passed on the same privacy fix before that ordering-only adjustment: core 503 total (497 passed, 0 failed, 6 platform/privilege skips), UI 29/29. `git diff --check` passed. This is automated local evidence; filesystem behavior and live multi-client acceptance on other platforms remain unverified.
+Windows/Node.js 24.22.1 verification on exact commit `52594c111fe7516390f30fd73acb1a766560c211`: `npm run test:all` passed after the final cache-check ordering adjustment — core 503 total (497 passed, 0 failed, 6 platform/privilege skips), UI 29/29. The six skips include Windows symlink-privilege and non-Windows platform cases. This is automated local evidence; hosted CI, filesystem behavior on other filesystems, and live multi-client acceptance remain unverified.
 
 ### Rechecked client connection and fictional handoff (2026-10-28)
 
