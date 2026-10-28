@@ -7,6 +7,7 @@ import { setTimeout as delay } from 'node:timers/promises';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { parse } from 'yaml';
+import { zstdCompressSync } from 'node:zlib';
 
 import { normalize, validate, saveConfig, configPath } from '../src/config.mjs';
 import { detect, connect, disconnect, connectClient, disconnectClient, readClientAgentToken, test as testClient, UNSUPPORTED } from '../src/connectors.mjs';
@@ -138,12 +139,21 @@ test('runSync: non-private sessions get scope "brain" so they reach the sync tar
 
 // ---- src/sessions/index.mjs: importAll wiring (DEMO-CRITICAL: it must have callers) ----
 
-test('importAll wiring: `brainlink sync` and `session_list` both see real ~/.claude and ~/.codex history under a fake HOME', async () => {
+test('importAll wiring: `brainlink sync` and `session_list` import Claude, Codex and DeepSeek Harness under a fake HOME', async () => {
   const home = await tmp('fake-home');
   await mkdir(path.join(home, '.claude', 'projects'), { recursive: true });
   await mkdir(path.join(home, '.codex', 'sessions'), { recursive: true });
   await cp(path.join(FIXTURES, 'claude-code', 'projects'), path.join(home, '.claude', 'projects'), { recursive: true });
   await cp(path.join(FIXTURES, 'codex', 'sessions'), path.join(home, '.codex', 'sessions'), { recursive: true });
+  const dshSessionDir = path.join(home, '.dsh', 'sessions', '--fictional-workspace--', 'fictional-dsh-session');
+  await mkdir(dshSessionDir, { recursive: true });
+  const dshAt = Date.parse('2026-10-28T03:00:00.000Z');
+  const dshRecords = [
+    { type: 'session', version: 4, id: 'fictional-dsh-session', cwd: '/fictional/workspace', createdAt: dshAt, isSeeded: false },
+    { type: 'user/message', seq: 0, time: dshAt, data: { role: 'user', source: { kind: 'user' }, content: [{ type: 'text', text: 'Synthetic DeepSeek Harness wiring check' }] } },
+    { type: 'assistant/message', seq: 1, time: dshAt + 1, data: { message: { role: 'assistant', provider: 'fixture', model: 'fixture', content: [{ type: 'text', text: 'Synthetic import is working.' }] } } },
+  ].map((record) => JSON.stringify(record) + '\n');
+  await writeFile(path.join(dshSessionDir, 'session.v4.jsonl.zstd'), Buffer.concat(dshRecords.map((record) => zstdCompressSync(Buffer.from(record)))));
   const env = { ...process.env, HOME: home, BRAINLINK_AI_PLATFORM: 'Cursor' };
 
   // 1) `brainlink sync` must call importAll so the local session index is no longer empty.
@@ -155,8 +165,8 @@ test('importAll wiring: `brainlink sync` and `session_list` both see real ~/.cla
     child.on('exit', (code) => (code === 0 ? resolve(buf) : reject(new Error(`exit ${code}: ${buf}`))));
   });
   const afterSync = await (await openSessionStore(syncEnv)).listSessions({ limit: 10 });
-  assert.equal(afterSync.length, 2, '`brainlink sync` must import Claude Code + Codex history into the local session index');
-  assert.deepEqual(afterSync.map((s) => s.client).sort(), ['claude-code', 'codex']);
+  assert.equal(afterSync.length, 3, '`brainlink sync` must import Claude Code, Codex and DeepSeek Harness history into the local session index');
+  assert.deepEqual(afterSync.map((s) => s.client).sort(), ['claude-code', 'codex', 'deepseek-harness']);
 
   // 2) `brainlink serve`'s session_list must independently trigger its own lazy import, starting
   // from a fresh BRAINLINK_HOME with nothing imported yet. Imported sessions are private by
@@ -179,8 +189,8 @@ test('importAll wiring: `brainlink sync` and `session_list` both see real ~/.cla
   assert.equal(result.sessions.length, 0, 'imported sessions stay hidden by default until the user opts in, and include_private from a caller has no effect');
 
   const afterServe = await (await openSessionStore(serveEnv)).listSessions({ limit: 10 });
-  assert.equal(afterServe.length, 2, 'session_list must still trigger its own lazy import behind the scenes');
-  assert.deepEqual(afterServe.map((s) => s.client).sort(), ['claude-code', 'codex']);
+  assert.equal(afterServe.length, 3, 'session_list must still trigger its own lazy import behind the scenes');
+  assert.deepEqual(afterServe.map((s) => s.client).sort(), ['claude-code', 'codex', 'deepseek-harness']);
 });
 
 // ---- connectors.mjs: {ok,message} wrappers + the ChatGPT honest note ----

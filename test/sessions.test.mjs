@@ -4,6 +4,7 @@ import { mkdtemp, writeFile, mkdir, readFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { zstdCompressSync } from 'node:zlib';
 
 import { redactText } from '../src/sessions/redact.mjs';
 import { estTokens, clip } from '../src/sessions/tokens.mjs';
@@ -11,6 +12,7 @@ import { createSessionStore } from '../src/sessions/store.mjs';
 import { createSessionRefresher } from '../src/sessions/index.mjs';
 import { importClaudeCode, defaultRoot as defaultClaudeRoot } from '../src/sessions/claude-code.mjs';
 import { importCodex, defaultRoot as defaultCodexRoot, defaultHistoryFile } from '../src/sessions/codex.mjs';
+import { importDeepSeekHarness, defaultRoot as defaultDeepSeekHarnessRoot } from '../src/sessions/deepseek-harness.mjs';
 import { autoSummary } from '../src/sessions/import-util.mjs';
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
@@ -45,6 +47,8 @@ test('session importer paths default under the real home (not exercised here) an
   assert.match(defaultClaudeRoot('/home/x'), /\.claude[\/\\]projects$/);
   assert.match(defaultCodexRoot('/home/x'), /\.codex[\/\\]sessions$/);
   assert.match(defaultHistoryFile('/home/x'), /\.codex[\/\\]history\.jsonl$/);
+  assert.match(defaultDeepSeekHarnessRoot('/home/x', {}), /\.dsh[\/\\]sessions$/);
+  assert.equal(defaultDeepSeekHarnessRoot('/home/x', { DSH_HOME: '/custom/dsh' }), path.join('/custom/dsh', 'sessions'));
 });
 
 // ---- redact ----
@@ -192,6 +196,68 @@ test('codex importer: rollouts take priority, skips function_call/output/event_m
   assert.ok(!blob.includes('function_call'), 'tool call items never reach the store');
   assert.ok(!blob.includes('token_count'));
   assert.equal(page.messages.length, 2);
+});
+
+// ---- DeepSeek Harness importer ----
+
+test('DeepSeek Harness importer: reads concatenated Zstandard frames, imports only direct visible text, redacts, and stays private', async () => {
+  const dir = await tmp('dsh-import');
+  const store = await createSessionStore({ dir });
+  const root = path.join(dir, 'dsh', 'sessions');
+  const sessionDir = path.join(root, '--fictional-project--', 'fictional-session-id');
+  await mkdir(sessionDir, { recursive: true });
+  const at = Date.parse('2026-10-28T01:00:00.000Z');
+  const lines = [
+    { type: 'session', version: 4, id: 'fictional-session-id', cwd: '/fictional/project', createdAt: at, isSeeded: false },
+    { type: 'user/message', seq: 0, time: at, data: { role: 'user', source: { kind: 'user' }, content: [{ type: 'text', text: 'Build a fictional garden app. API_TOKEN=synthetic-secret-value' }] } },
+    { type: 'user/message', seq: 1, time: at + 1, data: { role: 'user', source: { kind: 'plugin', plugin: 'fictional-context' }, content: [{ type: 'text', text: 'INJECTED_PRIVATE_CANARY' }] } },
+    { type: 'assistant/message', seq: 2, time: at + 2, data: { message: { role: 'assistant', provider: 'fake', model: 'fixture', content: [{ type: 'text', text: 'The fictional garden app is ready.' }, { type: 'reasoning', text: 'PRIVATE_REASONING_CANARY' }] } } },
+    { type: 'tool/result', seq: 3, time: at + 3, data: { message: { role: 'tool', content: [{ type: 'text', text: 'PRIVATE_TOOL_CANARY' }] } } },
+  ].map((line) => JSON.stringify(line) + '\n');
+  const file = path.join(sessionDir, 'session.v4.jsonl.zstd');
+  // Harness writes independent concatenated frames (one header frame, then event batches).
+  await writeFile(file, Buffer.concat(lines.map((line) => zstdCompressSync(Buffer.from(line)))));
+  const cursorsFile = path.join(dir, 'cursors.json');
+  const first = await importDeepSeekHarness({ store, root, cursorsFile });
+  assert.equal(first.imported, 1);
+  assert.deepEqual(first.errors, []);
+  const [session] = await store.listSessions();
+  assert.equal(session.client, 'deepseek-harness');
+  assert.equal(session.project, '/fictional/project');
+  assert.equal(session.private, true);
+  const page = await store.readSession(session.id, { limit: 20 });
+  assert.deepEqual(page.messages.map((m) => m.role), ['user', 'assistant']);
+  const serialized = JSON.stringify(page);
+  assert.doesNotMatch(serialized, /synthetic-secret-value|INJECTED_PRIVATE_CANARY|PRIVATE_REASONING_CANARY|PRIVATE_TOOL_CANARY/);
+  assert.match(serialized, /API_TOKEN=\[REDACTED\]/);
+  const second = await importDeepSeekHarness({ store, root, cursorsFile });
+  assert.equal(second.imported, 0);
+  assert.equal(second.unchanged, 1);
+});
+
+test('DeepSeek Harness importer: supports raw v3 JSONL and leaves unsupported or malformed logs retryable', async () => {
+  const dir = await tmp('dsh-raw-import');
+  const store = await createSessionStore({ dir });
+  const root = path.join(dir, 'sessions');
+  const rawDir = path.join(root, '_no-cwd_', 'fictional-raw-id');
+  const badDir = path.join(root, '_no-cwd_', 'fictional-bad-id');
+  await mkdir(rawDir, { recursive: true });
+  await mkdir(badDir, { recursive: true });
+  const at = Date.parse('2026-10-28T02:00:00.000Z');
+  const raw = [
+    { type: 'session', version: 3, id: 'fictional-raw-id', createdAt: at, isSeeded: false },
+    { type: 'user/message', seq: 0, time: at, data: { role: 'user', source: { kind: 'user' }, content: [{ type: 'text', text: 'Fictional raw session' }] } },
+  ].map((line) => JSON.stringify(line)).join('\n') + '\n';
+  await writeFile(path.join(rawDir, 'session.v3.jsonl'), raw);
+  await writeFile(path.join(badDir, 'session.v5.jsonl'), JSON.stringify({ type: 'session', version: 5, id: 'fictional-future', createdAt: at }) + '\n');
+  const cursorsFile = path.join(dir, 'cursors.json');
+  const imported = await importDeepSeekHarness({ store, root, cursorsFile });
+  assert.equal(imported.imported, 1);
+  assert.equal(imported.errors.length, 1);
+  assert.match(imported.errors[0].error, /supported formats: v3 and v4/);
+  const cursors = JSON.parse(await readFile(cursorsFile, 'utf8'));
+  assert.equal(Object.keys(cursors).length, 1, 'unsupported data must not advance its cursor');
+  assert.equal((await store.listSessions())[0].client, 'deepseek-harness');
 });
 
 test('codex importer: falls back to history.jsonl when no rollout files exist, grouped by session_id', async () => {
