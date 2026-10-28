@@ -60,9 +60,11 @@ try {
   if (result.error) throw result.error;
   assert.equal(result.status, 0, `claude mcp list failed: ${result.stderr || result.stdout}`);
   assert.match(result.stdout || '', /brainlink/i, 'Claude Code CLI should list the generated BrainLink server');
+  assert.match(result.stdout || '', /connected/i, 'Claude Code CLI should connect to the generated BrainLink MCP server');
 
   process.stdout.write('PASS: Claude Code CLI recognized the generated BrainLink MCP entry in a temporary profile.\n');
-  process.stdout.write('Scope: config recognition only; no model call or live tool invocation.\n');
+  if (result.stdout?.trim()) process.stdout.write(`${result.stdout.trim()}\n`);
+  process.stdout.write('Scope: Claude Code started BrainLink and reported its MCP connection healthy; no model or tool call.\n');
   if (result.stderr?.trim()) process.stderr.write(`${result.stderr.trim()}\n`);
 } finally {
   await rm(tempRoot, { recursive: true, force: true });

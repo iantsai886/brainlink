@@ -59,6 +59,7 @@ try {
   assert.match(result.stdout || '', /enabled/i, 'Codex CLI should report the BrainLink entry as enabled');
 
   process.stdout.write('PASS: Codex CLI recognized the generated BrainLink MCP entry in a temporary profile.\n');
+  if (result.stdout?.trim()) process.stdout.write(`${result.stdout.trim()}\n`);
   process.stdout.write('Scope: config recognition only; no model call or live tool invocation.\n');
   if (result.stderr?.trim()) process.stderr.write(`${result.stderr.trim()}\n`);
 } finally {
