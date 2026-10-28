@@ -18,6 +18,7 @@ export const DISCOVERY_SOURCES = Object.freeze({
   arxiv: Object.freeze({ id: 'arxiv', label: 'arXiv', host: 'export.arxiv.org', path: '/api/query', format: 'atom', entryHosts: ['arxiv.org', 'www.arxiv.org'] }),
   crossref: Object.freeze({ id: 'crossref', label: 'Crossref', host: 'api.crossref.org', path: '/works', format: 'json' }),
   github: Object.freeze({ id: 'github', label: 'GitHub projects', host: 'api.github.com', path: '/search/repositories', format: 'json' }),
+  github_issues: Object.freeze({ id: 'github_issues', label: 'GitHub issues', host: 'api.github.com', path: '/search/issues', format: 'json' }),
 });
 const MAX_BYTES = 1_000_000;
 const TIMEOUT_MS = 15_000;
@@ -129,10 +130,12 @@ function privateAddress(address) {
 // link-local or multicast address is refused.
 export async function fetchFeed(rawUrl, { fetchImpl = fetch, lookup = dnsLookup, timeoutMs = TIMEOUT_MS, maxBytes = MAX_BYTES } = {}) {
   let url; try { url = new URL(rawUrl); } catch { throw new Error('Discovery refused an invalid feed URL.'); }
-  const source = Object.values(DISCOVERY_SOURCES).find((item) => item.host === url.hostname);
   const pathParts = url.pathname.split('/');
-  const githubRepoPath = source?.id === 'github' && pathParts.length === 4 && pathParts[1] === 'repos' && GITHUB_OWNER.test(pathParts[2]) && GITHUB_REPOSITORY.test(pathParts[3]);
-  const allowedPath = source && (url.pathname === source.path || githubRepoPath);
+  const githubRepoPath = url.hostname === 'api.github.com' && pathParts.length === 4 && pathParts[1] === 'repos' && GITHUB_OWNER.test(pathParts[2]) && GITHUB_REPOSITORY.test(pathParts[3]);
+  const githubIssuePath = url.hostname === 'api.github.com' && pathParts.length === 6 && pathParts[1] === 'repos' && GITHUB_OWNER.test(pathParts[2]) && GITHUB_REPOSITORY.test(pathParts[3]) && pathParts[4] === 'issues' && /^[1-9]\d{0,8}$/.test(pathParts[5]);
+  const source = Object.values(DISCOVERY_SOURCES).find((item) => item.host === url.hostname && item.path === url.pathname)
+    || (githubRepoPath ? DISCOVERY_SOURCES.github : githubIssuePath ? DISCOVERY_SOURCES.github_issues : null);
+  const allowedPath = Boolean(source);
   if (url.protocol !== 'https:' || url.username || url.password || url.port || !allowedPath || githubRepoPath && (url.search || url.hash)) throw new Error('Discovery refused a feed outside the built-in HTTPS allowlist.');
   const answers = await lookup(url.hostname, { all: true, verbatim: true });
   const addresses = (Array.isArray(answers) ? answers : [answers]).map(a => typeof a === 'string' ? a : a?.address).filter(Boolean);
@@ -189,6 +192,14 @@ export function feedUrl(sourceId, topic) {
     url.searchParams.set('per_page', String(MAX_ENTRIES_PER_FEED));
     return url.href;
   }
+  if (sourceId === 'github_issues') {
+    const url = new URL(`https://${source.host}${source.path}`);
+    url.searchParams.set('q', `${topic} is:issue`);
+    url.searchParams.set('sort', 'updated');
+    url.searchParams.set('order', 'desc');
+    url.searchParams.set('per_page', String(MAX_ENTRIES_PER_FEED));
+    return url.href;
+  }
   const params = new URLSearchParams({ search_query: `all:"${topic}"`, sortBy: 'submittedDate', sortOrder: 'descending', max_results: String(MAX_ENTRIES_PER_FEED) });
   return `https://${source.host}${source.path}?${params}`;
 }
@@ -239,7 +250,7 @@ const crossrefDate = (item) => {
   return `${parts[0]}-${month}-${day}`;
 };
 
-const sourceClaim = (entry) => `${entry.source_kind === 'github' ? 'Repository description' : 'Abstract'} states (not verified): ${firstSentence(entry.summary)}`.slice(0, 500);
+const sourceClaim = (entry) => `${entry.source_kind === 'github' ? 'Repository description' : entry.source_kind === 'github-issue' ? 'Public issue description' : 'Abstract'} states (not verified): ${firstSentence(entry.summary)}`.slice(0, 500);
 const sourceSnapshot = (entry) => ({ url: canonicalSourceUrl(entry.url), title: entry.title, published_at: entry.published_at, claim: sourceClaim(entry) });
 const sourceFingerprint = (source) => createHash('sha256').update(JSON.stringify({ url: canonicalSourceUrl(source.url), title: source.title || '', published_at: source.published_at || 'unknown', claim: source.claim || '' })).digest('hex');
 
@@ -271,6 +282,13 @@ function freshnessUrl(sourceId, rawSourceUrl) {
     const parts = sourceUrl.pathname.split('/').filter(Boolean);
     if (parts.length !== 2 || !GITHUB_OWNER.test(parts[0]) || !GITHUB_REPOSITORY.test(parts[1])) throw new Error('The saved GitHub source is not supported.');
     endpoint.pathname = `/repos/${parts[0]}/${parts[1]}`;
+    return endpoint.href;
+  }
+  if (sourceId === 'github_issues') {
+    if (sourceUrl.hostname.toLowerCase() !== 'github.com' || sourceUrl.search || sourceUrl.hash) throw new Error('The saved GitHub issue source is not supported.');
+    const parts = sourceUrl.pathname.split('/').filter(Boolean);
+    if (parts.length !== 4 || !GITHUB_OWNER.test(parts[0]) || !GITHUB_REPOSITORY.test(parts[1]) || parts[2] !== 'issues' || !/^[1-9]\d{0,8}$/.test(parts[3])) throw new Error('The saved GitHub issue source is not supported.');
+    endpoint.pathname = `/repos/${parts[0]}/${parts[1]}/issues/${parts[3]}`;
     return endpoint.href;
   }
   throw new Error('The saved discovery source is not supported.');
@@ -312,6 +330,32 @@ export function parseGitHub(json, { single = false } = {}) {
   const items = single ? [data] : data?.items;
   if (!Array.isArray(items)) throw new Error('GitHub response did not contain repository results.');
   return items.slice(0, MAX_ENTRIES_PER_FEED).map(parseGitHubRepository).filter(Boolean);
+}
+
+function parseGitHubIssue(item) {
+  if (item?.pull_request) return null;
+  const rawUrl = typeof item?.html_url === 'string' ? item.html_url : '';
+  let url;
+  try { url = new URL(rawUrl); } catch { return null; }
+  if (url.protocol !== 'https:' || url.hostname.toLowerCase() !== 'github.com' || url.username || url.password || url.port || url.search || url.hash) return null;
+  const parts = url.pathname.split('/').filter(Boolean);
+  if (parts.length !== 4 || !GITHUB_OWNER.test(parts[0]) || !GITHUB_REPOSITORY.test(parts[1]) || parts[2] !== 'issues' || !/^[1-9]\d{0,8}$/.test(parts[3])) return null;
+  const createdAt = typeof item.created_at === 'string' ? item.created_at : '';
+  const published = createdAt.match(/^(\d{4}-\d{2}-\d{2})T\d{2}:\d{2}:\d{2}Z$/)?.[1] || 'unknown';
+  return {
+    url: `https://github.com/${parts[0]}/${parts[1]}/issues/${parts[3]}`,
+    title: plain(typeof item.title === 'string' ? item.title : '', 240),
+    summary: plain(typeof item.body === 'string' ? item.body : '', 2000),
+    published_at: published,
+  };
+}
+
+export function parseGitHubIssues(json, { single = false } = {}) {
+  let data;
+  try { data = typeof json === 'string' ? JSON.parse(json) : json; } catch { throw new Error('GitHub response was not valid JSON.'); }
+  const items = single ? [data] : data?.items;
+  if (!Array.isArray(items)) throw new Error('GitHub response did not contain issue results.');
+  return items.slice(0, MAX_ENTRIES_PER_FEED).map(parseGitHubIssue).filter(Boolean);
 }
 
 // ---- relevance ----
@@ -451,8 +495,11 @@ export function createRsiDiscovery({ home, ledger, fetchImpl, lookup, now = () =
           try {
             const payload = await fetchFeed(feedUrl(sourceId, topic), { fetchImpl, lookup });
             receipt.fetched++;
-            const entries = sourceId === 'crossref' ? parseCrossref(payload) : sourceId === 'github' ? parseGitHub(payload) : parseAtom(payload, sourceId);
+            const entries = sourceId === 'crossref' ? parseCrossref(payload)
+              : sourceId === 'github' ? parseGitHub(payload)
+                : sourceId === 'github_issues' ? parseGitHubIssues(payload) : parseAtom(payload, sourceId);
             if (sourceId === 'github') for (const entry of entries) entry.source_kind = 'github';
+            if (sourceId === 'github_issues') for (const entry of entries) entry.source_kind = 'github-issue';
             for (const entry of entries) {
               receipt.entries++;
               if (!entry.url || !entry.title || !entry.summary) { receipt.dropped.invalid++; continue; }
@@ -507,8 +554,11 @@ export function createRsiDiscovery({ home, ledger, fetchImpl, lookup, now = () =
       };
       try {
         const payload = await fetchFeed(url, { fetchImpl, lookup });
-        const entries = sourceId === 'crossref' ? parseCrossref(payload) : sourceId === 'github' ? parseGitHub(payload, { single: true }) : parseAtom(payload, sourceId);
+        const entries = sourceId === 'crossref' ? parseCrossref(payload)
+          : sourceId === 'github' ? parseGitHub(payload, { single: true })
+            : sourceId === 'github_issues' ? parseGitHubIssues(payload, { single: true }) : parseAtom(payload, sourceId);
         if (sourceId === 'github') for (const entry of entries) entry.source_kind = 'github';
+        if (sourceId === 'github_issues') for (const entry of entries) entry.source_kind = 'github-issue';
         const match = entries.find((entry) => canonicalSourceUrl(entry.url) === canonicalSourceUrl(original.url));
         if (!match) receipt.status = 'not_found';
         else {
