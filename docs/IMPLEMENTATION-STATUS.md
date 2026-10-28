@@ -980,6 +980,12 @@ Added the opt-in `node scripts/smoke-live-codex-handoff.mjs --live` check. On th
 
 `node --check scripts/smoke-live-codex-handoff.mjs`, the opt-in guard test (`test/live-codex-handoff-smoke.test.mjs`, 1/1), and `git diff --check` passed. This is live receiver evidence for one model turn, not a real Claude Code sender, two-human acceptance, production-vault validation, hosted CI, or release readiness. Claude Code is currently signed out on this host, so a real Claude-to-Codex round trip remains open. Earlier attempts exposed a test harness issue: mailbox verification filtered for messages addressed to Codex and hid the reply addressed back to its sender; the final run uses the profile-scoped mailbox view and passed.
 
+### Full local regression and hosted CI status for live handoff smoke (2026-10-28)
+
+On Windows with Node.js 24.22.1, `npm run test:all` passed on exact pushed commit `594bedf5e2b28a1a445371ed04833694c8d666f8`: core 523 total (517 passed, 0 failed, 6 platform/privilege skips) and UI 29/29. This includes the live-smoke opt-in guard test. The live one-turn Codex receiver result is recorded above; the full suite itself uses synthetic fixtures and makes no model calls.
+
+GitHub Actions run [#408](https://github.com/iantsai886/brainlink/actions/runs/40681665218) for that commit failed before any runner started. GitHub's annotations say recent account payments failed or the spending limit needs to be increased; all six Node matrix jobs and all three package jobs were not started. This is an account billing gate, not a test failure, and no hosted test result is available. I cannot change the account billing limit from this repository. Claude Code CLI is signed out on this host (`claude auth status`: `loggedIn: false`), so real Claude-to-Codex acceptance also remains open.
+
 ### Remove only BrainLink-owned Windows sign-in entry during uninstall (2026-10-28)
 
 Commit `3064249` updates the Inno Setup uninstaller to remove `BrainLink Background.vbs` only when its contents contain BrainLink's ownership marker; it leaves unrelated or user-edited entries untouched. The isolated QA build uses a separate startup filename and plants a harmless marker file in the current user's Startup folder. `npm run smoke:installed:win` passed with Inno Setup 6.7.3: the installed launcher and authenticated Setup UI worked, and uninstall removed the app, shortcuts, QA startup marker and PATH entry while preserving the isolated BrainLink data file. The smoke refuses to replace an existing QA startup file and cleans its own marker on failure.
