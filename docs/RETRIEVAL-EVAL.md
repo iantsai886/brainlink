@@ -74,6 +74,10 @@ Evaluator v3 now compares the actual compact MCP projection against full diagnos
 
 The same frozen fixture was rerun on clean source commit `bb71426ee9d5d4a008f954dc9e89649b4ff80ba9` using Windows/Node.js 24.22.1. Results remained 17/30 deterministic task proxy success, source recall 1.000, and zero privacy violations; estimated context stayed 497 baseline versus 427 compact (about 14% lower). The exact receipt is `samples/evaluation/reports/retrieval-independent-windows-v3.json`, with the same fixture SHA-256. This confirms reproducibility at the current pre-receipt commit; the report adds no claim about model-generated answers, provider-billed tokens, live customer work, or cross-client behavior.
 
+### Current integration-branch rerun (2026-10-28)
+
+Reran the independent frozen fixture on clean source commit `79b910a9734bb02d923e074b3c74e90e20f2b6f8`, Windows/Node.js 24.22.1. Baseline and compact response preserved task proxy success at 17/30, required-source recall at 1.000, and zero privacy violations. Mean estimated response size was 497 tokens for full results and 427 for compact results (14.1% lower). The evaluator labels this `eligible_for_review`; that is not approval to change retrieval behavior. Receipt: `samples/evaluation/reports/retrieval-independent-79b910a.json`, fixture SHA-256 `500e0faffedcdf194c535dc3c0b2f44afe2111814f0d6c034420616392cb5490`. This fictional source/context proxy does not measure generated answer quality, provider-billed tokens, real customer tasks, or cross-client behavior.
+
 ## Session filing evaluation (read-only RSI evidence)
 
 Run `node bin/brainlink.mjs eval-filing --fixture ABSOLUTE_PATH_TO_JSON` after configuring the fixture's vault. This evaluates where BrainLink would suggest filing a completed session, against labelled destinations and a baseline that always selects the configured intake folder. Folder labels must exist and be selectable in the enabled vault. A `null` expected destination labels a deliberate abstention. Optional `forbidden_folders` label privacy-sensitive destinations that must never be proposed for that case.
