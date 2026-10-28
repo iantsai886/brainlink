@@ -397,6 +397,76 @@ test('connect: the generated Codex config launches BrainLink against its isolate
   }
 });
 
+test('connect: the generated DeepSeek Harness config launches BrainLink in an isolated profile and filters private notes', async () => {
+  const home = await tmp('dsh-isolated-runtime');
+  const dshHome = path.join(home, '.dsh');
+  const brainHome = path.join(home, 'brainlink-data');
+  const vault = path.join(home, 'fictional-vault');
+  const configFile = path.join(home, 'brainlink-config', 'config.json');
+  const clientConfig = path.join(dshHome, 'cordis.patch.yml');
+  await mkdir(dshHome, { recursive: true });
+  await mkdir(vault, { recursive: true });
+  await writeFile(clientConfig, '[]\n');
+  await writeFile(path.join(vault, 'Public Project.md'), '# HARNESSPUBLIC\n\nA fictional public project note for runtime isolation testing.');
+  await writeFile(path.join(vault, 'Private Project.md'), '---\nprivate: true\n---\n# HARNESSPRIVATE\n\nA fictional private note that must never be returned.');
+  await saveConfig(normalize({ vaults: [{ name: 'Fictional Harness Vault', path: vault }] }), configFile);
+
+  const launch = { command: process.execPath, args: [path.join(ROOT, 'bin/brainlink.mjs'), 'serve'] };
+  const opts = {
+    home, os: 'win32', env: { DSH_HOME: dshHome, BRAINLINK_HOME: brainHome, BRAINLINK_CONFIG: configFile },
+    launch, useCli: false, extraEnv: { BRAINLINK_AGENT_TOKEN: 'fictional-harness-runtime-token' },
+  };
+  assert.equal((await connect('deepseek-harness', opts)).ok, true);
+
+  const saved = parse(await readFile(clientConfig, 'utf8'));
+  const entry = saved.flatMap((patch) => patch.insert || []).find((row) => row.id === 'mcp-brainlink');
+  assert.equal(entry.name, '@deepseek-ai/dsh-mcp-client');
+  assert.equal(entry.config.command, launch.command);
+  assert.deepEqual(entry.config.args, launch.args);
+  assert.equal(entry.config.env.BRAINLINK_HOME, brainHome);
+  assert.equal(entry.config.env.BRAINLINK_CONFIG, configFile);
+  assert.equal(entry.config.env.BRAINLINK_AGENT_TOKEN, 'fictional-harness-runtime-token');
+  assert.equal(entry.config.toolCallTimeoutMs, 60_000);
+  assert.equal(entry.config.failOnStartupError, true);
+
+  const child = spawn(entry.config.command, entry.config.args, {
+    cwd: ROOT,
+    env: { ...process.env, ...entry.config.env, BRAINLINK_SEMANTIC: '0' },
+    windowsHide: true,
+  });
+  const childExit = new Promise((resolve) => child.once('exit', resolve));
+  const responses = [];
+  let buffer = '';
+  child.stdout.on('data', (chunk) => {
+    buffer += chunk;
+    let newline;
+    while ((newline = buffer.indexOf('\n')) >= 0) {
+      const line = buffer.slice(0, newline);
+      buffer = buffer.slice(newline + 1);
+      if (line.trim()) responses.push(JSON.parse(line));
+    }
+  });
+  try {
+    child.stdin.write(`${JSON.stringify({ jsonrpc: '2.0', id: 1, method: 'initialize', params: {} })}\n`);
+    child.stdin.write(`${JSON.stringify({ jsonrpc: '2.0', id: 2, method: 'tools/call', params: { name: 'brainlink_guide', arguments: {} } })}\n`);
+    child.stdin.write(`${JSON.stringify({ jsonrpc: '2.0', id: 3, method: 'tools/call', params: { name: 'vault_search', arguments: { vault: 'Fictional Harness Vault', query: 'HARNESSPUBLIC' } } })}\n`);
+    child.stdin.write(`${JSON.stringify({ jsonrpc: '2.0', id: 4, method: 'tools/call', params: { name: 'vault_search', arguments: { vault: 'Fictional Harness Vault', query: 'HARNESSPRIVATE' } } })}\n`);
+    for (let i = 0; i < 300 && responses.length < 4 && child.exitCode === null; i++) await delay(50);
+    assert.equal(responses.length, 4, `expected four MCP responses; received ${responses.length}, child exit=${child.exitCode}`);
+    assert.equal(responses[1].result.isError, false);
+    assert.match(JSON.stringify(responses[1].result), /Fictional Harness Vault/);
+    assert.doesNotMatch(JSON.stringify(responses[1].result), /HARNESSPRIVATE/);
+    assert.match(JSON.stringify(responses[2].result), /HARNESSPUBLIC/);
+    assert.doesNotMatch(JSON.stringify(responses[3].result), /HARNESSPRIVATE/);
+    const runtimeConfig = JSON.parse(await readFile(configFile, 'utf8'));
+    assert.equal(runtimeConfig.vaults[0].path, vault, 'the spawned server loaded only the isolated fictional vault');
+  } finally {
+    child.kill();
+    await childExit;
+    await rm(home, { recursive: true, force: true });
+  }
+});
+
 test('connectors: Hermes merges YAML safely, reads its scoped token, backs up settings, and disconnects only BrainLink', async () => {
   const home = await tmp('hermes-connect');
   const folder = path.join(home, '.hermes');
