@@ -67,7 +67,7 @@ jobs:
           if (-not (Test-Path (Join-Path $appRoot 'skills/brainlink-session-closeout/SKILL.md'))) { throw 'Staged portable skill is missing' }
           if (-not (Test-Path (Join-Path $appRoot 'skills/brainlink-graph-curation/SKILL.md'))) { throw 'Staged graph-curation skill is missing' }
           Push-Location $appRoot
-          try { & $node --input-type=module -e "await import('./src/connectors.mjs')"; if ($LASTEXITCODE -ne 0) { throw 'Staged connector could not load its YAML runtime' } }
+          try { & $node --input-type=module -e "await import('./src/connectors.mjs'); await import('./src/update-manifest.mjs')"; if ($LASTEXITCODE -ne 0) { throw 'Staged connector or update verifier could not load' } }
           finally { Pop-Location }
 
       - name: Install, run and uninstall Windows package
@@ -137,7 +137,7 @@ jobs:
           test ! -e "$app_root/ui/app/test"
           test -f "$app_root/skills/brainlink-session-closeout/SKILL.md"
           test -f "$app_root/skills/brainlink-graph-curation/SKILL.md"
-          (cd "$app_root" && "$resources/node/bin/node" --input-type=module -e "await import('./src/connectors.mjs')")
+          (cd "$app_root" && "$resources/node/bin/node" --input-type=module -e "await import('./src/connectors.mjs'); await import('./src/update-manifest.mjs')")
 
       - name: Install and smoke-test macOS package
         run: |
@@ -147,7 +147,7 @@ jobs:
           test -f "/Applications/BrainLink.app/Contents/Resources/app/skills/brainlink-session-closeout/SKILL.md"
           test -f "/Applications/BrainLink.app/Contents/Resources/app/skills/brainlink-graph-curation/SKILL.md"
           test ! -e "/Applications/BrainLink.app/Contents/Resources/app/ui/app/test"
-          "/Applications/BrainLink.app/Contents/Resources/node/bin/node" --input-type=module -e "await import('/Applications/BrainLink.app/Contents/Resources/app/src/connectors.mjs')"
+          "/Applications/BrainLink.app/Contents/Resources/node/bin/node" --input-type=module -e "await import('/Applications/BrainLink.app/Contents/Resources/app/src/connectors.mjs'); await import('/Applications/BrainLink.app/Contents/Resources/app/src/update-manifest.mjs')"
 
       - name: Remove macOS smoke-test installation
         if: always()
@@ -196,7 +196,7 @@ jobs:
           test -f /opt/brainlink/app/skills/brainlink-session-closeout/SKILL.md
           test -f /opt/brainlink/app/skills/brainlink-graph-curation/SKILL.md
           test ! -e /opt/brainlink/app/ui/app/test
-          /opt/brainlink/node/bin/node --input-type=module -e "await import('/opt/brainlink/app/src/connectors.mjs')"
+          /opt/brainlink/node/bin/node --input-type=module -e "await import('/opt/brainlink/app/src/connectors.mjs'); await import('/opt/brainlink/app/src/update-manifest.mjs')"
           mkdir -p "$RUNNER_TEMP/brainlink-smoke-vault"
           BRAINLINK_HOME="$RUNNER_TEMP/brainlink-smoke-home" brainlink init --vault "$RUNNER_TEMP/brainlink-smoke-vault" --name Smoke
           test -f "$RUNNER_TEMP/brainlink-smoke-home/config.json"

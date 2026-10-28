@@ -43,6 +43,7 @@ test('every native installer bundles all production dependencies and portable Br
   assert.match(nsisInstaller, /Delete "\$DESKTOP\\BrainLink\.lnk"/, 'NSIS uninstall must remove the shortcut it created');
 
   const macZipTest = await read('packaging/macos/test-zip.sh');
+  assert.match(macZipTest, /app\/src\/update-manifest\.mjs/, 'the macOS zip package must include the update verifier');
   assert.match(macZipTest, /app\/node_modules\/yaml\/dist\/index\.js/, 'the macOS package smoke test must check a loadable YAML runtime');
   assert.match(macZipTest, /app\/skills\/brainlink-session-closeout\/SKILL\.md/, 'the macOS package smoke test must check a shipped skill');
   assert.match(macZipTest, /app\/skills\/brainlink-graph-curation\/SKILL\.md/, 'the macOS package smoke test must check the graph-curation skill');
@@ -88,9 +89,10 @@ test('the staged connector loads with the bundled YAML package outside the check
     await mkdir(path.join(app, 'node_modules'), { recursive: true });
     await cp(path.join(ROOT, 'src', 'connectors.mjs'), path.join(app, 'src', 'connectors.mjs'));
     await cp(path.join(ROOT, 'src', 'app-home.mjs'), path.join(app, 'src', 'app-home.mjs'));
+    await cp(path.join(ROOT, 'src', 'update-manifest.mjs'), path.join(app, 'src', 'update-manifest.mjs'));
     await cp(path.join(ROOT, 'node_modules', 'yaml'), path.join(app, 'node_modules', 'yaml'), { recursive: true });
     await writeFile(path.join(app, 'package.json'), '{"type":"module"}\n');
-    const child = spawnSync(process.execPath, ['--input-type=module', '-e', "const { detect } = await import('./src/connectors.mjs'); if (typeof detect !== 'function') process.exit(2);"], {
+    const child = spawnSync(process.execPath, ['--input-type=module', '-e', "const { detect } = await import('./src/connectors.mjs'); const { verifyUpdateManifest } = await import('./src/update-manifest.mjs'); if (typeof detect !== 'function' || typeof verifyUpdateManifest !== 'function') process.exit(2);"], {
       cwd: app, encoding: 'utf8', timeout: 10_000,
     });
     assert.equal(child.status, 0, `packaged import failed: ${child.stderr || child.error || child.stdout}`);

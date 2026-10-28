@@ -54,7 +54,7 @@ echo "ok"
 
 echo "== file tree =="
 REQUIRED=(
-  "app/bin/brainlink.mjs" "app/src/runtime.mjs" "app/src/connectors.mjs" "app/ui/index.html"
+  "app/bin/brainlink.mjs" "app/src/runtime.mjs" "app/src/connectors.mjs" "app/src/update-manifest.mjs" "app/ui/index.html"
   "app/ui/locales/en.json" "app/ui/locales/zh-TW.json" "app/ui/locales/pt.json"
   "app/samples/acme-studio" "app/skills/brainlink-session-closeout/SKILL.md" "app/skills/brainlink-graph-curation/SKILL.md" "app/package.json" "app/LICENSE.txt" "app/README.md"
   "app/node_modules/brainlink-store/memory-store.mjs" "app/node_modules/brainlink-store/package.json"
