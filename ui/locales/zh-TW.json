@@ -101,7 +101,7 @@
   "sessions.localSummaryTitle": "私密本機摘要",
   "sessions.localSummaryHint": "BrainLink 可在這台電腦上使用 Ollama 建立私密草稿。草稿尚未驗證，未經你檢查不會寫入資料庫。",
   "sessions.localSummaryEnable": "啟用本機 AI 摘要草稿",
-  "sessions.localSummaryAuto": "已設定的 Claude Code 或 Codex 對話結束後自動建立草稿（BrainLink 必須保持執行）",
+  "sessions.localSummaryAuto": "Claude Code 或 Codex 結束後自動草擬；Harness 30 分鐘沒有新回合後也會草擬（BrainLink 必須保持執行）",
   "sessions.localSummaryModel": "Ollama 模型名稱",
   "sessions.localSummarySave": "儲存本機摘要設定",
   "sessions.localSummaryRun": "產生本機草稿",

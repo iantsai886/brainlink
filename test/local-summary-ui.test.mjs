@@ -17,6 +17,14 @@ test('local summary UI explains opt-in, local processing, and review requirement
   assert.match(html, /sessions_local_summary\?\.enabled \? `<button[^`]*data-sess-summarize/s);
 });
 
+test('automatic local-summary wording explains the Harness idle guess in every shipped language', async () => {
+  for (const locale of ['en', 'zh-TW', 'pt']) {
+    const catalog = JSON.parse(await readFile(new URL(`../ui/locales/${locale}.json`, import.meta.url), 'utf8'));
+    assert.match(catalog['sessions.localSummaryAuto'], /30/);
+    assert.match(catalog['sessions.localSummaryAuto'], /Harness/i);
+  }
+});
+
 test('local summary UI uses the reviewed private draft for both preview and explicit save', () => {
   assert.match(html, /useLocalDraft: fileLocalDraftIds\.has\(id\)/);
   assert.match(html, /useLocalDraft: fileLocalDraftIds\.has\(d\.fileConfirm\)/);

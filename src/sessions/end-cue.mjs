@@ -5,7 +5,16 @@ import path from 'node:path';
 const CLIENTS = new Set(['claude-code', 'codex', 'deepseek-harness']);
 const MAX_EVENT_BYTES = 32 * 1024;
 const MAX_HARNESS_CUE_AGE_MS = 14 * 24 * 60 * 60 * 1000;
+export const HARNESS_AUTO_DRAFT_IDLE_MS = 30 * 60 * 1000;
 export const sessionEndCueId = (cue) => createHash('sha256').update(`${cue.client}\0${cue.session_id}`).digest('hex');
+
+export function harnessCueIsIdle(cue, latestMessageAt, now = Date.now()) {
+  if (cue?.client !== 'deepseek-harness') return false;
+  const ended = Date.parse(cue.ended_at);
+  const latest = Date.parse(latestMessageAt);
+  return Number.isFinite(ended) && Number.isFinite(latest)
+    && now - ended >= HARNESS_AUTO_DRAFT_IDLE_MS && latest <= ended;
+}
 
 // Match a minimal SessionEnd cue to an already imported transcript without opening its
 // contents. Client formats deliberately differ: Claude files use <session-id>.jsonl;

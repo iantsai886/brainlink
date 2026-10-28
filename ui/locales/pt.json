@@ -101,7 +101,7 @@
   "sessions.localSummaryTitle": "Resumos locais privados",
   "sessions.localSummaryHint": "O BrainLink pode preparar rascunhos privados com o Ollama neste computador. Os rascunhos não são verificados e nunca são gravados no cofre sem a sua revisão.",
   "sessions.localSummaryEnable": "Ativar rascunhos de resumo com IA local",
-  "sessions.localSummaryAuto": "Criar rascunho quando terminar uma sessão configurada do Claude Code ou Codex (o BrainLink precisa estar aberto)",
+  "sessions.localSummaryAuto": "Criar rascunho quando Claude Code ou Codex terminar, ou após 30 minutos sem novo turno no Harness (o BrainLink precisa estar aberto)",
   "sessions.localSummaryModel": "Nome do modelo Ollama",
   "sessions.localSummarySave": "Guardar definições de resumo local",
   "sessions.localSummaryRun": "Criar rascunho local",

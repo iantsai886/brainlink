@@ -1,12 +1,12 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtemp, mkdir, readFile } from 'node:fs/promises';
+import { mkdtemp, mkdir, readFile, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { normalize, saveConfig } from '../src/config.mjs';
 import { openSessionStore } from '../src/sessions/index.mjs';
-import { recordSessionEndCue } from '../src/sessions/end-cue.mjs';
-import { readLocalSummaryDraft } from '../src/sessions/local-summary.mjs';
+import { HARNESS_AUTO_DRAFT_IDLE_MS, recordSessionEndCue, sessionEndCueId } from '../src/sessions/end-cue.mjs';
+import { readLocalSummaryDraft, saveLocalSummaryDraft } from '../src/sessions/local-summary.mjs';
 import { startSetup } from '../src/setup.mjs';
 
 test('local summary API requires opt-in, generates private draft, and files only after preview and confirmation', async () => {
@@ -96,5 +96,54 @@ test('opt-in background closeout drafts one matching ended session locally and n
     assert.equal(reviewed.draft.summary, draft.summary);
     assert.equal(calls, 1, 'opening a prepared draft does not spend another local model run');
     assert.equal((await readFile(path.join(vault, 'Fake project closeout.md')).catch(() => '')).length, 0, 'background drafting never creates a vault note');
+  } finally { await new Promise((resolve) => app.server.close(resolve)); }
+});
+
+test('opt-in background closeout drafts a quiet Harness session only after 30 minutes and keeps it private', async () => {
+  const home = await mkdtemp(path.join(tmpdir(), 'brainlink-harness-idle-summary-'));
+  const appHome = path.join(home, 'app'), vault = path.join(home, 'vault');
+  await mkdir(vault, { recursive: true });
+  const env = { BRAINLINK_HOME: appHome, HOME: home, BRAINLINK_SEMANTIC: '0' };
+  const config = normalize({ vaults: [{ name: 'Company', path: vault }] });
+  config.sessions.localSummary = { enabled: true, model: 'qwen2.5:3b', autoDraftOnEnd: true };
+  await saveConfig(config, path.join(appHome, 'config.json'));
+  const store = await openSessionStore(env);
+  const now = Date.now();
+  const cueTime = new Date(now - HARNESS_AUTO_DRAFT_IDLE_MS - 60_000).toISOString();
+  const messageTime = new Date(Date.parse(cueTime) - 60_000).toISOString();
+  const session = await store.putSession({ client: 'deepseek-harness', source_id: '--fictional-project--/fictional-harness-session/session.v4.jsonl.zstd', project: 'Fictional project', title: 'Fictional Harness session', summary: 'Fictional source session.', started_at: messageTime, private: true,
+    messages: [{ role: 'user', at: messageTime, text: 'Complete the fictional task.' }, { role: 'assistant', at: messageTime, text: 'The fictional task is complete.' }] });
+  const cue = { schema: 1, client: 'deepseek-harness', session_id: 'fictional-harness-session', ended_at: cueTime, reason: 'turn-completed' };
+  const cueDir = path.join(appHome, 'sessions', 'end-cues');
+  await mkdir(cueDir, { recursive: true });
+  await writeFile(path.join(cueDir, `${sessionEndCueId(cue)}.json`), `${JSON.stringify(cue)}\n`);
+  await saveLocalSummaryDraft(path.join(appHome, 'sessions', 'auto-summary'), session.id, {
+    summary: '## Outcome (unverified)\nStale draft from an earlier turn.', model: 'qwen2.5:3b',
+    generated_at: new Date(Date.parse(cueTime) - 60_000).toISOString(), source: 'local_model_unverified',
+  });
+  let calls = 0;
+  const app = await startSetup({ env, home, os: 'win32', port: 0, useCli: false, localSummaryAutoDraftTickMs: 20, localSummaryFetch: async () => {
+    calls++;
+    return { ok: true, json: async () => ({ message: { content: JSON.stringify({ goal: 'Complete fictional task', outcome: 'Completed after an idle Harness turn', decisions: [], corrections: [], next_actions: ['Review the draft'], open_questions: [] }) } }) };
+  } });
+  const api = (route, body) => fetch(`http://127.0.0.1:${app.port}${route}`, {
+    method: 'POST', headers: { 'Content-Type': 'application/json', 'X-BrainLink-Token': app.token }, body: JSON.stringify(body),
+  });
+  try {
+    const draftDir = path.join(appHome, 'sessions', 'auto-summary');
+    const until = Date.now() + 4000;
+    let draft = null;
+    while ((!draft || /Stale draft/.test(draft.summary)) && Date.now() < until) {
+      await new Promise((resolve) => setTimeout(resolve, 20));
+      draft = await readLocalSummaryDraft(draftDir, session.id);
+    }
+    assert.ok(draft, `quiet Harness session should get a local review draft; model calls=${calls}`);
+    assert.match(draft.summary, /Completed after an idle Harness turn/);
+    assert.doesNotMatch(draft.summary, /Stale draft/);
+    assert.equal(calls, 1);
+    assert.equal((await readFile(path.join(vault, 'Fictional Harness session.md')).catch(() => '')).length, 0, 'idle detection never writes a vault note');
+    const shown = await (await api('/api/sessions/end-cues', {})).json();
+    assert.equal(shown.cues[0]?.client, 'deepseek-harness');
+    assert.equal(shown.cues[0]?.summary_ready, true);
   } finally { await new Promise((resolve) => app.server.close(resolve)); }
 });

@@ -1,7 +1,7 @@
 // Private, local-only summaries for opted-in session closeout. Transcript text is sent only to
 // Ollama bound to this computer; generated text remains unverified until a person reviews it.
 import { createHash, randomUUID } from 'node:crypto';
-import { mkdir, readFile, rename, writeFile } from 'node:fs/promises';
+import { mkdir, readFile, rename, unlink, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import { redactText } from './redact.mjs';
 
@@ -112,7 +112,7 @@ export async function readLocalSummaryDraft(dir, sessionId) {
   } catch (error) { if (error.code === 'ENOENT') return null; throw error; }
 }
 
-export async function saveLocalSummaryDraft(dir, sessionId, draft) {
+export async function saveLocalSummaryDraft(dir, sessionId, draft, { replace = false } = {}) {
   const file = draftPath(dir, sessionId);
   if (!draft || draft.source !== 'local_model_unverified' || !validLocalModelName(draft.model)
     || typeof draft.summary !== 'string' || !draft.summary.trim() || draft.summary.length > 20_000) throw new Error('Invalid private summary draft.');
@@ -121,7 +121,19 @@ export async function saveLocalSummaryDraft(dir, sessionId, draft) {
   const record = { schema: 1, session_id: sessionId, status: 'ready', source: draft.source, model: draft.model, generated_at: draft.generated_at, summary: draft.summary };
   try {
     await writeFile(temp, `${JSON.stringify(record, null, 2)}\n`, { flag: 'wx', mode: 0o600 });
-    await rename(temp, file);
+    if (!replace) await rename(temp, file);
+    else {
+      const previous = `${file}.old-${randomUUID()}`;
+      let movedPrevious = false;
+      try { await rename(file, previous); movedPrevious = true; }
+      catch (error) { if (error.code !== 'ENOENT') throw error; }
+      try { await rename(temp, file); }
+      catch (error) {
+        if (movedPrevious) await rename(previous, file).catch(() => {});
+        throw error;
+      }
+      if (movedPrevious) await unlink(previous).catch(() => {});
+    }
   } catch (error) {
     const { unlink } = await import('node:fs/promises');
     await unlink(temp).catch(() => {});

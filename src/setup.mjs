@@ -38,7 +38,7 @@ import { createOrReadBackupRecoveryKey, parseBackupKey, requireBackupKey } from 
 import { fileSessionSummary, readFiledSessionSummary, updateFiledSessionSummary, listFiledSessionSummaries } from './sessions/filing.mjs';
 import { isStartupEnabled, setStartupEnabled } from './startup.mjs';
 import { recommendSessionVault } from './sessions/routing.mjs';
-import { listSessionEndCues, dismissSessionEndCue, sessionEndCueId, matchSessionEndCue } from './sessions/end-cue.mjs';
+import { harnessCueIsIdle, listSessionEndCues, dismissSessionEndCue, sessionEndCueId, matchSessionEndCue } from './sessions/end-cue.mjs';
 import { listSessionFilingFolders, suggestedSessionFolder } from './sessions/folders.mjs';
 import { generateLocalSessionSummary, readLocalSummaryDraft, saveLocalSummaryDraft, validLocalModelName } from './sessions/local-summary.mjs';
 import { sessionHookStatus, setSessionHook } from './sessions/hooks.mjs';
@@ -252,18 +252,36 @@ export async function startSetup(opts = {}) {
       await sessions.refresh();
       const store = await sessions.store();
       const imported = await store.listSessions({ limit: 100000 });
-      const cues = await listSessionEndCues(path.join(appHome(env), 'sessions', 'end-cues'));
+      const cueDir = path.join(appHome(env), 'sessions', 'end-cues');
+      const cues = await listSessionEndCues(cueDir);
       for (const cue of cues) {
-        if (cue.client === 'deepseek-harness') continue; // A completed turn is a manual closeout suggestion, not a session-end approval for auto-drafting.
         const id = matchSessionEndCue(cue, imported);
-        if (!id || await readLocalSummaryDraft(path.join(appHome(env), 'sessions', 'auto-summary'), id)) continue;
+        if (!id) continue;
+        const draftDir = path.join(appHome(env), 'sessions', 'auto-summary');
+        const previousDraft = await readLocalSummaryDraft(draftDir, id);
+        if (cue.client === 'deepseek-harness') {
+          const { messages } = await store.readSession(id, { limit: 1000 });
+          const latest = messages.filter((message) => ['user', 'assistant'].includes(message.role)).at(-1)?.at;
+          if (!harnessCueIsIdle(cue, latest)) continue;
+          if (previousDraft && Date.parse(previousDraft.generated_at) >= Date.parse(cue.ended_at)) continue;
+        } else if (previousDraft) continue;
         const lastAttempt = localSummaryAutoDraftAttempts.get(id) || 0;
         if (Date.now() - lastAttempt < 10 * 60_000) continue;
         localSummaryAutoDraftAttempts.set(id, Date.now());
         try {
           const { messages } = await store.readSession(id, { limit: 1000 });
           const draft = await generateLocalSessionSummary(messages, settings.model, { fetchImpl: opts.localSummaryFetch || fetch });
-          await saveLocalSummaryDraft(path.join(appHome(env), 'sessions', 'auto-summary'), id, draft);
+          if (cue.client === 'deepseek-harness') {
+            await sessions.refresh({ force: true });
+            const latestStore = await sessions.store();
+            const latestSessions = await latestStore.listSessions({ limit: 100000 });
+            const latestId = matchSessionEndCue(cue, latestSessions);
+            const latestMessages = latestId ? await latestStore.readSession(latestId, { limit: 1000 }).then((value) => value.messages) : [];
+            const latestAt = latestMessages.filter((message) => ['user', 'assistant'].includes(message.role)).at(-1)?.at;
+            const stillPending = (await listSessionEndCues(cueDir)).some((current) => sessionEndCueId(current) === sessionEndCueId(cue));
+            if (!stillPending || !harnessCueIsIdle(cue, latestAt)) continue;
+          }
+          await saveLocalSummaryDraft(draftDir, id, draft, { replace: Boolean(previousDraft) });
           localSummaryAutoDraftStatus.set(id, 'ready');
           localSummaryAutoDraftAttempts.delete(id);
         } catch {

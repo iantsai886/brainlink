@@ -101,7 +101,7 @@
   "sessions.localSummaryTitle": "Private local summaries",
   "sessions.localSummaryHint": "BrainLink can prepare private drafts on this computer with Ollama. Drafts are unverified and never written to a vault without your review.",
   "sessions.localSummaryEnable": "Enable local AI summary drafts",
-  "sessions.localSummaryAuto": "Automatically draft after a configured Claude Code or Codex session ends (BrainLink must be running)",
+  "sessions.localSummaryAuto": "Automatically draft after Claude Code or Codex ends, or after 30 minutes with no new Harness turn (BrainLink must be running)",
   "sessions.localSummaryModel": "Ollama model name",
   "sessions.localSummarySave": "Save local summary settings",
   "sessions.localSummaryRun": "Make local draft",

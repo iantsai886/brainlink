@@ -5,11 +5,20 @@ import { mkdtemp, mkdir, readdir, readFile, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { spawn } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
-import { recordSessionEndCue, listSessionEndCues, parseSessionEndEvent, matchSessionEndCue } from '../src/sessions/end-cue.mjs';
+import { HARNESS_AUTO_DRAFT_IDLE_MS, harnessCueIsIdle, recordSessionEndCue, listSessionEndCues, parseSessionEndEvent, matchSessionEndCue } from '../src/sessions/end-cue.mjs';
 import { startSetup } from '../src/setup.mjs';
 
 const temp = () => mkdtemp(path.join(tmpdir(), 'brainlink-end-cue-'));
 const hookEvent = (extra = {}) => JSON.stringify({ hook_event_name: 'SessionEnd', session_id: 'fictional-session-17', reason: 'other', cwd: 'C:\\Private\\Northwind', transcript_path: 'C:\\Private\\Northwind\\secret.jsonl', ...extra });
+
+test('Harness automatic drafts wait 30 idle minutes and reject sessions with later activity', () => {
+  const now = Date.parse('2026-10-28T12:00:00.000Z');
+  const cue = { client: 'deepseek-harness', ended_at: new Date(now - HARNESS_AUTO_DRAFT_IDLE_MS - 1000).toISOString() };
+  assert.equal(harnessCueIsIdle(cue, new Date(now - HARNESS_AUTO_DRAFT_IDLE_MS - 5000).toISOString(), now), true);
+  assert.equal(harnessCueIsIdle({ ...cue, ended_at: new Date(now - HARNESS_AUTO_DRAFT_IDLE_MS + 1000).toISOString() }, new Date(now - HARNESS_AUTO_DRAFT_IDLE_MS).toISOString(), now), false, 'a recent completed turn remains a reminder');
+  assert.equal(harnessCueIsIdle(cue, new Date(now - 1000).toISOString(), now), false, 'a later message means work continued');
+  assert.equal(harnessCueIsIdle(cue, undefined, now), false, 'missing activity time fails closed');
+});
 
 test('pending session cue offers a safe copy request for an authorized AI', async () => {
   const html = await readFile(new URL('../ui/index.html', import.meta.url), 'utf8');
