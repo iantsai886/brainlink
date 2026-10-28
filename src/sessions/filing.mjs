@@ -126,6 +126,33 @@ export async function listFiledSessionSummaries(ctx, vaultName, { limit = 100 } 
   return { summaries: results, truncated };
 }
 
+// Used by the opt-in local closeout worker to avoid filing the same imported session twice.
+// It checks only the exact, user-approved destination folder and returns metadata, never note text.
+export async function findFiledSessionSummary(ctx, vaultName, folder, sessionId) {
+  if (typeof sessionId !== 'string' || !/^s_[a-f0-9]{16}$/i.test(sessionId)) throw new Error('Invalid session reference.');
+  if (!ctx.enabled.includes(vaultName)) return null;
+  const allowed = await listSessionFilingFolders(ctx, vaultName);
+  if (!allowed.some((item) => item.path === folder)) return null;
+  const root = vaultRoot(ctx, vaultName);
+  const dir = folder ? safeJoin(root, folder) : root;
+  const expectedSource = `BrainLink session ${sessionId}`;
+  for (const entry of (await readdir(dir, { withFileTypes: true }).catch(() => [])).sort((a, b) => a.name.localeCompare(b.name))) {
+    if (!entry.isFile() || entry.name.startsWith('.') || !entry.name.toLowerCase().endsWith('.md')) continue;
+    const rel = folder ? `${folder}/${entry.name}` : entry.name;
+    if (await isExcludedPath(root, rel)) continue;
+    const full = safeJoin(root, rel);
+    const info = await lstat(full).catch(() => null);
+    if (!info?.isFile() || info.isSymbolicLink() || info.size > 128 * 1024) continue;
+    const raw = await readFile(full, 'utf8');
+    const { meta } = parseFrontmatter(raw);
+    if (metadataValue(meta, 'type').toLowerCase() !== 'episode'
+      || metadataValue(meta, 'source') !== expectedSource
+      || !isPrivateMeta(meta)) continue;
+    return { vault: vaultName, path: rel, title: entry.name.replace(/\.md$/i, ''), status: metadataValue(meta, 'status') || 'unknown' };
+  }
+  return null;
+}
+
 export async function updateFiledSessionSummary(ctx, { vaultName, rel, sessionId, etag, action, summary, now = new Date() }) {
   const opened = await openFiledEpisode(ctx, { vaultName, rel, sessionId, etag });
   const { vault, full, raw, parsed } = opened;

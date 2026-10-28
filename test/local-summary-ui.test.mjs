@@ -7,6 +7,7 @@ const html = await readFile(new URL('../ui/index.html', import.meta.url), 'utf8'
 test('local summary UI explains opt-in, local processing, and review requirements', () => {
   assert.match(html, /id="sess-local-summary-enabled"/);
   assert.match(html, /id="sess-local-summary-auto"/);
+  assert.match(html, /id="sess-local-summary-auto-file"/);
   assert.match(html, /id="sess-local-summary-model"/);
   assert.match(html, /id="sess-local-summary-find"/);
   assert.match(html, /POST', '\/api\/sessions\/local-summary\/models'/);
@@ -17,6 +18,8 @@ test('local summary UI explains opt-in, local processing, and review requirement
   assert.match(html, /sessions\.localSummaryDraftReady/);
   assert.match(html, /sessions\.localSummaryDraftFailed/);
   assert.match(html, /autoDraftOnEnd: \$\('sess-local-summary-enabled'\)\.checked && \$\('sess-local-summary-auto'\)\.checked/);
+  assert.match(html, /autoFileOnEnd: \$\('sess-local-summary-enabled'\)\.checked && \$\('sess-local-summary-auto'\)\.checked && \$\('sess-local-summary-auto-file'\)\.checked/);
+  assert.match(html, /sessions\.localSummaryAutoFileHint/);
   assert.match(html, /sessions_local_summary\?\.enabled \? `<button[^`]*data-sess-summarize/s);
 });
 

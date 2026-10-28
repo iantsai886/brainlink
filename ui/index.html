@@ -246,6 +246,8 @@ main #ready, main #ask-panel, main #brain-panel, main #sessions-panel, main #s-c
       <p class="muted" data-i18n="sessions.localSummaryHint"></p>
       <label class="muted" style="display:flex;flex-direction:row;gap:6px;align-items:center;margin-top:6px"><input type="checkbox" id="sess-local-summary-enabled" style="width:auto"><span data-i18n="sessions.localSummaryEnable"></span></label>
       <label class="muted" style="display:flex;flex-direction:row;gap:6px;align-items:center;margin-top:6px"><input type="checkbox" id="sess-local-summary-auto" style="width:auto"><span data-i18n="sessions.localSummaryAuto"></span></label>
+      <label class="muted" style="display:flex;flex-direction:row;gap:6px;align-items:center;margin-top:6px"><input type="checkbox" id="sess-local-summary-auto-file" style="width:auto"><span data-i18n="sessions.localSummaryAutoFile"></span></label>
+      <p class="muted" data-i18n="sessions.localSummaryAutoFileHint"></p>
       <div class="row" style="margin-top:6px"><label><span data-i18n="sessions.localSummaryModel"></span><input id="sess-local-summary-model" list="sess-local-summary-model-options" maxlength="160" placeholder="qwen2.5:3b"><datalist id="sess-local-summary-model-options"></datalist></label><button class="secondary" id="sess-local-summary-find" data-i18n="sessions.localSummaryFind"></button><button class="secondary" id="sess-local-summary-save" data-i18n="sessions.localSummarySave"></button></div>
     </div>
     <div class="row" style="margin-bottom:10px"><label class="muted" style="display:flex;flex-direction:row;gap:6px;align-items:center"><input type="checkbox" id="sess-private" style="width:auto"><span data-i18n="sessions.showPrivate"></span></label></div>
@@ -715,7 +717,8 @@ async function loadSessionEndCues() {
     const { cues } = await api('POST', '/api/sessions/end-cues', {});
     const rows = cues.map((cue) => {
       const draftStatus = cue.summary_ready ? `<span class="pill on">${esc(t('sessions.localSummaryDraftReady'))}</span>` : cue.summary_failed ? `<span class="muted">${esc(t('sessions.localSummaryDraftFailed'))}</span>` : '';
-      const actions = cue.session_ref ? `${S.sessions_local_summary?.enabled ? `<button class="secondary" data-sess-summarize="${esc(cue.session_ref)}">${esc(t(cue.summary_ready ? 'sessions.localSummaryReview' : 'sessions.localSummaryRun'))}</button>` : ''}<button class="primary" data-sess-file="${esc(cue.session_ref)}">${esc(t('sessions.fileSummary'))}</button><button class="link" data-cue-review-request="${esc(cue.session_ref)}">${esc(t('sessions.copyReviewRequest'))}</button>` : `<span class="muted">${esc(t('sessions.endedSessionNotImported'))}</span>`;
+      const autoFileStatus = cue.auto_file_status === 'needs_destination' ? `<span class="muted">${esc(t('sessions.localSummaryAutoFileNeedsDestination'))}</span>` : cue.auto_file_status === 'failed' ? `<span class="muted">${esc(t('sessions.localSummaryAutoFileFailed'))}</span>` : '';
+      const actions = cue.session_ref ? `${S.sessions_local_summary?.enabled ? `<button class="secondary" data-sess-summarize="${esc(cue.session_ref)}">${esc(t(cue.summary_ready ? 'sessions.localSummaryReview' : 'sessions.localSummaryRun'))}</button>` : ''}${cue.summary_filed ? `<span class="pill on">${esc(t('sessions.localSummaryAutoFiled'))}</span>` : `<button class="primary" data-sess-file="${esc(cue.session_ref)}">${esc(t('sessions.fileSummary'))}</button>`}${autoFileStatus}<button class="link" data-cue-review-request="${esc(cue.session_ref)}">${esc(t('sessions.copyReviewRequest'))}</button>` : `<span class="muted">${esc(t('sessions.endedSessionNotImported'))}</span>`;
       const cueKind = cue.reason === 'turn-completed' ? `<span class="pill">${esc(t('sessions.harnessTurnComplete'))}</span>` : '';
       return `<div class="row"><span>${esc(clientLabel(cue.client))} · ${esc(new Date(cue.ended_at).toLocaleString(LOCALE))} ${cueKind} ${draftStatus}</span>${actions}<button class="link" data-cue-dismiss="${esc(cue.id)}">${esc(t('sessions.dismissCue'))}</button></div>`;
     }).join('');
@@ -1267,9 +1270,11 @@ async function load() {
   $('sess-share-full').checked = Boolean(S.sessions_sharing?.shareFullText);
   $('sess-local-summary-enabled').checked = Boolean(S.sessions_local_summary?.enabled);
   $('sess-local-summary-auto').checked = Boolean(S.sessions_local_summary?.autoDraftOnEnd);
+  $('sess-local-summary-auto-file').checked = Boolean(S.sessions_local_summary?.autoFileOnEnd);
   $('sess-local-summary-model').value = S.sessions_local_summary?.model || '';
   $('sess-local-summary-model').disabled = !$('sess-local-summary-enabled').checked;
   $('sess-local-summary-auto').disabled = !$('sess-local-summary-enabled').checked;
+  $('sess-local-summary-auto-file').disabled = !$('sess-local-summary-enabled').checked || !$('sess-local-summary-auto').checked;
   $('sess-share-full').disabled = !$('sess-share-summaries').checked;
   // P1a: sessions were imported (or logged) but stay invisible to every connected AI because
   // sharing is off -- say so plainly, with one button that turns the existing switch on, instead
@@ -1694,7 +1699,15 @@ $('sess-share-full').onchange = () => act(async () => {
   S.sessions_sharing = r.sessions;
   toast(t('sessions.shareToastSaved'));
 });
-$('sess-local-summary-enabled').onchange = () => { $('sess-local-summary-model').disabled = !$('sess-local-summary-enabled').checked; $('sess-local-summary-auto').disabled = !$('sess-local-summary-enabled').checked; if (!$('sess-local-summary-enabled').checked) $('sess-local-summary-auto').checked = false; };
+const updateLocalSummaryControls = () => {
+  $('sess-local-summary-model').disabled = !$('sess-local-summary-enabled').checked;
+  $('sess-local-summary-auto').disabled = !$('sess-local-summary-enabled').checked;
+  $('sess-local-summary-auto-file').disabled = !$('sess-local-summary-enabled').checked || !$('sess-local-summary-auto').checked;
+  if (!$('sess-local-summary-enabled').checked) { $('sess-local-summary-auto').checked = false; $('sess-local-summary-auto-file').checked = false; }
+  if (!$('sess-local-summary-auto').checked) $('sess-local-summary-auto-file').checked = false;
+};
+$('sess-local-summary-enabled').onchange = updateLocalSummaryControls;
+$('sess-local-summary-auto').onchange = updateLocalSummaryControls;
 $('sess-local-summary-find').onclick = () => act(async () => {
   const result = await api('POST', '/api/sessions/local-summary/models', {});
   const options = $('sess-local-summary-model-options');
@@ -1705,7 +1718,7 @@ $('sess-local-summary-find').onclick = () => act(async () => {
   toast(t('sessions.localSummaryFound', { count: result.models.length }));
 });
 $('sess-local-summary-save').onclick = () => act(async () => {
-  const result = await api('POST', '/api/sessions/local-summary/settings', { enabled: $('sess-local-summary-enabled').checked, model: $('sess-local-summary-model').value, autoDraftOnEnd: $('sess-local-summary-enabled').checked && $('sess-local-summary-auto').checked });
+  const result = await api('POST', '/api/sessions/local-summary/settings', { enabled: $('sess-local-summary-enabled').checked, model: $('sess-local-summary-model').value, autoDraftOnEnd: $('sess-local-summary-enabled').checked && $('sess-local-summary-auto').checked, autoFileOnEnd: $('sess-local-summary-enabled').checked && $('sess-local-summary-auto').checked && $('sess-local-summary-auto-file').checked });
   S.sessions_local_summary = result.settings;
   toast(t('sessions.localSummarySaved'));
 });

@@ -35,9 +35,9 @@ import { snapshotSettings, chooseSnapshot, suggestSnapshotFolder, clearSnapshot,
 import { listHandoffs } from './writes.mjs';
 import { backupOnce, verifyBackup, restoreBackupToEmpty, loadBackupStatus, saveBackupStatus, pruneBackups, listVerifiedBackups } from './backup.mjs';
 import { createOrReadBackupRecoveryKey, parseBackupKey, requireBackupKey } from './backup-key.mjs';
-import { fileSessionSummary, readFiledSessionSummary, updateFiledSessionSummary, listFiledSessionSummaries } from './sessions/filing.mjs';
+import { fileSessionSummary, readFiledSessionSummary, updateFiledSessionSummary, listFiledSessionSummaries, findFiledSessionSummary } from './sessions/filing.mjs';
 import { isStartupEnabled, setStartupEnabled } from './startup.mjs';
-import { recommendSessionVault } from './sessions/routing.mjs';
+import { recommendSessionVault, exactSessionFilingDestination } from './sessions/routing.mjs';
 import { harnessCueIsIdle, listSessionEndCues, dismissSessionEndCue, sessionEndCueId, matchSessionEndCue } from './sessions/end-cue.mjs';
 import { listSessionFilingFolders, suggestedSessionFolder } from './sessions/folders.mjs';
 import { generateLocalSessionSummary, LOCAL_OLLAMA_URL, readLocalSummaryDraft, saveLocalSummaryDraft, validLocalModelName } from './sessions/local-summary.mjs';
@@ -240,6 +240,7 @@ export async function startSetup(opts = {}) {
   let localSummaryAutoDraftRunning = false;
   const localSummaryAutoDraftAttempts = new Map();
   const localSummaryAutoDraftStatus = new Map();
+  const localSummaryAutoFileStatus = new Map();
   const localSummaryAutoDraftTimer = setInterval(async () => {
     if (localSummaryAutoDraftRunning) return;
     localSummaryAutoDraftRunning = true;
@@ -259,12 +260,33 @@ export async function startSetup(opts = {}) {
         if (!id) continue;
         const draftDir = path.join(appHome(env), 'sessions', 'auto-summary');
         const previousDraft = await readLocalSummaryDraft(draftDir, id);
+        const fileDraft = async (draft) => {
+          if (!settings.autoFileOnEnd || !draft) return false;
+          const { session } = await store.readSession(id, { limit: 1 });
+          const destination = exactSessionFilingDestination(session, cfg);
+          if (!destination) { localSummaryAutoFileStatus.set(id, 'needs_destination'); return false; }
+          const ctx = localContext(cfg, { ...env, BRAINLINK_AI_PLATFORM: 'BrainLink Local' });
+          const existing = await findFiledSessionSummary(ctx, destination.vault, destination.folder, id);
+          if (existing) { localSummaryAutoFileStatus.set(id, 'filed'); return true; }
+          const summarySession = { ...session, summary: draft.summary, local_summary_model: draft.model, local_summary_generated_at: draft.generated_at };
+          const result = await fileSessionSummary(ctx, summarySession, destination.vault, true,
+            { ai_platform: 'BrainLink Local', agent_or_role: 'automatic local session closeout', session_or_task_id: id }, destination.folder);
+          if (!result?.written) throw new Error('The session summary note was not written.');
+          localSummaryAutoFileStatus.set(id, 'filed');
+          return true;
+        };
         if (cue.client === 'deepseek-harness') {
           const { messages } = await store.readSession(id, { limit: 1000 });
           const latest = messages.filter((message) => ['user', 'assistant'].includes(message.role)).at(-1)?.at;
           if (!harnessCueIsIdle(cue, latest)) continue;
-          if (previousDraft && Date.parse(previousDraft.generated_at) >= Date.parse(cue.ended_at)) continue;
-        } else if (previousDraft) continue;
+          if (previousDraft && Date.parse(previousDraft.generated_at) >= Date.parse(cue.ended_at)) {
+            try { await fileDraft(previousDraft); } catch { localSummaryAutoFileStatus.set(id, 'failed'); }
+            continue;
+          }
+        } else if (previousDraft) {
+          try { await fileDraft(previousDraft); } catch { localSummaryAutoFileStatus.set(id, 'failed'); }
+          continue;
+        }
         const lastAttempt = localSummaryAutoDraftAttempts.get(id) || 0;
         if (Date.now() - lastAttempt < 10 * 60_000) continue;
         localSummaryAutoDraftAttempts.set(id, Date.now());
@@ -284,6 +306,7 @@ export async function startSetup(opts = {}) {
           await saveLocalSummaryDraft(draftDir, id, draft, { replace: Boolean(previousDraft) });
           localSummaryAutoDraftStatus.set(id, 'ready');
           localSummaryAutoDraftAttempts.delete(id);
+          try { await fileDraft(draft); } catch { localSummaryAutoFileStatus.set(id, 'failed'); }
         } catch {
           localSummaryAutoDraftStatus.set(id, 'failed');
         }
@@ -1629,6 +1652,7 @@ export async function startSetup(opts = {}) {
       return setSessionHook(b.client, b.enabled, { home, env, os });
     },
     'POST /api/sessions/end-cues': async () => {
+      const cfg = await loadConfig(file);
       const cues = (await listSessionEndCues(path.join(appHome(env), 'sessions', 'end-cues'))).slice(0, 100);
       await sessions.refresh();
       const store = await sessions.store();
@@ -1636,8 +1660,20 @@ export async function startSetup(opts = {}) {
       return { cues: await Promise.all(cues.map(async (cue) => {
         const id = matchSessionEndCue(cue, imported);
         const summary_ready = Boolean(id && await readLocalSummaryDraft(path.join(appHome(env), 'sessions', 'auto-summary'), id));
+        let summary_filed = id ? localSummaryAutoFileStatus.get(id) === 'filed' : false;
+        if (id && !summary_filed && cfg.sessions.localSummary.autoFileOnEnd) {
+          try {
+            const { session } = await store.readSession(id, { limit: 1 });
+            const destination = exactSessionFilingDestination(session, cfg);
+            if (!destination && summary_ready) localSummaryAutoFileStatus.set(id, 'needs_destination');
+            else summary_filed = Boolean(await findFiledSessionSummary(localContext(cfg, { ...env, BRAINLINK_AI_PLATFORM: 'BrainLink Local' }), destination.vault, destination.folder, id));
+            if (summary_filed) localSummaryAutoFileStatus.set(id, 'filed');
+          } catch { /* Keep status unknown when the local index or destination cannot be read. */ }
+        }
         return { id: sessionEndCueId(cue), client: cue.client, ended_at: cue.ended_at, reason: cue.reason || null, session_ref: id,
-          summary_ready, summary_failed: id ? localSummaryAutoDraftStatus.get(id) === 'failed' : false };
+          summary_ready, summary_failed: id ? localSummaryAutoDraftStatus.get(id) === 'failed' : false,
+          summary_filed,
+          auto_file_status: id ? (localSummaryAutoFileStatus.get(id) || null) : null };
       })) };
     },
     'POST /api/sessions/end-cues/dismiss': (b) => dismissSessionEndCue(path.join(appHome(env), 'sessions', 'end-cues'), b.id),
@@ -1740,8 +1776,9 @@ export async function startSetup(opts = {}) {
       const enabled = typeof b.enabled === 'boolean' ? b.enabled : cfg.sessions.localSummary.enabled;
       const model = typeof b.model === 'string' ? b.model.trim() : cfg.sessions.localSummary.model;
       const autoDraftOnEnd = enabled && typeof b.autoDraftOnEnd === 'boolean' ? b.autoDraftOnEnd : enabled ? cfg.sessions.localSummary.autoDraftOnEnd : false;
+      const autoFileOnEnd = enabled && autoDraftOnEnd && typeof b.autoFileOnEnd === 'boolean' ? b.autoFileOnEnd : enabled && autoDraftOnEnd ? cfg.sessions.localSummary.autoFileOnEnd : false;
       if (enabled && (!validLocalModelName(model) || !model)) throw new Error('Enter a valid local Ollama model name before enabling summaries.');
-      const next = { ...cfg, sessions: { ...cfg.sessions, localSummary: { enabled, model, autoDraftOnEnd } } };
+      const next = { ...cfg, sessions: { ...cfg.sessions, localSummary: { enabled, model, autoDraftOnEnd, autoFileOnEnd } } };
       await saveConfig(next, file);
       localSummaryAutoDraftKeepsAlive = Boolean(enabled && autoDraftOnEnd);
       touch();
