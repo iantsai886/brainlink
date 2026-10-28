@@ -43,6 +43,8 @@ test('every native installer bundles all production dependencies and portable Br
   assert.match(windowsInstaller, /^#define ProductStartupLauncher "BrainLink QA Smoke Background\.vbs"$/m, 'the smoke installer must use its own startup launcher name');
   assert.match(installedWindowsSmoke, /TcpListener/, 'the installed-app smoke must use a port separate from a running BrainLink');
   assert.match(installedWindowsSmoke, /Join-Path \$TestRoot "BrainLink-QA-Smoke-Setup-\$Version\.exe"/, 'the smoke installer must live in its unique temporary directory');
+  assert.match(installedWindowsSmoke, /if \(\$SkipCompile\) \{ \$ReusableInstaller \} else/, 'skip-compile mode must reuse the existing QA artifact');
+  assert.match(installedWindowsSmoke, /Join-Path \$Root "dist\\BrainLink-QA-Smoke-Setup-\$Version\.exe"/, 'the reusable installer must keep the existing QA artifact path');
   assert.match(installedWindowsSmoke, /"\/O\$TestRoot"/, 'the compiler must not overwrite a shared QA installer artifact');
   assert.match(installedWindowsSmoke, /setup-instance\.json/, 'the smoke must verify it started its own Setup process');
   assert.match(installedWindowsSmoke, /CreateShortcut\(\$StartMenuShortcut\)/, 'the smoke must read the installed Start menu shortcut settings');

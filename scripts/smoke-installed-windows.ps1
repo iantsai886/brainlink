@@ -25,7 +25,8 @@ $StartMenuShortcut = Join-Path $StartMenuFolder 'BrainLink QA Smoke.lnk'
 $StartupFolder = Join-Path $env:APPDATA 'Microsoft\Windows\Start Menu\Programs\Startup'
 $StartupFile = Join-Path $StartupFolder 'BrainLink QA Smoke Background.vbs'
 $StartupMarker = "' BrainLink managed startup launcher v1"
-$Installer = Join-Path $TestRoot "BrainLink-QA-Smoke-Setup-$Version.exe"
+$ReusableInstaller = Join-Path $Root "dist\BrainLink-QA-Smoke-Setup-$Version.exe"
+$Installer = if ($SkipCompile) { $ReusableInstaller } else { Join-Path $TestRoot "BrainLink-QA-Smoke-Setup-$Version.exe" }
 $OriginalPathExists = Test-Path 'HKCU:\Environment'
 $OriginalPath = if ($OriginalPathExists) { (Get-ItemProperty 'HKCU:\Environment' -Name Path -ErrorAction SilentlyContinue).Path } else { $null }
 $OldBrainLinkHome = $env:BRAINLINK_HOME
@@ -55,7 +56,7 @@ try {
     $env:BRAINLINK_VERSION = $Version
     & $Iscc '/DBRAINLINK_SMOKE_TEST' "/O$TestRoot" (Join-Path $Root 'packaging\windows\BrainLink.iss') | Out-Host
     if ($LASTEXITCODE -ne 0 -or -not (Test-Path -LiteralPath $Installer)) { throw 'Could not compile the isolated QA installer.' }
-  } elseif (-not (Test-Path -LiteralPath $Installer)) { throw 'The isolated QA installer does not exist; omit -SkipCompile to build it.' }
+  } elseif (-not (Test-Path -LiteralPath $Installer)) { throw "The reusable QA installer does not exist: $Installer" }
 
   $Installed = $true
   Invoke-HiddenAndWait $Installer @('/VERYSILENT', '/SUPPRESSMSGBOXES', '/NORESTART', "/DIR=`"$InstallDir`"", '/GROUP="BrainLink QA Smoke"')
