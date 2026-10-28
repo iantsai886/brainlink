@@ -22,6 +22,9 @@ $BrainLinkHome = Join-Path $TestRoot 'home'
 $DesktopShortcut = Join-Path ([Environment]::GetFolderPath('Desktop')) 'BrainLink QA Smoke.lnk'
 $StartMenuFolder = Join-Path $env:APPDATA 'Microsoft\Windows\Start Menu\Programs\BrainLink QA Smoke'
 $StartMenuShortcut = Join-Path $StartMenuFolder 'BrainLink QA Smoke.lnk'
+$StartupFolder = Join-Path $env:APPDATA 'Microsoft\Windows\Start Menu\Programs\Startup'
+$StartupFile = Join-Path $StartupFolder 'BrainLink QA Smoke Background.vbs'
+$StartupMarker = "' BrainLink managed startup launcher v1"
 $Installer = Join-Path $Root "dist\BrainLink-QA-Smoke-Setup-$Version.exe"
 $OriginalPathExists = Test-Path 'HKCU:\Environment'
 $OriginalPath = if ($OriginalPathExists) { (Get-ItemProperty 'HKCU:\Environment' -Name Path -ErrorAction SilentlyContinue).Path } else { $null }
@@ -32,6 +35,8 @@ $OldNoOpen = $env:BRAINLINK_NO_OPEN
 $Process = $null
 $Installed = $false
 $Success = $false
+$StartupFileCreated = $false
+$StartupFolderExisted = Test-Path -LiteralPath $StartupFolder -PathType Container
 
 function Invoke-HiddenAndWait([string]$FilePath, [string[]]$Arguments) {
   $process = Start-Process -FilePath $FilePath -ArgumentList $Arguments -PassThru -Wait -WindowStyle Hidden
@@ -41,7 +46,11 @@ function Invoke-HiddenAndWait([string]$FilePath, [string[]]$Arguments) {
 try {
   if (Test-Path -LiteralPath $DesktopShortcut) { throw 'A BrainLink QA Smoke desktop shortcut already exists; refusing to replace it.' }
   if (Test-Path -LiteralPath $StartMenuFolder) { throw 'A BrainLink QA Smoke Start menu folder already exists; refusing to replace it.' }
+  if (Test-Path -LiteralPath $StartupFile) { throw 'A BrainLink QA Smoke startup file already exists; refusing to replace it.' }
   New-Item -ItemType Directory -Path $TestRoot -Force | Out-Null
+  New-Item -ItemType Directory -Path $StartupFolder -Force | Out-Null
+  Set-Content -LiteralPath $StartupFile -Value $StartupMarker -NoNewline
+  $StartupFileCreated = $true
   if (-not $SkipCompile) {
     $env:BRAINLINK_VERSION = $Version
     & $Iscc '/DBRAINLINK_SMOKE_TEST' (Join-Path $Root 'packaging\windows\BrainLink.iss') | Out-Host
@@ -109,6 +118,7 @@ try {
       if (Test-Path -LiteralPath $InstallDir) { throw 'QA uninstaller left its isolated install directory behind.' }
       if (Test-Path -LiteralPath $DesktopShortcut) { throw 'QA uninstaller left the desktop shortcut behind.' }
       if (Test-Path -LiteralPath $StartMenuFolder) { throw 'QA uninstaller left the Start menu shortcuts behind.' }
+      if (Test-Path -LiteralPath $StartupFile) { throw 'QA uninstaller left its owned start-at-sign-in entry behind.' }
       if (-not (Test-Path -LiteralPath (Join-Path $BrainLinkHome 'qa-preserve.txt'))) { throw 'Uninstall removed BrainLink user data from the isolated home.' }
       $currentPath = if (Test-Path 'HKCU:\Environment') { (Get-ItemProperty 'HKCU:\Environment' -Name Path -ErrorAction SilentlyContinue).Path } else { $null }
       if ($currentPath -ne $OriginalPath) { throw 'Uninstall did not restore the user PATH exactly.' }
@@ -119,6 +129,13 @@ try {
     $env:BRAINLINK_VERSION = $OldBrainLinkVersion
     $env:BRAINLINK_SETUP_PORT = $OldSetupPort
     $env:BRAINLINK_NO_OPEN = $OldNoOpen
+  }
+  if ($StartupFileCreated -and (Test-Path -LiteralPath $StartupFile)) {
+    if ((Get-Content -LiteralPath $StartupFile -Raw) -eq $StartupMarker) { Remove-Item -LiteralPath $StartupFile -Force }
+    else { Write-Warning 'The QA startup file changed during testing and was preserved.' }
+  }
+  if (-not $StartupFolderExisted -and (Test-Path -LiteralPath $StartupFolder -PathType Container)) {
+    Remove-Item -LiteralPath $StartupFolder -ErrorAction SilentlyContinue
   }
   if ($Success) { Remove-Item -LiteralPath $TestRoot -Recurse -Force -ErrorAction SilentlyContinue }
   else { Write-Warning "QA logs preserved for diagnosis at $TestRoot" }

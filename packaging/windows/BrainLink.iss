@@ -8,6 +8,7 @@
 #define ProductDir "{localappdata}\Programs\BrainLink-QA-Smoke"
 #define ProductGroup "BrainLink QA Smoke"
 #define ProductShortcut "BrainLink QA Smoke"
+#define ProductStartupLauncher "BrainLink QA Smoke Background.vbs"
 #define ProductOutput "BrainLink-QA-Smoke-Setup-" + AppVersion
 #else
 #define ProductAppId "{{6F2B8E4C-9A51-4C1E-B7D3-2B1A9E5C7F40}"
@@ -15,6 +16,7 @@
 #define ProductDir "{localappdata}\Programs\BrainLink"
 #define ProductGroup "BrainLink"
 #define ProductShortcut "BrainLink"
+#define ProductStartupLauncher "BrainLink Background.vbs"
 #define ProductOutput "BrainLink-Setup-" + AppVersion
 #endif
 
@@ -117,7 +119,23 @@ begin
   end;
 end;
 
+procedure RemoveBrainLinkStartupLauncher;
+var
+  StartupFile: String;
+  Contents: AnsiString;
+begin
+  StartupFile := ExpandConstant('{userappdata}\Microsoft\Windows\Start Menu\Programs\Startup\{#ProductStartupLauncher}');
+  if FileExists(StartupFile) and LoadStringFromFile(StartupFile, Contents) then begin
+    if Pos('BrainLink managed startup launcher v1', Contents) > 0 then begin
+      if not DeleteFile(StartupFile) then Log('Could not remove the BrainLink startup launcher.');
+    end;
+  end;
+end;
+
 procedure CurUninstallStepChanged(CurUninstallStep: TUninstallStep);
 begin
-  if CurUninstallStep = usPostUninstall then RemoveBrainLinkFromUserPath;
+  if CurUninstallStep = usPostUninstall then begin
+    RemoveBrainLinkFromUserPath;
+    RemoveBrainLinkStartupLauncher;
+  end;
 end;

@@ -39,6 +39,8 @@ test('every native installer bundles all production dependencies and portable Br
   assert.match(pkg.scripts['smoke:installed:win'], /smoke-installed-windows\.ps1/, 'Windows installed-app acceptance must have a repeatable command');
   assert.match(windowsInstaller, /BRAINLINK_SMOKE_TEST/, 'the test build must use an isolated Inno Setup identity');
   assert.match(windowsInstaller, /BrainLink QA Smoke/, 'the test installer must use isolated product and shortcut names');
+  assert.match(windowsInstaller, /^#define ProductStartupLauncher "BrainLink Background\.vbs"$/m, 'the production uninstaller must target the real startup launcher name');
+  assert.match(windowsInstaller, /^#define ProductStartupLauncher "BrainLink QA Smoke Background\.vbs"$/m, 'the smoke installer must use its own startup launcher name');
   assert.match(installedWindowsSmoke, /TcpListener/, 'the installed-app smoke must use a port separate from a running BrainLink');
   assert.match(installedWindowsSmoke, /setup-instance\.json/, 'the smoke must verify it started its own Setup process');
   assert.match(installedWindowsSmoke, /CreateShortcut\(\$StartMenuShortcut\)/, 'the smoke must read the installed Start menu shortcut settings');
@@ -55,6 +57,9 @@ test('every native installer bundles all production dependencies and portable Br
   assert.match(windowsInstaller, /^AppName=\{#ProductName\}$/m, 'the Inno installer app name should use the selected production or smoke identity');
   assert.match(windowsInstaller, /CurUninstallStepChanged\(CurUninstallStep: TUninstallStep\)/, 'Windows uninstaller must clean up its PATH entry');
   assert.match(windowsInstaller, /SamePathEntry\(Segment, Target\)/, 'Windows PATH cleanup must remove only the BrainLink entry');
+  assert.match(windowsInstaller, /RemoveBrainLinkStartupLauncher/, 'Windows uninstall must remove BrainLink-owned sign-in startup');
+  assert.match(windowsInstaller, /BrainLink managed startup launcher v1/, 'Windows uninstall must check the ownership marker before deleting startup');
+  assert.match(installedWindowsSmoke, /owned start-at-sign-in entry behind/, 'installed-app smoke must verify owned startup cleanup');
   assert.match(windowsInstaller, /\{autodesktop\}\\\{#ProductShortcut\}/, 'Windows install must add a desktop shortcut that opens Setup');
   assert.match(windowsInstaller, /Filename: "\{sys\}\\wscript\.exe"; Parameters: """\{app\}\\BrainLink\.vbs"""/, 'Windows desktop shortcut must use the quiet Setup launcher');
   const nsisInstaller = await read('packaging/windows/BrainLink.nsi');
