@@ -5,6 +5,10 @@ GitHub repository: `iantsai886/brainlink`
 Branch: `integration/brainlink-retrieval-evaluation` (integrates profile-scoped GitHub, RSI discovery, and independent retrieval evaluation)
 Code baseline: development target `1.2.8`, with `package.json` as the canonical version source. The `v1.2.7` tag belongs to the separate `wip/v1.2.7` release line; this branch continues from the full-source `main` history and does not move or recreate that tag.
 
+### Rechecked client connection and fictional handoff (2026-10-28)
+
+At source commit `b017126dc52caf3b305706eb23d0d8d812ca0817` on Windows/Node.js 24.22.1, `npm run smoke:claude-code` passed: the installed Claude Code CLI started BrainLink in a temporary profile and reported it connected. `npm run smoke:codex-cli` passed: the installed Codex CLI recognized the temporary BrainLink entry as enabled, but reported auth `Unsupported`; it made no model or tool call. `node --import ./test/_preload.mjs --test --test-concurrency=1 test/cross-client-handoff.test.mjs` passed 2/2 using fictional data, including private-source filtering, Codex pickup and acknowledgement, plus invalid Git checkpoint rejection. This verifies local client config recognition and the simulated handoff protocol only. A real model-driven Claude-to-Codex handoff, live DeepSeek Harness connection, and user-profile acceptance remain unverified.
+
 ### Corrected DeepSeek Harness host status (2026-10-28)
 
 Rechecked this Windows host: `C:\Users\iants\AppData\Local\Programs\DeepSeek Harness\DeepSeek Harness.exe` and its version file exist; the app reports `44.7.0`. A `dsh` command is not available on `PATH`. This corrects the older statement below that the app was not installed. BrainLink's Harness MCP connection and session importer still have not been exercised inside a live Harness profile; no Harness profile or private session data was changed or inspected for this check. Keep live tool use and cross-client closeout marked unverified.
