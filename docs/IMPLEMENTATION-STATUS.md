@@ -945,3 +945,7 @@ The focused packaging test passed 2/2; PowerShell parsing and `git diff --check`
 ### Full regression after installed Windows shortcut work (2026-10-28)
 
 On Windows with Node.js 24.22.1, `npm run test:all` passed on exact source commit `b5688c09e377255ae464a7c3f0a52658cd3d1b53`: core 510 total (504 passed, 0 failed, 6 platform/privilege skips) and UI 29/29. Coverage includes the Windows packaging guards, vault and memory permissions, graph privacy/review, scheduled backup and restore, session capture and handoff, GitHub sync, Harness connectors, and governed RSI workflows. This is local automated evidence; it does not prove hosted CI, live multi-model handoff, customer upgrade safety, user acceptance, code signing, or release readiness.
+
+### Run the isolated Windows shortcut smoke in hosted CI (2026-10-28)
+
+Commit `5cd309d` adds `npm run smoke:installed:win` to the Windows package job, after the staged runtime check and before the existing production installer exercise. The packaging workflow assertion passed 2/2 locally. The workflow change is pushed; its GitHub-hosted result has not been verified in this environment, so it is not counted as a hosted CI pass.
