@@ -291,6 +291,7 @@
   "connect.permissionsBtn": "Choose access",
   "connect.permissionsTitle": "Connect {client}",
   "connect.profileHint": "Choose which Twin profile this AI belongs to, then allow access only to the vaults and actions it needs.",
+  "connect.readProposePreset": "Select read and propose",
   "connect.profileLabel": "Twin profile",
   "connect.cancel": "Cancel",
   "connect.search": "Search notes",

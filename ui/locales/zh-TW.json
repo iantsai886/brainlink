@@ -291,6 +291,7 @@
   "connect.permissionsBtn": "選擇權限",
   "connect.permissionsTitle": "連接 {client}",
   "connect.profileHint": "選擇這個 AI 所屬的 Twin，再只開放它需要的筆記庫與操作權限。",
+  "connect.readProposePreset": "選取讀取與提議權限",
   "connect.profileLabel": "Twin 設定檔",
   "connect.cancel": "取消",
   "connect.search": "搜尋筆記",

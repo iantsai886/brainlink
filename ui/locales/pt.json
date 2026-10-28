@@ -291,6 +291,7 @@
   "connect.permissionsBtn": "Escolher acesso",
   "connect.permissionsTitle": "Ligar {client}",
   "connect.profileHint": "Escolha o perfil Twin desta IA e permita apenas o acesso aos cadernos e ações necessários.",
+  "connect.readProposePreset": "Selecionar leitura e proposta",
   "connect.profileLabel": "Perfil Twin",
   "connect.cancel": "Cancelar",
   "connect.search": "Pesquisar notas",

@@ -1685,11 +1685,12 @@ function renderPresetConnectOptions() {
   const labels = [['search','connect.search','semantic'],['read_note','connect.readNote','semantic'],['read_session','connect.readSession','episodic'],['log_session','twinProfiles.operation.log_session','episodic'],['propose_note','twinProfiles.operation.propose_note','semantic'],['handoff_read','connect.readHandoffs','working'],['write_handoff','connect.sendHandoffs','working']];
   $('preset-vault-list').innerHTML = vaults.length ? vaults.map((grant, index) => {
     const available = labels.filter(([action]) => !['handoff_read','write_handoff'].includes(action) || S.handoff?.vault === grant.name);
+    const canPropose = grant.access === 'propose' && profile.memory_policy?.semantic === true;
     return `<div class="card"><b>${esc(grant.name)}</b><div class="row" style="margin-top:7px">${available.map(([action,key,memory]) => {
       const needsPropose = ['propose_note','write_handoff'].includes(action);
       const allowed = twinActionMemoryAllowed(action, profile.memory_policy) && (!needsPropose || grant.access === 'propose');
       return `<label class="muted" style="display:flex;flex-direction:row;align-items:center;gap:5px"><input type="checkbox" data-preset-vault="${esc(grant.name)}" value="${action}" ${index === 0 && ['search','read_note'].includes(action) ? 'checked' : ''} ${allowed ? '' : 'disabled'} style="width:auto">${esc(t(key))}</label>`;
-    }).join('')}</div></div>`;
+    }).join('')}</div>${canPropose ? `<button type="button" data-preset-read-propose="${esc(grant.name)}">${esc(t('connect.readProposePreset'))}</button>` : ''}</div>`;
   }).join('') : `<p class="muted">${esc(t('connect.noVault'))}</p>`;
   $('preset-connect-summary').textContent = t('connect.permissionSummary');
   $('preset-connect-submit').disabled = !vaults.length;
@@ -1704,6 +1705,15 @@ function openPresetConnect(clientId) {
   $('preset-profile').focus();
 }
 $('preset-profile').onchange = renderPresetConnectOptions;
+$('preset-vault-list').addEventListener('click', (event) => {
+  const button = event.target.closest('[data-preset-read-propose]');
+  if (!button) return;
+  const vault = button.dataset.presetReadPropose;
+  document.querySelectorAll(`[data-preset-vault="${CSS.escape(vault)}"]`).forEach((input) => {
+    input.checked = ['search', 'read_note', 'propose_note'].includes(input.value);
+  });
+  $('preset-connect-submit').disabled = !document.querySelector('[data-preset-vault]:checked');
+});
 $('preset-vault-list').onchange = () => {
   $('preset-connect-submit').disabled = !document.querySelector('[data-preset-vault]:checked');
 };
