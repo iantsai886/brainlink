@@ -5,6 +5,10 @@ GitHub repository: `iantsai886/brainlink`
 Branch: `integration/brainlink-retrieval-evaluation` (integrates profile-scoped GitHub, RSI discovery, and independent retrieval evaluation)
 Code baseline: development target `1.2.8`, with `package.json` as the canonical version source. The `v1.2.7` tag belongs to the separate `wip/v1.2.7` release line; this branch continues from the full-source `main` history and does not move or recreate that tag.
 
+### Client connection status and Harness lifecycle research (2026-10-28, source `3832ba1`)
+
+On this Windows host, `npm run smoke:claude-code` passed: Claude Code started BrainLink and reported the local MCP connection healthy. `npm run smoke:codex-cli` passed: Codex CLI recognized the generated entry, but reported authentication as `Unsupported`; this is configuration recognition only. Neither smoke invoked a model or called a BrainLink tool. DeepSeek Harness is not installed or on PATH, so its configured connector has not been live-tested. The Harness lifecycle boundary and official documentation references are recorded in [session filing](SESSION-FILING.md#deepseek-harness-lifecycle-boundary-2026-10-28). No cross-client continuation or end-to-end user closeout is claimed.
+
 ### Cross-vault source references in scoped handoffs (2026-10-28)
 
 Structured handoffs now accept source references as `path/to/note.md` within the mailbox vault or `Vault Name::path/to/note.md` across vaults. BrainLink checks each reference through the sender's `read_note` permission before saving; private, excluded, missing, and cross-Twin sources fail with one generic error. Cross-vault references are recorded as text because a separate vault cannot be represented as a reliable Obsidian wikilink. A dedicated shared mailbox no longer prevents the procedural guide from being read by an otherwise authorized scoped agent. The fictional regression uses separately tokened Company and Personal agents and confirms private-note and cross-Twin source isolation.
