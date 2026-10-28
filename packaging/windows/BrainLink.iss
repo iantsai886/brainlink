@@ -5,7 +5,7 @@
 
 [Setup]
 AppId={{6F2B8E4C-9A51-4C1E-B7D3-2B1A9E5C7F40}
-AppName=BrainLink MCP
+AppName=BrainLink
 AppVersion={#AppVersion}
 AppPublisher=Iango
 DefaultDirName={localappdata}\Programs\BrainLink

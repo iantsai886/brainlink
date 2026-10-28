@@ -1,4 +1,4 @@
-# BrainLink MCP
+# BrainLink
 
 Obsidian / Markdown vaults that authorized AI agents can search and write to safely: Claude Desktop and Claude Code, ChatGPT Codex, Cursor, Gemini CLI, Google Antigravity, Hermes Agent, DeepSeek Harness, Windsurf, and any Streamable-HTTP MCP client (such as Grok bots). Product spec: [docs/PRODUCT-SPEC.md](docs/PRODUCT-SPEC.md). Typed company/workflow graph design: [docs/GRAPH-KNOWLEDGE-MODEL.md](docs/GRAPH-KNOWLEDGE-MODEL.md).
 

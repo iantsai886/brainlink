@@ -1,4 +1,4 @@
-BrainLink MCP — Pre-release Use Notice
+BrainLink — Pre-release Use Notice
 
 Copyright (c) 2026 Iango. All rights reserved.
 

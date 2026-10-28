@@ -34,15 +34,21 @@ test('every native installer bundles all production dependencies and portable Br
   assert.match(windowsBuilder, /LOCALAPPDATA.*Inno Setup 6\\ISCC\.exe/, 'Windows builder must find a per-user Inno Setup installation');
   assert.match(windowsBuilder, /Inno Setup compiler failed with exit code/, 'Windows builder must report compiler failures');
   const windowsInstaller = await read('packaging/windows/BrainLink.iss');
+  assert.match(windowsInstaller, /^AppName=BrainLink$/m, 'Windows installer should use the customer-facing product name');
+  assert.doesNotMatch(windowsInstaller, /^AppName=BrainLink MCP$/m, 'implementation protocol should not appear in the Windows app name');
   assert.match(windowsInstaller, /CurUninstallStepChanged\(CurUninstallStep: TUninstallStep\)/, 'Windows uninstaller must clean up its PATH entry');
   assert.match(windowsInstaller, /SamePathEntry\(Segment, Target\)/, 'Windows PATH cleanup must remove only the BrainLink entry');
   assert.match(windowsInstaller, /\{autodesktop\}\\BrainLink/, 'Windows install must add a desktop shortcut that opens Setup');
   assert.match(windowsInstaller, /Filename: "\{sys\}\\wscript\.exe"; Parameters: """\{app\}\\BrainLink\.vbs"""/, 'Windows desktop shortcut must use the quiet Setup launcher');
   const nsisInstaller = await read('packaging/windows/BrainLink.nsi');
+  assert.match(nsisInstaller, /^Name "BrainLink \$\{VERSION\}"$/m, 'NSIS installer should use the customer-facing product name');
+  assert.match(nsisInstaller, /DisplayName" "BrainLink"/, 'Windows uninstall list should use the customer-facing product name');
   assert.match(nsisInstaller, /CreateShortcut "\$DESKTOP\\BrainLink\.lnk"/, 'NSIS install must add the same desktop shortcut');
   assert.match(nsisInstaller, /Delete "\$DESKTOP\\BrainLink\.lnk"/, 'NSIS uninstall must remove the shortcut it created');
 
   const macZipTest = await read('packaging/macos/test-zip.sh');
+  assert.match(await read('packaging/macos/resources/welcome.html'), /<h2[^>]*>BrainLink<\/h2>/, 'macOS installer should use the customer-facing product name');
+  assert.match(await read('packaging/macos/resources/license.txt'), /^BrainLink — Pre-release Use Notice/, 'macOS license page should match the customer-facing product name');
   assert.match(macZipTest, /app\/src\/update-manifest\.mjs/, 'the macOS zip package must include the update verifier');
   assert.match(macZipTest, /app\/node_modules\/yaml\/dist\/index\.js/, 'the macOS package smoke test must check a loadable YAML runtime');
   assert.match(macZipTest, /app\/skills\/brainlink-session-closeout\/SKILL\.md/, 'the macOS package smoke test must check a shipped skill');

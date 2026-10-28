@@ -97,7 +97,7 @@ cp "$ROOT/LICENSE.txt" "$HERE/resources/license.txt"
 cat > "$WORK/distribution.xml" <<XML
 <?xml version="1.0" encoding="utf-8"?>
 <installer-gui-script minSpecVersion="2">
-  <title>BrainLink MCP $VERSION</title>
+  <title>BrainLink $VERSION</title>
   <welcome file="welcome.html"/>
   <license file="license.txt"/>
   <conclusion file="conclusion.html"/>
