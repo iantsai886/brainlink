@@ -6,14 +6,15 @@ import { openInAppWindow } from '../src/setup.mjs';
 test('Windows desktop launch opens the local Setup page in an Edge app window', () => {
   const calls = [];
   const env = { 'ProgramFiles(x86)': 'C:\\Program Files (x86)' };
+  const edge = path.win32.join(env['ProgramFiles(x86)'], 'Microsoft', 'Edge', 'Application', 'msedge.exe');
   const result = openInAppWindow('http://127.0.0.1:4312/?t=local-token', {
     os: 'win32', env,
-    exists: (file) => file === path.join(env['ProgramFiles(x86)'], 'Microsoft', 'Edge', 'Application', 'msedge.exe'),
+    exists: (file) => file === edge,
     run: (...args) => { calls.push(args); return { unref() {} }; },
   });
   assert.deepEqual(result, { mode: 'app', browser: 'edge' });
   assert.equal(calls.length, 1);
-  assert.equal(calls[0][0], path.join(env['ProgramFiles(x86)'], 'Microsoft', 'Edge', 'Application', 'msedge.exe'));
+  assert.equal(calls[0][0], edge);
   assert.deepEqual(calls[0][1], ['--app=http://127.0.0.1:4312/?t=local-token']);
 });
 
