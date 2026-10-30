@@ -216,6 +216,15 @@ export async function startSetup(opts = {}) {
   const home = opts.home || homedir();
   const os = opts.os || process.platform;
   const file = configPath(env);
+  let configMutationQueue = Promise.resolve();
+  async function withConfigMutation(operation) {
+    const previous = configMutationQueue;
+    let release;
+    configMutationQueue = new Promise((resolve) => { release = resolve; });
+    await previous;
+    try { return await operation(); }
+    finally { release(); }
+  }
   const token = opts.token || randomBytes(18).toString('base64url');
   const updateDownloads = new Map();
   const pick = opts.pick || (() => pickFolder(os));
@@ -584,20 +593,25 @@ export async function startSetup(opts = {}) {
     if (ingestionTickRunning || ingestionRunning) return;
     ingestionTickRunning = true;
     try {
-      const cfg = await loadConfig(file);
-      const now = new Date();
-      if (!ingestionScheduleDue(cfg.ingestion, now, cfg.timezone)) return;
-      const localDate = localDateAndTime(now, cfg.timezone).date;
-      const isRetry = cfg.ingestion.retry_date === localDate && Boolean(cfg.ingestion.retry_after);
-      const attempt = isRetry ? (Number(cfg.ingestion.retry_count) || 1) + 1 : 1;
-      // Mark the day before the initial run, then retry failures at a bounded interval.
-      if (!isRetry) {
-        cfg.ingestion.last_scheduled_date = localDate;
-        cfg.ingestion.retry_count = 0;
-        cfg.ingestion.retry_date = null;
-        cfg.ingestion.retry_after = null;
-      }
-      await saveConfig(cfg, file);
+      const scheduled = await withConfigMutation(async () => {
+        const cfg = await loadConfig(file);
+        const now = new Date();
+        if (!ingestionScheduleDue(cfg.ingestion, now, cfg.timezone)) return null;
+        const localDate = localDateAndTime(now, cfg.timezone).date;
+        const isRetry = cfg.ingestion.retry_date === localDate && Boolean(cfg.ingestion.retry_after);
+        const attempt = isRetry ? (Number(cfg.ingestion.retry_count) || 1) + 1 : 1;
+        // Mark the day before the initial run, then retry failures at a bounded interval.
+        if (!isRetry) {
+          cfg.ingestion.last_scheduled_date = localDate;
+          cfg.ingestion.retry_count = 0;
+          cfg.ingestion.retry_date = null;
+          cfg.ingestion.retry_after = null;
+        }
+        await saveConfig(cfg, file);
+        return { cfg, localDate, attempt };
+      });
+      if (!scheduled) return;
+      const { cfg, localDate, attempt } = scheduled;
       try {
         const result = await runIngestion(cfg, { trigger: 'schedule' });
         if (!result.ok) throw new Error(result.error || 'One or more scan folders could not be read.');
@@ -605,24 +619,29 @@ export async function startSetup(opts = {}) {
           const draftResult = await runScheduledIngestionDrafts(cfg, result.candidates);
           if (!draftResult.ok) throw new Error('One or more scheduled local drafts failed.');
         }
-        const latest = await loadConfig(file);
-        if (JSON.stringify(latest.ingestion?.targets || []) === JSON.stringify(cfg.ingestion?.targets || [])) {
-          latest.ingestion.retry_count = 0;
-          latest.ingestion.retry_date = null;
-          latest.ingestion.retry_after = null;
-          await saveConfig(latest, file);
-        }
+        await withConfigMutation(async () => {
+          const latest = await loadConfig(file);
+          if (JSON.stringify(latest.ingestion?.targets || []) === JSON.stringify(cfg.ingestion?.targets || [])) {
+            latest.ingestion.retry_count = 0;
+            latest.ingestion.retry_date = null;
+            latest.ingestion.retry_after = null;
+            await saveConfig(latest, file);
+          }
+        });
       } catch (error) {
-        const latest = await loadConfig(file);
-        const sameSchedule = latest.ingestion?.enabled && JSON.stringify(latest.ingestion?.targets || []) === JSON.stringify(cfg.ingestion?.targets || []);
-        const retryAt = sameSchedule && attempt < (opts.ingestionMaxAttempts ?? INGESTION_MAX_ATTEMPTS)
-          ? new Date(Date.now() + (opts.ingestionRetryMs ?? INGESTION_RETRY_DELAY_MS)).toISOString() : null;
-        if (sameSchedule) {
-          latest.ingestion.retry_count = attempt;
-          latest.ingestion.retry_date = retryAt ? localDate : null;
-          latest.ingestion.retry_after = retryAt;
-          await saveConfig(latest, file);
-        }
+        const retryAt = await withConfigMutation(async () => {
+          const latest = await loadConfig(file);
+          const sameSchedule = latest.ingestion?.enabled && JSON.stringify(latest.ingestion?.targets || []) === JSON.stringify(cfg.ingestion?.targets || []);
+          const retry = sameSchedule && attempt < (opts.ingestionMaxAttempts ?? INGESTION_MAX_ATTEMPTS)
+            ? new Date(Date.now() + (opts.ingestionRetryMs ?? INGESTION_RETRY_DELAY_MS)).toISOString() : null;
+          if (sameSchedule) {
+            latest.ingestion.retry_count = attempt;
+            latest.ingestion.retry_date = retry ? localDate : null;
+            latest.ingestion.retry_after = retry;
+            await saveConfig(latest, file);
+          }
+          return retry;
+        });
         await saveIngestionStatus({ ...ingestionStatus, attempt, retry_after: retryAt }).catch(() => {});
         if (!ingestionStatus) throw error;
       }
@@ -1375,13 +1394,16 @@ export async function startSetup(opts = {}) {
       return { ok: true, vault: name, created };
     },
     'POST /api/vault/remove': async (b) => {
-      const cfg = await loadConfig(file);
-      const next = { ...cfg, vaults: cfg.vaults.filter((v) => v.name !== b.name), agents: cfg.agents.filter((a) => a.vault !== b.name), handoff: cfg.handoff?.vault === b.name ? null : cfg.handoff };
-      if ((next.ingestion?.targets || []).some((target) => target.vault === b.name)) {
-        const targets = next.ingestion.targets.filter((target) => target.vault !== b.name);
-        next.ingestion = { ...next.ingestion, targets, vault: targets[0]?.vault || null, folder: targets[0]?.folder || null, enabled: Boolean(next.ingestion.enabled && targets.length), last_scheduled_date: null, retry_count: 0, retry_date: null, retry_after: null };
-      }
-      await saveConfig(next, file);
+      const next = await withConfigMutation(async () => {
+        const cfg = await loadConfig(file);
+        const updated = { ...cfg, vaults: cfg.vaults.filter((v) => v.name !== b.name), agents: cfg.agents.filter((a) => a.vault !== b.name), handoff: cfg.handoff?.vault === b.name ? null : cfg.handoff };
+        if ((updated.ingestion?.targets || []).some((target) => target.vault === b.name)) {
+          const targets = updated.ingestion.targets.filter((target) => target.vault !== b.name);
+          updated.ingestion = { ...updated.ingestion, targets, vault: targets[0]?.vault || null, folder: targets[0]?.folder || null, enabled: Boolean(updated.ingestion.enabled && targets.length), last_scheduled_date: null, retry_count: 0, retry_date: null, retry_after: null };
+        }
+        await saveConfig(updated, file);
+        return updated;
+      });
       refreshVaultWatcher(next);
       refreshIngestionSchedule(next);
       // S5: the snapshot watcher was started from whatever vault list existed at launch (or the
@@ -1401,21 +1423,24 @@ export async function startSetup(opts = {}) {
       return { ok: true, excluded_folders: active };
     },
     'POST /api/vault/private': async (b) => {
-      const cfg = await loadConfig(file);
-      const v = cfg.vaults.find((x) => x.name === b.name);
-      if (!v) throw new Error(`Unknown vault "${b.name}".`);
-      v.private = Boolean(b.private);
-      if (v.private && (cfg.ingestion?.targets || []).some((target) => target.vault === v.name)) {
-        const targets = cfg.ingestion.targets.filter((target) => target.vault !== v.name);
-        cfg.ingestion = { ...cfg.ingestion, targets, vault: targets[0]?.vault || null, folder: targets[0]?.folder || null, enabled: Boolean(cfg.ingestion.enabled && targets.length), last_scheduled_date: null, retry_count: 0, retry_date: null, retry_after: null };
-      }
-      await saveConfig(cfg, file);
-      refreshIngestionSchedule(cfg);
+      const updated = await withConfigMutation(async () => {
+        const cfg = await loadConfig(file);
+        const v = cfg.vaults.find((x) => x.name === b.name);
+        if (!v) throw new Error(`Unknown vault "${b.name}".`);
+        v.private = Boolean(b.private);
+        if (v.private && (cfg.ingestion?.targets || []).some((target) => target.vault === v.name)) {
+          const targets = cfg.ingestion.targets.filter((target) => target.vault !== v.name);
+          cfg.ingestion = { ...cfg.ingestion, targets, vault: targets[0]?.vault || null, folder: targets[0]?.folder || null, enabled: Boolean(cfg.ingestion.enabled && targets.length), last_scheduled_date: null, retry_count: 0, retry_date: null, retry_after: null };
+        }
+        await saveConfig(cfg, file);
+        return { cfg, isPrivate: v.private };
+      });
+      refreshIngestionSchedule(updated.cfg);
       // S5: a vault just marked private must stop being watched/synced into the shared snapshot
       // right away, not only after the app restarts (startSnapshotWatcher already skips private
       // vault roots — see src/snapshot.mjs — but only when it starts watching).
-      await refreshSnapshotWatcher(cfg);
-      return { ok: true, private: v.private };
+      await refreshSnapshotWatcher(updated.cfg);
+      return { ok: true, private: updated.isPrivate };
     },
     'POST /api/sync': async (b) => {
       // Local by default; Drive/iCloud/Dropbox need an existing, writable folder (the user's own
@@ -2223,14 +2248,17 @@ export async function startSetup(opts = {}) {
       return runBackup(cfg, 'manual');
     },
     'POST /api/ingestion/settings': async (b) => {
-      const cfg = await loadConfig(file);
-      const next = { ...cfg, ingestion: validateIngestionSchedule(b, cfg.ingestion) };
-      if (next.ingestion.autoDrafts && (!cfg.sessions.localSummary?.enabled || !cfg.sessions.localSummary?.model)) throw new Error('Enable Local summary drafts and choose an Ollama model before scheduling AI drafts.');
-      if (next.ingestion.enabled) {
-        const ctx = localContext(next, { ...env, BRAINLINK_SEMANTIC: '0' });
-        for (const target of next.ingestion.targets) await ingestionQueue(ctx, target.vault, target.folder, { limit: 1 });
-      }
-      await saveConfig(next, file);
+      const next = await withConfigMutation(async () => {
+        const cfg = await loadConfig(file);
+        const updated = { ...cfg, ingestion: validateIngestionSchedule(b, cfg.ingestion) };
+        if (updated.ingestion.autoDrafts && (!cfg.sessions.localSummary?.enabled || !cfg.sessions.localSummary?.model)) throw new Error('Enable Local summary drafts and choose an Ollama model before scheduling AI drafts.');
+        if (updated.ingestion.enabled) {
+          const ctx = localContext(updated, { ...env, BRAINLINK_SEMANTIC: '0' });
+          for (const target of updated.ingestion.targets) await ingestionQueue(ctx, target.vault, target.folder, { limit: 1 });
+        }
+        await saveConfig(updated, file);
+        return updated;
+      });
       refreshIngestionSchedule(next);
       return { ok: true, ingestion: { ...next.ingestion, status: ingestionStatus } };
     },
