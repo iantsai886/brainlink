@@ -11,6 +11,8 @@ Claude Code, Codex, and DeepSeek Harness importers now compare source metadata b
 
 Verification on Windows with Node.js 24.22.1: `test/sessions.test.mjs` passed 24/24; the formerly timing-sensitive RSI discovery test passed alone and in the full run; `npm run test:all` passed with core 599 total (591 passed, 0 failed, 8 Windows platform/privilege skips) and UI 44/44. `git diff --check` passed. Tests used fictional transcripts; live vendor clients were not writing transcripts concurrently during this run. The commit is pushed to the integration branch, not merged or released.
 
+The same source commit `310f3d3` also passed `npm run smoke:backup-recovery`: encrypted fictional Personal, Organisation and Client-A data; four files verified and restored; wrong-key refusal; artifact restored; source files unchanged. The output reported `ok: true` and `fixture_contents: fictional`.
+
 ### DeepSeek Harness Zstandard compatibility (2026-10-30)
 
 Fixed the local session importer for Harness files made of concatenated Zstandard frames. Node.js 22's built-in decoder returns only the first frame, which dropped later events from a session. BrainLink now checks each frame and block boundary, decompresses frames separately, enforces the existing total output limit, and refuses malformed or truncated frames before importing partial text. The importer still stores only direct user prompts and visible assistant text, redacts secrets, and keeps imported sessions private by default.
