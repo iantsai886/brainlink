@@ -1,6 +1,6 @@
 # BrainLink — Product and Engineering Specification
 
-Status: living specification, updated 2026-10-28. This version supersedes the October 18 plan where they conflict, especially on onboarding, trial/licensing and the product's Personal/Organisation/Client Twin direction. Current code, tests and dated evidence in `docs/IMPLEMENTATION-STATUS.md` determine implementation status.
+Status: living specification, updated 2026-10-30. This version supersedes the October 18 plan where they conflict, especially on onboarding, trial/licensing and the product's Personal/Organisation/Client Twin direction. Current code, tests and dated evidence in `docs/IMPLEMENTATION-STATUS.md` determine implementation status.
 
 ## 1. What it is
 
