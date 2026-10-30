@@ -200,6 +200,7 @@ export async function startSetup(opts = {}) {
   const pickBackupFolder = opts.pickBackupFolder || (() => pickFolder(os, 'Choose a private backup destination'));
   const pickRestoreSourceFolder = opts.pickRestoreSourceFolder || (() => pickFolder(os, 'Choose a BrainLink backup folder'));
   const pickRestoreDestinationFolder = opts.pickRestoreDestinationFolder || (() => pickFolder(os, 'Choose an empty restore destination'));
+  const pickGitHubRepository = opts.pickGitHubRepository || (() => pickFolder(os, 'Choose an existing GitHub repository clone'));
   const clientOpts = () => ({ home, os, env, launch: launchSpec(env), useCli: opts.useCli });
   // Setup and its scheduled local jobs operate with the user's local authority. AI client
   // health checks intentionally use createContext() without this bypass.
@@ -1261,6 +1262,10 @@ export async function startSetup(opts = {}) {
     'POST /api/github/assignment/inspect': async (b) => {
       const cfg = await loadConfig(file);
       return inspectGitHubAssignment(cfg, b);
+    },
+    'POST /api/github/assignment/pick-repository': async () => {
+      const selected = await pickGitHubRepository();
+      return selected === undefined ? { path: null, unavailable: true } : { path: selected || null };
     },
     'POST /api/github/assignment/set': async (b) => {
       const cfg = await loadConfig(file);

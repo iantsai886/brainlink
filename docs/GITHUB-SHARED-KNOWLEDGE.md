@@ -17,7 +17,7 @@ Let a user keep selected Markdown knowledge in a GitHub repository so authorized
 
 ## User flow
 
-1. Choose **GitHub knowledge** in Sync and select a local clone (or clone a repository through the signed-in Git credential helper).
+1. Choose **GitHub knowledge** in Sync, select a Twin profile and vault, then use **Browse** to select an existing local clone or enter its path. On systems without a native folder dialog, BrainLink opens its accessible path-entry fallback. The following review detects the repository identity and branch before assignment; BrainLink does not clone repositories or log the user into GitHub.
 2. Confirm the GitHub owner/repository, branch, privacy scope and allowed folders. Explain that pushing transfers note content to GitHub and that private-repository history may retain prior versions after a note is edited or removed.
 3. Review a first-sync preview containing paths, change direction, and conflict status. The preview must not show excluded/private bodies.
 4. Choose manual sync or explicitly enable scheduled sync. BrainLink fetches/pulls before applying changes; pushes only allowlisted files. Each BrainLink sync commit records the operation, time and an optional pseudonymous agent identifier without embedding full prompt or transcript text.
@@ -65,7 +65,7 @@ A Twin profile may carry one `github_repository` record in `config.json`:
 ## Implementation slices
 
 1. Done: safe local-repository validation, authenticated candidate/preview endpoints, localized Setup UI, separately confirmed local commits, and explicit selected-commit push with remote ancestry/path validation.
-2. Validate UI behavior, accessibility, localized privacy messaging, and the GitHub credential-helper flow using a user-controlled test repository.
+2. Done in local implementation: the assignment form has a native folder picker with a manual-path fallback, localized labels, and the same authenticated, exact-identity review step. Still required: validate the desktop dialog behavior, accessibility, localized privacy messaging, and GitHub credential-helper flow using a user-controlled test repository.
 3. Profile-to-repository binding is locally tested. Remaining: validate assignment and conflict-copy flows in the desktop UI with a user-controlled test account.
 4. Done in local implementation: per-profile opt-in schedule (1/6/12/24 hours), manual run, safe import/publication, conflict pause, pending-commit retry, and body-free status receipts. Still required: installed-app usability review and user-controlled GitHub acceptance.
 5. Run cross-device and cross-AI acceptance with fictional data before considering a customer release.

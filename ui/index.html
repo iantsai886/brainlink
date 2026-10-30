@@ -431,7 +431,7 @@ main #ready, main #ask-panel, main #brain-panel, main #sessions-panel, main #s-c
       </div>
       <div class="grid2">
         <label><span data-i18n="github.vault"></span><select id="github-vault"></select></label>
-        <label id="github-repository-row"><span data-i18n="github.repository"></span><input id="github-repository" class="mono" data-i18n-placeholder="github.repositoryPlaceholder"></label>
+        <label id="github-repository-row"><span data-i18n="github.repository"></span><div class="row"><input id="github-repository" class="mono" style="flex:1;min-width:0" data-i18n-placeholder="github.repositoryPlaceholder"><button type="button" id="github-repository-pick" data-i18n="github.repositoryBrowse"></button></div></label>
       </div>
       <div id="github-assign-form" hidden>
         <label><span data-i18n="github.folders"></span><textarea id="github-assign-folders" rows="2" class="mono" data-i18n-placeholder="github.foldersPlaceholder"></textarea></label>
@@ -1949,6 +1949,15 @@ $('github-assign-inspect').onclick = async () => {
     $('github-assign-confirm').disabled = r.blocked.length > 0;
   } catch (e) { $('github-status').textContent = e.message; }
 };
+$('github-repository-pick').onclick = () => act(async () => {
+  const result = await api('POST', '/api/github/assignment/pick-repository', {});
+  const selected = result.path || (result.unavailable ? await window.promptForFolder() : '');
+  if (!selected) return;
+  $('github-repository').value = selected;
+  githubInspected = null;
+  $('github-assign-review').hidden = true;
+  $('github-assign-confirm').disabled = true;
+});
 $('github-assign-confirm').onclick = () => act(async () => {
   if (!githubInspected) return;
   const scope = githubInspected.whole_vault ? t('github.wholeVault') : githubInspected.folders.join(', ');

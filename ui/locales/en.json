@@ -390,6 +390,7 @@
   "github.assignProfileRepository": "Assign a separate GitHub repository to this profile before sharing.",
   "github.noProfileVault": "This profile has no available non-private vaults.",
   "github.repository": "Existing local GitHub clone",
+  "github.repositoryBrowse": "Browse…",
   "github.repositoryPlaceholder": "C:\\Users\\you\\shared-brain",
   "github.load": "Load safe note list",
   "github.preview": "Preview selected notes",

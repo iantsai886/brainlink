@@ -258,13 +258,17 @@ test('Setup API: assignments need review plus an exact confirmation, are exclusi
   const file = path.join(home, 'config.json');
   await saveConfig(f.cfg, file);
   const env = { BRAINLINK_HOME: home, HOME: home, BRAINLINK_SEMANTIC: '0' };
-  const app = await startSetup({ env, home, os: 'linux', port: 0, useCli: false });
+  const app = await startSetup({ env, home, os: 'linux', port: 0, useCli: false, pickGitHubRepository: async () => f.repos.org });
   const post = async (route, body, token = app.token) => {
     const response = await fetch(`http://127.0.0.1:${app.port}${route}`, { method: 'POST', headers: { 'Content-Type': 'application/json', 'X-BrainLink-Token': token }, body: JSON.stringify(body) });
     return { status: response.status, body: await response.json() };
   };
   const org = { profile_id: 'org', vault: P.org.vault, repository: f.repos.org, whole_vault: true };
   try {
+    assert.equal((await post('/api/github/assignment/pick-repository', {}, 'wrong')).status, 401);
+    const picked = await post('/api/github/assignment/pick-repository', {});
+    assert.equal(picked.status, 200);
+    assert.equal(picked.body.path, f.repos.org);
     assert.equal((await post('/api/github/assignment/inspect', org, 'wrong')).status, 401);
     assert.equal((await post('/api/github/assignment/set', { ...org, confirm_remote: P.org.remote }, 'wrong')).status, 401);
     // Before confirmation, a normal operation is refused.
@@ -335,6 +339,8 @@ test('Setup UI parses and clears selections, receipts and pending confirmations 
   assert.match(html, /githubPendingPush = r\.committed \? \{ commit: r\.commit, paths: r\.committed_paths \|\| paths, profile: githubProfileId\(\) \}/);
   assert.match(html, /githubPendingPush\.profile !== githubProfileId\(\)/);
   assert.match(html, /id="github-no-profiles" class="notice" data-i18n="github\.noProfiles" hidden/);
+  assert.match(html, /id="github-repository-pick" data-i18n="github\.repositoryBrowse"/);
+  assert.match(html, /github-repository-pick'\)\.onclick = \(\) => act\(async \(\) => \{[\s\S]*?\/api\/github\/assignment\/pick-repository[\s\S]*?window\.promptForFolder\(\)[\s\S]*?githubInspected = null/);
   assert.match(html, /if \(!list\.length\) \{[\s\S]*?\$\('github-load'\)\.disabled = true;[\s\S]*?\$\('github-pull-check'\)\.disabled = true;/);
   for (const route of ['share-candidates', 'preview', 'commit-selected', 'push-selected', 'pull-candidates', 'import-selected']) {
     assert.match(html, new RegExp(`/api/github/${route}'[^\\n]*profile_id: githubProfileId\\(\\)`), `${route} must send the selected profile`);

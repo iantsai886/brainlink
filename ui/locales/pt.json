@@ -390,6 +390,7 @@
   "github.assignProfileRepository": "Atribua um repositório GitHub separado a este perfil antes de partilhar.",
   "github.noProfileVault": "Este perfil não tem cofres não privados disponíveis.",
   "github.repository": "Clone local existente do GitHub",
+  "github.repositoryBrowse": "Procurar…",
   "github.repositoryPlaceholder": "C:\\Users\\you\\shared-brain",
   "github.load": "Carregar lista segura de notas",
   "github.preview": "Pré-visualizar notas selecionadas",
