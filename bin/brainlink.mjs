@@ -81,7 +81,7 @@ const HELP = `BrainLink MCP ${VERSION} — one Markdown brain for every AI
   brainlink init --vault PATH [--name N] [--pack ${Object.keys(PACKS).join('|')}] [--agent NAME] [--no-scaffold]
   brainlink connect <client|all>       ${Object.keys(CLIENTS).join(', ')} (or --all)
   brainlink disconnect <client>        (disconnect-all removes it from every app)
-  brainlink clients                    show detected / connected AI apps
+  brainlink clients                    show detected / configured AI apps
   brainlink status                     config, vaults, timezone
   brainlink brief [--vault V] [--days 7]  what changed and what is open
   brainlink eval --fixture FILE [--vault-root DIR --vault-name NAME]  compare labelled retrieval (read-only)
@@ -203,7 +203,7 @@ async function main() {
       return;
     }
     case 'clients': {
-      for (const [id, c] of Object.entries(await detect(clientOpts()))) out(`${c.connected ? '●' : c.present ? '○' : '·'} ${id.padEnd(15)} ${c.title}${c.unsupported ? ` — ${c.note}` : c.connected ? ' — connected' : c.present ? ' — found' : ''}`);
+      for (const [id, c] of Object.entries(await detect(clientOpts()))) out(`${c.connected ? '●' : c.present ? '○' : '·'} ${id.padEnd(15)} ${c.title}${c.unsupported ? ` — ${c.note}` : c.connected ? ' — configured' : c.present ? ' — found' : ''}`);
       return;
     }
     case 'status': {
