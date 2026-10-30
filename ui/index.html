@@ -300,6 +300,12 @@ main #ready, main #ask-panel, main #brain-panel, main #sessions-panel, main #s-c
       <b data-i18n="rsi.weekly.title">Weekly retrieval benchmark</b>
       <p class="muted" data-i18n="rsi.weekly.hint">Run the same 20 fictional questions against BrainLink's built-in sample vault. It reads no connected vault and never changes live search behavior.</p>
       <button type="button" id="rsi-weekly-run" data-i18n="rsi.weekly.run">Run benchmark</button>
+      <form id="rsi-weekly-schedule-form" class="grid2" style="margin-top:10px">
+        <label class="muted" style="display:flex;flex-direction:row;gap:6px;align-items:center"><input type="checkbox" name="enabled" style="width:auto"><span data-i18n="rsi.weekly.scheduleEnabled">Run automatically each week</span></label>
+        <label><span data-i18n="rsi.weekly.day">Day</span><select name="weekday"><option value="0" data-i18n="rsi.weekly.sunday">Sunday</option><option value="1" data-i18n="rsi.weekly.monday">Monday</option><option value="2" data-i18n="rsi.weekly.tuesday">Tuesday</option><option value="3" data-i18n="rsi.weekly.wednesday">Wednesday</option><option value="4" data-i18n="rsi.weekly.thursday">Thursday</option><option value="5" data-i18n="rsi.weekly.friday">Friday</option><option value="6" data-i18n="rsi.weekly.saturday">Saturday</option></select></label>
+        <label><span data-i18n="rsi.weekly.time">Time</span><input name="time" type="time" required></label>
+        <div><button type="submit" data-i18n="rsi.weekly.saveSchedule">Save schedule</button><p id="rsi-weekly-schedule-status" class="muted" role="status" aria-live="polite"></p></div>
+      </form>
       <p id="rsi-weekly-status" class="muted" role="status" aria-live="polite"></p>
       <div id="rsi-weekly-history" aria-live="polite"></div>
     </div>
@@ -1073,9 +1079,36 @@ function renderWeeklyBenchmark(runs) {
     }).join('') + '</ol>'
     : '<p class="muted">' + esc(t('rsi.weekly.empty')) + '</p>';
 }
-async function loadWeeklyBenchmark() {
-  renderWeeklyBenchmark((await api('GET', '/api/rsi/weekly-benchmark')).runs);
+function renderWeeklyBenchmarkSchedule(schedule) {
+  const form = $('rsi-weekly-schedule-form');
+  if (!schedule) return;
+  form.elements.namedItem('enabled').checked = schedule.enabled === true;
+  form.elements.namedItem('weekday').value = String(schedule.weekday ?? 1);
+  form.elements.namedItem('time').value = schedule.time || '09:00';
+  const days = ['sunday', 'monday', 'tuesday', 'wednesday', 'thursday', 'friday', 'saturday'];
+  const day = t(`rsi.weekly.${days[schedule.weekday] || 'monday'}`);
+  const at = schedule.last_run_at && Number.isFinite(Date.parse(schedule.last_run_at)) ? new Date(schedule.last_run_at).toLocaleString() : '';
+  $('rsi-weekly-schedule-status').textContent = schedule.enabled
+    ? t(schedule.last_run_ok === false ? 'rsi.weekly.scheduleFailed' : schedule.last_run_ok === true ? 'rsi.weekly.scheduleDone' : 'rsi.weekly.scheduleOn', { at, day, time: schedule.time })
+    : t('rsi.weekly.scheduleOff');
 }
+async function loadWeeklyBenchmark() {
+  const result = await api('GET', '/api/rsi/weekly-benchmark');
+  renderWeeklyBenchmark(result.runs);
+  renderWeeklyBenchmarkSchedule(result.schedule);
+}
+document.getElementById('rsi-weekly-schedule-form').addEventListener('submit', event => {
+  event.preventDefault();
+  const form = event.currentTarget;
+  act(async () => {
+    const schedule = await api('POST', '/api/rsi/weekly-benchmark/settings', {
+      enabled: form.elements.namedItem('enabled').checked,
+      weekday: Number(form.elements.namedItem('weekday').value),
+      time: form.elements.namedItem('time').value,
+    });
+    renderWeeklyBenchmarkSchedule(schedule.schedule);
+  });
+});
 document.getElementById('rsi-weekly-run').addEventListener('click', () => act(async () => {
   const button = $('rsi-weekly-run');
   button.disabled = true;
@@ -1083,6 +1116,7 @@ document.getElementById('rsi-weekly-run').addEventListener('click', () => act(as
   try {
     const result = await api('POST', '/api/rsi/weekly-benchmark/run');
     renderWeeklyBenchmark(result.runs);
+    renderWeeklyBenchmarkSchedule(result.schedule);
     $('rsi-weekly-status').textContent = t('rsi.weekly.saved');
   } finally { button.disabled = false; }
 }));

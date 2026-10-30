@@ -10,7 +10,7 @@ import { execFile } from 'node:child_process';
 import { setTimeout as delay } from 'node:timers/promises';
 import { homedir } from 'node:os';
 import path from 'node:path';
-import { loadConfig, saveConfig, configPath, normalize, validate, LOCALES, appHome } from './config.mjs';
+import { loadConfig, saveConfig, configPath, normalize, validate, LOCALES, appHome, emptyConfig } from './config.mjs';
 import { PACKS, buildPack, scaffold, mergePack } from './packs.mjs';
 import { CLIENTS, resolveClient, detect, connectClient, disconnectClient, readClientAgentToken, test, deepSeekSessionCueStatus, setDeepSeekSessionCue } from './connectors.mjs';
 import { createContext, search, searchWithVerdict, readNote, related as relatedNotes, ensureDefaultIgnore, readExcludedFolders, writeExcludedFolders, DEFAULT_EXCLUDED_FOLDERS, SUGGESTED_EXCLUDED_FOLDERS, safeJoin, vaultRoot, countVisibleNotes } from './core.mjs';
@@ -49,6 +49,7 @@ import { createRsiExperiments } from './rsi-experiments.mjs';
 import { createRsiDiscovery } from './rsi-discovery.mjs';
 import { createRsiObservationSchedule } from './rsi-observation-schedule.mjs';
 import { createRsiWeekly, taipeiWeek } from './rsi-weekly.mjs';
+import { validateWeeklyBenchmarkSchedule, weeklyBenchmarkScheduleDue, weeklyScheduleWeek } from './rsi-weekly-schedule.mjs';
 import { readGitSourceState } from './git-source-state.mjs';
 import { inspectAgentSkills, installAgentSkills, removeAgentSkills, skillClientRoot } from './agent-skills.mjs';
 import { ingestionQueue, readIngestionSource, recordIngestion } from './ingestion.mjs';
@@ -257,6 +258,8 @@ export async function startSetup(opts = {}) {
   });
   const initialObservationStatus = await rsiObservationSchedule.status().catch(() => null);
   let observationKeepsAlive = Boolean(initialObservationStatus?.settings.enabled);
+  const initialWeeklyBenchmarkConfig = await loadConfig(file);
+  let weeklyBenchmarkKeepsAlive = Boolean(initialWeeklyBenchmarkConfig.weekly_benchmark?.enabled);
   const html = await readFile(path.join(ROOT, 'ui', 'index.html'), 'utf8');
   let port = opts.port ?? 0;
   // When started from the app (no terminal), exit after idleMinutes without requests. Closing
@@ -277,7 +280,7 @@ export async function startSetup(opts = {}) {
   const touch = () => {
     clearTimeout(idleTimer);
     clearTimeout(idleQuitTimer);
-    if (!opts.idleMinutes || backupEnabled || discoveryKeepsAlive || observationKeepsAlive || ingestionKeepsAlive || briefKeepsAlive || localSummaryAutoDraftKeepsAlive || syncKeepsAlive || githubAutoKeepsAlive) return;
+    if (!opts.idleMinutes || backupEnabled || discoveryKeepsAlive || observationKeepsAlive || weeklyBenchmarkKeepsAlive || ingestionKeepsAlive || briefKeepsAlive || localSummaryAutoDraftKeepsAlive || syncKeepsAlive || githubAutoKeepsAlive) return;
     idleTimer = setTimeout(quit, opts.idleMinutes * 60e3);
     idleTimer.unref?.();
   };
@@ -862,6 +865,52 @@ export async function startSetup(opts = {}) {
   observationTimer.unref?.();
   if (await rsiObservationSchedule.due().catch(() => false)) rsiObservationSchedule.run('schedule').catch(() => {});
 
+  let weeklyBenchmarkRunning = false;
+  async function runWeeklyBenchmark(trigger = 'manual', week = null) {
+    if (weeklyBenchmarkRunning) throw new Error('A weekly benchmark is already running.');
+    weeklyBenchmarkRunning = true;
+    try {
+      const fixturePath = path.join(ROOT, 'samples', 'evaluation', 'rsi-weekly-fictional-20.json');
+      const vaultPath = path.join(ROOT, 'samples', 'rsi-fictional-vault');
+      const fixtureBytes = await readFile(fixturePath);
+      const fixture = JSON.parse(fixtureBytes.toString('utf8'));
+      if (fixture.vault !== 'RSI Fictional' || fixture.schema !== 2 || fixture.cases?.length !== 20) throw new Error('The built-in RSI benchmark fixture is invalid.');
+      const cfg = await loadConfig(file);
+      const benchmarkWeek = week || weeklyScheduleWeek(opts.weeklyBenchmarkNow?.() || new Date(), cfg.timezone);
+      const ctx = createContext({ ...emptyConfig(), vaults: [{ name: fixture.vault, path: vaultPath }] }, { env: { ...env, BRAINLINK_SEMANTIC: '0' }, trustedLocal: true });
+      const result = await rsiWeekly.runBenchmark({ ctx, fixture, fixtureBytes, week: benchmarkWeek, softwareVersion: VERSION, sourceState: readGitSourceState(ROOT) });
+      return { ...result, trigger };
+    } finally { weeklyBenchmarkRunning = false; }
+  }
+  let weeklyBenchmarkTickRunning = false;
+  const weeklyBenchmarkTimer = setInterval(async () => {
+    if (weeklyBenchmarkTickRunning || weeklyBenchmarkRunning) return;
+    weeklyBenchmarkTickRunning = true;
+    try {
+      const cfg = await loadConfig(file);
+      const now = opts.weeklyBenchmarkNow?.() || new Date();
+      weeklyBenchmarkKeepsAlive = Boolean(cfg.weekly_benchmark?.enabled);
+      if (!weeklyBenchmarkScheduleDue(cfg.weekly_benchmark, now, cfg.timezone)) return;
+      cfg.weekly_benchmark = validateWeeklyBenchmarkSchedule({}, cfg.weekly_benchmark);
+      cfg.weekly_benchmark.last_scheduled_week = weeklyScheduleWeek(now, cfg.timezone);
+      cfg.weekly_benchmark.last_run_at = now.toISOString();
+      cfg.weekly_benchmark.last_run_ok = null;
+      await saveConfig(cfg, file);
+      touch();
+      try {
+        await runWeeklyBenchmark('schedule', weeklyScheduleWeek(now, cfg.timezone));
+        const latest = await loadConfig(file);
+        latest.weekly_benchmark.last_run_ok = true;
+        await saveConfig(latest, file);
+      } catch {
+        const latest = await loadConfig(file);
+        latest.weekly_benchmark.last_run_ok = false;
+        await saveConfig(latest, file).catch(() => {});
+      }
+    } catch { /* failures are reflected by a false last_run_ok when possible */ }
+    finally { weeklyBenchmarkTickRunning = false; }
+  }, opts.weeklyBenchmarkTickMs ?? 30_000);
+  weeklyBenchmarkTimer.unref?.();
   refreshSnapshotWatcher(await loadConfig(file)).catch(() => {});
   const initialConfig = await loadConfig(file);
   refreshBackupTimer(initialConfig);
@@ -943,6 +992,7 @@ export async function startSetup(opts = {}) {
       backup: { ...cfg.backup, status: backupStatus, running: backupRunning },
       ingestion: { ...cfg.ingestion, status: ingestionStatus, running: ingestionRunning },
       ingestion_drafts: { status: ingestionDraftStatus },
+      weekly_benchmark: validateWeeklyBenchmarkSchedule({}, cfg.weekly_benchmark),
       brief: { ...cfg.brief, status: briefStatus, running: briefRunning },
       startup_at_login: ['win32', 'darwin', 'linux'].includes(os) ? await isStartupEnabled(env, home, os) : false,
     };
@@ -1225,17 +1275,22 @@ export async function startSetup(opts = {}) {
       return { status: 'opened', version: pending.version, format: pending.format };
     },
     'GET /api/rsi': async () => ({ ideas: await rsiLedger.list() }),
-    'GET /api/rsi/weekly-benchmark': async () => ({ runs: await rsiWeekly.benchmarkReport(8) }),
+    'GET /api/rsi/weekly-benchmark': async () => {
+      const cfg = await loadConfig(file);
+      return { runs: await rsiWeekly.benchmarkReport(8), schedule: validateWeeklyBenchmarkSchedule({}, cfg.weekly_benchmark) };
+    },
+    'POST /api/rsi/weekly-benchmark/settings': async (b) => {
+      const cfg = await loadConfig(file);
+      cfg.weekly_benchmark = validateWeeklyBenchmarkSchedule(b, cfg.weekly_benchmark);
+      await saveConfig(cfg, file);
+      weeklyBenchmarkKeepsAlive = cfg.weekly_benchmark.enabled;
+      touch();
+      return { schedule: cfg.weekly_benchmark };
+    },
     'POST /api/rsi/weekly-benchmark/run': async () => {
-      const fixturePath = path.join(ROOT, 'samples', 'evaluation', 'rsi-weekly-fictional-20.json');
-      const vaultPath = path.join(ROOT, 'samples', 'rsi-fictional-vault');
-      const fixtureBytes = await readFile(fixturePath);
-      const fixture = JSON.parse(fixtureBytes.toString('utf8'));
-      if (fixture.vault !== 'RSI Fictional' || fixture.schema !== 2 || fixture.cases?.length !== 20) throw new Error('The built-in RSI benchmark fixture is invalid.');
-      const cfg = normalize({ vaults: [{ name: fixture.vault, path: vaultPath }] });
-      const ctx = createContext(cfg, { env: { ...env, BRAINLINK_SEMANTIC: '0' }, trustedLocal: true });
-      const run = await rsiWeekly.runBenchmark({ ctx, fixture, fixtureBytes, week: taipeiWeek(new Date().toISOString()), softwareVersion: VERSION, sourceState: readGitSourceState(ROOT) });
-      return { run, runs: await rsiWeekly.benchmarkReport(8) };
+      const run = await runWeeklyBenchmark('manual');
+      const cfg = await loadConfig(file);
+      return { run, runs: await rsiWeekly.benchmarkReport(8), schedule: validateWeeklyBenchmarkSchedule({}, cfg.weekly_benchmark) };
     },
     'GET /api/rsi/observations': async () => ({ observations: await rsiObservationSchedule.status() }),
     'POST /api/rsi/observations/settings': async (b) => {
@@ -2420,7 +2475,7 @@ export async function startSetup(opts = {}) {
       json(res, 200, result);
     } catch (e) { json(res, 400, { error: String(e.message || e) }); }
   });
-  server.once('close', () => { snapshotWatcher?.stop(); vaultWatcher?.stop(); for (const client of eventClients) client.end(); eventClients.clear(); for (const pending of updateDownloads.values()) { clearTimeout(pending.timer); if (!pending.opened) rm(pending.folder, { recursive: true, force: true }).catch(() => {}); } updateDownloads.clear(); clearInterval(discoveryTimer); clearInterval(observationTimer); clearInterval(ingestionTimer); clearInterval(githubAutoTimer); clearInterval(localSummaryAutoDraftTimer); if (backupTimer) { clearTimeout(backupTimer); clearInterval(backupTimer); } if (syncTimer) { clearTimeout(syncTimer); clearInterval(syncTimer); } });
+  server.once('close', () => { snapshotWatcher?.stop(); vaultWatcher?.stop(); for (const client of eventClients) client.end(); eventClients.clear(); for (const pending of updateDownloads.values()) { clearTimeout(pending.timer); if (!pending.opened) rm(pending.folder, { recursive: true, force: true }).catch(() => {}); } updateDownloads.clear(); clearInterval(discoveryTimer); clearInterval(observationTimer); clearInterval(weeklyBenchmarkTimer); clearInterval(ingestionTimer); clearInterval(githubAutoTimer); clearInterval(localSummaryAutoDraftTimer); if (backupTimer) { clearTimeout(backupTimer); clearInterval(backupTimer); } if (syncTimer) { clearTimeout(syncTimer); clearInterval(syncTimer); } });
   await new Promise((resolve, reject) => { server.once('error', reject); server.listen(port, '127.0.0.1', resolve); });
   port = server.address().port;
   const startupConfig = await loadConfig(file);
