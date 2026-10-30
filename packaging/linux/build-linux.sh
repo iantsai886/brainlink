@@ -6,7 +6,11 @@ set -euo pipefail
 HERE="$(cd "$(dirname "$0")" && pwd)"
 ROOT="$(cd "$HERE/../.." && pwd)"
 VERSION="$(node -p "require('$ROOT/package.json').version")"
-NODE_VERSION="$(cat "$ROOT/vendor/node/VERSION")"
+NODE_VERSION="$(tr -d '\r\n' < "$ROOT/vendor/node/VERSION")"
+if [[ ! "$NODE_VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+  echo "Invalid pinned Node.js version in vendor/node/VERSION" >&2
+  exit 1
+fi
 NODE_DIST="https://nodejs.org/dist/v$NODE_VERSION"
 WORK="$ROOT/build/linux"
 DIST="$ROOT/dist"

@@ -30,6 +30,10 @@ test('every native installer bundles all production dependencies and portable Br
   assert.match(windowsPreview, /ui[\\/]app[\\/]test/, 'Windows portable preview must exclude development UI tests');
   assert.ok(pkg.dependencies.yaml, 'YAML connector dependency must remain a production dependency');
 
+  const linuxBuilder = await read('packaging/linux/build-linux.sh');
+  assert.match(linuxBuilder, /NODE_VERSION="\$\(tr -d '\\r\\n' < "\$ROOT\/vendor\/node\/VERSION"\)"/, 'Linux builds must accept the Windows CRLF version file');
+  assert.match(linuxBuilder, /Invalid pinned Node\.js version/, 'Linux build must reject malformed pinned runtime versions before making download URLs');
+
   const windowsBuilder = await read('packaging/windows/build-windows.ps1');
   assert.match(windowsBuilder, /LOCALAPPDATA.*Inno Setup 6\\ISCC\.exe/, 'Windows builder must find a per-user Inno Setup installation');
   assert.match(windowsBuilder, /Inno Setup compiler failed with exit code/, 'Windows builder must report compiler failures');
