@@ -1079,3 +1079,7 @@ Under the existing `Iango Organisation Twin` profile, DeepSeek Harness made 15 l
 ### Explain Twin memory permissions in Setup (2026-10-30)
 
 The four Twin memory controls now show short descriptions in English, Portuguese, and Traditional Chinese. The procedural-memory description states that it grants role instructions and Skills and is needed to activate configured agent roles. This makes clear why an AI with semantic note access may still be unable to activate an agent. The control remains an explicit user choice and does not change any saved profile. Windows focused validation passed: `test/twin-profiles.test.mjs` and `test/locales.test.mjs` — 28/28; `npm run test:ui` — 29/29; `git diff --check` passed. This verifies local UI rendering and locale completeness, not usability with every screen reader or client.
+
+### Full regression on Twin memory permission UI (2026-10-30)
+
+On Windows with Node.js 24.22.1, `npm run test:all` passed at exact source commit `717fbd77a576bd6a1068093967eb8b772435c9c6`: core 545 tests (539 passed, 0 failed, 6 platform/privilege skips) and UI 29/29. This verifies the current tracked code and four-memory permission descriptions under the automated local suite. It does not establish screen-reader usability, live user acceptance, hosted CI, cross-client handoff, or commercial release readiness.
