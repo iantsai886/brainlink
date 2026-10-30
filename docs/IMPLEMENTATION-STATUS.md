@@ -1617,6 +1617,10 @@ These unsigned artifacts stayed in a detached QA worktree and were not published
 
 Read the local BrainLink configuration without printing its token or note contents. The configured Organisation Twin contains the `Anna` role. Then loaded the exact BrainLink token from Claude Desktop's saved MCP entry into the current local server and called MCP `tools/list`: both `agent_connect_anna` and `agent_connect_brain` were present among 17 authorized tools. The oldest running Claude Desktop process still started before the saved config's modification time. This confirms BrainLink's saved server-side role and token scope; it does not confirm Claude Desktop has reloaded the tools or made a live Anna call. The remaining user-side step is to fully quit Claude Desktop, including its tray/background process, reopen it, and start a new chat.
 
+### Live Codex handoff leg (2026-10-31; source commit `63efbbf`)
+
+Ran `node scripts/smoke-live-codex-handoff.mjs --live` on Windows/Node.js 24.22.1 with the signed-in Codex CLI. The isolated fictional run passed: Codex picked up the exact open BrainLink handoff, read the cited fictional project note, wrote an append-only completed reply, and did not expose the planted private canary in model output or mailbox results. The script removed its temporary vaults. This verifies the receiver leg only; the full Claude Code → BrainLink → Codex flow remains unverified because `claude auth status` reports `loggedIn: false` on this machine.
+
 ### Refresh backup recovery and retrieval comparison on current branch (2026-10-31; source commit `57a301c`)
 
 `npm run smoke:backup-recovery` passed on Windows/Node.js 24.22.1 with fictional encrypted Personal, Organisation, and Client-A scopes: four files verified and restored to a clean folder; wrong-key refusal, artifact restore, and unchanged sources all passed.
