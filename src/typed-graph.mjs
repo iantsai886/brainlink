@@ -6,12 +6,14 @@ const SCOPES = new Set(['personal', 'organisation', 'client']);
 const ID = /^[a-z][a-z0-9._:-]{1,127}$/;
 const phrase = (pattern, cjk = '') => new RegExp(`(?<![\\p{L}\\p{N}_])(?:${pattern})(?![\\p{L}\\p{N}_])${cjk ? `|(?:${cjk})` : ''}`, 'iu');
 const DISCOVERY_RULES = [
-  { predicate: 'owned_by', targets: ['team', 'person'], phrase: phrase('owned by|owner is|belongs to|gerido por|responsável é|pertence a|所有者是|負責人是|负责人是') },
+  { predicate: 'owned_by', targets: ['team', 'person'], phrase: phrase('owned by|owner is|gerido por|responsável é|所有者是|負責人是|负责人是') },
   { predicate: 'runs', targets: ['workflow'], phrase: phrase('runs|operates|executes|executa|opera|realiza', '執行|执行|運行|运行') },
   { predicate: 'consumes', targets: ['dataset', 'artifact'], phrase: phrase('consumes|uses|reads|takes in|consome|usa|utiliza|lê', '消耗|使用|讀取|读取') },
   { predicate: 'produces', targets: ['dataset', 'artifact'], phrase: phrase('produces|creates|outputs|generates|produz|cria|gera', '產生|产生|生成|輸出|输出') },
   { predicate: 'depends_on', targets: ['workflow', 'dataset', 'project'], phrase: phrase('depends on|requires|relies on|depende de|requer|necessita de', '依賴|依赖|需要') },
-  { predicate: 'part_of', targets: ['team', 'project'], phrase: phrase('part of|belongs to|parte de|faz parte de', '屬於|属于') },
+  // Membership phrases are kept distinct from explicit ownership phrases above. Treating
+  // "belongs to" / "pertence a" as both predicates used to create two conflicting edges.
+  { predicate: 'part_of', targets: ['team', 'project'], phrase: phrase('part of|belongs to|pertence a|parte de|faz parte de', '屬於|属于') },
   { predicate: 'assigned_to', targets: ['person', 'team'], phrase: phrase('assigned to|atribuído a|atribuída a|designado a', '分配給|分配给|指派給|指派给') },
   { predicate: 'informed_by', targets: ['artifact', 'dataset', 'concept'], phrase: phrase('informed by|based on|derived from|informado por|com base em|derivado de|baseado em', '根據|根据|依據|依据') },
   { predicate: 'communicates_with', targets: ['person', 'team'], phrase: phrase('communicates with|talks to|coordinates with|hands off to|comunica com|fala com|coordena com|encaminha para', '(?:與|和)[^。！？.!?]{0,80}?(?:溝通|沟通|協作|协作|交接給|交接给)') },

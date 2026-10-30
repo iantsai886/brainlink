@@ -155,6 +155,30 @@ test('deterministic relationship discovery proposes only explicit same-scope tex
   assert.deepEqual(discoverTypedRelationshipCandidatesForSources(notes, [0]).get(0), candidates, 'batch discovery must preserve single-source results');
 });
 
+test('relationship discovery does not turn membership phrases into ownership edges', () => {
+  const notes = [
+    { rel: 'Product Team.md', title: 'Product Team', body: 'Product Team belongs to Operations.', raw: entity({ type: 'team', id: 'team.product' }) },
+    { rel: 'Operations.md', title: 'Operations', body: '', raw: entity({ type: 'team', id: 'team.operations' }) },
+    { rel: 'Intake Workflow.md', title: 'Intake Workflow', body: 'The intake workflow is owned by Product Team.', raw: entity({ type: 'workflow', id: 'workflow.intake' }) },
+  ];
+  const links = discoverTypedRelationshipCandidates(notes, 0);
+  assert.deepEqual(links.map(({ predicate, target_id, evidence }) => [predicate, target_id, evidence]), [
+    ['part_of', 'team.operations', 'Product Team belongs to Operations.'],
+  ]);
+  const workflowLinks = discoverTypedRelationshipCandidates(notes, 2);
+  assert.deepEqual(workflowLinks.map(({ predicate, target_id, evidence }) => [predicate, target_id, evidence]), [
+    ['owned_by', 'team.product', 'The intake workflow is owned by Product Team.'],
+  ]);
+});
+
+test('relationship discovery classifies Portuguese membership separately from ownership', () => {
+  const notes = [
+    { rel: 'Equipe A.md', title: 'Equipe A', body: 'Equipe A pertence a Operações.', raw: entity({ type: 'team', id: 'team.a' }) },
+    { rel: 'Operações.md', title: 'Operações', body: '', raw: entity({ type: 'team', id: 'team.ops' }) },
+  ];
+  assert.deepEqual(discoverTypedRelationshipCandidates(notes, 0).map(({ predicate, target_id }) => [predicate, target_id]), [['part_of', 'team.ops']]);
+});
+
 test('workflow graph suggests explicit team communication links without auto-verifying them', () => {
   const notes = [
     { rel: 'Product Team.md', title: 'Product Team', body: 'The Product Team coordinates with the Data Team to review incoming questions.', raw: '---\ntype: team\nid: team.product\nscope: organisation\nstatus: current\n---\n' },
