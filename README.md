@@ -46,6 +46,8 @@ brainlink setup | init | connect <client|all> | disconnect <client> | clients | 
 
 ## Developers
 
+Current feature, test, cross-client and release status: [docs/RELEASE-READINESS.md](docs/RELEASE-READINESS.md). This development branch has local test evidence, but is not yet release-ready.
+
 ```bash
 npm install               # uses the checked-in store implementation (file:./vendor/brainlink-store)
 npm test                  # core suite (Node 22+)
