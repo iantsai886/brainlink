@@ -4,6 +4,8 @@ This log covers the development branch. Entries marked **unreleased** are not pu
 
 ## 2026-10-31 — Development, unreleased
 
+- Re-ran the 30-case frozen retrieval comparison on clean source commit `46958e5`: 17/30 task proxies in both arms, source recall 1.000, zero privacy violations, and estimated result size 14.1% lower. Receipt: `samples/evaluation/reports/retrieval-independent-46958e5.json`. These estimates do not prove billed token savings or answer quality.
+- Checked Claude Desktop's saved BrainLink token against the current local server; the available role tools include Anna and Brain. Claude Desktop still needs a full exit and new chat before live activation can be verified.
 - The Agent Skills installer now accepts LF and CRLF metadata while preserving the original skill bytes and ownership hashes. A date-dependent test now works across time zones and midnight.
 - **Local tests:** code commit `441c3f0` passed the full Windows suite (592 core passed, 0 failed, 8 platform skips; UI 44/44) and Linux suite (598 core passed, 0 failed, 2 Windows-only skips; UI 44/44). The changed Skill and Twin-profile tests then passed 36/36 on both platforms.
 - **Package checks:** the Windows installed-app smoke passed on `441c3f0`; Linux x64 and ARM64 packages built with verified SHA-256 sidecars, and the x64 Debian and portable packages passed isolated install and uninstall checks. Backup recovery passed on code commit `2646341` using fictional data.
