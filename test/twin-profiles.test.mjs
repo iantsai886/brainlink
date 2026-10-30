@@ -133,6 +133,21 @@ test('Twin permission controls disable and clear actions when their memory type 
   assert.equal(helpers.twinActionMemoryAllowed('propose_note', { semantic: false, episodic: true }), false);
 });
 
+test('Twin setup explains all four memory switches in every supported language', async () => {
+  const html = await readFile(new URL('../ui/index.html', import.meta.url), 'utf8');
+  assert.match(html, /twinProfiles\.memoryDescription\.' \+ key/, 'each checkbox renders its matching short explanation');
+  const catalogs = {};
+  for (const locale of ['en', 'pt', 'zh-TW']) {
+    catalogs[locale] = JSON.parse(await readFile(new URL(`../ui/locales/${locale}.json`, import.meta.url), 'utf8'));
+    for (const type of ['working', 'semantic', 'procedural', 'episodic']) {
+      assert.ok(catalogs[locale][`twinProfiles.memoryDescription.${type}`], `${locale} ${type} description`);
+    }
+  }
+  assert.match(catalogs.en['twinProfiles.memoryDescription.procedural'], /activate agent roles/i);
+  assert.match(catalogs.pt['twinProfiles.memoryDescription.procedural'], /ativar agentes/i);
+  assert.match(catalogs['zh-TW']['twinProfiles.memoryDescription.procedural'], /啟用 Agent 角色/);
+});
+
 test('profile-scoped agents see only granted vaults and only supported read tools', async () => {
   const root = await mkdtemp(path.join(tmpdir(), 'brainlink-twin-runtime-'));
   const orgPath = path.join(root, 'org');
