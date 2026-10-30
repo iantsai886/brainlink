@@ -1,9 +1,15 @@
 # BrainLink implementation status
 
-Status snapshot: 2026-10-30 (Asia/Taipei).
+Status snapshot: 2026-10-31 (Asia/Taipei).
 GitHub repository: `iantsai886/brainlink`
 Branch: `integration/brainlink-retrieval-evaluation` (integrates profile-scoped GitHub, RSI discovery, and independent retrieval evaluation)
 Code baseline: development target `1.2.8`, with `package.json` as the canonical version source. The `v1.2.7` tag belongs to the separate `wip/v1.2.7` release line; this branch continues from the full-source `main` history and does not move or recreate that tag.
+
+### Prevent scheduled scans from restoring a now-private vault target (commit `107b1e0`, 2026-10-31)
+
+The background scan timer and Setup routes that change a vault's privacy or the scan target list now serialize their config updates. This prevents an older scheduled-run snapshot from overwriting a newer privacy change and putting that vault back into the scheduled scan list. Vault removal and scheduled-scan settings use the same update queue.
+
+Evidence on Windows with Node.js 24.22.1: the existing end-to-end privacy/schedule regression passed 20/20 repeated runs; full `npm run test:all` passed on the exact code tree committed as `107b1e0`: core 600 total (592 passed, 0 failed, 8 platform/privilege skips), UI 44/44. Before the fix, the full run exposed the regression and the focused test reproduced it once in 10 runs. Tests use fictional vaults. Hosted GitHub Actions has not allocated runners, so this remains local test evidence.
 
 ### Do not publish partial session imports while a source is changing (commit `310f3d3`, 2026-10-30)
 

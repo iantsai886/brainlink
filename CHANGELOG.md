@@ -4,6 +4,8 @@ This log covers the development branch. Entries marked **unreleased** are not pu
 
 ## 2026-10-31 — Development, unreleased
 
+- Fixed a config race where a scheduled folder scan could restore a scan target after its vault had been marked private. The schedule, privacy toggle, vault removal, and scan schedule settings now serialize their related config updates. Regression test: 20/20 repeated passes; full Windows suite on source commit `107b1e0`: core 600 total (592 passed, 0 failed, 8 platform/privilege skips), UI 44/44.
+- Updated the customer setup steps to fully quit/reopen each AI app and start a new chat so it loads the latest BrainLink tools.
 - Re-ran `npm run test:all` on clean repository commit `2ee9787`, Windows/Node.js 24.22.1: core 600 total (592 passed, 0 failed, 8 Windows privilege/platform skips) and UI 44/44. Application code is unchanged since the Linux-tested `441c3f0` revision.
 
 - Re-ran the 30-case frozen retrieval comparison on clean source commit `46958e5`: 17/30 task proxies in both arms, source recall 1.000, zero privacy violations, and estimated result size 14.1% lower. Receipt: `samples/evaluation/reports/retrieval-independent-46958e5.json`. These estimates do not prove billed token savings or answer quality.
