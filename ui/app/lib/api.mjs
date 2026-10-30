@@ -55,7 +55,8 @@ export async function storeSearch(store, q, f = {}) {
   if (!terms.length) return { verdict: 'not_in_brain', hits: [], tokens_est: 0 };
   const access = f.access || {};
   const summaries = [];
-  for (const vault of (f.vaults || store.vaults().filter(v => !access.remote || !v.private).map(v => v.name))) {
+  const visibleVaults=f.vaults||store.vaults().filter(v=>!access.remote||!v.private).map(v=>v.name);
+  for (const vault of (f.scope?visibleVaults.filter(name=>name===f.scope):visibleVaults)) {
     if (f.folder && !String(f.folder).trim()) continue;
     let after;
     for (let page = 0; page < 100; page++) {

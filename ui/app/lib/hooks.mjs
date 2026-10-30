@@ -27,8 +27,8 @@ export function useSessions(api) {
   return { ...h, load, search: q => load({ q }), togglePrivateListing: checked => load({ include_private: checked }), setPrivate, open, close: () => h.set({ open: null }) };
 }
 export function useSearch(api) {
-  const h = createHook({ q: '', result: null, open: null, error: null }); let version = 0;
-  async function run(q) { h.set({ q, error: null }); const n = ++version; try { const result = await api.search(q); if (n === version) h.set({ result }); } catch (e) { if (n === version) h.set({ error: errText(e) }); } }
+  const h = createHook({ q: '', scope:'', result: null, open: null, error: null }); let version = 0;
+  async function run(q = h.get().q, scope = h.get().scope) { h.set({ q, scope, error: null }); const n = ++version; try { const result = await api.search(q,{scope:scope||undefined}); if (n === version) h.set({ result }); } catch (e) { if (n === version) h.set({ error: errText(e) }); } }
   async function open(id) { try { h.set({ open: await api.readNote(id) }); } catch (e) { h.set({ error: errText(e) }); } }
-  return { ...h, run, open, close: () => h.set({ open: null }) };
+  return { ...h, run, setScope:scope=>run(h.get().q,scope), open, close: () => h.set({ open: null }) };
 }

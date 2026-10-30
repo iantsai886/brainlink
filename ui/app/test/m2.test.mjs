@@ -4,6 +4,7 @@ import { makeStore, mockServices } from './harness.mjs';
 import { createApi } from '../lib/api.mjs';
 import { useNotes } from '../lib/notes.mjs';
 import { markdown, notesView } from '../views/notes.mjs';
+import { searchView } from '../views/screens.mjs';
 import { memoryTypeInfo } from '../lib/memory-type.mjs';
 
 test('v0.2 ranked search forwards canonical options without re-ranking',async()=>{
@@ -89,6 +90,12 @@ test('memory type suggestions use only known frontmatter types and tags and neve
  assert.deepEqual(memoryTypeInfo({tags:['team','agent_skill']}),{current:null,suggested:'procedural'});
  assert.deepEqual(memoryTypeInfo({type:'episode',memory_type:'semantic'}),{current:'semantic',suggested:null});
  assert.deepEqual(memoryTypeInfo({type:'personal_story'}),{current:null,suggested:null});
+});
+test('search vault picker shows only accessible vaults and preserves the selected scope',async()=>{
+ const store=await makeStore(),api=createApi({store,access:{vaults:['Work']}});
+ const view=searchView({q:'website',scope:'Work',result:{hits:[]}},api.vaults());
+ assert.match(view,/value="Work" selected/);assert.doesNotMatch(view,/Journal/);
+ const all=searchView({q:'',scope:'',result:null},createApi({store}).vaults());assert.match(all,/All accessible vaults/);assert.match(all,/Journal \(private\)/);
 });
 test('Notes offers metadata-based suggestions separately from saved memory type',async()=>{
  const store=await makeStore(),api=createApi({store}),h=useNotes(api);const note=await store.write({vault:'Work',path:'Episode.md',body:'Summary',frontmatter:{type:'session_summary'}},{expected_etag:''});
