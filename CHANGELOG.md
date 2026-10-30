@@ -4,6 +4,8 @@ This log covers the development branch. Entries marked **unreleased** are not pu
 
 ## 2026-10-31 — Development, unreleased
 
+- Re-ran `npm run test:all` on clean repository commit `2ee9787`, Windows/Node.js 24.22.1: core 600 total (592 passed, 0 failed, 8 Windows privilege/platform skips) and UI 44/44. Application code is unchanged since the Linux-tested `441c3f0` revision.
+
 - Re-ran the 30-case frozen retrieval comparison on clean source commit `46958e5`: 17/30 task proxies in both arms, source recall 1.000, zero privacy violations, and estimated result size 14.1% lower. Receipt: `samples/evaluation/reports/retrieval-independent-46958e5.json`. These estimates do not prove billed token savings or answer quality.
 - Checked Claude Desktop's saved BrainLink token against the current local server; the available role tools include Anna and Brain. Claude Desktop still needs a full exit and new chat before live activation can be verified.
 - The Agent Skills installer now accepts LF and CRLF metadata while preserving the original skill bytes and ownership hashes. A date-dependent test now works across time zones and midnight.
