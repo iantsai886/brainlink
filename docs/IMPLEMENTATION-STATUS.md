@@ -5,6 +5,10 @@ GitHub repository: `iantsai886/brainlink`
 Branch: `integration/brainlink-retrieval-evaluation` (integrates profile-scoped GitHub, RSI discovery, and independent retrieval evaluation)
 Code baseline: development target `1.2.8`, with `package.json` as the canonical version source. The `v1.2.7` tag belongs to the separate `wip/v1.2.7` release line; this branch continues from the full-source `main` history and does not move or recreate that tag.
 
+### Preserve restore recovery paths when publication or rollback fails (code commit `28cfafd`, 2026-10-31)
+
+Restore still writes and verifies a complete staged copy before publishing it into the user's empty destination. If the final rename fails, BrainLink now explicitly attempts to return the original empty destination. If that rollback also fails, the error reports the exact sibling path where the original folder remains. If temporary recovered-copy cleanup fails, the error also reports that path instead of silently hiding the leftover. Added deterministic rename-failure tests with fictional data: publishing failure returns the original destination and cleans staging; a second rollback failure preserves the original folder and reports its location. On exact source commit `28cfafd`, Windows/Node.js 24.22.1 `npm run test:all` passed: core 602 total (594 passed, 0 failed, 8 Windows platform/privilege skips), UI 44/44. Focused `node --test test/backup.test.mjs` passed 20 total (19 passed, 0 failed, 1 Windows symlink-privilege skip). The subsequent changes to this file only record these results.
+
 ### Prevent scheduled scans from restoring a now-private vault target (commit `107b1e0`, 2026-10-31)
 
 The background scan timer and Setup routes that change a vault's privacy or the scan target list now serialize their config updates. This prevents an older scheduled-run snapshot from overwriting a newer privacy change and putting that vault back into the scheduled scan list. Vault removal and scheduled-scan settings use the same update queue.
