@@ -97,7 +97,10 @@ test('Twin source policy keeps proposed notes private and requires source confid
     confidence: 'reported', session_or_task_id: 'fixture-task-01', confirm: true,
   } } });
   assert.equal(saved.result.structuredContent.written, true);
-  assert.match(await readFile(path.join(vaultPath, 'Inbox/2026-10-30 — Private by default.md'), 'utf8'), /private: true/);
+  const savedNames = await readdir(path.join(vaultPath, 'Inbox'));
+  assert.equal(savedNames.length, 1);
+  assert.match(savedNames[0], / — Private by default\.md$/);
+  assert.match(await readFile(path.join(vaultPath, 'Inbox', savedNames[0]), 'utf8'), /private: true/);
 });
 
 test('Twin session capture policy blocks content capture and full text until opted in', async () => {

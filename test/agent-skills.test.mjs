@@ -37,6 +37,27 @@ test('BrainLink skills use each supported client’s user skill folder', () => {
   assert.throws(() => skillClientRoot('unknown', { home, env }), /not supported/);
 });
 
+test('Agent Skill installer accepts CRLF metadata and preserves the exact source bytes', async (t) => {
+  const f = await fixture(t);
+  const sourceBytes = new Map();
+  for (const name of skillNames) {
+    const file = path.join(f.bundled, name, 'SKILL.md');
+    const text = (await readFile(file, 'utf8')).replace(/\r?\n/g, '\r\n');
+    const bytes = Buffer.from(text, 'utf8');
+    sourceBytes.set(name, bytes);
+    await writeFile(file, bytes);
+  }
+
+  const installed = await installAgentSkills({ client: 'codex', sourceRoot: f.bundled, stateDir: f.stateDir, home: f.home, env: f.env });
+  assert.deepEqual(installed.installed, skillNames);
+  const targetRoot = skillClientRoot('codex', { home: f.home, env: f.env });
+  for (const name of skillNames) {
+    assert.deepEqual(await readFile(path.join(targetRoot, name, 'SKILL.md')), sourceBytes.get(name));
+  }
+  assert.deepEqual((await inspectAgentSkills({ client: 'codex', sourceRoot: f.bundled, stateDir: f.stateDir, home: f.home, env: f.env })).skills.map((item) => item.state), skillNames.map(() => 'managed'));
+  assert.deepEqual((await removeAgentSkills({ client: 'codex', stateDir: f.stateDir, home: f.home, env: f.env })).removed, skillNames);
+});
+
 test('Antigravity installs global Agent Skills in its documented user folder', async (t) => {
   const f = await fixture(t);
   const installed = await installAgentSkills({ client: 'antigravity', sourceRoot: f.bundled, stateDir: f.stateDir, home: f.home, env: f.env });
