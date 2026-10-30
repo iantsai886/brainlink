@@ -162,6 +162,8 @@ test('profile-scoped agents see only granted vaults and only supported read tool
   assert.deepEqual(ctx.enabled, ['Fictional Org']);
   assert.equal(ctx.twinScope.mode, 'scoped');
   const mcp = createMcp(ctx);
+  assert.match(mcp.instructions, /if brainlink_guide is listed and permitted/i);
+  assert.match(mcp.instructions, /do not retry or ask to widen access/);
   const listed = await mcp.handle({ jsonrpc: '2.0', id: 1, method: 'tools/list' });
   const names = listed.result.tools.map((tool) => tool.name);
   assert.ok(names.includes('vault_search'));
