@@ -632,6 +632,12 @@ document.addEventListener('click', async (event) => {
     link.textContent = download.filename;
     link.download = download.filename;
     result.append(link);
+    const open = document.createElement('button');
+    open.type = 'button';
+    open.dataset.updateOpen = download.ticket;
+    open.dataset.updateLabel = download.format === 'tar.gz' ? 'updates.openPackage' : 'updates.openInstaller';
+    open.textContent = t(open.dataset.updateLabel);
+    result.append(open);
   } catch {
     result.replaceChildren(document.createTextNode(t('updates.downloadFailed') + ' '));
     const retry = document.createElement('button');
@@ -639,6 +645,23 @@ document.addEventListener('click', async (event) => {
     retry.dataset.updatePrepare = '1';
     retry.textContent = t('updates.retryDownload');
     result.append(retry);
+  }
+});
+document.addEventListener('click', async (event) => {
+  const button = event.target.closest('[data-update-open]');
+  if (!button) return;
+  button.disabled = true;
+  button.textContent = t('updates.opening');
+  try {
+    const opened = await api('POST', '/api/updates/open', { ticket: button.dataset.updateOpen });
+    button.remove();
+    const result = $('updates-result');
+    result.querySelector('a')?.remove();
+    result.append(document.createTextNode(` ${t('updates.opened', { version: opened.version })}`));
+  } catch {
+    button.disabled = false;
+    button.textContent = t(button.dataset.updateLabel || 'updates.openInstaller');
+    $('updates-result').append(document.createTextNode(` ${t('updates.openFailed')}`));
   }
 });
 function toast(msg, bad) { const t = $('toast'); t.textContent = msg; t.className = 'show' + (bad ? ' bad' : ''); clearTimeout(t._h); t._h = setTimeout(() => (t.className = ''), bad ? 6000 : 3500); }

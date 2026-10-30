@@ -13,6 +13,9 @@ test('Settings update check gives plain messages and keeps a retry after downloa
   assert.match(html, /id="updates-check"/);
   assert.match(checkFlow, /api\('GET', '\/api\/updates\/check'\)/);
   assert.match(checkFlow, /api\('POST', '\/api\/updates\/download'/);
+  assert.match(checkFlow, /dataset\.updateOpen = download\.ticket/);
+  assert.match(checkFlow, /api\('POST', '\/api\/updates\/open'/);
+  assert.match(checkFlow, /updates\.openFailed/);
   assert.match(checkFlow, /updates\.downloadFailed/);
   assert.match(checkFlow, /updates\.retryDownload/);
   assert.match(checkFlow, /retry\.dataset\.updatePrepare = '1'/);
@@ -21,5 +24,10 @@ test('Settings update check gives plain messages and keeps a retry after downloa
     assert.equal(typeof locale['updates.downloadFailed'], 'string');
     assert.equal(typeof locale['updates.retryDownload'], 'string');
     assert.equal(typeof locale['updates.preparing'], 'string');
+    assert.equal(typeof locale['updates.openInstaller'], 'string');
+    assert.equal(typeof locale['updates.openPackage'], 'string');
+    assert.equal(typeof locale['updates.opening'], 'string');
+    assert.equal(typeof locale['updates.opened'], 'string');
+    assert.equal(typeof locale['updates.openFailed'], 'string');
   }
 });

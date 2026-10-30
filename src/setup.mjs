@@ -56,6 +56,7 @@ import { INGESTION_MAX_ATTEMPTS, INGESTION_RETRY_DELAY_MS, ingestionScheduleDue,
 import { briefScheduleDue, validateBriefSchedule } from './brief-schedule.mjs';
 import { defaultRoot as hermesDefaultRoot } from './sessions/hermes.mjs';
 import { checkForUpdate, downloadVerifiedUpdate } from './update-client.mjs';
+import { openUpdatePackage } from './update-launcher.mjs';
 import { UPDATE_PUBLIC_KEY } from './update-trust.mjs';
 
 const GRAPH_NOTE_MUTATIONS = new Set([
@@ -1188,8 +1189,36 @@ export async function startSetup(opts = {}) {
         if (pending) rm(pending.folder, { recursive: true, force: true }).catch(() => {});
       }, 5 * 60_000);
       timer.unref?.();
-      updateDownloads.set(ticket, { ...download, timer, expiresAt: Date.now() + 5 * 60_000 });
-      return { status: 'ready', version: download.version, filename: download.filename, size: download.size, sha256: download.sha256, download_url: `/api/updates/download/${ticket}?t=${encodeURIComponent(token)}` };
+      updateDownloads.set(ticket, { ...download, timer, expiresAt: Date.now() + 5 * 60_000, opened: false });
+      return { status: 'ready', version: download.version, filename: download.filename, format: download.format, size: download.size, sha256: download.sha256, ticket, download_url: `/api/updates/download/${ticket}?t=${encodeURIComponent(token)}` };
+    },
+    'POST /api/updates/open': async (b) => {
+      const ticket = String(b?.ticket || '');
+      if (!/^[A-Za-z0-9_-]{40,48}$/.test(ticket)) throw new Error('This verified update has expired. Check for updates and try again.');
+      const pending = updateDownloads.get(ticket);
+      if (!pending || pending.expiresAt <= Date.now()) throw new Error('This verified update has expired. Check for updates and try again.');
+      if (pending.opened) throw new Error('This package was already opened. Use its download link if you need another copy.');
+      const root = path.resolve(pending.folder);
+      const file = path.resolve(pending.file);
+      const relative = path.relative(root, file);
+      if (!relative || relative === '..' || relative.startsWith(`..${path.sep}`) || path.isAbsolute(relative)) throw new Error('Verified update package path is invalid.');
+      const info = await lstat(file);
+      if (!info.isFile() || info.isSymbolicLink() || info.size !== pending.size) throw new Error('Verified update package changed after download. Prepare it again.');
+      const digest = createHash('sha256');
+      let bytes = 0;
+      for await (const chunk of createReadStream(file)) { bytes += chunk.length; digest.update(chunk); }
+      if (bytes !== pending.size || digest.digest('hex') !== pending.sha256) throw new Error('Verified update package changed after download. Prepare it again.');
+      await (opts.updateLauncher || openUpdatePackage)({ file, format: pending.format, platform: os });
+      pending.opened = true;
+      clearTimeout(pending.timer);
+      pending.expiresAt = Date.now() + 24 * 60 * 60_000;
+      pending.timer = setTimeout(() => {
+        if (updateDownloads.get(ticket) !== pending) return;
+        updateDownloads.delete(ticket);
+        rm(pending.folder, { recursive: true, force: true }).catch(() => {});
+      }, 24 * 60 * 60_000);
+      pending.timer.unref?.();
+      return { status: 'opened', version: pending.version, format: pending.format };
     },
     'GET /api/rsi': async () => ({ ideas: await rsiLedger.list() }),
     'GET /api/rsi/observations': async () => ({ observations: await rsiObservationSchedule.status() }),
@@ -2335,6 +2364,7 @@ export async function startSetup(opts = {}) {
       if (given.length !== want.length || !timingSafeEqual(given, want)) { json(res, 401, { error: 'Setup session expired. Reopen BrainLink.' }); return; }
       const ticket = updateDownloadMatch[1];
       const pending = updateDownloads.get(ticket);
+      if (pending?.opened) { json(res, 409, { error: 'This package is already open. Check for updates again if you need another copy.' }); return; }
       if (!pending || pending.expiresAt <= Date.now()) {
         if (pending) { clearTimeout(pending.timer); updateDownloads.delete(ticket); await rm(pending.folder, { recursive: true, force: true }).catch(() => {}); }
         json(res, 404, { error: 'This verified download expired. Check for updates and try again.' });
@@ -2374,7 +2404,7 @@ export async function startSetup(opts = {}) {
       json(res, 200, result);
     } catch (e) { json(res, 400, { error: String(e.message || e) }); }
   });
-  server.once('close', () => { snapshotWatcher?.stop(); vaultWatcher?.stop(); for (const client of eventClients) client.end(); eventClients.clear(); for (const pending of updateDownloads.values()) { clearTimeout(pending.timer); rm(pending.folder, { recursive: true, force: true }).catch(() => {}); } updateDownloads.clear(); clearInterval(discoveryTimer); clearInterval(observationTimer); clearInterval(ingestionTimer); clearInterval(githubAutoTimer); clearInterval(localSummaryAutoDraftTimer); if (backupTimer) { clearTimeout(backupTimer); clearInterval(backupTimer); } if (syncTimer) { clearTimeout(syncTimer); clearInterval(syncTimer); } });
+  server.once('close', () => { snapshotWatcher?.stop(); vaultWatcher?.stop(); for (const client of eventClients) client.end(); eventClients.clear(); for (const pending of updateDownloads.values()) { clearTimeout(pending.timer); if (!pending.opened) rm(pending.folder, { recursive: true, force: true }).catch(() => {}); } updateDownloads.clear(); clearInterval(discoveryTimer); clearInterval(observationTimer); clearInterval(ingestionTimer); clearInterval(githubAutoTimer); clearInterval(localSummaryAutoDraftTimer); if (backupTimer) { clearTimeout(backupTimer); clearInterval(backupTimer); } if (syncTimer) { clearTimeout(syncTimer); clearInterval(syncTimer); } });
   await new Promise((resolve, reject) => { server.once('error', reject); server.listen(port, '127.0.0.1', resolve); });
   port = server.address().port;
   const startupConfig = await loadConfig(file);
