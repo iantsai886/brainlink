@@ -23,7 +23,7 @@ BrainLink's main product pieces are implemented in the development branch: local
 
 - Sign in to Claude Code, then pass the paired fictional Claude Code-to-Codex handoff test.
 - Restore GitHub Actions runner access. Current workflow runs stop before tests because GitHub reports an account payment or spending-limit problem.
-- Test macOS and Linux installers on their target systems.
+- Linux x64 `.deb` and portable installers now build and pass isolated install, launch, vault-init, and uninstall checks in a Debian 12 container. Still test a real Linux desktop session (menu/browser launch), execute ARM64 packages on ARM hardware, and test macOS installers on their target system.
 - Provision and pin the signed-update publisher key, then verify a real signed release and its upgrade/recovery flow.
 - Get real-user feedback on setup, vault selection, graph editing, backup restore, and permission wording. Synthetic tests do not prove the interface is easy for customers.
 - Measure token and time savings with matched real-world tasks. Current fixture scores and response-size estimates are not proof of provider-billed savings or generated-answer quality.
