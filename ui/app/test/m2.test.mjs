@@ -100,6 +100,7 @@ test('search vault picker shows only accessible vaults and preserves the selecte
 test('Notes vault filter narrows browsing without hiding create destinations or allowing unknown vaults',async()=>{
  const store=await makeStore(),api=createApi({store,access:{vaults:['Work','Journal']}}),h=useNotes(api);await h.load();
  let view=notesView(h.get(),api);assert.match(view,/data-notes-vault/);assert.match(view,/All accessible vaults/);assert.match(view,/name="vault"[\s\S]*Journal/);
+ h.setVault('Journal');view=notesView(h.get(),api);assert.match(view,/data-notes-vault>[\s\S]*value="Journal" selected>Journal \(private\)/);assert.match(view,/name="vault">[\s\S]*value="Journal" selected>Journal<\/option>/);assert.match(view,/Diary/);assert.doesNotMatch(view,/Website relaunch/);
  h.setVault('Work');view=notesView(h.get(),api);assert.match(view,/selected>Work</);assert.match(view,/Website relaunch/);assert.doesNotMatch(view,/Diary/);
  assert.equal(h.get().items.some(n=>n.vault==='Journal'),true);h.setVault('Not allowed');assert.equal(h.get().selectedVault,'');
 });
