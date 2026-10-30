@@ -1559,3 +1559,7 @@ GitHub Actions push run `41088015684` for source commit `a058201` had zero steps
 ### Full Windows suite on current repository revision (2026-10-31)
 
 On clean repository commit `2ee978792363925cc3762552cbcbb18d0068aa8e`, Windows/Node.js 24.22.1 `npm run test:all` passed: core 600 total (592 passed, 0 failed, 8 Windows symlink/platform privilege skips) and UI 44/44. `git diff 441c3f0..2ee9787 -- src test ui bin packaging` is empty, so application code is unchanged from the revision with the recorded Linux full-suite pass; this run refreshes evidence for the exact integration-branch commit. GitHub-hosted Actions is separate and remained blocked before runner steps by the account billing/spending-limit gate.
+
+### Full Linux suite on current integration revision (2026-10-31)
+
+On exact repository commit `67e8e82ad5b47f2345474bfdf1815c4885f89c62`, Linux x64 in Docker `node:24-bookworm`, `npm ci && npm run test:all` exited 0. Core suite: 600 total, 598 passed, 0 failed, 2 Windows-only skips. UI suite: 44 passed, 0 failed. The run used a temporary tmpfs for `node_modules` and did not alter the Windows dependency tree. GitHub Actions run `41091887272` remains separate: Windows/Linux jobs failed before any steps because GitHub blocked runner startup for account billing/spending-limit reasons; macOS jobs remained queued at inspection. This receipt verifies local Linux tests only, not hosted CI, macOS, or customer acceptance.
