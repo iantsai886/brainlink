@@ -991,13 +991,7 @@ export async function startSetup(opts = {}) {
       .filter((item) => item.name.startsWith('agent_connect_'))
       .map((item) => String(item.title || '').replace(/^Connect to\s+/i, '').trim())
       .filter(Boolean);
-    const scopedGrant = ctx.twinScope.mode === 'scoped'
-      ? ctx.twinScope.grants.find((grant) => grant.operations.includes('search') && ctx.twinScope.memory_policy?.semantic && ctx.enabled.includes(grant.name))
-      : null;
-    const scopedTool = scopedGrant ? 'vault_search'
-      : ['session_list', 'list_handoffs', 'brainlink_guide'].find((name) => toolNames.includes(name))
-        || (toolNames.includes('propose_note') ? 'tools/list' : null);
-    const tool = ctx.twinScope.mode === 'scoped' ? (scopedTool || 'tools/list') : 'brainlink_guide';
+    const tool = ctx.twinScope.mode === 'scoped' ? 'tools/list' : 'brainlink_guide';
     const expectedByAction = { search: 'vault_search', read_note: 'vault_read_note', read_session: 'session_list', log_session: 'session_log', propose_note: 'propose_note', handoff_read: 'list_handoffs', write_handoff: 'send_handoff' };
     const scopeHasLiveTool = ctx.twinScope.mode !== 'scoped' || ctx.twinScope.grants
       .filter((grant) => ctx.enabled.includes(grant.name))
@@ -1007,9 +1001,11 @@ export async function startSetup(opts = {}) {
       ok: false, verification: 'brainlink_local_mcp', external_client_verified: false, client: clientId, tool: null, took_ms: 0,
       message: 'This AI app has no usable tools under its selected Twin permissions. Review its memory and action settings.',
     };
-    const scopedVault = scopedGrant?.name;
-    const args = tool === 'vault_search' ? { vault: scopedVault, query: 'BrainLink connection check', limit: 1 }
-      : tool === 'session_list' || tool === 'list_handoffs' ? { limit: 1 } : {};
+    // For scoped identities, tools/list is the connection check. Calling vault_search here
+    // used to scan/index a real vault just to show a green connection light, which could time
+    // out on large vaults and read content the user did not ask to search. The authorized tool
+    // list already proves that this token can see its granted tools and named role connectors.
+    const args = {};
     const called = tool === 'tools/list' ? listed
       : await mcp.handle({ jsonrpc: '2.0', id: 3, method: 'tools/call', params: { name: tool, arguments: args } });
     await Promise.all(pending);
@@ -1019,7 +1015,7 @@ export async function startSetup(opts = {}) {
       ok, verification: 'brainlink_local_mcp', external_client_verified: false,
       client: clientId, tool, took_ms, available_agent_roles,
       message: ok
-        ? `BrainLink access check passed: ${tool} (${took_ms}ms).${available_agent_roles.length ? ` Named BrainLink roles available: ${available_agent_roles.join(', ')}.` : ''} Fully quit ${c.title} (including any tray/background process), reopen it, and start a new chat. This check does not confirm that the app loaded the updated tools.`
+        ? `BrainLink access check passed: ${tool} (${took_ms}ms); no vault notes were read.${available_agent_roles.length ? ` Named BrainLink roles available: ${available_agent_roles.join(', ')}.` : ''} Fully quit ${c.title} (including any tray/background process), reopen it, and start a new chat. This check does not confirm that the app loaded the updated tools.`
         : 'BrainLink access check failed; see Activity below.',
     };
   }

@@ -910,7 +910,8 @@ test('preset AI apps receive only the selected Twin permissions and disconnect r
     const connected = await api('/api/connect', { client: 'cursor', profile_id: 'org_scope', vaults: [{ name: 'Example Org', operations: ['search', 'read_note'] }] });
     assert.equal(connected.status, 200, JSON.stringify(connected.body));
     assert.equal(connected.body.health.ok, true, JSON.stringify(connected.body));
-    assert.equal(connected.body.health.tool, 'vault_search');
+    assert.equal(connected.body.health.tool, 'tools/list');
+    assert.match(connected.body.health.message, /no vault notes were read/);
     const clientConfig = JSON.parse(await readFile(path.join(home, '.cursor', 'mcp.json'), 'utf8'));
     const secret = clientConfig.mcpServers.brainlink.env.BRAINLINK_AGENT_TOKEN;
     assert.match(secret, /^bla_/);
@@ -1028,7 +1029,8 @@ test('preset AI apps can receive scoped session and handoff tools without semant
   const connected = await api('/api/connect', { client: 'cursor', profile_id: 'org_twin_1', vaults: [{ name: 'Fictional Org', operations: ['read_session', 'handoff_read', 'write_handoff'] }], memory_policy: { working: true, semantic: false, procedural: false, episodic: true } });
     assert.equal(connected.status, 200, JSON.stringify(connected.body));
     assert.equal(connected.body.health.ok, true, JSON.stringify(connected.body));
-    assert.equal(connected.body.health.tool, 'session_list');
+    assert.equal(connected.body.health.tool, 'tools/list');
+    assert.match(connected.body.health.message, /no vault notes were read/);
     const clientConfig = JSON.parse(await readFile(path.join(home, '.cursor', 'mcp.json'), 'utf8'));
     const token = clientConfig.mcpServers.brainlink.env.BRAINLINK_AGENT_TOKEN;
     const saved = JSON.parse(await readFile(path.join(env.BRAINLINK_HOME, 'config.json'), 'utf8'));
