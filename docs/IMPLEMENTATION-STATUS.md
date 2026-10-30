@@ -25,6 +25,10 @@ GitHub Actions run `41080930432` on commit `6f414f1` did not execute any job ste
 
 Re-ran `npm run smoke:live-cross-client-handoff` on the current branch. It exited before making a fixture and reported `Claude Code is not signed in. No fixture was created.` The synthetic two-agent test and Codex-only live smoke remain separate evidence; neither is reported as a successful real Claude Code to Codex continuation. The next live check needs Claude Code signed in, then the same smoke command rerun.
 
+### Independent retrieval and context comparison refreshed (source commit `64c12fa`, 2026-10-30)
+
+Ran the frozen 30-case fictional comparison with `node bin/brainlink.mjs eval --fixture samples/evaluation/retrieval-independent-v1.json --vault-root samples/evaluation/independent-vault`. Baseline and compact search both scored 17/30 task-success proxies, both retained 1.000 required-source recall, and both had zero privacy violations. Mean estimated result size fell from 497 to 427 tokens (14.1%); local mean latency was 220 ms versus 93 ms in this run. The exact receipt is `samples/evaluation/reports/retrieval-independent-windows-v4.json`. It reports `eligible_for_review`, not approval or automatic promotion. These are fictional search-output estimates; they do not measure generated answer quality, actual provider billing, or customer outcomes.
+
 ### DeepSeek Harness Zstandard compatibility (2026-10-30)
 
 Fixed the local session importer for Harness files made of concatenated Zstandard frames. Node.js 22's built-in decoder returns only the first frame, which dropped later events from a session. BrainLink now checks each frame and block boundary, decompresses frames separately, enforces the existing total output limit, and refuses malformed or truncated frames before importing partial text. The importer still stores only direct user prompts and visible assistant text, redacts secrets, and keeps imported sessions private by default.
