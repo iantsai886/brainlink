@@ -13,7 +13,7 @@ import path from 'node:path';
 import { loadConfig, saveConfig, configPath, normalize, validate, LOCALES, appHome } from './config.mjs';
 import { PACKS, buildPack, scaffold, mergePack } from './packs.mjs';
 import { CLIENTS, resolveClient, detect, connectClient, disconnectClient, readClientAgentToken, test, deepSeekSessionCueStatus, setDeepSeekSessionCue } from './connectors.mjs';
-import { createContext, search, searchWithVerdict, readNote, related as relatedNotes, ensureDefaultIgnore, readExcludedFolders, writeExcludedFolders, DEFAULT_EXCLUDED_FOLDERS, SUGGESTED_EXCLUDED_FOLDERS, safeJoin, vaultRoot } from './core.mjs';
+import { createContext, search, searchWithVerdict, readNote, related as relatedNotes, ensureDefaultIgnore, readExcludedFolders, writeExcludedFolders, DEFAULT_EXCLUDED_FOLDERS, SUGGESTED_EXCLUDED_FOLDERS, safeJoin, vaultRoot, countVisibleNotes } from './core.mjs';
 import { ROOT, launchSpec, readActivity, refreshMap, logActivity } from './runtime.mjs';
 import { detectEmbedder } from './embed.mjs';
 import { vaultHealth, brief as createBrief } from './insights.mjs';
@@ -200,17 +200,6 @@ export function pickFolder(os = process.platform, prompt = 'Choose your Obsidian
       execFile('kdialog', ['--getexistingdirectory', process.env.HOME || '/'], (e2, o2) => (e2 && e2.code !== 1 ? resolve(undefined) : done(e2, o2)));
     });
   });
-}
-
-// P1a: the vault card's note count must count only what the user/AI can actually see -- the same
-// definition vaultHealth/the Brain map stats use (excludes private notes, generated notes, and
-// anything under an excluded folder, which never even reaches the index). A raw recursive .md
-// file count here previously disagreed with that visible count (e.g. showing 8 when only 2 notes
-// were actually visible), which is confusing on its own and actively misleading once some of the
-// difference is private content.
-async function visibleNoteCount(ctx, vaultName) {
-  const index = await loadVault(ctx, vaultName);
-  return index.notes.filter((n) => !n.generated && !n.private).length;
 }
 
 // A search snippet is raw note text (headings, **bold**, `code`); strip the Markdown so the
@@ -877,6 +866,33 @@ export async function startSetup(opts = {}) {
   refreshSyncSchedule(initialConfig);
   refreshGitHubAutoSchedule(initialConfig);
   const eventClients = new Set();
+  const vaultNoteCounts = new Map();
+  const vaultNoteCountJobs = new Map();
+  const sendVaultNoteCount = (name, result) => {
+    const data = JSON.stringify({ vault: name, ...result });
+    for (const client of eventClients) { try { client.write(`event: vault-counts-updated\ndata: ${data}\n\n`); } catch { eventClients.delete(client); } }
+  };
+  const scheduleVaultNoteCount = (name) => {
+    if (vaultNoteCounts.has(name) || vaultNoteCountJobs.has(name)) return;
+    vaultNoteCounts.set(name, { status: 'scanning' });
+    const job = (async () => {
+      try {
+        const cfg = await loadConfig(file);
+        const vault = cfg.vaults.find((v) => v.name === name);
+        if (!vault || !await stat(vault.path).then((s) => s.isDirectory(), () => false)) throw new Error('Vault is unavailable');
+        const ctx = localContext(cfg);
+        const notes = await (opts.countVisibleNotes || countVisibleNotes)(ctx, name);
+        const result = { status: 'ready', notes };
+        vaultNoteCounts.set(name, result);
+        sendVaultNoteCount(name, result);
+      } catch {
+        const result = { status: 'unavailable' };
+        vaultNoteCounts.set(name, result);
+        sendVaultNoteCount(name, result);
+      } finally { vaultNoteCountJobs.delete(name); }
+    })();
+    vaultNoteCountJobs.set(name, job);
+  };
   let vaultWatcher = null;
   const refreshVaultWatcher = (cfg) => {
     vaultWatcher?.stop();
@@ -888,12 +904,13 @@ export async function startSetup(opts = {}) {
 
   async function state() {
     const cfg = await loadConfig(file);
-    const ctx = localContext(cfg);
     const vaults = [];
     for (const v of cfg.vaults) {
       const ok = await stat(v.path).then((s) => s.isDirectory(), () => false);
       const excluded = ok ? await readExcludedFolders(v.path) : { active: [], suggested: [] };
-      vaults.push({ ...v, exists: ok, notes: ok ? await visibleNoteCount(ctx, v.name) : 0, excluded_folders: excluded.active, excluded_suggestions: excluded.suggested });
+      if (ok) scheduleVaultNoteCount(v.name);
+      const count = vaultNoteCounts.get(v.name);
+      vaults.push({ ...v, exists: ok, notes: ok ? count?.notes ?? null : 0, notes_status: ok ? count?.status ?? 'scanning' : 'missing', excluded_folders: excluded.active, excluded_suggestions: excluded.suggested });
     }
     return {
       version: VERSION, config_path: file, os, locale: cfg.locale,

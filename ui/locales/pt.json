@@ -254,6 +254,8 @@
   "vault.cancel": "Cancelar",
   "vault.noneYet": "Ainda sem cadernos — escolha uma pasta acima.",
   "vault.notesCount": "{n} notas",
+  "vault.counting": "A contar notas…",
+  "vault.countUnavailable": "Contagem indisponível",
   "vault.missing": "pasta em falta",
   "vault.removeBtn": "Remover do BrainLink",
   "vault.writes": "escrita",

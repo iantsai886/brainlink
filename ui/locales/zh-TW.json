@@ -254,6 +254,8 @@
   "vault.cancel": "取消",
   "vault.noneYet": "還沒有筆記庫——請在上面選擇一個資料夾。",
   "vault.notesCount": "{n} 則筆記",
+  "vault.counting": "正在計算筆記…",
+  "vault.countUnavailable": "無法計算筆記數",
   "vault.missing": "資料夾不存在",
   "vault.removeBtn": "從 BrainLink 移除",
   "vault.writes": "寫入",

@@ -282,6 +282,24 @@ async function readIndexableHeader(full, size) {
   return inspectIndexableHeader(buffer.subarray(0, bytesRead).toString('utf8'), size, bytesRead);
 }
 
+// Setup needs a useful note count, but building the full search index just to display that
+// number reads every public Markdown body and can consume large amounts of memory on synced
+// vaults. Count from bounded frontmatter reads only; search still builds its normal index lazily.
+export async function countVisibleNotes(ctx, name) {
+  const root = vaultRoot(ctx, name);
+  let count = 0;
+  for (const full of await walk(root)) {
+    const rel = path.relative(root, full).split(path.sep).join('/');
+    if (!twinNoteMemoryAllowed(ctx, name, rel)) continue;
+    const st = await stat(full, { bigint: true });
+    const header = await readIndexableHeader(full, Number(st.size));
+    if (!header.indexable || !twinNoteMemoryAllowed(ctx, name, rel, header.meta)) continue;
+    if (header.meta.generated_by === 'brainlink' || /^BrainLink\/Commands\//i.test(rel)) continue;
+    count++;
+  }
+  return count;
+}
+
 // Hash-incremental: unchanged files are not re-chunked on the next call.
 export async function loadVault(ctx, name) {
   const root = vaultRoot(ctx, name);

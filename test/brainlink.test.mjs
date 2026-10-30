@@ -948,14 +948,23 @@ test('setup UI: host check, token check, add vault, connect with no plan limits'
   const s = await startSetup({ env, home, os: 'darwin', port: 0, pick: async () => vaultDir, useCli: false });
   const base = `http://127.0.0.1:${s.port}`;
   const api = (method, p, body, token = s.token) => fetch(base + p, { method, headers: { 'X-BrainLink-Token': token, 'Content-Type': 'application/json' }, body: body && JSON.stringify(body) });
+  const visibleCount = async () => {
+    const deadline = Date.now() + 5000;
+    while (Date.now() < deadline) {
+      const state = await (await api('GET', '/api/state')).json();
+      if (state.vaults[0]?.notes_status === 'ready') return state.vaults[0].notes;
+      await new Promise((resolve) => setTimeout(resolve, 10));
+    }
+    throw new Error('visible note count did not finish in time');
+  };
   try {
     assert.equal((await fetch(base + '/')).status, 200);
     assert.equal((await api('GET', '/api/state', null, 'wrong')).status, 401);
     assert.equal((await api('POST', '/api/pick-folder')).status, 200);
     const add = await (await api('POST', '/api/vault', { path: vaultDir, name: 'Acme', pack: 'founder-os', agentName: 'Chief of Staff' })).json();
     assert.equal(add.ok, true);
+    assert.equal((await visibleCount()) > 5, true);
     const st = await (await api('GET', '/api/state')).json();
-    assert.equal(st.vaults[0].notes > 5, true);
     assert.equal(st.agents[0].name, 'Chief of Staff');
     // No vault cap: a second vault is always allowed, not just on a paid plan.
     const second = await api('POST', '/api/vault', { path: home, name: 'Other' });
@@ -981,10 +990,19 @@ test('P1a: the vault card\'s note count matches what is actually visible (privat
   const s = await startSetup({ env, home, os: 'darwin', port: 0, pick: async () => vaultDir, useCli: false });
   const base = `http://127.0.0.1:${s.port}`;
   const api = (method, p, body) => fetch(base + p, { method, headers: { 'X-BrainLink-Token': s.token, 'Content-Type': 'application/json' }, body: body && JSON.stringify(body) });
+  const visibleCount = async () => {
+    const deadline = Date.now() + 5000;
+    while (Date.now() < deadline) {
+      const state = await (await api('GET', '/api/state')).json();
+      if (state.vaults[0]?.notes_status === 'ready') return state.vaults[0].notes;
+      await new Promise((resolve) => setTimeout(resolve, 10));
+    }
+    throw new Error('visible note count did not finish in time');
+  };
   try {
     const add = await (await api('POST', '/api/vault', { path: vaultDir, name: 'Acme', pack: 'founder-os', agentName: 'Chief of Staff' })).json();
     assert.equal(add.ok, true);
-    const before = (await (await api('GET', '/api/state')).json()).vaults[0].notes;
+    const before = await visibleCount();
     const g0 = await (await api('POST', '/api/graph', {})).json();
     assert.equal(before, g0.health.notes, 'the vault card count must match the Brain map\'s own visible-notes count');
 

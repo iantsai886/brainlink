@@ -254,6 +254,8 @@
   "vault.cancel": "Cancel",
   "vault.noneYet": "No vaults yet — choose a folder above.",
   "vault.notesCount": "{n} notes",
+  "vault.counting": "Counting notes…",
+  "vault.countUnavailable": "Count unavailable",
   "vault.missing": "folder missing",
   "vault.removeBtn": "Remove from BrainLink",
   "vault.writes": "writes",
