@@ -13,7 +13,7 @@ On Windows with Node.js 24.22.1, `npm run smoke:installed:win` passed using an i
 
 Docker 29.8.2 ran `npm ci && npm run test:all` in `node:24-bookworm`, with a separate Linux `node_modules` volume so Windows dependencies were untouched. Result: core 548 total (546 passed, 0 failed, 2 platform skips) and UI 29/29. This checks the current source changes on Linux; hosted Actions remains blocked and this is not installed Linux desktop or ARM acceptance.
 
-### Graph: manually propose typed links from a selected note (2026-10-30, working tree after `1b7e796`)
+### Graph: manually propose typed links from a selected note (`f8c847b`, privacy test `e557efb`, 2026-10-30)
 
 The graph side panel now lets a user propose a typed link when fixed phrase discovery misses it. The target must be a current, unique, visible typed entity in the same vault and Twin scope; the selected relation must accept its entity type; and evidence must be an exact excerpt (up to 320 characters) from the source note. BrainLink saves it as `review: proposed`; it remains out of the graph until a separate human approval. The UI filters target choices to compatible entity types. English, Portuguese, and Traditional Chinese text was added. The existing phrase-based scanner remains unchanged.
 
