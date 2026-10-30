@@ -843,8 +843,13 @@ test('MCP: initialize, tools, prompts, resources, errors', async () => {
   const init = await call('initialize', { protocolVersion: '2025-03-26' });
   assert.equal(init.result.protocolVersion, '2025-03-26');
   assert.match(init.result.instructions, /"Connect to Chief of Staff" → agent_connect/);
+  assert.match(init.result.instructions, /call BrainLink’s agent_connect tool directly/);
+  assert.match(init.result.instructions, /do not search a connector directory/);
   const names = (await call('tools/list')).result.tools.map((t) => t.name);
   for (const n of ['brainlink_guide', 'vault_search', 'agent_connect', 'agent_close_loop', 'propose_note', 'send_handoff', 'search', 'fetch']) assert.ok(names.includes(n), n);
+  const activationTool = (await call('tools/list')).result.tools.find((t) => t.name === 'agent_connect');
+  assert.match(activationTool.description, /Call this BrainLink tool directly/);
+  assert.match(activationTool.description, /not a separate connector or app/);
   const guide = await call('tools/call', { name: 'brainlink_guide', arguments: {} });
   const model = guide.result.structuredContent.memory_model;
   assert.deepEqual(Object.keys(model.types), ['working', 'semantic', 'procedural', 'episodic']);

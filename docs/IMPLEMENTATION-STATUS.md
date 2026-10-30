@@ -5,6 +5,12 @@ GitHub repository: `iantsai886/brainlink`
 Branch: `integration/brainlink-retrieval-evaluation` (integrates profile-scoped GitHub, RSI discovery, and independent retrieval evaluation)
 Code baseline: development target `1.2.8`, with `package.json` as the canonical version source. The `v1.2.7` tag belongs to the separate `wip/v1.2.7` release line; this branch continues from the full-source `main` history and does not move or recreate that tag.
 
+### Make agent activation direct in connected AI clients (2026-10-30)
+
+BrainLink's MCP instructions and `agent_connect` tool description now say to call BrainLink directly when a user asks for a named agent. They clarify that Anna is a role inside BrainLink, not a separate connector to find in a connector directory. This addresses a Claude response that searched the connector directory despite the configured BrainLink MCP server. A local runtime check using the Claude Desktop connection settings called `agent_connect` as Anna successfully and loaded the Anna role; the Claude UI tool call itself was not verified in this check.
+
+Added assertions for the direct-call guidance. Windows/Node.js 24.22.1 `npm run test:all`: core 579 total (571 passed, 0 failed, 8 platform/privilege skips); UI 44/44. `git diff --check` passed. This verifies BrainLink's tool metadata and the locally configured token, not that every live Claude Desktop conversation will select the tool.
+
 ### Claude Desktop Anna activation on a large vault (2026-10-30)
 
 Claude's first explicit `agent_connect` call timed out at the client's 60-second limit. The delay came from reading one known note through `readNote`, which built the full Brain vault index first, and from `agent_connect` building whole-vault recent activity/open-loop summaries on every activation. Commit `73ea027efb584d13c1140b749df6163d36f89af5` removes the full index build from direct note reads while preserving path containment, excluded-folder, symlink, privacy, and memory-type checks. Normal agent activation now reads configured notes only; the full activity summary is opt-in with `include_vault_context=true`.
