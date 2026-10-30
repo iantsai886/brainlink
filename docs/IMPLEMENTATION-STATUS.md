@@ -15,6 +15,8 @@ After commit `39149aa`, `npm run smoke:installed:win` passed from the current so
 
 The exact pushed branch commit `5f7c7bc` also passed `npm ci && npm run test:all` in a native Linux clone inside `node:24-bookworm` (Node.js 24.22.2): core 609 total (607 passed, 0 failed, 2 Windows-only skips); UI 44/44. This used a Linux-native Git clone because mounting a Windows Git worktree leaves a Windows-only `.git` pointer. The two skips are expected platform-specific Windows checks; the initial pointer-related failure was eliminated by the corrected clone-based run. GitHub-hosted CI is still not evidence for this commit.
 
+The exact pushed branch commit `27edc80` passed the same suite in a native Linux clone inside `node:22-bookworm` (Node.js 22.23.4): core 609 total (607 passed, 0 failed, 2 Windows-only skips); UI 44/44. No source changes occurred between `5f7c7bc` and `27edc80`; that intervening commit records the Linux Node 24 result. This provides local Linux evidence on both supported Node major versions.
+
 ### Full Windows test suite on current integration head (`be4e41f`, 2026-10-31)
 
 Windows/Node.js 24.22.1 `npm run test:all` exited 0 on exact repository commit `be4e41fc1068254ee1ab0fa77fbb31fb990020d8`: core 603 total (595 passed, 0 failed, 8 platform/privilege skips); UI 44/44. This includes code commit `28cfafd` restore recovery hardening and code commit `7e535ce` Twin memory setup shortcut. GitHub Actions run `41096595465` for this commit did not execute steps; the check annotation reports the repository account payment/spending-limit gate. Local test success and hosted CI are separate.
