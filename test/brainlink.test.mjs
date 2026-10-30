@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtemp, mkdir, writeFile, readFile, readdir, cp, utimes, stat } from 'node:fs/promises';
+import { mkdtemp, mkdir, writeFile, readFile, readdir, cp, utimes, stat, symlink } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { spawn } from 'node:child_process';
 import { request } from 'node:http';
@@ -134,6 +134,20 @@ test('reads are confined to the vault and to Markdown', async () => {
   await assert.rejects(readNote(ctx, 'Acme Studio', '../Journal/diary.md'), /escapes/);
   await assert.rejects(readNote(ctx, 'Acme Studio', 'AGENTS'), /Markdown/);
   assert.match((await readNote(ctx, 'Acme Studio', 'Home.md')).body, /Acme Studio/);
+});
+
+test('readNote refuses symlinked paths without building a whole-vault index', async (t) => {
+  const { base, cfg, company } = await fixture();
+  const outside = path.join(base, 'Outside.md');
+  await writeFile(outside, '# Outside\n\nMust not be exposed through the vault.');
+  try { await symlink(outside, path.join(company, 'Linked outside.md')); }
+  catch (error) {
+    if (error.code === 'EPERM' && process.platform === 'win32') { t.skip('Windows symlink privilege unavailable'); return; }
+    throw error;
+  }
+  const ctx = ctxOf(cfg);
+  await assert.rejects(readNote(ctx, 'Acme Studio', 'Linked outside.md'), /private/i);
+  assert.equal(ctx.cache.size, 0);
 });
 
 test('readNote refuses private notes and notes in an excluded folder, everywhere it is called', async () => {
@@ -706,6 +720,16 @@ test('agent_connect loads role notes, newest captures and stale warnings', async
   assert.match(r.instructions, /Chief of Staff close loop/);
 });
 
+test('agent_connect stays fast by loading configured context without indexing the whole vault', async () => {
+  const { cfg } = await fixture();
+  const ctx = ctxOf(cfg);
+  const r = await connectAgent(ctx, { agent: 'Connect to Chief of Staff' });
+  assert.ok(r.role_notes.some((n) => /Operating coordinator/.test(n.excerpt)));
+  assert.equal(r.whats_new, undefined);
+  assert.equal(r.open_loops, undefined);
+  assert.equal(ctx.cache.size, 0, 'activation should not build a whole-vault index');
+});
+
 test('agent_connect: private connect notes and private recent_dir entries never reach the agent', async () => {
   const { cfg, company } = await fixture();
   const office = 'Chief of Staff Office';
@@ -742,7 +766,9 @@ test('agent_connect applies each Twin memory-type switch to its mixed connection
     const mcp = createMcp(ctx);
     const listed = await mcp.handle({ jsonrpc: '2.0', id: 2, method: 'tools/list' });
     const activation = listed.result.tools.find((tool) => tool.name === 'agent_connect');
-    assert.match(activation.description, /only the context sections allowed by this Twin's memory policy/);
+    assert.match(activation.description, /configured notes allowed by this Twin's memory policy/);
+    assert.match(activation.description, /Does not scan the whole vault by default/);
+    assert.match(activation.description, /include_vault_context=true/);
     const result = await mcp.handle({ jsonrpc: '2.0', id: 1, method: 'tools/call', params: { name: 'agent_connect', arguments: { agent: 'Chief of Staff' } } });
     assert.equal(result.result.isError, false, JSON.stringify(result));
     const packet = JSON.stringify(result.result.structuredContent);
@@ -1357,7 +1383,7 @@ test('remember, daily note, open loops, recent, health and brief', async () => {
   assert.ok(h.broken_links.some((b) => b.target === 'Missing Note'));
   const b = await brief(ctx, 'Acme Studio');
   assert.ok(b.changed.length && b.health.notes > 10 && 'open_loops' in b);
-  const c = await connectAgent(ctx, { agent: 'Chief of Staff' });
+  const c = await connectAgent(ctx, { agent: 'Chief of Staff', include_vault_context: true });
   assert.ok(c.memories.includes('Founder prefers short answers.'));
   assert.ok(c.memories.includes('Founder uses markdown _(literal)_'), 'metadata parsing preserves fact text that resembles a legacy metadata suffix');
   assert.ok(c.whats_new.length);

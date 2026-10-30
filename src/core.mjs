@@ -3,7 +3,7 @@
 // BM25 over stemmed terms, fused (reciprocal rank) across the query, its rephrasings and the
 // optional semantic ranking; capped graph boost from links, co-citations and shared tags;
 // title boost; demotion of superseded / archived notes; date, folder and tag filters.
-import { readdir, readFile, writeFile, stat, open } from 'node:fs/promises';
+import { readdir, readFile, writeFile, stat, lstat, realpath, open } from 'node:fs/promises';
 import { createHash } from 'node:crypto';
 import path from 'node:path';
 import { termFrequencies, terms, linkGraph, collection, suggestRelated, extractTags } from './graph.mjs';
@@ -663,14 +663,19 @@ export async function readNote(ctx, name, rel, { readBody = readFile } = {}) {
   if (!full.toLowerCase().endsWith('.md')) throw new Error('Only Markdown notes can be read');
   const relNorm = path.relative(root, full).split(path.sep).join('/');
   if (await isExcludedPath(root, relNorm)) throw new Error(PRIVATE_NOTE_ERROR);
-  // safeJoin only resolves `..`/absolute-path tricks (path.resolve), not symlinks: a file or
-  // directory symlink that *looks* like it's inside the vault can still point at 00 Home or
-  // anywhere else on disk. walk() (the index builder) already skips symlinks entirely, so
-  // requiring the note to be indexed under this exact relative path closes that gap for free —
-  // a symlinked path is simply never in index.byRel, no matter what it resolves to on disk.
-  const index = await loadVault(ctx, name);
-  const i = index.byRel.get(relNorm);
-  if (i === undefined || index.notes[i].private) throw new Error(PRIVATE_NOTE_ERROR);
+  // Direct reads must not build the full vault index just to check one known path. Validate
+  // every path component, reject symlinks, and confirm the resolved target stays in this vault.
+  // This preserves walk()'s symlink boundary without scanning every Markdown file first.
+  let current = root;
+  const parts = relNorm.split('/');
+  for (let i = 0; i < parts.length; i++) {
+    current = path.join(current, parts[i]);
+    const entry = await lstat(current);
+    if (entry.isSymbolicLink() || (i < parts.length - 1 ? !entry.isDirectory() : !entry.isFile())) throw new Error(PRIVATE_NOTE_ERROR);
+  }
+  const [realRoot, realFull] = await Promise.all([realpath(root), realpath(full)]);
+  const realRel = path.relative(realRoot, realFull);
+  if (!realRel || realRel === '..' || realRel.startsWith(`..${path.sep}`) || path.isAbsolute(realRel)) throw new Error(PRIVATE_NOTE_ERROR);
   // The index can be stale if a file changes while preserving size and timestamps. Re-read
   // only the bounded frontmatter first so a changed memory type is denied before loading the
   // note body. Keep the post-read check below as a second guard against edits during the read.

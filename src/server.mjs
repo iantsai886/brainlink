@@ -217,8 +217,8 @@ export function createMcp(ctx, { onCall = () => {} } = {}) {
       run: async (a) => closeSession(ctx, await sessionStore(), a) },
     ...(agents.length ? [
       { name: 'agent_connect', title: 'Activate an agent ("Connect to …")', annotations: RO,
-        description: `Use when the user says an activation phrase (${agents.map((a) => `"${a.activation[0]}"`).join(', ')}). Loads the agent's role and only the context sections allowed by this Twin's memory policy; disabled memory types are omitted.`,
-        inputSchema: { type: 'object', properties: { agent: agentProp, ai_platform: idProps.ai_platform }, required: ['agent'] },
+        description: `Use when the user says an activation phrase (${agents.map((a) => `"${a.activation[0]}"`).join(', ')}). Quickly loads the agent's role and configured notes allowed by this Twin's memory policy; disabled memory types are omitted. Does not scan the whole vault by default. Set include_vault_context=true only when the user explicitly asks for a full recent-activity and open-items summary.`,
+        inputSchema: { type: 'object', properties: { agent: agentProp, ai_platform: idProps.ai_platform, include_vault_context: { type: 'boolean', description: 'Optional slower whole-vault recent-activity and open-items summary; leave false for normal activation.' } }, required: ['agent'] },
         run: (a) => connectAgent(ctx, a) },
       { name: 'agent_close_loop', title: 'Close the loop for an agent ("… close loop")', annotations: WR,
         description: `Use when the user says a close phrase (${agents.map((a) => `"${a.close[0]}"`).join(', ')}). Captures decisions, actions, corrections, unresolved questions, source, confidence, privacy boundary, links and smallest next actions in the agent's configured place. The user's close phrase authorises confirm=true.`,
