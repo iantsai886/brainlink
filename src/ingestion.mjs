@@ -7,12 +7,14 @@ import path from 'node:path';
 import { appHome } from './config.mjs';
 import { indexableHeader, isExcludedPath, isPrivateMeta, fmSaysPrivate, parseFrontmatter, safeJoin, vault, vaultRoot } from './core.mjs';
 import { extractLinks } from './graph.mjs';
+import { redactText } from './sessions/redact.mjs';
 
 const hash = (s) => createHash('sha256').update(String(s)).digest('hex');
 const MAX_NOTES = 5000;
 const MAX_DEPTH = 32;
 const MAX_NOTE_BYTES = 5 * 1024 * 1024;
 const MAX_HEADER_BYTES = 64 * 1024;
+const MAX_DRAFT_SOURCE_CHARS = 24_000;
 
 function selectedFolder(value) {
   const folder = String(value || '').replace(/\\/g, '/').replace(/^\/+|\/+$/g, '');
@@ -51,7 +53,7 @@ function scopeId(ctx, vaultName, root) {
 
 function sourceId(scope, rel) { return hash(`${scope}\0${rel}`); }
 
-async function readEligible(full, root, realRoot, rel) {
+async function readEligible(full, root, realRoot, rel, { includeBody = false } = {}) {
   if (await isExcludedPath(root, rel)) return null;
   const before = await lstat(full);
   if (before.isSymbolicLink() || !before.isFile() || before.size > MAX_NOTE_BYTES) return null;
@@ -74,7 +76,7 @@ async function readEligible(full, root, realRoot, rel) {
     if (after.size !== opened.size || after.mtimeMs !== opened.mtimeMs || pathAfter.isSymbolicLink() || (pathAfter.ino && opened.ino && pathAfter.ino !== opened.ino)) return null;
     const { meta, body, frontmatter } = parseFrontmatter(raw);
     if (isPrivateMeta(meta) || fmSaysPrivate(frontmatter) || meta.generated_by === 'brainlink') return null;
-    return { rel, title: path.posix.basename(rel).replace(/\.md$/i, ''), revision: hash(raw), updated_at: new Date(after.mtimeMs).toISOString() };
+    return { rel, title: path.posix.basename(rel).replace(/\.md$/i, ''), revision: hash(raw), updated_at: new Date(after.mtimeMs).toISOString(), ...(includeBody ? { body } : {}) };
   } finally { await fh.close(); }
 }
 
@@ -127,6 +129,22 @@ export async function ingestionQueue(ctx, vaultName, folder, { limit = 50 } = {}
   const candidates = pending.slice(0, cap)
     .map((s) => ({ source_id: sourceId(scope, s.rel), revision: s.revision, path: s.rel, title: s.title, updated_at: s.updated_at }));
   return { ok: true, vault: vaultName, folder: folderInfo.folder, candidates, queued_total: pending.length, scanned, skipped, truncated, limited: pending.length > cap, next: 'Read each selected source with vault_read_note. Draft linked knowledge with propose_note and show its preview. After a linked note is saved, record filed; otherwise record skipped. Source files are never changed.' };
+}
+
+// Re-read one exact queue item only after the same folder, vault and privacy checks pass.
+// The caller sends this text only to BrainLink's fixed loopback Ollama endpoint.
+export async function readIngestionSource(ctx, vaultName, folder, { source_id, revision } = {}) {
+  const folderInfo = await checkedFolder(ctx, vaultName, folder);
+  if (typeof source_id !== 'string' || !/^[a-f0-9]{64}$/.test(source_id) || typeof revision !== 'string' || !/^[a-f0-9]{64}$/.test(revision)) throw new Error('Choose a current source from the scan queue.');
+  const scope = scopeId(ctx, vaultName, folderInfo.root);
+  const prior = (await latestEvents(journalPath(ctx, scope))).get(source_id);
+  if (prior?.revision === revision) throw new Error('This source revision was already reviewed. Refresh the queue for changed sources.');
+  const { sources } = await sourcesInFolder(ctx, vaultName, folderInfo);
+  const queued = sources.find((item) => sourceId(scope, item.rel) === source_id);
+  if (!queued || queued.revision !== revision) throw new Error('This source changed or is no longer available. Refresh the queue and review it again.');
+  const source = await readEligible(safeJoin(folderInfo.root, queued.rel), folderInfo.root, folderInfo.realRoot, queued.rel, { includeBody: true });
+  if (!source || source.revision !== revision) throw new Error('This source changed during review. Refresh the queue and review it again.');
+  return { ...source, source_id, vault: vaultName, folder: folderInfo.folder, body: redactText(source.body).slice(0, MAX_DRAFT_SOURCE_CHARS) };
 }
 
 export async function recordIngestion(ctx, vaultName, folder, { source_id, revision, outcome, knowledge_path } = {}) {

@@ -2022,6 +2022,35 @@ document.addEventListener('click', async (event) => {
     renderIngestionTargets();
     return;
   }
+  const draftSource = event.target.closest('[data-ingestion-draft]');
+  if (draftSource) {
+    try {
+      if (!S.sessions_local_summary?.enabled || !S.sessions_local_summary?.model) throw new Error(t('ingestion.localDraftNeedsModel'));
+      draftSource.disabled = true;
+      const result = await api('POST', '/api/ingestion/draft', { vault: draftSource.dataset.vault, folder: draftSource.dataset.folder, source_id: draftSource.dataset.sourceId, revision: draftSource.dataset.revision });
+      const draft = result.draft;
+      const holder = $('ingestion-draft-' + draftSource.dataset.sourceId.slice(0, 12));
+      if (!holder) return;
+      holder.innerHTML = `<div class="notice"><b>${esc(t('ingestion.localDraftUnverified'))}</b><h4>${esc(draft.title)}</h4><p>${esc(draft.summary)}</p><p class="muted">${esc(t('ingestion.memoryType'))}: ${esc(draft.memory_type)} · ${esc(draft.model)}</p><details><summary>${esc(t('ingestion.reviewDraft'))}</summary><pre style="white-space:pre-wrap;overflow-wrap:anywhere">${esc(draft.body)}</pre></details>${draft.destinations?.length ? `<label>${esc(t('ingestion.destination'))}<select data-ingestion-destination="${esc(result.draft_id)}"><option value="">${esc(t('ingestion.chooseDestination'))}</option>${draft.destinations.map((folder) => `<option value="${esc(folder)}">${esc(folder)}</option>`).join('')}</select></label><button class="primary" type="button" data-ingestion-save-draft="${esc(result.draft_id)}">${esc(t('ingestion.saveProposal'))}</button>` : `<p class="muted">${esc(t('ingestion.noDestination'))}</p>`}</div>`;
+    } catch (error) { toast(error.message, true); }
+    finally { draftSource.disabled = false; }
+    return;
+  }
+  const saveDraft = event.target.closest('[data-ingestion-save-draft]');
+  if (saveDraft) {
+    const selector = document.querySelector(`[data-ingestion-destination="${CSS.escape(saveDraft.dataset.ingestionSaveDraft)}"]`);
+    if (!selector?.value) { toast(t('ingestion.chooseDestination'), true); return; }
+    if (!window.confirm(t('ingestion.confirmSaveProposal'))) return;
+    try {
+      saveDraft.disabled = true;
+      const result = await api('POST', '/api/ingestion/save-draft', { draft_id: saveDraft.dataset.ingestionSaveDraft, destination: selector.value, confirm: true });
+      if (result.written) saveDraft.closest('.notice').innerHTML = `<b>${esc(t('ingestion.proposalSaved'))}</b><p>${esc(result.path)}</p><p class="muted">${esc(t('ingestion.proposalUnverified'))}</p>`;
+      else if (result.preview) toast(t('ingestion.proposalNeedsReview'), true);
+      else toast((result.errors || []).join(' '), true);
+    } catch (error) { toast(error.message, true); }
+    finally { saveDraft.disabled = false; }
+    return;
+  }
   const editButton = event.target.closest('[data-twin-edit]');
   if (editButton) {
     editingTwinId = editButton.dataset.twinEdit;
@@ -2155,7 +2184,7 @@ $('ingestion-save').onclick = () => act(async () => {
 });
 $('ingestion-run').onclick = () => act(async () => {
   const r = await api('POST', '/api/ingestion/run', { targets: currentIngestionTargets() });
-  $('ingestion-queue').innerHTML = r.candidates.length ? `${r.limited ? `<p class="muted">${esc(t('ingestion.limited', { shown: r.candidates.length, total: r.queued_total }))}</p>` : ''}${r.candidates.map((item) => `<div class="card"><button class="link" data-open-note="${esc(item.vault || r.vault)}::${esc(item.path)}"><b>${esc(item.title)}</b></button><span class="mono muted">${esc(item.vault || r.vault)} · ${esc(item.path)}</span><small class="muted">${esc(item.updated_at)}</small></div>`).join('')}` : `<p class="muted">${esc(t('ingestion.empty'))}</p>`;
+  $('ingestion-queue').innerHTML = r.candidates.length ? `${r.limited ? `<p class="muted">${esc(t('ingestion.limited', { shown: r.candidates.length, total: r.queued_total }))}</p>` : ''}${r.candidates.map((item) => `<div class="card"><button class="link" data-open-note="${esc(item.vault || r.vault)}::${esc(item.path)}"><b>${esc(item.title)}</b></button><span class="mono muted">${esc(item.vault || r.vault)} · ${esc(item.path)}</span><small class="muted">${esc(item.updated_at)}</small>${S.sessions_local_summary?.enabled ? `<button class="secondary" type="button" data-ingestion-draft data-vault="${esc(item.vault || r.vault)}" data-folder="${esc(item.folder)}" data-source-id="${esc(item.source_id)}" data-revision="${esc(item.revision)}">${esc(t('ingestion.makeLocalDraft'))}</button>` : ''}<div id="ingestion-draft-${esc(item.source_id.slice(0, 12))}"></div></div>`).join('')}` : `<p class="muted">${esc(t('ingestion.empty'))}</p>`;
   toast(r.ok ? t('ingestion.scanDone', { count: r.queued_total }) : (r.error || t('ingestion.failed', { error: '' })), !r.ok);
 });
 $('brief-save').onclick = () => act(async () => {

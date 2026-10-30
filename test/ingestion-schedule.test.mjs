@@ -155,11 +155,14 @@ test('ingestion scan UI has manual and scheduled controls with all locale string
   assert.match(html, /<select id="ingestion-folder"><\/select>/, 'folder target is selected from existing directories, not typed as a path');
   assert.match(html, /api\('POST', '\/api\/ingestion\/folders', \{ vault \}\)/, 'folder options come from the authenticated vault-scoped endpoint');
   assert.match(html, /api\('POST', '\/api\/ingestion\/run', \{ targets: currentIngestionTargets\(\) \}\)/);
+  assert.match(html, /api\('POST', '\/api\/ingestion\/draft'/, 'the selected source can be summarized by the local draft route');
+  assert.match(html, /api\('POST', '\/api\/ingestion\/save-draft'.*confirm: true/, 'saving requires a separate confirmation action');
+  assert.match(html, /window\.confirm\(t\('ingestion\.confirmSaveProposal'\)\)/);
   assert.match(html, /data-open-note="\$\{esc\(item\.vault \|\| r\.vault\)\}::\$\{esc\(item\.path\)\}"/, 'queue entries open each source note in its own vault');
   assert.match(html, /document\.addEventListener\('click', async \(event\) => \{\s*const removeIngestionTarget/);
   assert.match(html, /currentIngestionTargets\(\)\.push\(target\)/);
   for (const locale of ['en', 'zh-TW', 'pt']) {
     const catalog = JSON.parse(await readFile(new URL(`../ui/locales/${locale}.json`, import.meta.url), 'utf8'));
-    for (const key of ['ingestion.title', 'ingestion.hint', 'ingestion.enabled', 'ingestion.vault', 'ingestion.folder', 'ingestion.chooseFolder', 'ingestion.addTarget', 'ingestion.targets', 'ingestion.removeTarget', 'ingestion.emptyTargets', 'ingestion.targetRequired', 'ingestion.maxTargets', 'ingestion.duplicateTarget', 'ingestion.time', 'ingestion.save', 'ingestion.run', 'ingestion.never', 'ingestion.running', 'ingestion.lastRun', 'ingestion.failed', 'ingestion.retryScheduled', 'ingestion.saved', 'ingestion.disabled', 'ingestion.scanDone', 'ingestion.empty', 'ingestion.limited', 'ingestion.trigger.manual', 'ingestion.trigger.schedule']) assert.ok(catalog[key], `${locale} ${key}`);
+    for (const key of ['ingestion.title', 'ingestion.hint', 'ingestion.enabled', 'ingestion.vault', 'ingestion.folder', 'ingestion.chooseFolder', 'ingestion.addTarget', 'ingestion.targets', 'ingestion.removeTarget', 'ingestion.emptyTargets', 'ingestion.targetRequired', 'ingestion.maxTargets', 'ingestion.duplicateTarget', 'ingestion.time', 'ingestion.save', 'ingestion.run', 'ingestion.never', 'ingestion.running', 'ingestion.lastRun', 'ingestion.failed', 'ingestion.retryScheduled', 'ingestion.saved', 'ingestion.disabled', 'ingestion.scanDone', 'ingestion.empty', 'ingestion.limited', 'ingestion.trigger.manual', 'ingestion.trigger.schedule', 'ingestion.makeLocalDraft', 'ingestion.localDraftNeedsModel', 'ingestion.localDraftUnverified', 'ingestion.memoryType', 'ingestion.reviewDraft', 'ingestion.destination', 'ingestion.chooseDestination', 'ingestion.noDestination', 'ingestion.saveProposal', 'ingestion.confirmSaveProposal', 'ingestion.proposalSaved', 'ingestion.proposalUnverified', 'ingestion.proposalNeedsReview']) assert.ok(catalog[key], `${locale} ${key}`);
   }
 });
