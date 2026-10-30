@@ -67,10 +67,58 @@ async function readLog(file, size) {
   const bytes = await readFile(file);
   if (bytes.length > MAX_INPUT_BYTES) throw new Error(`DeepSeek Harness session file exceeds the ${MAX_INPUT_BYTES / 1024 / 1024} MiB import limit`);
   const raw = file.endsWith('.zstd')
-    ? zstdDecompressSync(bytes, { maxOutputLength: MAX_OUTPUT_BYTES }).toString('utf8')
+    ? decompressFrames(bytes).toString('utf8')
     : bytes.toString('utf8');
   if (Buffer.byteLength(raw, 'utf8') > MAX_OUTPUT_BYTES) throw new Error('Decoded DeepSeek Harness session exceeds the import limit');
   return raw;
+}
+
+// Node 22's built-in Zstandard decoder returns only the first frame in a concatenated
+// stream. Harness writes the header and event batches as separate frames, so find each
+// frame boundary using the Zstandard block headers, then let Node decode each frame.
+function decompressFrames(bytes) {
+  const frames = [];
+  let offset = 0;
+  let total = 0;
+  while (offset < bytes.length) {
+    const start = offset;
+    if (offset + 5 > bytes.length || bytes.readUInt32LE(offset) !== 0xfd2fb528) {
+      throw new Error('DeepSeek Harness Zstandard stream has an invalid frame header');
+    }
+    offset += 4;
+    const descriptor = bytes[offset++];
+    if (descriptor & 0x18) throw new Error('DeepSeek Harness Zstandard frame uses reserved header bits');
+    const singleSegment = Boolean(descriptor & 0x20);
+    const checksum = Boolean(descriptor & 0x04);
+    const dictionaryIdSize = [0, 1, 2, 4][descriptor & 0x03];
+    const contentSizeFlag = descriptor >>> 6;
+    const contentSizeBytes = contentSizeFlag === 0 ? (singleSegment ? 1 : 0)
+      : contentSizeFlag === 1 ? 2 : contentSizeFlag === 2 ? 4 : 8;
+    if (!singleSegment) offset += 1; // Window descriptor
+    offset += dictionaryIdSize + contentSizeBytes;
+    if (offset > bytes.length) throw new Error('DeepSeek Harness Zstandard frame header is truncated');
+
+    let lastBlock = false;
+    while (!lastBlock) {
+      if (offset + 3 > bytes.length) throw new Error('DeepSeek Harness Zstandard block header is truncated');
+      const block = bytes[offset] | (bytes[offset + 1] << 8) | (bytes[offset + 2] << 16);
+      offset += 3;
+      lastBlock = Boolean(block & 1);
+      const blockType = (block >>> 1) & 0x03;
+      const blockSize = block >>> 3;
+      if (blockType === 3) throw new Error('DeepSeek Harness Zstandard frame has a reserved block type');
+      offset += blockType === 1 ? 1 : blockSize; // RLE stores one byte; other blocks store blockSize bytes.
+      if (offset > bytes.length) throw new Error('DeepSeek Harness Zstandard block is truncated');
+    }
+    if (checksum) offset += 4;
+    if (offset > bytes.length) throw new Error('DeepSeek Harness Zstandard checksum is truncated');
+
+    const frame = zstdDecompressSync(bytes.subarray(start, offset), { maxOutputLength: MAX_OUTPUT_BYTES - total });
+    total += frame.length;
+    if (total > MAX_OUTPUT_BYTES) throw new Error('Decoded DeepSeek Harness session exceeds the import limit');
+    frames.push(frame);
+  }
+  return Buffer.concat(frames, total);
 }
 
 // opts: { store, root?, cursorsFile }. This importer never writes to the Harness source.

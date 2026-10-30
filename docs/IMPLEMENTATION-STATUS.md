@@ -5,6 +5,12 @@ GitHub repository: `iantsai886/brainlink`
 Branch: `integration/brainlink-retrieval-evaluation` (integrates profile-scoped GitHub, RSI discovery, and independent retrieval evaluation)
 Code baseline: development target `1.2.8`, with `package.json` as the canonical version source. The `v1.2.7` tag belongs to the separate `wip/v1.2.7` release line; this branch continues from the full-source `main` history and does not move or recreate that tag.
 
+### DeepSeek Harness Zstandard compatibility (2026-10-30)
+
+Fixed the local session importer for Harness files made of concatenated Zstandard frames. Node.js 22's built-in decoder returns only the first frame, which dropped later events from a session. BrainLink now checks each frame and block boundary, decompresses frames separately, enforces the existing total output limit, and refuses malformed or truncated frames before importing partial text. The importer still stores only direct user prompts and visible assistant text, redacts secrets, and keeps imported sessions private by default.
+
+Evidence: Windows/Node.js 24.22.1 passed `npm run test:all` (core 595 total: 587 passed, 0 failed, 8 Windows privilege/platform skips; UI 44/44). Node.js 22.23.4 on Linux passed the full `npm run test:all` and `npm run smoke:backup-recovery`; the 34 focused session/MCP importer tests also passed on both Windows and Linux. The recovery smoke used fictional Personal, Organisation and Client-A vaults, restored all four verified files, refused the wrong key, and left sources unchanged. This validates Linux tests in a local container, not a native Linux installer or hosted GitHub Actions run.
+
 ### Optional scheduled weekly RSI benchmark (commit `7d04dcd`, 2026-10-30)
 
 Setup can now run the existing fixed 20-case fictional retrieval benchmark automatically once per week. It is **off by default**; the user chooses a weekday and local time. It runs only while BrainLink is open, uses the built-in fictional vault, stores aggregate results and source revision details, and does not read connected vaults or call an AI model. The schedule and recorded ISO week now use the same configured timezone, including around local week boundaries. An interrupted run can retry after restart on the scheduled day; a completed failed attempt waits until the next week or a manual run. This measures retrieval task success, not generated-answer quality, provider-billed token savings, or RSI promotion eligibility.

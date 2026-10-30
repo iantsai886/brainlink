@@ -239,6 +239,25 @@ test('DeepSeek Harness importer: reads concatenated Zstandard frames, imports on
   assert.equal(second.unchanged, 1);
 });
 
+test('DeepSeek Harness importer: rejects a truncated later Zstandard frame without importing partial text', async () => {
+  const dir = await tmp('dsh-truncated-import');
+  const store = await createSessionStore({ dir });
+  const root = path.join(dir, 'sessions', 'fictional-project', 'fictional-session-id');
+  await mkdir(root, { recursive: true });
+  const at = Date.parse('2026-10-28T01:00:00.000Z');
+  const records = [
+    { type: 'session', version: 4, id: 'fictional-session-id', cwd: '/fictional/project', createdAt: at, isSeeded: false },
+    { type: 'user/message', seq: 0, time: at + 1, data: { role: 'user', source: { kind: 'user' }, content: [{ type: 'text', text: 'PRIVATE_PARTIAL_IMPORT_CANARY' }] } },
+  ];
+  const frames = records.map((row) => zstdCompressSync(Buffer.from(JSON.stringify(row) + '\n')));
+  frames[1] = frames[1].subarray(0, frames[1].length - 2);
+  await writeFile(path.join(root, 'session.v4.jsonl.zstd'), Buffer.concat(frames));
+  const result = await importDeepSeekHarness({ store, root: path.dirname(path.dirname(root)), cursorsFile: path.join(dir, 'cursors.json') });
+  assert.equal(result.imported, 0);
+  assert.equal(result.errors.length, 1);
+  assert.deepEqual(await store.listSessions(), []);
+});
+
 test('DeepSeek Harness importer: supports raw v3 JSONL and leaves unsupported or malformed logs retryable', async () => {
   const dir = await tmp('dsh-raw-import');
   const store = await createSessionStore({ dir });
