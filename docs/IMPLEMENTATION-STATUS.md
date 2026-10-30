@@ -1563,3 +1563,7 @@ On clean repository commit `2ee978792363925cc3762552cbcbb18d0068aa8e`, Windows/N
 ### Full Linux suite on current integration revision (2026-10-31)
 
 On exact repository commit `67e8e82ad5b47f2345474bfdf1815c4885f89c62`, Linux x64 in Docker `node:24-bookworm`, `npm ci && npm run test:all` exited 0. Core suite: 600 total, 598 passed, 0 failed, 2 Windows-only skips. UI suite: 44 passed, 0 failed. The run used a temporary tmpfs for `node_modules` and did not alter the Windows dependency tree. GitHub Actions run `41091887272` remains separate: Windows/Linux jobs failed before any steps because GitHub blocked runner startup for account billing/spending-limit reasons; macOS jobs remained queued at inspection. This receipt verifies local Linux tests only, not hosted CI, macOS, or customer acceptance.
+
+### Align the adversarial privacy probe with the private-session response (2026-10-31; commit `959fd60`)
+
+The probe previously treated the safe structured `{private: true, message}` response as a test failure because it expected an MCP error. It now requires the private marker, rejects message/key-turn fields and checks for the planted transcript canary. On exact test commit `959fd60`, Linux x64 in Docker `node:24-bookworm`, `node --test test/privacy-probe.test.mjs` passed: 1 test, 0 failed, 0 skipped. This changes the test expectation only; the session access policy is unchanged.
