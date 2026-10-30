@@ -13,6 +13,10 @@ Verification on Windows with Node.js 24.22.1: `test/sessions.test.mjs` passed 24
 
 The same source commit `310f3d3` also passed `npm run smoke:backup-recovery`: encrypted fictional Personal, Organisation and Client-A data; four files verified and restored; wrong-key refusal; artifact restored; source files unchanged. The output reported `ok: true` and `fixture_contents: fictional`.
 
+### Hosted GitHub Actions runner gate (commit `799fcb7`, 2026-10-30)
+
+GitHub Actions run `41080789367` did not execute any job steps. GitHub's check annotation says the job was not started because recent account payments failed or the spending limit needs to be increased. This is an account billing gate, not a test failure in BrainLink. Hosted CI will remain unverified until the account owner resolves it in GitHub Billing & plans and a new run completes.
+
 ### DeepSeek Harness Zstandard compatibility (2026-10-30)
 
 Fixed the local session importer for Harness files made of concatenated Zstandard frames. Node.js 22's built-in decoder returns only the first frame, which dropped later events from a session. BrainLink now checks each frame and block boundary, decompresses frames separately, enforces the existing total output limit, and refuses malformed or truncated frames before importing partial text. The importer still stores only direct user prompts and visible assistant text, redacts secrets, and keeps imported sessions private by default.
