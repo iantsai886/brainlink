@@ -11,6 +11,8 @@ The Windows Setup health check now compares Claude Desktop process start times w
 
 The live local Windows check on Ian's setup returned `started_before_config: true`, matching the reported connection problem. If no Claude process is found, Setup says to open Claude; if process inspection fails, it falls back to the general restart instruction. Regression tests cover stale, fresh, closed and unknown process states and the Setup response. `npm run test:all` on Windows/Node.js 24.22.1 passed on the pre-commit working tree based on commit `eb08162`: core 609 total (601 passed, 0 failed, 8 platform/privilege skips); UI 44/44. This is local test evidence; no fresh model-driven Anna call in Claude Desktop was observed.
 
+After commit `39149aa`, `npm run smoke:installed:win` passed from the current source tree: the unsigned 1.2.8 installer launched from its bundled runtime, both shortcuts worked, authenticated Setup loaded, the temporary Hermes hook preserved unrelated settings, and isolated uninstall preserved user data and restored PATH. This confirms packaging/install behavior for the build; the smoke does not prove Claude itself reloaded its MCP tools.
+
 ### Full Windows test suite on current integration head (`be4e41f`, 2026-10-31)
 
 Windows/Node.js 24.22.1 `npm run test:all` exited 0 on exact repository commit `be4e41fc1068254ee1ab0fa77fbb31fb990020d8`: core 603 total (595 passed, 0 failed, 8 platform/privilege skips); UI 44/44. This includes code commit `28cfafd` restore recovery hardening and code commit `7e535ce` Twin memory setup shortcut. GitHub Actions run `41096595465` for this commit did not execute steps; the check annotation reports the repository account payment/spending-limit gate. Local test success and hosted CI are separate.
