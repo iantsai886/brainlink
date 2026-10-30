@@ -7,7 +7,7 @@ Code baseline: development target `1.2.8`, with `package.json` as the canonical 
 
 ### Make agent activation direct in connected AI clients (2026-10-30)
 
-BrainLink's MCP instructions and `agent_connect` tool description now say to call BrainLink directly when a user asks for a named agent. They clarify that Anna is a role inside BrainLink, not a separate connector to find in a connector directory. This addresses a Claude response that searched the connector directory despite the configured BrainLink MCP server. A local runtime check using the Claude Desktop connection settings called `agent_connect` as Anna successfully and loaded the Anna role; the Claude UI tool call itself was not verified in this check.
+BrainLink's MCP instructions and `agent_connect` tool description say to call BrainLink directly when a user asks for a named agent; Anna is a role inside BrainLink, not a separate connector. After Ian reported that Claude still searched its connector directory, Claude Desktop's scoped token was replaced without changing its Iango Organisation Twin, Brain-vault, or search/read/propose permissions. A direct runtime check using Claude's current local settings authenticated the refreshed token, listed `agent_connect`, and loaded Anna's role. Claude Desktop was not running during the latest UI check, so loading the refreshed connection and a live Claude tool call still need confirmation after reopening it.
 
 Added assertions for the direct-call guidance. Windows/Node.js 24.22.1 `npm run test:all`: core 579 total (571 passed, 0 failed, 8 platform/privilege skips); UI 44/44. `git diff --check` passed. This verifies BrainLink's tool metadata and the locally configured token, not that every live Claude Desktop conversation will select the tool.
 
