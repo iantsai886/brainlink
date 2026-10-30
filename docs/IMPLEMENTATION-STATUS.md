@@ -7,7 +7,11 @@ Code baseline: development target `1.2.8`, with `package.json` as the canonical 
 
 ### Interactive 3D graph in Setup (2026-10-30)
 
-The Setup graph now uses a deterministic 3D force layout and perspective projection. Users can drag to rotate, use the wheel to zoom, reset the view, click a node to open its note, and use the keyboard-accessible note list for the same action. Existing vault and private-note filtering remains in `buildGraph` before layout. `npm run test:ui` passed 42/42, including deterministic and bounded 3D layout, projection rotation/zoom, private-note exclusion, accessible controls, click-to-open, and listener cleanup. This verifies UI logic, not visual usability or graph readability on customer vaults. Large graphs over 400 nodes use a static 3D sphere layout for responsiveness; human evaluation of that layout remains open.
+The Setup graph now uses a deterministic 3D force layout and perspective projection. Users can drag to rotate, use the wheel to zoom, reset the view, click a node to open its note, and use the keyboard-accessible note list for the same action. Existing vault and private-note filtering remains in `buildGraph` before layout. `npm run test:ui` passed 43/43, including deterministic and bounded 3D layout, the large-graph fallback, projection rotation/zoom, private-note exclusion, accessible controls, click-to-open, and listener cleanup. This verifies UI logic, not visual usability or graph readability on customer vaults. Large graphs over 400 nodes use a static 3D sphere layout for responsiveness; human evaluation of that layout remains open.
+
+### Hosted CI runner allocation status (2026-10-30)
+
+For current source `5d69162a386b2dc98e09c564bd71fbe14fdb63ae`, push run `41032141607` ended with all nine jobs failed before runner allocation (`runner_id: 0`, zero steps). GitHub supplied no job logs. This run does not test or reject the source; local UI and package evidence are recorded separately. Hosted CI remains unavailable for this repository at this time.
 
 ### Current-source Linux package build and x64 install smoke (2026-10-30)
 
