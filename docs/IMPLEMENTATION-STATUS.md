@@ -1567,3 +1567,18 @@ On exact repository commit `67e8e82ad5b47f2345474bfdf1815c4885f89c62`, Linux x64
 ### Align the adversarial privacy probe with the private-session response (2026-10-31; commit `959fd60`)
 
 The probe previously treated the safe structured `{private: true, message}` response as a test failure because it expected an MCP error. It now requires the private marker, rejects message/key-turn fields and checks for the planted transcript canary. On exact test commit `959fd60`, Linux x64 in Docker `node:24-bookworm`, `node --test test/privacy-probe.test.mjs` passed: 1 test, 0 failed, 0 skipped. This changes the test expectation only; the session access policy is unchanged.
+
+### Current-source Linux package build and x64 installation smoke (2026-10-31; source commit `4a30238`)
+
+In a disposable Linux x64 `node:24-bookworm` container, `npm ci && npm run build:linux` built the four 1.2.8 x64/ARM64 tar and Debian packages. All four generated SHA-256 sidecars verified. The x64 `.deb` was installed with `dpkg -i`, reported version 1.2.8, passed `scripts/smoke-staged-runtime.mjs` against the bundled Node runtime (including MCP initialization, public-note search, and exclusion of a planted private-note canary), and was removed with `dpkg -r`; a settings canary remained. The x64 portable archive passed `install.sh --no-open`, launcher/version and app-menu file checks, and uninstall while preserving its settings canary.
+
+SHA-256 values for the temporary QA artifacts:
+
+| Artifact | SHA-256 |
+|---|---|
+| `brainlink-1.2.8-linux-x64.tar.gz` | `8975DC8F63084C7791B67EE3B2CF5BF5A3995770FAB55D1496B50B3AED01DAB` |
+| `brainlink-1.2.8-linux-arm64.tar.gz` | `B5D695B8EA93809441BC4055C4E3C39EB7C943B316E2EDB9B17777D26F56EBC8` |
+| `brainlink_1.2.8_amd64.deb` | `8FAF091091DC743D14641604C730A4DDF6AFFD83B9778DF63A0E4FE73155E400` |
+| `brainlink_1.2.8_arm64.deb` | `85CB6257E57BE74F021A7852F1757C44067852A981FD14303380BC4DB8BB27C8` |
+
+These unsigned artifacts stayed in a detached QA worktree and were not published. ARM64 package architecture and checksums were verified, but they were not executed on ARM hardware. A real graphical Linux desktop session, macOS installation, and customer acceptance remain unverified.
