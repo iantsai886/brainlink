@@ -1,5 +1,5 @@
 // Opt-in RSI research discovery. Off by default; when the user enables it, BrainLink queries fixed
-// public research sources (arXiv Atom, Crossref JSON and GitHub repository search) for the user's topic terms, keeps only entries that
+// public research sources (arXiv Atom, Crossref JSON, Semantic Scholar and GitHub search) for the user's topic terms, keeps only entries that
 // match one of the user's own problem statements and a BrainLink memory/agent workflow, and appends
 // them to the local RSI ledger as `discovered` proposals. It never fetches a caller-supplied URL,
 // never sends problem statements or vault content off the machine, never executes or promotes
@@ -19,6 +19,7 @@ export const DISCOVERY_SOURCES = Object.freeze({
   crossref: Object.freeze({ id: 'crossref', label: 'Crossref', host: 'api.crossref.org', path: '/works', format: 'json' }),
   github: Object.freeze({ id: 'github', label: 'GitHub projects', host: 'api.github.com', path: '/search/repositories', format: 'json' }),
   github_issues: Object.freeze({ id: 'github_issues', label: 'GitHub issues', host: 'api.github.com', path: '/search/issues', format: 'json' }),
+  semantic_scholar: Object.freeze({ id: 'semantic_scholar', label: 'Semantic Scholar', host: 'api.semanticscholar.org', path: '/graph/v1/paper/search', format: 'json' }),
 });
 const MAX_BYTES = 1_000_000;
 const TIMEOUT_MS = 15_000;
@@ -133,10 +134,21 @@ export async function fetchFeed(rawUrl, { fetchImpl = fetch, lookup = dnsLookup,
   const pathParts = url.pathname.split('/');
   const githubRepoPath = url.hostname === 'api.github.com' && pathParts.length === 4 && pathParts[1] === 'repos' && GITHUB_OWNER.test(pathParts[2]) && GITHUB_REPOSITORY.test(pathParts[3]);
   const githubIssuePath = url.hostname === 'api.github.com' && pathParts.length === 6 && pathParts[1] === 'repos' && GITHUB_OWNER.test(pathParts[2]) && GITHUB_REPOSITORY.test(pathParts[3]) && pathParts[4] === 'issues' && /^[1-9]\d{0,8}$/.test(pathParts[5]);
+  const semanticPaperPath = url.hostname === DISCOVERY_SOURCES.semantic_scholar.host && /^\/graph\/v1\/paper\/[a-f0-9]{40}$/i.test(url.pathname);
   const source = Object.values(DISCOVERY_SOURCES).find((item) => item.host === url.hostname && item.path === url.pathname)
-    || (githubRepoPath ? DISCOVERY_SOURCES.github : githubIssuePath ? DISCOVERY_SOURCES.github_issues : null);
+    || (githubRepoPath ? DISCOVERY_SOURCES.github : githubIssuePath ? DISCOVERY_SOURCES.github_issues : semanticPaperPath ? DISCOVERY_SOURCES.semantic_scholar : null);
   const allowedPath = Boolean(source);
   if (url.protocol !== 'https:' || url.username || url.password || url.port || !allowedPath || githubRepoPath && (url.search || url.hash)) throw new Error('Discovery refused a feed outside the built-in HTTPS allowlist.');
+  if (source?.id === 'semantic_scholar') {
+    const keys = [...url.searchParams.keys()].sort();
+    const isSearch = url.pathname === source.path;
+    const expected = isSearch ? ['fields', 'limit', 'query'] : ['fields'];
+    if (url.hash || keys.join(',') !== expected.join(',') || expected.some((key) => url.searchParams.getAll(key).length !== 1)
+      || url.searchParams.get('fields') !== 'paperId,title,abstract,year,publicationDate,url'
+      || isSearch && (!url.searchParams.get('query')?.trim() || url.searchParams.get('query').length > 60 || !/^(?:[1-9]|1\d|2[0-5])$/.test(url.searchParams.get('limit')))) {
+      throw new Error('Discovery refused a Semantic Scholar request outside its fixed query and result limits.');
+    }
+  }
   const answers = await lookup(url.hostname, { all: true, verbatim: true });
   const addresses = (Array.isArray(answers) ? answers : [answers]).map(a => typeof a === 'string' ? a : a?.address).filter(Boolean);
   if (!addresses.length || addresses.some(privateAddress)) throw new Error('Discovery refused a feed host that resolves to a private or reserved address.');
@@ -200,6 +212,13 @@ export function feedUrl(sourceId, topic) {
     url.searchParams.set('per_page', String(MAX_ENTRIES_PER_FEED));
     return url.href;
   }
+  if (sourceId === 'semantic_scholar') {
+    const url = new URL(`https://${source.host}${source.path}`);
+    url.searchParams.set('query', topic);
+    url.searchParams.set('limit', String(MAX_ENTRIES_PER_FEED));
+    url.searchParams.set('fields', 'paperId,title,abstract,year,publicationDate,url');
+    return url.href;
+  }
   const params = new URLSearchParams({ search_query: `all:"${topic}"`, sortBy: 'submittedDate', sortOrder: 'descending', max_results: String(MAX_ENTRIES_PER_FEED) });
   return `https://${source.host}${source.path}?${params}`;
 }
@@ -250,7 +269,9 @@ const crossrefDate = (item) => {
   return `${parts[0]}-${month}-${day}`;
 };
 
-const sourceClaim = (entry) => `${entry.source_kind === 'github' ? 'Repository description' : entry.source_kind === 'github-issue' ? 'Public issue description' : 'Abstract'} states (not verified): ${firstSentence(entry.summary)}`.slice(0, 500);
+const sourceClaim = (entry) => entry.source_kind === 'semantic-scholar' && !entry.summary
+  ? 'Semantic Scholar metadata lists this paper; no abstract was provided.'
+  : `${entry.source_kind === 'github' ? 'Repository description' : entry.source_kind === 'github-issue' ? 'Public issue description' : 'Abstract'} states (not verified): ${firstSentence(entry.summary)}`.slice(0, 500);
 const sourceSnapshot = (entry) => ({ url: canonicalSourceUrl(entry.url), title: entry.title, published_at: entry.published_at, claim: sourceClaim(entry) });
 const sourceFingerprint = (source) => createHash('sha256').update(JSON.stringify({ url: canonicalSourceUrl(source.url), title: source.title || '', published_at: source.published_at || 'unknown', claim: source.claim || '' })).digest('hex');
 
@@ -291,6 +312,14 @@ function freshnessUrl(sourceId, rawSourceUrl) {
     endpoint.pathname = `/repos/${parts[0]}/${parts[1]}/issues/${parts[3]}`;
     return endpoint.href;
   }
+  if (sourceId === 'semantic_scholar') {
+    if (!['semanticscholar.org', 'www.semanticscholar.org'].includes(sourceUrl.hostname.toLowerCase()) || sourceUrl.search || sourceUrl.hash) throw new Error('The saved Semantic Scholar source is not supported.');
+    const match = sourceUrl.pathname.match(/^\/paper\/(?:[^/]+\/)?([a-f0-9]{40})\/?$/i);
+    if (!match) throw new Error('The saved Semantic Scholar source is not supported.');
+    endpoint.pathname = `/graph/v1/paper/${match[1].toLowerCase()}`;
+    endpoint.searchParams.set('fields', 'paperId,title,abstract,year,publicationDate,url');
+    return endpoint.href;
+  }
   throw new Error('The saved discovery source is not supported.');
 }
 
@@ -310,6 +339,39 @@ export function parseCrossref(json) {
       published_at: crossrefDate(item),
     };
   });
+}
+
+function validScholarDate(value) {
+  if (typeof value !== 'string' || !/^\d{4}-\d{2}-\d{2}$/.test(value)) return 'unknown';
+  const date = new Date(`${value}T00:00:00Z`);
+  return Number.isFinite(date.getTime()) && date.toISOString().slice(0, 10) === value ? value : 'unknown';
+}
+
+function parseSemanticScholarPaper(item) {
+  const paperId = typeof item?.paperId === 'string' && /^[a-f0-9]{40}$/i.test(item.paperId) ? item.paperId.toLowerCase() : '';
+  const title = plain(typeof item?.title === 'string' ? item.title : '', 240);
+  if (!paperId || !title) return null;
+  let paperUrl;
+  try { paperUrl = new URL(item?.url); } catch { return null; }
+  if (paperUrl.protocol !== 'https:' || !['semanticscholar.org', 'www.semanticscholar.org'].includes(paperUrl.hostname.toLowerCase())
+    || paperUrl.username || paperUrl.password || paperUrl.port || paperUrl.search || paperUrl.hash
+    || !paperUrl.pathname.startsWith('/paper/') || paperUrl.pathname.split('/').at(-1)?.toLowerCase() !== paperId) return null;
+  const publishedAt = validScholarDate(item.publicationDate);
+  return {
+    paper_id: paperId,
+    url: `https://www.semanticscholar.org${paperUrl.pathname}`,
+    title,
+    summary: plain(typeof item.abstract === 'string' ? item.abstract : '', 2000),
+    published_at: publishedAt,
+  };
+}
+
+export function parseSemanticScholar(json, { single = false } = {}) {
+  let data;
+  try { data = typeof json === 'string' ? JSON.parse(json) : json; } catch { throw new Error('Semantic Scholar response was not valid JSON.'); }
+  const items = single ? [data] : data?.data;
+  if (!Array.isArray(items)) throw new Error('Semantic Scholar response did not contain paper results.');
+  return items.slice(0, MAX_ENTRIES_PER_FEED).map(parseSemanticScholarPaper).filter(Boolean);
 }
 
 function parseGitHubRepository(item) {
@@ -496,13 +558,15 @@ export function createRsiDiscovery({ home, ledger, fetchImpl, lookup, now = () =
             const payload = await fetchFeed(feedUrl(sourceId, topic), { fetchImpl, lookup });
             receipt.fetched++;
             const entries = sourceId === 'crossref' ? parseCrossref(payload)
+              : sourceId === 'semantic_scholar' ? parseSemanticScholar(payload)
               : sourceId === 'github' ? parseGitHub(payload)
                 : sourceId === 'github_issues' ? parseGitHubIssues(payload) : parseAtom(payload, sourceId);
             if (sourceId === 'github') for (const entry of entries) entry.source_kind = 'github';
             if (sourceId === 'github_issues') for (const entry of entries) entry.source_kind = 'github-issue';
+            if (sourceId === 'semantic_scholar') for (const entry of entries) entry.source_kind = 'semantic-scholar';
             for (const entry of entries) {
               receipt.entries++;
-              if (!entry.url || !entry.title || !entry.summary) { receipt.dropped.invalid++; continue; }
+              if (!entry.url || !entry.title || !entry.summary && sourceId !== 'semantic_scholar') { receipt.dropped.invalid++; continue; }
               const hostile = hostileReason(entry);
               if (hostile) { receipt.dropped[hostile]++; continue; }
               if (seen.has(entry.url)) continue;
@@ -555,11 +619,16 @@ export function createRsiDiscovery({ home, ledger, fetchImpl, lookup, now = () =
       try {
         const payload = await fetchFeed(url, { fetchImpl, lookup });
         const entries = sourceId === 'crossref' ? parseCrossref(payload)
+          : sourceId === 'semantic_scholar' ? parseSemanticScholar(payload, { single: true })
           : sourceId === 'github' ? parseGitHub(payload, { single: true })
             : sourceId === 'github_issues' ? parseGitHubIssues(payload, { single: true }) : parseAtom(payload, sourceId);
         if (sourceId === 'github') for (const entry of entries) entry.source_kind = 'github';
         if (sourceId === 'github_issues') for (const entry of entries) entry.source_kind = 'github-issue';
-        const match = entries.find((entry) => canonicalSourceUrl(entry.url) === canonicalSourceUrl(original.url));
+        if (sourceId === 'semantic_scholar') for (const entry of entries) entry.source_kind = 'semantic-scholar';
+        const savedScholarId = sourceId === 'semantic_scholar' ? new URL(original.url).pathname.split('/').filter(Boolean).at(-1)?.toLowerCase() : null;
+        const match = entries.find((entry) => sourceId === 'semantic_scholar'
+          ? entry.paper_id === savedScholarId
+          : canonicalSourceUrl(entry.url) === canonicalSourceUrl(original.url));
         if (!match) receipt.status = 'not_found';
         else {
           const hostile = hostileReason(match);

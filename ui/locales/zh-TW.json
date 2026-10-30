@@ -957,7 +957,7 @@
   "rsi.discovery.maxNew": "每次最多新增提案數（1-10）",
   "rsi.discovery.refreshExisting": "也重新檢查已保存的舊來源（每次最多 3 筆）",
   "rsi.discovery.refreshSummary": "已檢查舊來源：{checked}；待檢查：{deferred}",
-  "rsi.discovery.privacy": "通常只有搜尋主題會離開這台電腦。若開啟舊來源檢查，每次最多也會把 BrainLink 探索記錄中的 3 個公開引用識別碼傳給同一個已選來源。問題描述、筆記、工作階段和憑證都留在本機。請勿輸入客戶資料或機密。排程只會在 BrainLink 執行時檢查；按下方按鈕可讓它在登入後於背景啟動。關閉 BrainLink 後會暫停，直到下次啟動。Crossref 摘要可能受著作權保護；GitHub 描述和搜尋結果是未經審查的公開資料。",
+  "rsi.discovery.privacy": "通常只有搜尋主題會離開這台電腦。若開啟舊來源檢查，每次最多也會把 BrainLink 探索記錄中的 3 個公開引用識別碼傳給同一個已選來源。問題描述、筆記、工作階段和憑證都留在本機。請勿輸入客戶資料或機密。排程只會在 BrainLink 執行時檢查；按下方按鈕可讓它在登入後於背景啟動。關閉 BrainLink 後會暫停，直到下次啟動。Crossref 摘要可能受著作權保護；Semantic Scholar 摘要以及 GitHub 描述和搜尋結果都是未經審查的公開資料。",
   "rsi.discovery.backgroundStart": "登入時在背景啟動 BrainLink",
   "rsi.discovery.backgroundHint": "排程研究只會在 BrainLink 開啟時執行。開啟背景啟動後，登入時會自動恢復；關閉 BrainLink 會暫停到下次啟動。",
   "rsi.discovery.backgroundOn": "背景啟動已開啟。BrainLink 開啟且未暫停時，會依你選擇的頻率研究。",

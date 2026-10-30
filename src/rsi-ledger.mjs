@@ -130,6 +130,16 @@ function validatePayload(input, { partial = false } = {}) {
   // constrained above to exactly 40 hex characters; keep every free-text field in secret scan.
   const scanFields = {
     ...out,
+    ...(Array.isArray(out.sources) ? { sources: out.sources.map((source) => {
+      let url; try { url = new URL(source.url); } catch { return source; }
+      // Semantic Scholar paper IDs are public 40-hex identifiers. Keep scanning the full
+      // proposal for secrets, but do not mistake this one validated public URL segment for a key.
+      if (['semanticscholar.org', 'www.semanticscholar.org'].includes(url.hostname.toLowerCase())
+        && /^\/paper\/(?:[^/]+\/)?[a-f0-9]{40}\/?$/i.test(url.pathname)) {
+        source = { ...source, url: source.url.replace(/([a-f0-9]{40})(\/?(?:[?#].*)?)$/i, '[public-paper-id]$2') };
+      }
+      return source;
+    }) } : {}),
     ...(out.promotion_commit_sha ? { promotion_commit_sha: '' } : {}),
     ...(/^[a-f0-9]{64}$/i.test(out.test_set_version || '') ? { test_set_version: '' } : {}),
   };
