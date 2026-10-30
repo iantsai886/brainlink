@@ -61,6 +61,7 @@ import { defaultRoot as hermesDefaultRoot } from './sessions/hermes.mjs';
 import { checkForUpdate, downloadVerifiedUpdate } from './update-client.mjs';
 import { openUpdatePackage } from './update-launcher.mjs';
 import { UPDATE_PUBLIC_KEY } from './update-trust.mjs';
+import { inspectClaudeDesktopRuntime } from './client-runtime.mjs';
 
 const GRAPH_NOTE_MUTATIONS = new Set([
   '/api/graph3d/note/save',
@@ -1083,11 +1084,18 @@ export async function startSetup(opts = {}) {
     await Promise.all(pending);
     const took_ms = Date.now() - t0;
     const ok = Boolean(called?.result) && !called.result.isError;
+    const client_runtime = clientId === 'claude-desktop'
+      ? await (opts.inspectClientRuntime || inspectClaudeDesktopRuntime)({ os, configPath: c.file(clientOpts()) }).catch(() => ({ status: 'unknown', started_before_config: null }))
+      : undefined;
+    const restartHint = client_runtime?.started_before_config === true
+      ? ' Claude Desktop was already running when its BrainLink settings changed. Fully quit it (including the tray icon), reopen it, and start a new chat.'
+      : '';
     return {
       ok, verification: 'brainlink_local_mcp', external_client_verified: false,
       client: clientId, tool, took_ms, available_agent_roles,
+      ...(client_runtime ? { client_runtime } : {}),
       message: ok
-        ? `BrainLink access check passed: ${tool} (${took_ms}ms); no vault notes were read.${available_agent_roles.length ? ` Named BrainLink roles available: ${available_agent_roles.join(', ')}.` : ''} Fully quit ${c.title} (including any tray/background process), reopen it, and start a new chat. This check does not confirm that the app loaded the updated tools.`
+        ? `BrainLink access check passed: ${tool} (${took_ms}ms); no vault notes were read.${available_agent_roles.length ? ` Named BrainLink roles available: ${available_agent_roles.join(', ')}.` : ''}${restartHint || ` Fully quit ${c.title} (including any tray/background process), reopen it, and start a new chat.`} This check does not confirm that the app loaded the updated tools.`
         : 'BrainLink access check failed; see Activity below.',
     };
   }

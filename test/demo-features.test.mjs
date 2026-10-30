@@ -2,7 +2,7 @@
 // (/api/connect's health field, /api/client-health), and the `brainlink sync` session-count fix.
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtemp, mkdir, cp, readFile } from 'node:fs/promises';
+import { mkdtemp, mkdir, cp, readFile, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -15,12 +15,12 @@ import { openSessionStore } from '../src/sessions/index.mjs';
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const tmp = (p) => mkdtemp(path.join(tmpdir(), `brainlink-${p}-`));
 
-async function withSampleVault(label, { agentName } = {}) {
+async function withSampleVault(label, { agentName, os = 'linux', inspectClientRuntime } = {}) {
   const home = await tmp(`${label}-home`);
   const vaultPath = path.join(home, 'Acme Studio');
   await cp(path.join(ROOT, 'samples', 'acme-studio'), vaultPath, { recursive: true });
   const env = { BRAINLINK_HOME: path.join(home, 'app'), BRAINLINK_SEMANTIC: '0' };
-  const s = await startSetup({ env, home, os: 'linux', port: 0, useCli: false });
+  const s = await startSetup({ env, home, os, port: 0, useCli: false, ...(inspectClientRuntime ? { inspectClientRuntime } : {}) });
   const base = `http://127.0.0.1:${s.port}`;
   const api = (p, body) => fetch(base + p, { method: 'POST', headers: { 'X-BrainLink-Token': s.token, 'Content-Type': 'application/json' }, body: JSON.stringify(body || {}) });
   const r = await (await api('/api/vault', { path: vaultPath, name: 'Acme Studio', pack: 'simple', agentName, scaffold: false })).json();
@@ -118,6 +118,24 @@ test('/api/client-health: names the BrainLink roles this AI can call and gives c
     const log = await readFile(path.join(env.BRAINLINK_HOME, 'activity.log'), 'utf8');
     const lines = log.trim().split('\n').map((l) => JSON.parse(l));
     assert.ok(lines.some((l) => l.tool === 'brainlink_guide' && l.mode === 'health-check' && l.ok === true), JSON.stringify(lines));
+  } finally { s.server.close(); }
+});
+
+test('/api/client-health: explains when Claude was open before its BrainLink config changed', async () => {
+  const { home, s, api } = await withSampleVault('health-claude-stale', {
+    agentName: 'Anna', os: 'win32',
+    inspectClientRuntime: async () => ({ status: 'running', started_before_config: true }),
+  });
+  const claudeConfig = path.join(home, 'AppData', 'Roaming', 'Claude', 'claude_desktop_config.json');
+  await mkdir(path.dirname(claudeConfig), { recursive: true });
+  await writeFile(claudeConfig, '{}');
+  try {
+    const r = await (await api('/api/client-health', { client: 'claude-desktop' })).json();
+    assert.equal(r.ok, true, JSON.stringify(r));
+    assert.deepEqual(r.client_runtime, { status: 'running', started_before_config: true });
+    assert.match(r.message, /Claude Desktop was already running when its BrainLink settings changed/i);
+    assert.match(r.message, /including the tray icon/i);
+    assert.equal(r.external_client_verified, false);
   } finally { s.server.close(); }
 });
 

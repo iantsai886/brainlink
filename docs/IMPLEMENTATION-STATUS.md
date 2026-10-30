@@ -5,6 +5,12 @@ GitHub repository: `iantsai886/brainlink`
 Branch: `integration/brainlink-retrieval-evaluation` (integrates profile-scoped GitHub, RSI discovery, and independent retrieval evaluation)
 Code baseline: development target `1.2.8`, with `package.json` as the canonical version source. The `v1.2.7` tag belongs to the separate `wip/v1.2.7` release line; this branch continues from the full-source `main` history and does not move or recreate that tag.
 
+### Diagnose stale Claude Desktop processes after BrainLink setup changes (working tree based on `7fad0b2`, 2026-10-31)
+
+The Windows Setup health check now compares Claude Desktop process start times with the saved Claude MCP configuration's modification time. If the oldest Claude process predates that configuration, the message says Claude was already running when the settings changed and asks the user to fully quit it, including the tray icon, then reopen and start a new chat. The check returns only a small status (`running` and whether it predates the config); it does not expose process IDs or timestamps, inspect conversation data, restart Claude, or claim that Claude loaded or called BrainLink. Non-Windows systems and inspection failures report unknown and keep the existing general instruction. This is a diagnostic hint because some client versions may reload MCP settings while running.
+
+The live local Windows check on Ian's setup returned `started_before_config: true`, matching the reported connection problem. Regression tests cover stale, fresh and unknown process states and the Setup response. `npm run test:all` on Windows/Node.js 24.22.1 passed on the working tree based on commit `7fad0b2`: core 607 total (599 passed, 0 failed, 8 platform/privilege skips); UI 44/44. This is local test evidence; no fresh model-driven Anna call in Claude Desktop was observed.
+
 ### Full Windows test suite on current integration head (`be4e41f`, 2026-10-31)
 
 Windows/Node.js 24.22.1 `npm run test:all` exited 0 on exact repository commit `be4e41fc1068254ee1ab0fa77fbb31fb990020d8`: core 603 total (595 passed, 0 failed, 8 platform/privilege skips); UI 44/44. This includes code commit `28cfafd` restore recovery hardening and code commit `7e535ce` Twin memory setup shortcut. GitHub Actions run `41096595465` for this commit did not execute steps; the check annotation reports the repository account payment/spending-limit gate. Local test success and hosted CI are separate.
