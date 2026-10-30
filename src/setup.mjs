@@ -54,6 +54,8 @@ import { ingestionDraftId, listIngestionDrafts, readIngestionDraft, removeIngest
 import { INGESTION_MAX_ATTEMPTS, INGESTION_RETRY_DELAY_MS, ingestionScheduleDue, localDateAndTime, normalizeIngestionTargets, validateIngestionSchedule } from './ingestion-schedule.mjs';
 import { briefScheduleDue, validateBriefSchedule } from './brief-schedule.mjs';
 import { defaultRoot as hermesDefaultRoot } from './sessions/hermes.mjs';
+import { checkForUpdate } from './update-client.mjs';
+import { UPDATE_PUBLIC_KEY } from './update-trust.mjs';
 
 const GRAPH_NOTE_MUTATIONS = new Set([
   '/api/graph3d/note/save',
@@ -1144,6 +1146,13 @@ export async function startSetup(opts = {}) {
 
   const routes = {
     'GET /api/state': () => state(),
+    'GET /api/updates/check': async () => checkForUpdate({
+      publicKey: opts.updatePublicKey ?? UPDATE_PUBLIC_KEY,
+      currentVersion: VERSION,
+      platform: os,
+      arch: opts.arch || process.arch,
+      fetchImpl: opts.updateFetch || fetch,
+    }),
     'GET /api/rsi': async () => ({ ideas: await rsiLedger.list() }),
     'GET /api/rsi/observations': async () => ({ observations: await rsiObservationSchedule.status() }),
     'POST /api/rsi/observations/settings': async (b) => {

@@ -1,5 +1,12 @@
 {
   "header.done": "Concluído — fechar configuração",
+  "updates.title": "Atualizações",
+  "updates.hint": "Verifique se há uma versão BrainLink assinada. A verificação não baixa nem instala nada.",
+  "updates.check": "Verificar atualizações",
+  "updates.checking": "Verificando a versão assinada…",
+  "updates.unavailable": "A verificação automática ainda não está ativada nesta versão.",
+  "updates.available": "A versão assinada {version} está disponível: {url}",
+  "updates.failed": "Não foi possível verificar atualizações.",
   "header.version": "Versão {version}",
   "header.langLabel": "Idioma",
   "nav.home": "Início",

@@ -337,6 +337,11 @@ main #ready, main #ask-panel, main #brain-panel, main #sessions-panel, main #s-c
   </section>
 
   <details class="settings" id="settings"><summary data-i18n="settings.summary"></summary><div>
+  <section id="s-updates">
+    <h2 data-i18n="updates.title">Updates</h2>
+    <p class="hint" data-i18n="updates.hint">Check for a signed BrainLink release. Checking does not download or install anything.</p>
+    <div class="row"><button type="button" id="updates-check" data-i18n="updates.check">Check for updates</button><span id="updates-result" class="muted" role="status" aria-live="polite"></span></div>
+  </section>
   <section id="s-vault">
     <h2><span class="step" id="n1">1</span> <span data-i18n="vault.step1Title"></span></h2>
     <p class="hint" data-i18n="vault.hint"></p>
@@ -576,6 +581,18 @@ async function api(method, url, body) {
   if (!r.ok) throw new Error(j.error || r.statusText);
   return j;
 }
+document.getElementById('updates-check')?.addEventListener('click', async (event) => {
+  const button = event.currentTarget;
+  const result = $('updates-result');
+  button.disabled = true;
+  result.textContent = t('updates.checking');
+  try {
+    const update = await api('GET', '/api/updates/check');
+    if (update.status === 'unavailable') result.textContent = t('updates.unavailable');
+    else result.textContent = t('updates.available', { version: update.version, url: update.asset.url });
+  } catch (error) { result.textContent = error.message || t('updates.failed'); }
+  finally { button.disabled = false; }
+});
 function toast(msg, bad) { const t = $('toast'); t.textContent = msg; t.className = 'show' + (bad ? ' bad' : ''); clearTimeout(t._h); t._h = setTimeout(() => (t.className = ''), bad ? 6000 : 3500); }
 async function act(fn) { try { await fn(); await load(); } catch (e) { toast(e.message, true); } }
 function currentIngestionTargets() {

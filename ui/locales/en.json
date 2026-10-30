@@ -1,5 +1,12 @@
 {
   "header.done": "Done — close setup",
+  "updates.title": "Updates",
+  "updates.hint": "Check for a signed BrainLink release. Checking does not download or install anything.",
+  "updates.check": "Check for updates",
+  "updates.checking": "Checking the signed release…",
+  "updates.unavailable": "Automatic update checks are not enabled for this build yet.",
+  "updates.available": "Signed release {version} is available: {url}",
+  "updates.failed": "Could not check for updates.",
   "header.version": "Version {version}",
   "header.langLabel": "Language",
   "nav.home": "Home",

@@ -1,5 +1,12 @@
 {
   "header.done": "完成 — 關閉設定",
+  "updates.title": "更新",
+  "updates.hint": "檢查 BrainLink 是否有經簽署的新版。檢查不會下載或安裝任何內容。",
+  "updates.check": "檢查更新",
+  "updates.checking": "正在檢查已簽署版本…",
+  "updates.unavailable": "此版本尚未啟用自動更新檢查。",
+  "updates.available": "已推出簽署版本 {version}：{url}",
+  "updates.failed": "無法檢查更新。",
   "header.version": "版本 {version}",
   "header.langLabel": "語言",
   "nav.home": "首頁",
