@@ -64,6 +64,25 @@ test('episode withdrawal refuses unrelated notes, non-private notes and stale re
  await h.load();await h.open(valid.id);await store.write({id:valid.id,vault:'Journal',path:'Stale.md',frontmatter:fm,body:'Concurrent update'},{expected_etag:valid.etag});
  assert.equal(await h.withdrawEpisode(),false);assert.match(h.get().error,/E_CONFLICT/);assert.equal((await store.read(valid.id)).frontmatter.status,'proposed');
 });
+test('memory type picker displays unclassified notes and saves a chosen type without dropping metadata',async()=>{
+ const store=await makeStore(),api=createApi({store}),h=useNotes(api);await h.load();
+ const id=h.get().items.find(n=>n.title==='Home').id;await h.open(id);
+ let view=notesView({...h.get(),items:h.get().items},api);
+ assert.match(view,/Current type: <strong>Unclassified<\/strong>/);
+ assert.match(view,/aria-label="Set memory type"/);
+ h.changeMemoryType('procedural');assert.equal(h.get().dirty,true);
+ assert.match(h.get().frontmatter,/"memory_type": "procedural"/);
+ assert.equal(await h.save(),true);
+ const saved=await store.read(id);assert.equal(saved.frontmatter.memory_type,'procedural');
+ assert.equal(saved.frontmatter.type,'index');assert.deepEqual(saved.frontmatter.tags,['home']);
+ view=notesView({...h.get(),items:h.get().items},api);assert.match(view,/Current type: <strong>Procedural<\/strong>/);
+});
+test('memory type picker rejects unknown types and cancel restores original metadata',async()=>{
+ const store=await makeStore(),api=createApi({store}),h=useNotes(api);await h.load();const id=h.get().items[0].id;await h.open(id);
+ const original=h.get().frontmatter;assert.equal(h.changeMemoryType('admin'),false);assert.equal(h.get().dirty,false);
+ assert.equal(h.changeMemoryType('episodic'),true);assert.equal(h.get().dirty,true);assert.equal(h.cancel(),true);
+ assert.equal(h.get().frontmatter,original);assert.equal(h.get().dirty,false);
+});
 test('wikilinks render safely and backlinks resolve by target id',async()=>{
  const store=await makeStore(),api=createApi({store});const list=await api.listNotes();const website=list.find(n=>n.title==='Website relaunch');const backlinks=await api.backlinks(website.id);
  assert.ok(backlinks.some(l=>list.find(n=>n.id===l.src_id)?.title==='Home'));
