@@ -132,6 +132,51 @@ function deriveTypedRelationsWithReview(notes, reviewStatus) {
 export function deriveProposedTypedRelations(notes) { return deriveTypedRelationsWithReview(notes, 'proposed'); }
 export function deriveRejectedTypedRelations(notes) { return deriveTypedRelationsWithReview(notes, 'rejected'); }
 
+// Privacy-safe structural counts for RSI. Only aggregate numbers leave this function: no note
+// titles, IDs, evidence, paths, or relation text. Private/generated notes cannot affect totals.
+export function typedGraphHealth(notes) {
+  const records = (Array.isArray(notes) ? notes : [])
+    .filter((note) => note && !note.private && !note.generated)
+    .map((note) => ({ note, ...parseRecord(note.raw) }));
+  const isEntity = ({ meta }) => ENTITY_TYPES.has(meta.type) && ID.test(meta.id || '')
+    && SCOPES.has(meta.scope) && ['current', 'proposed'].includes(meta.status);
+  const typed = records.filter(isEntity);
+  const currentById = new Map();
+  const duplicateIds = new Set();
+  for (const record of typed) {
+    if (record.meta.status !== 'current') continue;
+    const id = record.meta.id;
+    if (currentById.has(id)) { currentById.delete(id); duplicateIds.add(id); }
+    else if (!duplicateIds.has(id)) currentById.set(id, record);
+  }
+
+  let verified = 0, proposed = 0, unresolved = 0;
+  for (const source of typed) {
+    for (const relation of source.relations) {
+      if (!['verified', 'proposed'].includes(relation.review)) continue;
+      const target = currentById.get(relation.target);
+      const confidenceText = relation.confidence || '';
+      const confidence = Number(confidenceText);
+      const validEvidence = Boolean(relation.source) && relation.source.length <= 300
+        && /^(?:0(?:\.\d+)?|1(?:\.0+)?)$/.test(confidenceText)
+        && Number.isFinite(confidence) && confidence >= 0 && confidence <= 1;
+      const resolves = ENTITY_TYPES.has(source.meta.type) && source.meta.status === 'current'
+        && PREDICATES.has(relation.predicate) && validEvidence && target
+        && target.note !== source.note && target.meta.scope === source.meta.scope;
+      if (!resolves) { unresolved++; continue; }
+      if (relation.review === 'verified') verified++;
+      else proposed++;
+    }
+  }
+  return {
+    typed_entity_count: typed.filter(({ meta }) => meta.status === 'current').length,
+    verified_typed_relation_count: verified,
+    proposed_typed_relation_count: proposed,
+    unresolved_typed_relation_count: unresolved,
+    duplicate_typed_id_count: duplicateIds.size,
+  };
+}
+
 // Deterministic, review-only discovery. It reads only the already-authorized vault index passed
 // by the caller, requires a typed current source and a unique same-scope target, and stores one
 // short sentence as evidence. It never creates or verifies a relationship by itself.

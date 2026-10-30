@@ -3,6 +3,7 @@
 // a brief that combines them, for "what's going on?" and for agents when they connect.
 import { loadVault, summarize, zonedNow } from './core.mjs';
 import { linkTarget } from './links.mjs';
+import { typedGraphHealth } from './typed-graph.mjs';
 
 const daysAgo = (tz, n, now = new Date()) => zonedNow(tz, new Date(now.getTime() - n * 86400e3)).slice(0, 10);
 
@@ -76,6 +77,7 @@ export async function vaultHealth(ctx, vaultName, { staleDays = 180 } = {}, now 
     orphans: orphans.slice(0, 30).map((i) => summarize(index, i)),
     broken_links: broken.slice(0, 30).map((b) => ({ in: index.notes[b.from].rel, target: b.target })), broken_count: broken.length,
     duplicate_title_count: dupes.length, stale_active_count: stale.length,
+    ...typedGraphHealth(index.notes),
     duplicate_titles: dupes.slice(0, 20),
     stale_active_notes: stale.slice(0, 20).map((i) => summarize(index, i)),
     tips: [

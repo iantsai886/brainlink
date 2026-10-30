@@ -211,6 +211,11 @@ export async function startSetup(opts = {}) {
       return {
         notes: health.notes, links: health.links, orphan_count: health.orphan_count, broken_count: health.broken_count,
         duplicate_title_count: health.duplicate_title_count, stale_active_count: health.stale_active_count,
+        typed_entity_count: health.typed_entity_count,
+        verified_typed_relation_count: health.verified_typed_relation_count,
+        proposed_typed_relation_count: health.proposed_typed_relation_count,
+        unresolved_typed_relation_count: health.unresolved_typed_relation_count,
+        duplicate_typed_id_count: health.duplicate_typed_id_count,
       };
     },
   });

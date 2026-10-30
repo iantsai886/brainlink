@@ -20,7 +20,11 @@ function tokenSummary(values) { return { samples: values.length, mean_estimate: 
 // note-derived fields from the vault-health reader.
 export function sanitizeVaultHealthSnapshot(input, vault) {
   if (!input || typeof input !== 'object' || Array.isArray(input)) throw new Error('Vault health snapshot is invalid.');
-  const fields = ['notes', 'links', 'orphan_count', 'broken_count', 'duplicate_title_count', 'stale_active_count'];
+  const fields = [
+    'notes', 'links', 'orphan_count', 'broken_count', 'duplicate_title_count', 'stale_active_count',
+    'typed_entity_count', 'verified_typed_relation_count', 'proposed_typed_relation_count',
+    'unresolved_typed_relation_count', 'duplicate_typed_id_count',
+  ];
   const counts = {};
   for (const field of fields) {
     const value = input[field];
@@ -34,14 +38,25 @@ export function sanitizeVaultHealthSnapshot(input, vault) {
 
 export function compareVaultHealth(current, previous) {
   if (!current?.counts || !previous?.counts || current.vault !== previous.vault) return { signal: 'baseline_unavailable', changes: null };
-  const keys = ['notes', 'links', 'orphan_count', 'broken_count', 'duplicate_title_count', 'stale_active_count'];
+  const keys = [
+    'notes', 'links', 'orphan_count', 'broken_count', 'duplicate_title_count', 'stale_active_count',
+    'typed_entity_count', 'verified_typed_relation_count', 'proposed_typed_relation_count',
+    'unresolved_typed_relation_count', 'duplicate_typed_id_count',
+  ];
+  if (keys.some((key) => !Number.isSafeInteger(current.counts[key]) || !Number.isSafeInteger(previous.counts[key]))) {
+    return { signal: 'baseline_unavailable', changes: null };
+  }
   const changes = Object.fromEntries(keys.map((key) => [key, current.counts[key] - previous.counts[key]]));
   const orphanRate = (snapshot) => snapshot.counts.notes ? snapshot.counts.orphan_count / snapshot.counts.notes : null;
   const beforeRate = orphanRate(previous), afterRate = orphanRate(current);
   const orphanRateChange = beforeRate === null || afterRate === null ? null : Number((afterRate - beforeRate).toFixed(4));
   changes.orphan_rate = orphanRateChange;
-  const worse = changes.broken_count > 0 || changes.duplicate_title_count > 0 || changes.stale_active_count > 0 || (orphanRateChange !== null && orphanRateChange > 0.01);
-  const better = changes.broken_count < 0 || changes.duplicate_title_count < 0 || changes.stale_active_count < 0 || (orphanRateChange !== null && orphanRateChange < -0.01);
+  const worse = changes.broken_count > 0 || changes.duplicate_title_count > 0 || changes.stale_active_count > 0
+    || changes.unresolved_typed_relation_count > 0 || changes.duplicate_typed_id_count > 0
+    || (orphanRateChange !== null && orphanRateChange > 0.01);
+  const better = changes.links > 0 || changes.broken_count < 0 || changes.duplicate_title_count < 0 || changes.stale_active_count < 0
+    || changes.unresolved_typed_relation_count < 0 || changes.duplicate_typed_id_count < 0
+    || (orphanRateChange !== null && orphanRateChange < -0.01);
   return { signal: worse && better ? 'mixed' : worse ? 'regressed' : better ? 'improved' : 'stable', changes };
 }
 

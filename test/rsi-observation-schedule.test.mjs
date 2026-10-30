@@ -69,7 +69,7 @@ test('optional health snapshots are per-vault, local aggregates and compare only
   const home = await mkdtemp(path.join(os.tmpdir(), 'brainlink-rsi-vault-health-'));
   t.after(() => rm(home, { recursive: true, force: true }));
   let now = new Date('2026-10-27T12:00:00.000Z');
-  let snapshot = { notes: 10, links: 8, orphan_count: 4, broken_count: 2, duplicate_title_count: 1, stale_active_count: 3, path: 'PRIVATE_PATH_CANARY', text: 'PRIVATE_NOTE_CANARY' };
+  let snapshot = { notes: 10, links: 8, orphan_count: 4, broken_count: 2, duplicate_title_count: 1, stale_active_count: 3, typed_entity_count: 5, verified_typed_relation_count: 3, proposed_typed_relation_count: 1, unresolved_typed_relation_count: 2, duplicate_typed_id_count: 1, path: 'PRIVATE_PATH_CANARY', text: 'PRIVATE_NOTE_CANARY' };
   let selected = [];
   const service = createRsiObservationSchedule({
     home, now: () => now, readEntries: async () => [],

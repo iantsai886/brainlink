@@ -6,12 +6,34 @@ import path from 'node:path';
 import { normalize } from '../src/config.mjs';
 import { createContext, loadVault } from '../src/core.mjs';
 import { buildGraph3D, noteDetail3D } from '../src/graph3d.mjs';
-import { deriveTypedRelations, deriveRejectedTypedRelations, discoverTypedRelationshipCandidates, discoverTypedRelationshipCandidatesForSources, appendTypedRelationProposal, approveTypedRelation, rejectTypedRelation, reopenTypedRelation } from '../src/typed-graph.mjs';
+import { deriveTypedRelations, deriveRejectedTypedRelations, discoverTypedRelationshipCandidates, discoverTypedRelationshipCandidatesForSources, appendTypedRelationProposal, approveTypedRelation, rejectTypedRelation, reopenTypedRelation, typedGraphHealth } from '../src/typed-graph.mjs';
 import { proposeNote } from '../src/writes.mjs';
 import { createMcp } from '../src/server.mjs';
 
 const temp = (name) => mkdtemp(path.join(tmpdir(), `brainlink-typed-graph-${name}-`));
 const entity = ({ type, id, scope = 'organisation', body = '', relations = '', extra = '' }) => `---\ntype: ${type}\nid: ${id}\nscope: ${scope}\nstatus: current\n${extra}${relations ? `relations:\n${relations}` : ''}---\n# ${id}\n${body}`;
+
+test('typed graph health returns structural counts only and excludes private or generated notes', () => {
+  const notes = [
+    { rel: 'Team.md', raw: entity({ type: 'team', id: 'team.product', relations: '  - predicate: runs\n    target: workflow.triage\n    review: verified\n    source: "Approved process map"\n    confidence: 0.9\n' }) },
+    { rel: 'Workflow.md', raw: entity({ type: 'workflow', id: 'workflow.triage', relations: '  - predicate: consumes\n    target: dataset.missing\n    review: proposed\n    source: "Approved process map"\n    confidence: 0.8\n' }) },
+    { rel: 'Project.md', raw: entity({ type: 'project', id: 'project.alpha', relations: '  - predicate: informed_by\n    target: dataset.alpha\n    review: proposed\n    source: "Approved project brief"\n    confidence: 0.8\n' }) },
+    { rel: 'Dataset.md', raw: entity({ type: 'dataset', id: 'dataset.alpha' }) },
+    { rel: 'Duplicate A.md', raw: entity({ type: 'concept', id: 'concept.duplicate' }) },
+    { rel: 'Duplicate B.md', raw: entity({ type: 'concept', id: 'concept.duplicate' }) },
+    { rel: 'Private.md', private: true, raw: entity({ type: 'team', id: 'team.private', relations: '  - predicate: runs\n    target: team.product\n    review: verified\n    source: PRIVATE_CANARY\n    confidence: 0.9\n' }) },
+    { rel: 'Generated.md', generated: true, raw: entity({ type: 'team', id: 'team.generated' }) },
+  ];
+  const health = typedGraphHealth(notes);
+  assert.deepEqual(health, {
+    typed_entity_count: 6,
+    verified_typed_relation_count: 1,
+    proposed_typed_relation_count: 1,
+    unresolved_typed_relation_count: 1,
+    duplicate_typed_id_count: 1,
+  });
+  assert.doesNotMatch(JSON.stringify(health), /PRIVATE_CANARY|team\.private|dataset\.missing|Team\.md/);
+});
 
 async function context(vaults) {
   const config = normalize({ vaults: await Promise.all(vaults.map(async ({ name, path: p, private: isPrivate = false }) => {

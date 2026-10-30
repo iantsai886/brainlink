@@ -62,22 +62,30 @@ test('RSI observation labels small or empty samples as unknown, not as zero fail
 });
 
 test('vault health comparison uses only counts, keeps vaults separate, and reports structural signals', () => {
-  const previous = sanitizeVaultHealthSnapshot({ notes: 10, links: 8, orphan_count: 4, broken_count: 2, duplicate_title_count: 1, stale_active_count: 3, paths: ['PRIVATE_PATH'], note_text: 'PRIVATE_NOTE' }, 'Personal');
-  const current = sanitizeVaultHealthSnapshot({ notes: 10, links: 10, orphan_count: 2, broken_count: 0, duplicate_title_count: 1, stale_active_count: 3, title: 'PRIVATE_TITLE' }, 'Personal');
-  assert.deepEqual(current, { vault: 'Personal', counts: { notes: 10, links: 10, orphan_count: 2, broken_count: 0, duplicate_title_count: 1, stale_active_count: 3 } });
+  const baseline = { typed_entity_count: 5, verified_typed_relation_count: 2, proposed_typed_relation_count: 1, unresolved_typed_relation_count: 2, duplicate_typed_id_count: 1 };
+  const previous = sanitizeVaultHealthSnapshot({ notes: 10, links: 8, orphan_count: 4, broken_count: 2, duplicate_title_count: 1, stale_active_count: 3, ...baseline, paths: ['PRIVATE_PATH'], note_text: 'PRIVATE_NOTE' }, 'Personal');
+  const current = sanitizeVaultHealthSnapshot({ notes: 10, links: 10, orphan_count: 2, broken_count: 0, duplicate_title_count: 1, stale_active_count: 3, ...baseline, unresolved_typed_relation_count: 1, duplicate_typed_id_count: 1, title: 'PRIVATE_TITLE' }, 'Personal');
+  assert.deepEqual(current, { vault: 'Personal', counts: { notes: 10, links: 10, orphan_count: 2, broken_count: 0, duplicate_title_count: 1, stale_active_count: 3, ...baseline, unresolved_typed_relation_count: 1 } });
   assert.deepEqual(compareVaultHealth(current, previous), {
     signal: 'improved',
-    changes: { notes: 0, links: 2, orphan_count: -2, broken_count: -2, duplicate_title_count: 0, stale_active_count: 0, orphan_rate: -0.2 },
+    changes: { notes: 0, links: 2, orphan_count: -2, broken_count: -2, duplicate_title_count: 0, stale_active_count: 0, typed_entity_count: 0, verified_typed_relation_count: 0, proposed_typed_relation_count: 0, unresolved_typed_relation_count: -1, duplicate_typed_id_count: 0, orphan_rate: -0.2 },
   });
-  const worse = sanitizeVaultHealthSnapshot({ notes: 10, links: 5, orphan_count: 5, broken_count: 4, duplicate_title_count: 2, stale_active_count: 3 }, 'Personal');
+  const worse = sanitizeVaultHealthSnapshot({ notes: 10, links: 5, orphan_count: 5, broken_count: 4, duplicate_title_count: 2, stale_active_count: 3, ...baseline }, 'Personal');
   assert.equal(compareVaultHealth(worse, previous).signal, 'regressed');
-  const staleWorse = sanitizeVaultHealthSnapshot({ notes: 10, links: 8, orphan_count: 4, broken_count: 2, duplicate_title_count: 1, stale_active_count: 4 }, 'Personal');
+  const staleWorse = sanitizeVaultHealthSnapshot({ notes: 10, links: 8, orphan_count: 4, broken_count: 2, duplicate_title_count: 1, stale_active_count: 4, ...baseline }, 'Personal');
   assert.equal(compareVaultHealth(staleWorse, previous).signal, 'regressed', 'stale active notes affect the trend classification');
-  const staleBetter = sanitizeVaultHealthSnapshot({ notes: 10, links: 8, orphan_count: 4, broken_count: 2, duplicate_title_count: 1, stale_active_count: 2 }, 'Personal');
+  const staleBetter = sanitizeVaultHealthSnapshot({ notes: 10, links: 8, orphan_count: 4, broken_count: 2, duplicate_title_count: 1, stale_active_count: 2, ...baseline }, 'Personal');
   assert.equal(compareVaultHealth(staleBetter, previous).signal, 'improved', 'fewer stale active notes affect the trend classification');
-  const mixed = sanitizeVaultHealthSnapshot({ notes: 10, links: 9, orphan_count: 1, broken_count: 3, duplicate_title_count: 1, stale_active_count: 3 }, 'Personal');
+  const mixed = sanitizeVaultHealthSnapshot({ notes: 10, links: 9, orphan_count: 1, broken_count: 3, duplicate_title_count: 1, stale_active_count: 3, ...baseline }, 'Personal');
   assert.equal(compareVaultHealth(mixed, previous).signal, 'mixed');
   assert.equal(compareVaultHealth(current, { ...previous, vault: 'Organisation' }).signal, 'baseline_unavailable');
+  const legacy = { ...previous, counts: { ...previous.counts } };
+  delete legacy.counts.typed_entity_count;
+  assert.equal(compareVaultHealth(current, legacy).signal, 'baseline_unavailable', 'old snapshots are not treated as zero-valued typed graph baselines');
+  const graphWorse = sanitizeVaultHealthSnapshot({ ...previous.counts, unresolved_typed_relation_count: 3 }, 'Personal');
+  assert.equal(compareVaultHealth(graphWorse, previous).signal, 'regressed', 'more unresolved typed relations are a structural regression');
+  const graphBetter = sanitizeVaultHealthSnapshot({ ...previous.counts, duplicate_typed_id_count: 0 }, 'Personal');
+  assert.equal(compareVaultHealth(graphBetter, previous).signal, 'improved', 'fewer duplicate typed IDs are a structural improvement');
   assert.throws(() => sanitizeVaultHealthSnapshot({ ...current.counts, broken_count: -1 }, 'Personal'), /non-negative/);
   assert.throws(() => sanitizeVaultHealthSnapshot(current.counts, ''), /one valid vault/);
   assert.doesNotMatch(JSON.stringify(current), /PRIVATE_(?:PATH|NOTE|TITLE)/);
