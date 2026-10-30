@@ -43,11 +43,19 @@ test('Windows RSI settings replacement retries transient sharing violations and 
     os: 'win32',
     renameFile: async () => {
       attempts++;
-      if (attempts <= 25) { const error = new Error('longer antivirus/indexer lock'); error.code = 'EPERM'; throw error; }
+      if (attempts <= 100) { const error = new Error('longer antivirus/indexer lock'); error.code = 'EPERM'; throw error; }
     },
     wait: async (ms) => waits.push(ms),
   });
-  assert.equal(attempts, 26, 'Windows file replacement remains retryable beyond a brief lock');
+  assert.equal(attempts, 101, 'Windows file replacement remains retryable beyond a brief lock');
+
+  attempts = 0;
+  const boundedWaits = [];
+  await assert.rejects(replaceDiscoveryFile('tmp', 'settings', {
+    os: 'win32', renameFile: async () => { attempts++; const error = new Error('persistent lock'); error.code = 'EPERM'; throw error; }, wait: async (ms) => boundedWaits.push(ms),
+  }), /persistent lock/);
+  assert.equal(attempts, 120, 'Windows replacement retries stop after a bounded number of attempts');
+  assert.equal(boundedWaits.length, 119);
 
   attempts = 0;
   await assert.rejects(replaceDiscoveryFile('tmp', 'settings', {
@@ -597,9 +605,13 @@ test('Setup exposes discovery only through authenticated local APIs and runs the
     assert.equal((await resumeResponse.json()).discovery.settings.paused, false);
     for (let i = 0; i < 100 && !calls.length; i++) await delay(50);
     assert.equal(calls.length, 1, 'the scheduler runs once when due');
-    for (let i = 0; i < 50; i++) { if ((await fetch(base + '/api/rsi/discovery', { headers: { 'X-BrainLink-Token': app.token } }).then(r => r.json())).discovery.runs.length) break; await delay(20); }
-    const status = await fetch(base + '/api/rsi/discovery', { headers: { 'X-BrainLink-Token': app.token } }).then(r => r.json());
-    assert.equal(status.discovery.runs[0].trigger, 'schedule');
+    let status;
+    for (let i = 0; i < 200; i++) {
+      status = await fetch(base + '/api/rsi/discovery', { headers: { 'X-BrainLink-Token': app.token } }).then(r => r.json());
+      if (status.discovery.runs.some((run) => run.trigger === 'schedule')) break;
+      await delay(25);
+    }
+    assert.ok(status.discovery.runs.some((run) => run.trigger === 'schedule'), 'the scheduled receipt appears after the fetch begins');
     await delay(80);
     assert.equal(calls.length, 1, 'not due again until the interval passes');
     const manual = await post('/api/rsi/discovery/run').then(r => r.json());

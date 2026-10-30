@@ -498,29 +498,36 @@ test('semantic-only agents cannot search or directly read typed operating manual
   await writeFile(path.join(vaultPath, 'Knowledge.md'), '# Knowledge\n\nSEMANTIC_TYPE_CANARY is ordinary shared knowledge.');
   await writeFile(path.join(vaultPath, 'Anna Manual.md'), '---\ntype: operating-manual\ntags:\n  - company-role\n---\n# Anna\n\nPROCEDURAL_MANUAL_CANARY is private to agents with procedural permission.');
   await writeFile(path.join(vaultPath, 'Handoff Skill.md'), '---\ntags: [agent-skill]\n---\n# Handoff Skill\n\nPROCEDURAL_SKILL_CANARY is private to agents with procedural permission.');
+  await writeFile(path.join(vaultPath, 'Session Summary Type.md'), '---\ntype: session_summary\n---\n# Session Summary\n\nEPISODIC_TYPE_CANARY is private to agents with episodic permission.');
+  await writeFile(path.join(vaultPath, 'Session Summary Tag.md'), '---\ntags: [session_summary]\n---\n# Session Summary Tag\n\nEPISODIC_TAG_CANARY is private to agents with episodic permission.');
   const cfg = fixture(vaultPath);
   const ctx = createContext(cfg, { env: { BRAINLINK_AGENT_TOKEN: 'fictional-agent-token' } });
   ctx.twinScope.memory_policy.procedural = false;
+  ctx.twinScope.memory_policy.episodic = false;
   const mcp = createMcp(ctx);
   const call = (name, args) => mcp.handle({ jsonrpc: '2.0', id: 1, method: 'tools/call', params: { name, arguments: args } });
-  const query = 'SEMANTIC_TYPE_CANARY PROCEDURAL_MANUAL_CANARY PROCEDURAL_SKILL_CANARY';
+  const query = 'SEMANTIC_TYPE_CANARY PROCEDURAL_MANUAL_CANARY PROCEDURAL_SKILL_CANARY EPISODIC_TYPE_CANARY EPISODIC_TAG_CANARY';
   const search = await call('vault_search', { vault: 'Fictional Org', query });
   assert.equal(search.result.isError, false);
   assert.match(JSON.stringify(search.result.structuredContent), /Knowledge\.md|SEMANTIC_TYPE_CANARY/);
-  assert.doesNotMatch(JSON.stringify(search.result.structuredContent), /PROCEDURAL_MANUAL_CANARY|PROCEDURAL_SKILL_CANARY/);
+  assert.doesNotMatch(JSON.stringify(search.result.structuredContent), /PROCEDURAL_MANUAL_CANARY|PROCEDURAL_SKILL_CANARY|EPISODIC_TYPE_CANARY|EPISODIC_TAG_CANARY/);
   const packet = await call('context_packet', { vault: 'Fictional Org', query });
   assert.equal(packet.result.isError, false);
   assert.match(JSON.stringify(packet.result.structuredContent), /Knowledge\.md|SEMANTIC_TYPE_CANARY/);
-  assert.doesNotMatch(JSON.stringify(packet.result.structuredContent), /PROCEDURAL_MANUAL_CANARY|PROCEDURAL_SKILL_CANARY/);
-  for (const note of ['Anna Manual.md', 'Handoff Skill.md']) {
+  assert.doesNotMatch(JSON.stringify(packet.result.structuredContent), /PROCEDURAL_MANUAL_CANARY|PROCEDURAL_SKILL_CANARY|EPISODIC_TYPE_CANARY|EPISODIC_TAG_CANARY/);
+  for (const note of ['Anna Manual.md', 'Handoff Skill.md', 'Session Summary Type.md', 'Session Summary Tag.md']) {
     const read = await call('vault_read_note', { vault: 'Fictional Org', path: note });
-    assert.equal(read.result.isError, true, `${note} must be blocked by the procedural memory grant`);
-    assert.doesNotMatch(JSON.stringify(read), /PROCEDURAL_MANUAL_CANARY|PROCEDURAL_SKILL_CANARY/);
+    assert.equal(read.result.isError, true, `${note} must be blocked by its required memory grant`);
+    assert.doesNotMatch(JSON.stringify(read), /PROCEDURAL_MANUAL_CANARY|PROCEDURAL_SKILL_CANARY|EPISODIC_TYPE_CANARY|EPISODIC_TAG_CANARY/);
   }
   ctx.twinScope.memory_policy.procedural = true;
+  ctx.twinScope.memory_policy.episodic = true;
   const allowed = await call('vault_read_note', { vault: 'Fictional Org', path: 'Anna Manual.md' });
   assert.equal(allowed.result.isError, false, 'the existing Harness grant can still read the operating manual');
   assert.match(JSON.stringify(allowed.result.structuredContent), /PROCEDURAL_MANUAL_CANARY/);
+  const allowedEpisode = await call('vault_read_note', { vault: 'Fictional Org', path: 'Session Summary Type.md' });
+  assert.equal(allowedEpisode.result.isError, false, 'session summaries require episodic memory, not semantic memory');
+  assert.match(JSON.stringify(allowedEpisode.result.structuredContent), /EPISODIC_TYPE_CANARY/);
 });
 
 test('direct note read rechecks memory type after reading a stale-index file', async () => {

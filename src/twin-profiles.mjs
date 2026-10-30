@@ -22,7 +22,7 @@ const NOTE_TYPE_MEMORY = Object.freeze({
   'agent-manual': 'procedural', procedure: 'procedural', 'standard-operating-procedure': 'procedural',
   runbook: 'procedural', skill: 'procedural', 'agent-skill': 'procedural', 'role-instructions': 'procedural',
   handoff: 'working', 'handoff-request': 'working', task: 'working', 'open-loop': 'working', 'work-item': 'working',
-  episode: 'episodic', session_episode: 'episodic', 'session-episode': 'episodic', session_summary: 'episodic',
+  episode: 'episodic', 'session-episode': 'episodic', 'session-summary': 'episodic',
 });
 export function effectiveAgentMemoryPolicy(profile, agentAccess) {
   return Object.fromEntries(MEMORY_TYPES.map((type) => [
