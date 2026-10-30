@@ -10,7 +10,7 @@ The publisher key is intentionally empty in the source today. Builds therefore r
 
 1. Generate and protect an Ed25519 release private key outside GitHub and outside the repository. Keep an encrypted offline backup and restrict release access.
 2. Put only its public PEM in `src/update-trust.mjs` through a reviewed commit. Build and distribute that version before publishing signed update manifests.
-3. For each release, publish `brainlink-update.json` at the fixed GitHub release download URL. Sign a canonical JSON payload with `npm run updates:sign-manifest`; include each package's exact byte size and SHA-256. Keep the private key in a protected release environment, never in Git, the app, or user configuration.
+3. Build all platform packages into one `dist` folder. Run `npm run updates:create-payload -- --dist dist --out brainlink-update-payload.json --channel stable` (or `beta`). The builder requires the Windows installer, universal macOS package, and Linux x64/arm64 `.deb` and `.tar.gz` packages; it calculates each exact byte size and SHA-256 and refuses missing, linked, changed, oversized, or non-regular packages. Review the payload, then sign it with `npm run updates:sign-manifest -- --payload brainlink-update-payload.json --key <protected-key-file> --out brainlink-update.json`. Keep the private key in a protected release environment, never in Git, the app, or user configuration. The release URL format and repository identity are currently fixed in the verifier.
 4. Verify the release envelope with the public key before publishing. Publish package assets and the manifest as one reviewed release operation.
 
 Key rotation is not implemented. Do not replace a live publisher key until the app supports a reviewed overlap period with old and new public keys, or a migration may strand existing installs.
@@ -18,7 +18,7 @@ Key rotation is not implemented. Do not replace a live publisher key until the a
 ## Remaining release work
 
 - Provision and pin the publisher key.
-- Automate asset hashing, payload creation, signing, and publication without exposing the private key.
+- Automate signing and publication without exposing the private key; package hashing and payload creation now have a local checked CLI, but are not yet wired into a hosted release workflow.
 - Design and test a clear, user-approved OS installer handoff, upgrade, and rollback flow.
 - Exercise signed releases on Windows, macOS, and Linux, including key rotation and interrupted downloads.
 

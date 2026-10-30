@@ -16,6 +16,7 @@
     "smoke:live-cross-client-handoff": "node scripts/smoke-live-cross-client-handoff.mjs --live",
     "smoke:backup-recovery": "node scripts/smoke-backup-recovery.mjs",
     "updates:sign-manifest": "node scripts/sign-update-manifest.mjs",
+    "updates:create-payload": "node scripts/create-update-payload.mjs",
     "smoke:installed:win": "pwsh -NoProfile -File scripts/smoke-installed-windows.ps1",
     "smoke:upgrade:win": "pwsh -NoProfile -File scripts/smoke-upgrade-windows.ps1",
     "evaluate:rsi-discovery": "node bin/rsi-discovery-eval.mjs",
