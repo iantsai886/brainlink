@@ -24,7 +24,7 @@ BrainLink's main product pieces are implemented in the development branch: local
 ## Still needed before calling this ready to sell
 
 - Sign in to Claude Code, then pass the paired fictional Claude Code-to-Codex handoff test.
-- Restore GitHub Actions test access. Run `41080930432` on commit `6f414f1` was stopped before steps by GitHub's account billing/spending-limit gate (check annotation verified through the GitHub API). After the account owner resolves it, rerun CI and inspect the actual job results.
+- Restore GitHub Actions test access. The latest push run `41088015684` for commit `a058201` failed before runner steps on Windows/Linux jobs; GitHub annotations say recent account payments failed or the spending limit needs to be increased. No tests ran in those jobs. After the account owner resolves billing, rerun CI and inspect the actual results.
 - Linux x64 `.deb` and portable installers now build and pass isolated install, launch, vault-init, and uninstall checks in a Debian 12 container. Still test a real Linux desktop session (menu/browser launch), execute ARM64 packages on ARM hardware, and test macOS installers on their target system.
 - Provision and pin the signed-update publisher key, then verify a real signed release and its upgrade/recovery flow.
 - Get real-user feedback on setup, vault selection, graph editing, backup restore, and permission wording. Synthetic tests do not prove the interface is easy for customers.
