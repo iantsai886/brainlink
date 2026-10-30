@@ -498,9 +498,17 @@ test('context_packet returns bounded cited excerpts and keeps private notes out'
   assert.equal(source.truncated, true);
   assert.match(packetTool.description, /vault_read_note/);
   assert.doesNotMatch(JSON.stringify(packet), /PRIVATE_PACKET_CANARY_9137|private diary|pricing and agent memory/);
+  const compact = await packetTool.run({ vault: 'Acme Studio', query: 'context packet retrieval test', max_sources: 4, excerpt_chars: 300, max_total_chars: 160 });
+  assert.equal(compact.excerpt_chars_budget, 160);
+  assert.equal(compact.excerpt_chars_used, compact.sources.reduce((sum, item) => sum + item.excerpt.length, 0));
+  assert.ok(compact.excerpt_chars_used <= 160);
+  assert.ok(compact.sources.length <= 2, 'keep at least 80 characters per selected source');
+  assert.ok(compact.sources.every((item) => item.path && item.title && item.excerpt.length <= 80));
+  assert.doesNotMatch(JSON.stringify(compact), /PRIVATE_PACKET_CANARY_9137/);
   const empty = await packetTool.run({ vault: 'Acme Studio', query: 'zzqv-no-matching-record-771' });
   assert.equal(empty.status, 'not_in_brain');
   assert.equal(empty.sources.length, 0);
+  assert.equal(empty.excerpt_chars_used, 0);
   assert.match(packetTool.description, /not_in_brain, do not guess/);
 });
 

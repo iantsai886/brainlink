@@ -130,16 +130,18 @@ export function createMcp(ctx, { onCall = () => {} } = {}) {
         return a.detail === 'full' ? result : compactSearchResponse(result);
       } },
     { name: 'context_packet', title: 'Get a small cited context packet', annotations: RO,
-      description: 'Question-focused retrieval for token efficiency. Returns up to 8 ranked excerpts with exact vault paths, titles, dates and status. Default: 4 sources, up to 300 characters each. If an excerpt is marked truncated or is insufficient, use vault_read_note on its exact path. If status is not_in_brain, do not guess. Respects the same vault, privacy, Twin memory-type and scope filters as vault_search. A packet is not proof that omitted sources do not exist.',
+      description: 'Question-focused retrieval for token efficiency. Returns ranked excerpts with exact vault paths, titles, dates and status. Defaults to 4 sources and at most 1200 excerpt characters total (300 per source); use max_total_chars to lower the whole-packet character budget. Character count is a size limit, not an exact token count. If an excerpt is marked truncated or is insufficient, use vault_read_note on its exact path. If status is not_in_brain, do not guess. Respects the same vault, privacy, Twin memory-type and scope filters as vault_search. A packet is not proof that omitted sources do not exist.',
       inputSchema: { type: 'object', properties: {
         vault: vaultProp, query: { type: 'string' }, queries: { type: 'array', items: { type: 'string' }, maxItems: 4 },
         max_sources: { type: 'integer', minimum: 1, maximum: 8, default: 4 }, excerpt_chars: { type: 'integer', minimum: 80, maximum: 300, default: 300 },
+        max_total_chars: { type: 'integer', minimum: 80, maximum: 2400, description: 'Maximum combined excerpt characters. Defaults to max_sources × excerpt_chars.' },
       }, required: ['vault', 'query'] },
       run: async (a) => {
         const maxSources = Number.isInteger(a.max_sources) ? Math.max(1, Math.min(8, a.max_sources)) : 4;
         const excerptChars = Number.isInteger(a.excerpt_chars) ? Math.max(80, Math.min(300, a.excerpt_chars)) : 300;
+        const maxTotalChars = Number.isInteger(a.max_total_chars) ? Math.max(80, Math.min(2400, a.max_total_chars)) : maxSources * excerptChars;
         const result = await searchWithVerdict(ctx, a.vault, a.query, { limit: maxSources, queries: a.queries });
-        return buildContextPacket(result, { vault: a.vault, maxSources, excerptChars });
+        return buildContextPacket(result, { vault: a.vault, maxSources, excerptChars, maxTotalChars });
       } },
     { name: 'vault_recent', title: 'What changed recently', annotations: RO,
       description: 'Notes created or changed in the last N days (or between since/until), newest first.',
