@@ -55,6 +55,32 @@ import { INGESTION_MAX_ATTEMPTS, INGESTION_RETRY_DELAY_MS, ingestionScheduleDue,
 import { briefScheduleDue, validateBriefSchedule } from './brief-schedule.mjs';
 import { defaultRoot as hermesDefaultRoot } from './sessions/hermes.mjs';
 
+const GRAPH_NOTE_MUTATIONS = new Set([
+  '/api/graph3d/note/save',
+  '/api/graph3d/relationship/approve',
+  '/api/graph3d/relationship/reject',
+  '/api/graph3d/relationship/reopen',
+  '/api/graph3d/relationship/propose',
+  '/api/graph3d/relationship/propose-manual',
+]);
+const graphNoteMutationQueues = new Map();
+
+async function serializeGraphNoteMutation(body, action) {
+  const vault = String(body?.vault || '');
+  const note = path.posix.normalize(String(body?.path || '').replace(/\\/g, '/'));
+  const key = JSON.stringify([vault, process.platform === 'win32' ? note.toLowerCase() : note]);
+  const previous = graphNoteMutationQueues.get(key) || Promise.resolve();
+  let release;
+  const current = new Promise((resolve) => { release = resolve; });
+  graphNoteMutationQueues.set(key, current);
+  await previous.catch(() => {});
+  try { return await action(); }
+  finally {
+    release();
+    if (graphNoteMutationQueues.get(key) === current) graphNoteMutationQueues.delete(key);
+  }
+}
+
 const UI_STATIC_TYPES = { '.js': 'text/javascript; charset=utf-8', '.css': 'text/css; charset=utf-8', '.json': 'application/json; charset=utf-8' };
 const UI_DIR = path.join(ROOT, 'ui');
 
@@ -2256,7 +2282,12 @@ export async function startSetup(opts = {}) {
       for await (const c of req) { raw += c; if (raw.length > 1e5) { res.writeHead(413).end(); return; } }
       try { body = raw ? JSON.parse(raw) : {}; } catch { json(res, 400, { error: 'Bad JSON' }); return; }
     }
-    try { json(res, 200, await route(body)); } catch (e) { json(res, 400, { error: String(e.message || e) }); }
+    try {
+      const result = GRAPH_NOTE_MUTATIONS.has(url.pathname)
+        ? await serializeGraphNoteMutation(body, () => route(body))
+        : await route(body);
+      json(res, 200, result);
+    } catch (e) { json(res, 400, { error: String(e.message || e) }); }
   });
   server.once('close', () => { snapshotWatcher?.stop(); vaultWatcher?.stop(); for (const client of eventClients) client.end(); eventClients.clear(); clearInterval(discoveryTimer); clearInterval(observationTimer); clearInterval(ingestionTimer); clearInterval(githubAutoTimer); clearInterval(localSummaryAutoDraftTimer); if (backupTimer) { clearTimeout(backupTimer); clearInterval(backupTimer); } if (syncTimer) { clearTimeout(syncTimer); clearInterval(syncTimer); } });
   await new Promise((resolve, reject) => { server.once('error', reject); server.listen(port, '127.0.0.1', resolve); });

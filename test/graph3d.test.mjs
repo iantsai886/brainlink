@@ -213,6 +213,17 @@ test('/api/graph3d and /api/graph3d/note: same exclusion guarantee over HTTP', a
     const stale = await api('/api/graph3d/note/save', { vault: 'Main', path: 'Beta.md', etag: note.etag, body: 'stale overwrite' });
     assert.match(stale.error || stale.message || '', /changed since it was opened/i);
 
+    const concurrentNote = await api('/api/graph3d/note', { vault: 'Main', path: 'Beta.md' });
+    const concurrentSaves = await Promise.all([
+      api('/api/graph3d/note/save', { vault: 'Main', path: 'Beta.md', etag: concurrentNote.etag, body: '# Beta\n\nFirst concurrent edit.\n' }),
+      api('/api/graph3d/note/save', { vault: 'Main', path: 'Beta.md', etag: concurrentNote.etag, body: '# Beta\n\nSecond concurrent edit.\n' }),
+    ]);
+    assert.equal(concurrentSaves.filter((result) => result.ok).length, 1, JSON.stringify(concurrentSaves));
+    assert.equal(concurrentSaves.filter((result) => /changed since it was opened/i.test(result.error || '')).length, 1, JSON.stringify(concurrentSaves));
+    const concurrentRaw = await (await import('node:fs/promises')).readFile(path.join(vaultPath, 'Beta.md'), 'utf8');
+    assert.match(concurrentRaw, /First concurrent edit|Second concurrent edit/);
+    assert.doesNotMatch(concurrentRaw, /stale overwrite/);
+
     const refused = await api('/api/graph3d/note', { vault: 'Main', path: 'Hidden Note.md' });
     assert.ok(refused.error || refused.message, 'a private note must error, not return its content');
     const privateSave = await api('/api/graph3d/note/save', { vault: 'Main', path: 'Hidden Note.md', etag: 'x', body: 'must not write' });

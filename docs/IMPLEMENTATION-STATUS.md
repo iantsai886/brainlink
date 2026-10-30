@@ -1332,3 +1332,9 @@ Docker 29.8.2 ran `npm ci && npm run test:all` in `node:24-bookworm` against the
 ### Rebuild and install the graph-validated Windows package (`dd8e14d`, 2026-10-30)
 
 `npm run smoke:installed:win` rebuilt the unsigned 1.2.8 installer from the graph-validated source using Inno Setup 6.7.3. In an isolated temporary identity, the installed app launched through its bundled Node runtime and both shortcuts, passed authenticated Setup health/UI checks, and uninstalled without removing the isolated user data or leaving PATH changes. This verifies the local Windows package and launcher path for `dd8e14d`; it does not test signing/SmartScreen, macOS/Linux installers, customer migration, visual user acceptance, or public release readiness.
+
+### Serialize concurrent graph edits (2026-10-30)
+
+Graph note saves and typed-relationship review/proposal actions are now queued per vault and note inside the Setup process. This closes a same-process race where two requests could both validate the same old ETag, then overwrite each other's edit. The queued second request re-reads the current note and receives the existing stale-revision error; edits to different notes remain independent. External editors/processes are not covered by this in-process queue and remain protected by the existing revision check only.
+
+Windows/Node.js 24.22.1 verification: the graph suite passed 20/20, including a new simultaneous-save regression proving exactly one request succeeds and the other must reload. Full `npm run test:all` passed: core 558 total (552 passed, 0 failed, 6 platform/privilege skips), UI 43/43. GitHub Actions remains blocked before runner startup by the repository account billing limit, so these are local test results; hosted CI and desktop acceptance remain unverified.
