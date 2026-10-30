@@ -19,7 +19,7 @@ Synthetic tests verify the policy both at tool-list and direct-call boundaries, 
 
 ### Keep public RSI fingerprints out of generic secret false positives (2026-10-30)
 
-`findSecrets` now exempts only schema-shaped 40–64 character hex values in the known public fingerprint fields `fixture_sha256` and `source_commit_sha`. Long hex strings in ordinary text and key-shaped values inside those fields still trigger the scanner. Focused BrainLink and RSI-ledger tests passed 92/94 (2 Windows symlink-privilege skips). One full Windows run had a transient `EPERM` during RSI discovery settings replacement; that test passed alone and on the complete rerun. Final `npm run test:all` passed: core 581 total (573 passed, 0 failed, 8 platform/privilege skips); UI 44/44. This fixes the shared scanner false positive; contributor PR #4's weekly benchmark feature is still a draft and has not been merged or verified here.
+`findSecrets` now exempts only exact-length public hashes in `fixture_sha256` and `source_commit_sha`. Long hex strings in ordinary text and key-shaped or malformed values in those fields still trigger the scanner. Focused BrainLink and RSI-ledger tests passed 92/94 (2 Windows symlink-privilege skips). One full Windows run had a transient `EPERM` during RSI discovery settings replacement; that test passed alone and on the complete rerun. Final `npm run test:all` passed: core 581 total (573 passed, 0 failed, 8 platform/privilege skips); UI 44/44. The four focused tests in draft PR #4 also pass on Windows/Node.js 24.22.1 when run in a disposable worktree with this scanner fix applied. This does not validate the full contributor branch or integrate it; the PR remains draft.
 
 ### Claude Desktop Anna activation on a large vault (2026-10-30)
 
