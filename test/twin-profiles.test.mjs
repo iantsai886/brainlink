@@ -102,6 +102,9 @@ test('Twin setup creates profiles from local UI choices and escapes every profil
   assert.match(html, /POST', '\/api\/twins\/update'/);
   assert.match(html, /twinProfiles\.confirmUpdate/);
   assert.match(html, /id="preset-connect-modal"/);
+  assert.match(html, /id="preset-connect-review" class="card" role="status" aria-live="polite"/);
+  assert.match(html, /connect\.reviewSelected/);
+  assert.match(html, /grant\.actions\.push\(t\(actionKeys\[input\.value\]\)\)/);
   assert.match(html, /data-connect-scope=/);
   assert.match(html, /POST', '\/api\/connect'/);
   assert.match(html, /twinProfiles\.identityHint/);
