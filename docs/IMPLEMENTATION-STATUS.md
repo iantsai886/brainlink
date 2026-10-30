@@ -5,6 +5,10 @@ GitHub repository: `iantsai886/brainlink`
 Branch: `integration/brainlink-retrieval-evaluation` (integrates profile-scoped GitHub, RSI discovery, and independent retrieval evaluation)
 Code baseline: development target `1.2.8`, with `package.json` as the canonical version source. The `v1.2.7` tag belongs to the separate `wip/v1.2.7` release line; this branch continues from the full-source `main` history and does not move or recreate that tag.
 
+### Windows installed-app smoke (2026-10-30)
+
+`pwsh -NoProfile -File scripts/smoke-installed-windows.ps1 -SkipCompile` passed using the existing `dist/BrainLink-QA-Smoke-Setup-1.2.8.exe` artifact (SHA-256 `2C058A6219C793316FBD2C0685EAB55206C55D3AF380743C3170F3F3A859E067`, file timestamp 2026-10-28). The installed bundled runtime launched from both desktop and Start Menu shortcuts; the isolated Setup health and authenticated UI checks passed; uninstall removed the test app/shortcuts, preserved the isolated user-data canary, and restored the exact prior PATH. The QA artifact was not rebuilt from current source, so this validates that installer artifact and install flow, not packaging of HEAD `073fd0b` or end-user acceptance.
+
 ### RSI discovery: cross-script Chinese matching (2026-10-30)
 
 Discovery method `lexical-topic-gate-v3` now normalizes a reviewed list of BrainLink memory/agent vocabulary between Traditional and Simplified Chinese for topic matching, problem-signal matching, and workflow-term checks. It uses explicit phrase pairs, not general script conversion. Tests cover both directions, memory-type classification, and preservation of the two-topic-term gate. Focused discovery/evaluation tests passed 35/35. Full Windows/Node.js 24.22.1 `npm run test:all` passed: core 558 total (552 passed, 0 failed, 6 platform/privilege skips), UI 38/38. The push run `41029392963` and PR run `41029399494` for this source revision both failed before runner allocation; all nine jobs had no steps and runner ID 0. Thus hosted CI did not execute the change. This improves matching only for the listed terms; it does not translate general Chinese or establish broader relevance quality.
