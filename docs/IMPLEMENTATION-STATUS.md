@@ -1612,3 +1612,7 @@ SHA-256 values for the temporary QA artifacts:
 | `brainlink_1.2.8_arm64.deb` | `85CB6257E57BE74F021A7852F1757C44067852A981FD14303380BC4DB8BB27C8` |
 
 These unsigned artifacts stayed in a detached QA worktree and were not published. ARM64 package architecture and checksums were verified, but they were not executed on ARM hardware. A real graphical Linux desktop session, macOS installation, and customer acceptance remain unverified.
+
+### Refresh Windows Node 22 and installer verification on branch tip (2026-10-31; source commit `b35ac77`)
+
+On the exact current integration-branch commit `b35ac77b18d866a5a0c0266f9a1d048f30de7ab6`, the Windows/Node.js 22.23.2 `npm run test:all` run passed: core 609 total (601 passed, 0 failed, 8 Windows privilege/platform skips), and UI 44/44. `npm run smoke:installed:win` then passed on the same source revision. It compiled the unsigned 1.2.8 QA installer, launched Setup using the bundled Node runtime through the desktop shortcut, checked authenticated local Setup, exercised Hermes finalization-hook enable/disable in an isolated temporary profile while preserving an unrelated hook, and uninstalled while preserving isolated user data and restoring PATH. No real vault, client configuration, or Hermes profile was changed. This verifies local Windows Node 22 tests and installer mechanics; it does not verify a fresh Claude Desktop Anna call, hosted CI, code signing, public release, or customer usability.
