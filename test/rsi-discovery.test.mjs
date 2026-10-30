@@ -675,10 +675,11 @@ test('enabled discovery keeps the desktop process alive through its idle timeout
     assert.equal((await fetch(base + '/health')).status, 200, 'scheduled RSI work keeps BrainLink available after ordinary idle timeout');
     assert.equal(quitCalled, false);
     await post('/api/rsi/discovery/pause');
-    // This test exercises real timers and a local HTTP server; CI and full-suite host load can
-    // delay the event loop well beyond the configured 300 ms idle period. Give the callback a
-    // generous outer bound while keeping the product's actual idle delay under test.
-    assert.equal(await waitFor(() => quitCalled, { timeoutMs: 15000 }), true, 'pausing discovery restores the configured idle exit within the timeout');
+    // The pause request itself resets idle time, so prove the server remains available during
+    // that fresh idle window, then verify it exits after the window expires.
+    await delay(150);
+    assert.equal(quitCalled, false, 'pausing does not shut BrainLink down during its new idle window');
+    assert.equal(await waitFor(() => quitCalled, { timeoutMs: 5000 }), true, 'pausing restores the configured idle exit');
   } finally { if (!quitCalled) app.server.close(); }
 });
 
