@@ -4,6 +4,7 @@ This log covers the development branch. Entries marked **unreleased** are not pu
 
 ## 2026-10-31 — Development, unreleased
 
+- Simplified Twin setup in code commit `7e535ce`: one button copies the selected Twin memory limit to selected AI agents, leaves unselected agents alone, and keeps all changes in the unsaved form for review. Windows/Node.js 24.22.1 focused Twin permission tests passed 28/28; desktop UI tests passed 44/44.
 - Hardened restore failure handling in code commit `28cfafd`: if publishing the verified recovery copy fails, BrainLink restores the original empty destination; if that rollback also fails, the error identifies where the original folder was preserved. Temporary recovered-copy cleanup failures now report their location. Windows/Node.js 24.22.1 `npm run test:all` passed on that source commit: core 602 total (594 passed, 0 failed, 8 platform/privilege skips), UI 44/44. Focused backup suite: 19 passed, 0 failed, 1 Windows-only symlink-privilege skip.
 - Fixed a config race where a scheduled folder scan could restore a scan target after its vault had been marked private. The schedule, privacy toggle, vault removal, and scan schedule settings now serialize their related config updates. Regression test: 20/20 repeated passes; full Windows suite on source commit `107b1e0`: core 600 total (592 passed, 0 failed, 8 platform/privilege skips), UI 44/44.
 - Updated the customer setup steps to fully quit/reopen each AI app and start a new chat so it loads the latest BrainLink tools.

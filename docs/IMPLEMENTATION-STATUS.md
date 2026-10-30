@@ -11,6 +11,10 @@ Restore still writes and verifies a complete staged copy before publishing it in
 
 GitHub Actions push run `41096014637` for documentation commit `ca161f0` confirms that hosted jobs were blocked before any steps because the account needs payment or spending-limit attention. This is an account runner gate, not a source-test failure; the local Windows test receipts above are separate evidence.
 
+### Make Twin memory setup quicker without saving automatically (code commit `7e535ce`, 2026-10-31)
+
+Added a one-click form action to copy the Twin's checked memory ceiling to selected AI agents. It leaves unselected agents alone, updates dependent controls through the existing permission logic, and only changes the unsaved form; the normal review and save steps still apply. Added English, Traditional Chinese, and Portuguese labels and tests for selected/unselected agents and the no-agent warning. Windows/Node.js 24.22.1 `node --import ./test/_preload.mjs --test --test-concurrency=1 test/twin-profiles.test.mjs` passed 28/28. `npm run test:ui` passed 44/44. The full core suite was not rerun for this UI change; the preceding full suite is recorded for code commit `28cfafd`.
+
 ### Prevent scheduled scans from restoring a now-private vault target (commit `107b1e0`, 2026-10-31)
 
 The background scan timer and Setup routes that change a vault's privacy or the scan target list now serialize their config updates. This prevents an older scheduled-run snapshot from overwriting a newer privacy change and putting that vault back into the scheduled scan list. Vault removal and scheduled-scan settings use the same update queue.
