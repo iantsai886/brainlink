@@ -17,9 +17,13 @@ The same source commit `310f3d3` also passed `npm run smoke:backup-recovery`: en
 
 `npm run smoke:installed:win` built an unsigned local 1.2.8 installer and passed: bundled runtime launch, desktop and Start Menu shortcuts, Setup health, temporary Hermes hook enable/disable, isolated uninstall, user-data preservation, and PATH restoration. `npm run smoke:upgrade:win` built an isolated 1.2.7 installer from the repository tag and the current 1.2.8 installer; both launched, the upgrade preserved the user-data canary and passed Setup health, and uninstall preserved data and restored PATH. Temporary test profiles were cleaned up. These are local Windows package tests, not a signed or published release, customer upgrade, macOS install, or native Linux desktop test.
 
-### Hosted GitHub Actions runner gate (commit `799fcb7`, 2026-10-30)
+### Hosted GitHub Actions runner gate (commit `6f414f1`, 2026-10-30)
 
 GitHub Actions run `41080930432` on commit `6f414f1` did not execute any job steps. GitHub's check annotation says the job was not started because recent account payments failed or the spending limit needs to be increased. This is an account billing gate, not a test failure in BrainLink. Hosted CI will remain unverified until the account owner resolves it in GitHub Billing & plans and a new run completes.
+
+### Live Claude Code to Codex handoff remains unavailable (2026-10-30)
+
+Re-ran `npm run smoke:live-cross-client-handoff` on the current branch. It exited before making a fixture and reported `Claude Code is not signed in. No fixture was created.` The synthetic two-agent test and Codex-only live smoke remain separate evidence; neither is reported as a successful real Claude Code to Codex continuation. The next live check needs Claude Code signed in, then the same smoke command rerun.
 
 ### DeepSeek Harness Zstandard compatibility (2026-10-30)
 
