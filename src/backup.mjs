@@ -339,7 +339,7 @@ export async function pruneBackups(destination, keepCount = 0, newestFolder = nu
 
 // Recovery is deliberately constrained to a new empty directory. Never restore in place or
 // overwrite a live vault; the user can inspect the copy before switching any config paths.
-export async function restoreBackupToEmpty(backupDir, destination, encryptionKey = null) {
+export async function restoreBackupToEmpty(backupDir, destination, encryptionKey = null, { renameFolder = rename } = {}) {
   const check = await verifyBackup(backupDir, encryptionKey);
   if (!check.ok) throw new Error(`Backup failed verification: ${check.errors.join('; ')}`);
   const source = await realpath(backupDir);
@@ -365,6 +365,7 @@ export async function restoreBackupToEmpty(backupDir, destination, encryptionKey
   }
   await mkdir(stagingRoot);
   let placeholderMoved = false;
+  let restoreError = null;
   try {
     const restored = [];
     for (const file of manifest.files) {
@@ -395,27 +396,33 @@ export async function restoreBackupToEmpty(backupDir, destination, encryptionKey
       throw new Error('Restore destination changed during recovery.');
     }
     if ((await readdir(targetRoot)).length) throw new Error('Restore destination must stay empty until recovery finishes.');
-    await rename(targetRoot, placeholderRoot);
+    await renameFolder(targetRoot, placeholderRoot);
     placeholderMoved = true;
     if ((await readdir(placeholderRoot)).length) throw new Error('Restore destination changed during recovery.');
-    try {
-      await rename(stagingRoot, targetRoot);
-    } catch (error) {
-      try {
-        await rename(placeholderRoot, targetRoot);
-        placeholderMoved = false;
-      } catch {
-        throw new Error('Could not publish the restored copy or return the original empty folder. The original folder is preserved beside the destination.');
-      }
-      throw error;
-    }
+    await renameFolder(stagingRoot, targetRoot);
     await rm(placeholderRoot, { recursive: false, force: true }).catch(() => {});
     placeholderMoved = false;
-  } finally {
-    await rm(stagingRoot, { recursive: true, force: true }).catch(() => {});
+  } catch (error) {
+    restoreError = error;
     if (placeholderMoved) {
-      // Preserve the original empty folder if a concurrent change interrupted publication.
-      await rename(placeholderRoot, targetRoot).catch(() => {});
+      try {
+        await renameFolder(placeholderRoot, targetRoot);
+        placeholderMoved = false;
+      } catch (rollbackError) {
+        restoreError = new Error(
+          `Restore failed and the original empty destination folder could not be returned. It is preserved at ${placeholderRoot}. Rollback error: ${rollbackError.message}`,
+          { cause: error },
+        );
+      }
+    }
+    throw restoreError;
+  } finally {
+    try {
+      await rm(stagingRoot, { recursive: true, force: true });
+    } catch (cleanupError) {
+      const detail = `Could not remove the temporary recovered copy at ${stagingRoot}: ${cleanupError.message}`;
+      if (restoreError) throw new AggregateError([restoreError, cleanupError], `${restoreError.message} ${detail}`);
+      throw new Error(`Restore completed, but ${detail}`);
     }
   }
   return { folder: targetRoot, vault_count: check.vault_count, file_count: check.file_count };

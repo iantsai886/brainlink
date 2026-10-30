@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtemp, mkdir, writeFile, readFile, readdir, symlink } from 'node:fs/promises';
+import { mkdtemp, mkdir, writeFile, readFile, readdir, rename, symlink } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { backupOnce, verifyBackup, restoreBackupToEmpty, loadBackupStatus, saveBackupStatus, pruneBackups, listVerifiedBackups } from '../src/backup.mjs';
@@ -186,6 +186,58 @@ test('verification rejects duplicate restore destinations before creating a part
   const restorePrefix = `.${path.basename(recovered)}.brainlink-restore-`;
   const placeholderPrefix = `.${path.basename(recovered)}.brainlink-empty-`;
   assert.equal(parentEntries.some((entry) => entry.startsWith(restorePrefix) || entry.startsWith(placeholderPrefix)), false, 'temporary restore folders are cleaned up');
+});
+
+test('restore returns the empty destination and removes staging when publishing the recovered copy fails', async () => {
+  const root = await tmp('publish-failure-source');
+  const dest = await tmp('publish-failure-backup');
+  const recovered = await tmp('publish-failure-output');
+  await writeFile(path.join(root, 'Note.md'), 'fictional recovery fixture');
+  const made = await backupOnce([{ name: 'Personal', path: root }], dest);
+  let calls = 0;
+  const failPublishOnce = async (from, to) => {
+    calls += 1;
+    if (calls === 2) throw new Error('injected publish rename failure');
+    return rename(from, to);
+  };
+
+  await assert.rejects(
+    restoreBackupToEmpty(made.folder, recovered, null, { renameFolder: failPublishOnce }),
+    /injected publish rename failure/,
+  );
+  assert.deepEqual(await readdir(recovered), [], 'the original empty destination is restored');
+  const siblings = await readdir(path.dirname(recovered));
+  assert.equal(siblings.some((entry) => entry.startsWith(`.${path.basename(recovered)}.brainlink-restore-`)), false, 'the verified staging copy is removed');
+  assert.equal(siblings.some((entry) => entry.startsWith(`.${path.basename(recovered)}.brainlink-empty-`)), false, 'the empty placeholder is returned to its original path');
+});
+
+test('restore reports the recovery path if publication and returning the original destination both fail', async () => {
+  const root = await tmp('rollback-failure-source');
+  const dest = await tmp('rollback-failure-backup');
+  const recovered = await tmp('rollback-failure-output');
+  await writeFile(path.join(root, 'Note.md'), 'fictional recovery fixture');
+  const made = await backupOnce([{ name: 'Personal', path: root }], dest);
+  let calls = 0;
+  const failPublishAndRollback = async (from, to) => {
+    calls += 1;
+    if (calls === 2) throw new Error('injected publish rename failure');
+    if (calls === 3) throw new Error('injected rollback rename failure');
+    return rename(from, to);
+  };
+
+  let failure;
+  await assert.rejects(
+    restoreBackupToEmpty(made.folder, recovered, null, { renameFolder: failPublishAndRollback }),
+    (error) => { failure = error; return /original empty destination folder could not be returned/.test(error.message); },
+  );
+  const siblings = await readdir(path.dirname(recovered));
+  const prefix = `.${path.basename(recovered)}.brainlink-empty-`;
+  const preservedName = siblings.find((entry) => entry.startsWith(prefix));
+  assert.ok(preservedName, 'the original empty directory remains beside the destination');
+  const preservedPath = path.join(path.dirname(recovered), preservedName);
+  assert.ok(failure.message.includes(preservedPath), 'the error tells the user where the original directory was preserved');
+  assert.deepEqual(await readdir(preservedPath), [], 'the preserved original directory is intact and empty');
+  assert.equal(siblings.some((entry) => entry.startsWith(`.${path.basename(recovered)}.brainlink-restore-`)), false, 'the recovered copy staging area is removed');
 });
 
 test('verified backup includes and restores the BrainLink RSI ledger artifact', async () => {
