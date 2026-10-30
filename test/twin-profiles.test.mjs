@@ -125,6 +125,47 @@ test('Twin setup creates profiles from local UI choices and escapes every profil
   assert.match(html, /sessions\.twinPrivate/);
 });
 
+test('AI connection review summary tracks exact checked memory types and per-vault actions', async () => {
+  const html = await readFile(new URL('../ui/index.html', import.meta.url), 'utf8');
+  const start = html.indexOf('function updatePresetPermissionControls(profile) {');
+  const end = html.indexOf('function openPresetConnect(clientId)', start);
+  assert.ok(start >= 0 && end > start, 'connection summary helper exists');
+  const memories = ['working', 'semantic', 'procedural', 'episodic'].map((key) => ({ dataset: { presetMemory: key }, checked: ['semantic', 'episodic'].includes(key) }));
+  const actions = [
+    { vault: 'Company Vault', value: 'search', checked: true },
+    { vault: 'Company Vault', value: 'read_note', checked: true },
+    { vault: 'Company Vault', value: 'propose_note', checked: false },
+    { vault: 'Personal Vault', value: 'read_session', checked: true },
+    { vault: 'Personal Vault', value: 'handoff_read', checked: true },
+  ].map((item) => ({ dataset: { presetVault: item.vault }, value: item.value, checked: item.checked, disabled: false }));
+  const review = { textContent: '' };
+  const document = {
+    querySelectorAll(selector) {
+      if (selector === '[data-preset-memory]') return memories;
+      if (selector === '[data-preset-memory]:checked') return memories.filter((item) => item.checked);
+      if (selector === '[data-preset-vault]') return actions;
+      if (selector === '[data-preset-vault]:checked') return actions.filter((item) => item.checked);
+      throw new Error(`Unexpected selector: ${selector}`);
+    },
+  };
+  const $ = (id) => id === 'preset-connect-review' ? review : null;
+  const t = (key, values = {}) => key === 'connect.reviewSelected'
+    ? `Review access: Memory — ${values.memories}. Vaults and actions — ${values.grants}.`
+    : key;
+  const update = new Function('$', 't', 'document', `${html.slice(start, end)}; return updatePresetPermissionControls;`)($, t, document);
+  const profile = { memory_policy: { working: true, semantic: true, procedural: true, episodic: true } };
+  update(profile);
+  assert.equal(review.textContent, 'Review access: Memory — twinProfiles.memory.semantic, twinProfiles.memory.episodic. Vaults and actions — Company Vault: connect.search, connect.readNote · Personal Vault: connect.readSession.');
+  assert.equal(actions.find((item) => item.value === 'handoff_read').disabled, true, 'handoff access remains off when working memory is off');
+
+  memories.find((item) => item.dataset.presetMemory === 'semantic').checked = false;
+  update(profile);
+  assert.deepEqual(actions.filter((item) => ['search', 'read_note', 'propose_note'].includes(item.value)).map((item) => ({ checked: item.checked, disabled: item.disabled })), [
+    { checked: false, disabled: true }, { checked: false, disabled: true }, { checked: false, disabled: true },
+  ]);
+  assert.equal(review.textContent, 'Review access: Memory — twinProfiles.memory.episodic. Vaults and actions — Personal Vault: connect.readSession.');
+});
+
 test('Twin permission controls disable and clear actions when their memory type is off', async () => {
   const html = await readFile(new URL('../ui/index.html', import.meta.url), 'utf8');
   const start = html.indexOf('function twinActionMemoryAllowed(action, policy) {');

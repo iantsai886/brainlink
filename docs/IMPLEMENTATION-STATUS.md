@@ -11,7 +11,7 @@ Built commit `f2a0ef5bf991ab5fb2a4fcbc318dcdee29886f9c` in a clean detached work
 
 ### Exact access review before connecting an AI (2026-10-30)
 
-The connection dialog now shows a live summary of the selected memory types and each vault's selected actions. It updates when the user changes profile, memory types, or vault actions, and announces changes through an accessible status region. Empty selections have a clear prompt. English, Portuguese, and Traditional Chinese strings were added together. Full Windows/Node.js `npm run test:all`: core 555 total (549 passed, 0 failed, 6 platform/privilege skips), UI 38/38. This checks UI wiring and locale parity, not a visual usability session or actual external-client loading; those remain unverified.
+The connection dialog now shows a live summary of the selected memory types and each vault's selected actions. It updates when the user changes profile, memory types, or vault actions, and announces changes through an accessible status region. Empty selections have a clear prompt. English, Portuguese, and Traditional Chinese strings were added together. Full Windows/Node.js `npm run test:all`: core 555 total (549 passed, 0 failed, 6 platform/privilege skips), UI 38/38. Follow-up behavior-level `test/twin-profiles.test.mjs`: 25/25, including exact per-vault summary changes and disabling dependent actions when a memory type is turned off. This checks UI logic and locale parity, not a visual usability session or actual external-client loading; those remain unverified.
 
 ### Four memory types in the desktop Notes view (2026-10-30)
 
