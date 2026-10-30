@@ -5,6 +5,10 @@ GitHub repository: `iantsai886/brainlink`
 Branch: `integration/brainlink-retrieval-evaluation` (integrates profile-scoped GitHub, RSI discovery, and independent retrieval evaluation)
 Code baseline: development target `1.2.8`, with `package.json` as the canonical version source. The `v1.2.7` tag belongs to the separate `wip/v1.2.7` release line; this branch continues from the full-source `main` history and does not move or recreate that tag.
 
+### Fresh Windows installer smoke from current source (2026-10-30)
+
+Built commit `f2a0ef5bf991ab5fb2a4fcbc318dcdee29886f9c` in a clean detached worktree with `npm ci` and `pwsh -NoProfile -File packaging/windows/build-windows.ps1` (Inno Setup 6.7.3). Installer SHA-256: `6E299CF3F171182D5A9526F66CAF26201CD7EFDA734ABD961ADB4A3ADE10E756`. SHA-256 checks confirmed the staged `ui/index.html`, `src/setup.mjs`, and `package.json` exactly matched source. `pwsh -NoProfile -File scripts/smoke-installed-windows.ps1` then built a QA installer from that stage, installed it into a unique temporary directory, launched its shortcut, passed the authenticated loopback health/UI check, and uninstalled it; the isolated user-data canary survived and the prior PATH was restored. This verifies a fresh Windows unsigned installer path and local Setup launch, not signing/SmartScreen, upgrade-over-customer-install, external AI loading, or end-user acceptance.
+
 ### Exact access review before connecting an AI (2026-10-30)
 
 The connection dialog now shows a live summary of the selected memory types and each vault's selected actions. It updates when the user changes profile, memory types, or vault actions, and announces changes through an accessible status region. Empty selections have a clear prompt. English, Portuguese, and Traditional Chinese strings were added together. Full Windows/Node.js `npm run test:all`: core 555 total (549 passed, 0 failed, 6 platform/privilege skips), UI 38/38. This checks UI wiring and locale parity, not a visual usability session or actual external-client loading; those remain unverified.
