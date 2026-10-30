@@ -57,6 +57,16 @@ test('rejects downgrade, wrong channel, future publication time, and a missing p
   assert.throws(() => verify(payload({ assets: [payload().assets[1]] })), /no package/);
 });
 
+test('rejects impossible UTC calendar dates and clock values', () => {
+  for (const published_at of [
+    '2026-02-31T11:00:00Z',
+    '2026-13-01T11:00:00Z',
+    '2026-10-28T24:00:00Z',
+    '2026-10-28T11:60:00Z',
+    '2026-10-28T11:00:60Z',
+  ]) assert.throws(() => verify(payload({ published_at })), /real UTC ISO timestamp/);
+});
+
 test('rejects non-GitHub URLs, wrong release versions, weak hashes, and unsafe sizes', () => {
   const base = payload();
   for (const asset of [

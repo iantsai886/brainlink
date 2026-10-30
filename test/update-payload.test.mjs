@@ -99,6 +99,7 @@ test('rejects unsupported channels and invalid timestamps before writing', async
   try {
     await assert.rejects(createUpdatePayload({ distDir: f.distDir, outputPath: path.join(f.root, 'bad-channel.json'), channel: 'preview', publishedAt: PUBLISHED }), /Channel must be/);
     await assert.rejects(createUpdatePayload({ distDir: f.distDir, outputPath: path.join(f.root, 'bad-time.json'), publishedAt: 'next week' }), /UTC ISO timestamp/);
+    await assert.rejects(createUpdatePayload({ distDir: f.distDir, outputPath: path.join(f.root, 'impossible-time.json'), publishedAt: '2026-02-31T12:00:00Z' }), /UTC ISO timestamp/);
   } finally { await rm(f.root, { recursive: true, force: true }); }
 });
 

@@ -4,7 +4,7 @@ import { createReadStream } from 'node:fs';
 import { lstat, open, readFile, stat, unlink } from 'node:fs/promises';
 import path from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
-import { UPDATE_MANIFEST_LIMITS } from '../src/update-manifest.mjs';
+import { isValidUtcTimestamp, UPDATE_MANIFEST_LIMITS } from '../src/update-manifest.mjs';
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const VERSION_PATTERN = /^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)$/;
@@ -72,7 +72,7 @@ export async function createUpdatePayload({ distDir, outputPath, channel = 'stab
   const version = packageJson.version;
   if (!VERSION_PATTERN.test(version)) throw new Error('package.json must contain a numeric major.minor.patch version.');
   if (!['stable', 'beta'].includes(channel)) throw new Error('Channel must be stable or beta.');
-  if (typeof publishedAt !== 'string' || !/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d{1,3})?Z$/.test(publishedAt) || !Number.isFinite(Date.parse(publishedAt))) {
+  if (!isValidUtcTimestamp(publishedAt)) {
     throw new Error('Publication time must be a UTC ISO timestamp.');
   }
 

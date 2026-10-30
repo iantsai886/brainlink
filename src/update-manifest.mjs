@@ -35,6 +35,22 @@ function decodeBase64Url(value, label) {
   return decoded;
 }
 
+export function isValidUtcTimestamp(value) {
+  if (typeof value !== 'string') return false;
+  const parts = value.match(/^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2}):(\d{2})(?:\.(\d{1,3}))?Z$/);
+  if (!parts) return false;
+  const date = new Date(value);
+  if (!Number.isFinite(date.getTime())) return false;
+  const [, year, month, day, hour, minute, second, fraction = ''] = parts;
+  return date.getUTCFullYear() === Number(year)
+    && date.getUTCMonth() + 1 === Number(month)
+    && date.getUTCDate() === Number(day)
+    && date.getUTCHours() === Number(hour)
+    && date.getUTCMinutes() === Number(minute)
+    && date.getUTCSeconds() === Number(second)
+    && date.getUTCMilliseconds() === Number(fraction.padEnd(3, '0') || '0');
+}
+
 function validateAsset(asset, index, version) {
   if (!asset || typeof asset !== 'object' || Array.isArray(asset)) fail(`asset ${index} must be an object`);
   onlyKeys(asset, ['platform', 'arch', 'format', 'url', 'sha256', 'size'], `asset ${index}`);
@@ -64,7 +80,7 @@ function validatePayload(payload, { currentVersion, channel, platform, arch, now
   if (!['stable', 'beta'].includes(payload.channel) || payload.channel !== channel) fail('channel does not match the requested update channel');
   if (typeof payload.version !== 'string' || !VERSION.test(payload.version)) fail('version must use numeric major.minor.patch format');
   if (compareVersions(payload.version, currentVersion) <= 0) fail('update is not newer than the installed version');
-  if (typeof payload.published_at !== 'string' || !/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d{1,3})?Z$/.test(payload.published_at) || !Number.isFinite(Date.parse(payload.published_at))) fail('published_at must be a UTC ISO timestamp');
+  if (!isValidUtcTimestamp(payload.published_at)) fail('published_at must be a real UTC ISO timestamp');
   if (Date.parse(payload.published_at) > now + 5 * 60 * 1000) fail('published_at is too far in the future');
   if (!Array.isArray(payload.assets) || payload.assets.length < 1 || payload.assets.length > 20) fail('assets must contain 1 to 20 entries');
   const assets = payload.assets.map((asset, index) => validateAsset(asset, index, payload.version));

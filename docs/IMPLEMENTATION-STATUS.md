@@ -1377,3 +1377,7 @@ Added `npm run updates:create-payload -- --dist dist --out brainlink-update-payl
 ### Re-run full regression on the current pushed revision (`f472492`, 2026-10-30)
 
 On Windows with Node.js 24.22.1, `npm run test:all` passed at exact source commit `f47249255abe85ef89478264c8fdd0bd1ff52228`: core 568 total (562 passed, 0 failed, 6 platform/privilege skips) and UI 44/44. GitHub Actions runs for this revision did not start any runner; annotations say recent account payments failed or the spending limit needs to be increased. Therefore this is full local regression evidence only. Hosted cross-platform CI, publisher-key provisioning, signed release, cross-client user acceptance, and commercial release readiness remain unverified.
+
+### Reject normalized invalid dates in signed update metadata (2026-10-30)
+
+The update manifest verifier and local payload builder now reject impossible UTC dates and times instead of accepting JavaScript's normalized date values (for example, February 31). The payload-to-signature test confirms generated metadata still passes the exact shipped verifier. Windows/Node.js 24.22.1 `npm run test:all` passed on the worktree based on `a10eeb1` with this change included: core 573 total (566 passed, 0 failed, 7 platform/privilege skips), UI 44/44. Focused update manifest, payload and signing tests passed 12/13 with 1 Windows symlink-privilege skip; syntax checks and `git diff --check` passed. This is local evidence; hosted CI remains blocked by the account billing gate.
