@@ -29,8 +29,8 @@ export async function replaceDiscoveryFile(temp, file, { os = process.platform, 
     try { await renameFile(temp, file); return; }
     catch (error) {
       // Windows antivirus/indexing can briefly hold a recently replaced settings file.
-      // Keep retries bounded while allowing up to three seconds for the lock to clear.
-      if (os !== 'win32' || !['EPERM', 'EACCES', 'EBUSY'].includes(error.code) || attempt >= 119) throw error;
+      // Keep retries bounded while allowing up to eight seconds for the lock to clear.
+      if (os !== 'win32' || !['EPERM', 'EACCES', 'EBUSY'].includes(error.code) || attempt >= 319) throw error;
       await wait(25);
     }
   }

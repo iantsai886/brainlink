@@ -50,12 +50,25 @@ test('Windows RSI settings replacement retries transient sharing violations and 
   assert.equal(attempts, 101, 'Windows file replacement remains retryable beyond a brief lock');
 
   attempts = 0;
+  const longLockWaits = [];
+  await replaceDiscoveryFile('tmp', 'settings', {
+    os: 'win32',
+    renameFile: async () => {
+      attempts++;
+      if (attempts <= 180) { const error = new Error('extended antivirus lock'); error.code = 'EPERM'; throw error; }
+    },
+    wait: async (ms) => longLockWaits.push(ms),
+  });
+  assert.equal(attempts, 181, 'a Windows lock lasting longer than three seconds can clear');
+  assert.equal(longLockWaits.length, 180);
+
+  attempts = 0;
   const boundedWaits = [];
   await assert.rejects(replaceDiscoveryFile('tmp', 'settings', {
     os: 'win32', renameFile: async () => { attempts++; const error = new Error('persistent lock'); error.code = 'EPERM'; throw error; }, wait: async (ms) => boundedWaits.push(ms),
   }), /persistent lock/);
-  assert.equal(attempts, 120, 'Windows replacement retries stop after a bounded number of attempts');
-  assert.equal(boundedWaits.length, 119);
+  assert.equal(attempts, 320, 'Windows replacement retries stop after a bounded eight-second window');
+  assert.equal(boundedWaits.length, 319);
 
   attempts = 0;
   await assert.rejects(replaceDiscoveryFile('tmp', 'settings', {
