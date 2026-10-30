@@ -1246,3 +1246,7 @@ Windows/Node.js 24.22.1 verification: focused graph, relationship, and evaluator
 ### Linux full-suite verification of typed graph rules (`dd8e14d`, 2026-10-30)
 
 Docker 29.8.2 ran `npm ci && npm run test:all` in `node:24-bookworm` against the exact `dd8e14d` source commit, mounted read-only with dependencies in container-only temporary storage. Core tests passed 553/553 with 2 Windows-only skips; UI passed 29/29. This adds Linux automated evidence for the graph type checks and shared product behavior. It does not verify a Linux desktop install, ARM builds, hosted GitHub Actions, or user acceptance.
+
+### Rebuild and install the graph-validated Windows package (`dd8e14d`, 2026-10-30)
+
+`npm run smoke:installed:win` rebuilt the unsigned 1.2.8 installer from the graph-validated source using Inno Setup 6.7.3. In an isolated temporary identity, the installed app launched through its bundled Node runtime and both shortcuts, passed authenticated Setup health/UI checks, and uninstalled without removing the isolated user data or leaving PATH changes. This verifies the local Windows package and launcher path for `dd8e14d`; it does not test signing/SmartScreen, macOS/Linux installers, customer migration, visual user acceptance, or public release readiness.
