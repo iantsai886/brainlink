@@ -5,6 +5,12 @@ GitHub repository: `iantsai886/brainlink`
 Branch: `integration/brainlink-retrieval-evaluation` (integrates profile-scoped GitHub, RSI discovery, and independent retrieval evaluation)
 Code baseline: development target `1.2.8`, with `package.json` as the canonical version source. The `v1.2.7` tag belongs to the separate `wip/v1.2.7` release line; this branch continues from the full-source `main` history and does not move or recreate that tag.
 
+### Optional scheduled weekly RSI benchmark (commit `7d04dcd`, 2026-10-30)
+
+Setup can now run the existing fixed 20-case fictional retrieval benchmark automatically once per week. It is **off by default**; the user chooses a weekday and local time. It runs only while BrainLink is open, uses the built-in fictional vault, stores aggregate results and source revision details, and does not read connected vaults or call an AI model. The schedule and recorded ISO week now use the same configured timezone, including around local week boundaries. An interrupted run can retry after restart on the scheduled day; a completed failed attempt waits until the next week or a manual run. This measures retrieval task success, not generated-answer quality, provider-billed token savings, or RSI promotion eligibility.
+
+Windows/Node.js 24.22.1 verification on this exact source: `npm run test:all` passed with core 594 total (586 passed, 0 failed, 8 Windows platform/privilege skips) and UI 44/44. Focused schedule/config/locale tests passed 15/15. `git diff --check` passed before commit. The scheduler runs inside the local BrainLink process; it is not an OS-level task that runs while the computer or BrainLink is shut down. Hosted GitHub Actions and a newly built installer were not verified for this commit.
+
 ### Fast, content-free check for scoped AI connections (commit `5c7c073`, 2026-10-30)
 
 For scoped AI profiles, Setup now verifies the authenticated MCP `tools/list` response instead of running `vault_search` just to show connection status. It confirms that at least one tool permitted by the profile is available, returns the named BrainLink role tools, and states that no vault notes were read. Global/unscoped checks retain the `brainlink_guide` round trip. This avoids indexing or searching a large vault as a side effect of a connection check.
