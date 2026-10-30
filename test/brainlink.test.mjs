@@ -42,6 +42,9 @@ test('product preview matches approved commercial status and verified feature bo
   assert.match(page, /pricing, paid plans and a commercial release date have not been announced/i);
   assert.match(page, /AI providers may receive retrieved context/i);
   assert.match(page, /secure HTTPS relay/i);
+  assert.match(page, /30-case fictional test/i);
+  assert.match(page, /27\.5% lower than compact search/i);
+  assert.match(page, /provider-billed savings are not measured/i);
   assert.doesNotMatch(page, /14.day trial|first 14 days|free trial|trial ended/i);
   assert.doesNotMatch(page, /US\$79|US\$12|NT\$15,000|one year of updates|2 devices/i);
   assert.doesNotMatch(page, /every AI app on the computer is connected|Windows 10 and 11 are coming soon|signed edits/i);
