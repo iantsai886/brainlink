@@ -97,6 +97,12 @@ test('search vault picker shows only accessible vaults and preserves the selecte
  assert.match(view,/value="Work" selected/);assert.doesNotMatch(view,/Journal/);
  const all=searchView({q:'',scope:'',result:null},createApi({store}).vaults());assert.match(all,/All accessible vaults/);assert.match(all,/Journal \(private\)/);
 });
+test('Notes vault filter narrows browsing without hiding create destinations or allowing unknown vaults',async()=>{
+ const store=await makeStore(),api=createApi({store,access:{vaults:['Work','Journal']}}),h=useNotes(api);await h.load();
+ let view=notesView(h.get(),api);assert.match(view,/data-notes-vault/);assert.match(view,/All accessible vaults/);assert.match(view,/name="vault"[\s\S]*Journal/);
+ h.setVault('Work');view=notesView(h.get(),api);assert.match(view,/selected>Work</);assert.match(view,/Website relaunch/);assert.doesNotMatch(view,/Diary/);
+ assert.equal(h.get().items.some(n=>n.vault==='Journal'),true);h.setVault('Not allowed');assert.equal(h.get().selectedVault,'');
+});
 test('Notes offers metadata-based suggestions separately from saved memory type',async()=>{
  const store=await makeStore(),api=createApi({store}),h=useNotes(api);const note=await store.write({vault:'Work',path:'Episode.md',body:'Summary',frontmatter:{type:'session_summary'}},{expected_etag:''});
  await h.load();await h.open(note.id);let view=notesView(h.get(),api);

@@ -5,6 +5,7 @@ export function useNotes(api) {
   async function load() { try { h.set({items:await api.listNotes(),error:null}); } catch(e) { h.set({error:errText(e)}); } }
   async function open(id) { if (!guard()) return false; try { const note=await api.readNote(id); const backlinks=await api.backlinks(id); h.set({note,backlinks,body:note.body,frontmatter:JSON.stringify(note.frontmatter||{},null,2),editing:false,editingMeta:false,dirty:false,error:null,message:''}); return true; } catch(e) { h.set({error:errText(e)}); return false; } }
   function edit() { if(h.get().note) h.set({editing:true}); }
+  function setVault(selectedVault) { const allowed=new Set(api.vaults().map(v=>v.name));h.set({selectedVault:allowed.has(selectedVault)?selectedVault:''}); }
   function changeBody(body) { h.set({body,dirty:body !== (h.get().note?.body || '') || h.get().frontmatter !== JSON.stringify(h.get().note?.frontmatter||{},null,2)}); }
   function changeMeta(frontmatter) { h.set({frontmatter,dirty:frontmatter !== JSON.stringify(h.get().note?.frontmatter||{},null,2) || h.get().body !== h.get().note?.body}); }
   function changeMemoryType(memoryType) {
@@ -52,5 +53,5 @@ export function useNotes(api) {
   async function rename(path) { const s=h.get(); if(!s.note || !guard()) return false; if(!api.renameNote) {h.set({error:'Rename is not supported by this store.'});return false;} try { await api.renameNote(s.note.id,path,s.note.etag); await load(); await open(s.note.id); return true; } catch(e){h.set({error:errText(e)});return false;} }
   function close() {if(!guard())return false;h.set({note:null,dirty:false,editing:false,error:null});return true;}
   function cancel() {if(!guard())return false;const n=h.get().note;h.set({editing:false,editingMeta:false,dirty:false,body:n?.body||'',frontmatter:JSON.stringify(n?.frontmatter||{},null,2)});return true;}
-  return {...h,load,open,edit,changeBody,changeMeta,changeMemoryType,save,withdrawEpisode,create,rename,close,cancel,guard};
+  return {...h,load,open,edit,setVault,changeBody,changeMeta,changeMemoryType,save,withdrawEpisode,create,rename,close,cancel,guard};
 }
