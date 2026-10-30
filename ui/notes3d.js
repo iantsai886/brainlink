@@ -123,6 +123,7 @@
     const root = document.getElementById('notes3d-root');
     if (!brainPanel || !root) return;
     let graphInstance = null, nodesById = [], byTitle = new Map(), loaded = false, loadedOk = false, selectedId = null, currentDetail = null, currentNode = null, pendingVaultRefresh = false, vaultFilter = null, graphVaultOptions = [];
+    const relationTargets = { owned_by: ['team','person'], runs: ['workflow'], consumes: ['dataset','artifact'], produces: ['dataset','artifact'], depends_on: ['workflow','dataset','project'], part_of: ['team','project'], assigned_to: ['person','team'], informed_by: ['artifact','dataset','concept'], communicates_with: ['person','team'] };
 
     function stat(id, v) { const el = document.getElementById(id); if (el) el.textContent = v; }
 
@@ -166,7 +167,12 @@
         if (detail.proposed_relationships?.length) parts.push(`<div class="muted" style="font-size:12px;margin-top:12px"><b>${esc(tr('notes3d.proposedRelationships'))}</b></div><p class="muted">${esc(tr('notes3d.proposedHint'))}</p>${detail.proposed_relationships.map((r) => `<div class="card" style="margin:6px 0"><div><b>${esc(r.predicate)}</b></div><div class="row">${chip(r.note, tr('notes3d.suggestedTarget'))}</div><small class="muted">${esc(r.evidence)} · ${esc(tr('notes3d.confidence', { confidence: r.confidence }))}</small>${detail.writable ? `<div class="row" style="margin-top:8px"><button type="button" class="chip" data-review-relation="${esc(r.relation_index)}">${esc(tr('notes3d.approveRelationship'))}</button><button type="button" class="chip" data-reject-relation="${esc(r.relation_index)}">${esc(tr('notes3d.rejectRelationship'))}</button></div>` : ''}</div>`).join('')}`);
         if (detail.rejected_relationships?.length) parts.push(`<div class="muted" style="font-size:12px;margin-top:12px"><b>${esc(tr('notes3d.rejectedRelationships'))}</b></div>${detail.rejected_relationships.map((r) => `<div class="card" style="margin:6px 0"><div><b>${esc(r.predicate)}</b></div><div class="row">${chip(r.note, tr('notes3d.suggestedTarget'))}</div><small class="muted">${esc(r.evidence)} · ${esc(tr('notes3d.confidence', { confidence: r.confidence }))}</small>${detail.writable ? `<div style="margin-top:8px"><button type="button" class="chip" data-reopen-rejected="${esc(r.relation_index)}">${esc(tr('notes3d.reopenRejected'))}</button></div>` : ''}</div>`).join('')}`);
         if (detail.discovered_relationships?.length) parts.push(`<div class="muted" style="font-size:12px;margin-top:12px"><b>${esc(tr('notes3d.discoveredRelationships'))}</b></div><p class="muted">${esc(tr('notes3d.discoveredHint'))}</p>${detail.discovered_relationships.map((r) => `<div class="card" style="margin:6px 0"><div><b>${esc(r.predicate)}</b></div><div class="row">${chip(r.note, tr('notes3d.suggestedTarget'))}</div><small class="muted">${esc(r.evidence)} · ${esc(tr('notes3d.patternOnly'))}</small>${detail.writable ? `<div style="margin-top:8px"><button type="button" class="chip" data-save-suggestion="${esc(r.target_id)}" data-predicate="${esc(r.predicate)}" data-evidence="${esc(r.evidence)}">${esc(tr('notes3d.saveSuggestion'))}</button></div>` : ''}</div>`).join('')}`);
+        if (detail.writable && currentNode?.entity_id && currentNode?.scope) {
+          const targets = nodesById.filter((item) => item.entity_id && item.scope === currentNode.scope && item.entity_id !== currentNode.entity_id && item.vault === detail.vault);
+          if (targets.length) parts.push(`<details class="card" style="margin-top:12px"><summary>${esc(tr('notes3d.addRelationship'))}</summary><p class="muted">${esc(tr('notes3d.addRelationshipHint'))}</p><label class="muted">${esc(tr('notes3d.targetEntity'))}<select data-manual-target>${targets.map((item) => `<option value="${esc(item.entity_id)}" data-entity-type="${esc(item.type)}">${esc(item.title)} · ${esc(item.type)}</option>`).join('')}</select></label><label class="muted">${esc(tr('notes3d.relationshipType'))}<select data-manual-predicate>${['owned_by','runs','consumes','produces','depends_on','part_of','assigned_to','informed_by','communicates_with'].map((item) => `<option value="${item}">${item}</option>`).join('')}</select></label><label class="muted">${esc(tr('notes3d.evidenceExcerpt'))}<textarea data-manual-evidence maxlength="320" rows="3" placeholder="${esc(tr('notes3d.evidencePlaceholder'))}"></textarea></label><button type="button" class="chip" data-propose-manual>${esc(tr('notes3d.addRelationshipButton'))}</button></details>`);
+        }
         document.getElementById('notes3d-links').innerHTML = parts.join('');
+        document.getElementById('notes3d-links').querySelectorAll('details:has([data-manual-target])').forEach(updateManualTargetOptions);
       }).catch((e) => { if (selectedId === node.id) document.getElementById('notes3d-body').innerHTML = `<p class="error-box">Could not open this note: ${esc(e.message)}</p>`; });
     }
     function openById(id) {
@@ -258,8 +264,18 @@
       } finally { button.disabled = false; }
     }
 
+    function updateManualTargetOptions(form) {
+      const predicate = form.querySelector('[data-manual-predicate]')?.value;
+      const select = form.querySelector('[data-manual-target]');
+      if (!select) return;
+      const allowed = new Set(relationTargets[predicate] || []);
+      for (const option of select.options) option.hidden = !allowed.has(option.dataset.entityType);
+      if (select.selectedOptions[0]?.hidden) select.selectedIndex = [...select.options].findIndex((option) => !option.hidden);
+    }
+
     root.addEventListener('input', (e) => { if (e.target.id === 'notes3d-search') renderNodeList(); });
     root.addEventListener('change', (e) => {
+      if (e.target.matches('[data-manual-predicate]')) { updateManualTargetOptions(e.target.closest('details')); return; }
       if (e.target.id !== 'notes3d-vault-select') return;
       vaultFilter = e.target.value || '*';
       selectedId = null; currentDetail = null; currentNode = null;
@@ -393,6 +409,18 @@
             target_id: item.target_id, predicate: item.predicate, evidence: item.evidence }))
           .then(() => { toast(tr('notes3d.suggestionSaved')); return refreshGraph(); })
           .catch((err) => { discovered.disabled = false; toast(err.message, true); });
+        return;
+      }
+      const manual = e.target.closest('[data-propose-manual]');
+      if (manual) {
+        if (!currentDetail || !window.confirm(tr('notes3d.saveSuggestionConfirm'))) return;
+        const form = manual.closest('details');
+        manual.disabled = true;
+        api('/api/graph3d/relationship/propose-manual', { vault: currentDetail.vault, path: currentDetail.path, etag: currentDetail.etag,
+          target_id: form.querySelector('[data-manual-target]')?.value, predicate: form.querySelector('[data-manual-predicate]')?.value,
+          evidence: form.querySelector('[data-manual-evidence]')?.value })
+          .then(() => { toast(tr('notes3d.suggestionSaved')); return refreshGraph(); })
+          .catch((err) => { manual.disabled = false; toast(err.message, true); });
         return;
       }
       if (e.target.id === 'notes3d-close') {

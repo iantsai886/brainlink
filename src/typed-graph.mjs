@@ -16,6 +16,11 @@ const DISCOVERY_RULES = [
   { predicate: 'informed_by', targets: ['artifact', 'dataset', 'concept'], phrase: phrase('informed by|based on|derived from|informado por|com base em|derivado de|baseado em', '根據|根据|依據|依据') },
   { predicate: 'communicates_with', targets: ['person', 'team'], phrase: phrase('communicates with|talks to|coordinates with|hands off to|comunica com|fala com|coordena com|encaminha para', '(?:與|和)[^。！？.!?]{0,80}?(?:溝通|沟通|協作|协作|交接給|交接给)') },
 ];
+const PREDICATE_TARGET_TYPES = new Map(DISCOVERY_RULES.map((rule) => [rule.predicate, new Set(rule.targets)]));
+
+export function typedRelationTargetAllowed(predicate, targetType) {
+  return PREDICATE_TARGET_TYPES.get(predicate)?.has(targetType) === true;
+}
 
 function scalar(value) {
   const s = String(value || '').trim();

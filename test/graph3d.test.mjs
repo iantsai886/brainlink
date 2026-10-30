@@ -232,7 +232,9 @@ test('vault graph discovery is paged, scope-safe, excludes private records, and 
   const privatePath = path.join(home, 'private');
   await mkdir(vaultPath, { recursive: true });
   await mkdir(privatePath, { recursive: true });
-  await writeFile(path.join(vaultPath, 'A Product Team.md'), '---\ntype: team\nid: team.product\nscope: organisation\nstatus: current\n---\n# Product Team\n\nProduct Team coordinates with Data Team every day.\n');
+  await writeFile(path.join(vaultPath, 'A Product Team.md'), '---\ntype: team\nid: team.product\nscope: organisation\nstatus: current\n---\n# Product Team\n\nProduct Team coordinates with Data Team every day. Ava coordinates ownership of the product team intake workflow.\n');
+  await writeFile(path.join(vaultPath, 'Ava.md'), '---\ntype: person\nid: person.ava\nscope: organisation\nstatus: current\n---\n# Ava\n');
+  await writeFile(path.join(vaultPath, 'Z Client Project.md'), '---\ntype: project\nid: project.client\nscope: client\nstatus: current\n---\n# Client Project\n');
   await writeFile(path.join(vaultPath, 'Data Team.md'), '---\ntype: team\nid: team.data\nscope: organisation\nstatus: current\n---\n# Data Team\n');
   for (let i = 0; i < 22; i++) await writeFile(path.join(vaultPath, `Generic ${String(i).padStart(2, '0')}.md`), `# Generic ${i}\n\nOrdinary note ${i}.\n`);
   await writeFile(path.join(vaultPath, 'Private Source.md'), '---\ntype: workflow\nid: workflow.private\nscope: organisation\nstatus: current\nprivate: true\n---\n# Private\n\nThis workflow runs PRIVATE_CANARY.\n');
@@ -269,9 +271,19 @@ test('vault graph discovery is paged, scope-safe, excludes private records, and 
     const saved = await api('/api/graph3d/relationship/propose', { vault: 'Main', path: candidate.path, etag: detail.etag,
       target_id: candidate.target_id, predicate: candidate.predicate, evidence: candidate.evidence });
     assert.equal(saved.ok, true, JSON.stringify(saved));
+    const afterPatternSave = await api('/api/graph3d/note', { vault: 'Main', path: 'A Product Team.md' });
+    const badEvidence = await api('/api/graph3d/relationship/propose-manual', { vault: 'Main', path: 'A Product Team.md', etag: afterPatternSave.etag,
+      target_id: 'person.ava', predicate: 'assigned_to', evidence: 'This text is not in the note.' });
+    assert.match(badEvidence.error, /exact excerpt/i);
+    const crossScope = await api('/api/graph3d/relationship/propose-manual', { vault: 'Main', path: 'A Product Team.md', etag: afterPatternSave.etag,
+      target_id: 'project.client', predicate: 'part_of', evidence: 'Ava coordinates ownership of the product team intake workflow.' });
+    assert.match(crossScope.error, /same Twin scope/i);
+    const manual = await api('/api/graph3d/relationship/propose-manual', { vault: 'Main', path: 'A Product Team.md', etag: afterPatternSave.etag,
+      target_id: 'person.ava', predicate: 'assigned_to', evidence: 'Ava coordinates ownership of the product team intake workflow.' });
+    assert.equal(manual.ok, true, JSON.stringify(manual));
     const graph = await api('/api/graph3d', {});
-    assert.equal(graph.links.some((edge) => edge.predicate === candidate.predicate), false, 'a proposal must not become a live graph edge');
-    assert.equal((await api('/api/graph3d/reviews', {})).total, 1);
+    assert.equal(graph.links.some((edge) => edge.predicate === candidate.predicate || edge.predicate === 'assigned_to'), false, 'a proposal must not become a live graph edge');
+    assert.equal((await api('/api/graph3d/reviews', {})).total, 2);
   } finally { s.server.close(); }
 });
 
@@ -478,6 +490,10 @@ test('graph UI exposes a confirmation-gated action for reviewing a suggested rel
   assert.match(src, /rejected_relationships/);
   assert.match(src, /data-reject-queued/);
   assert.match(src, /api\('\/api\/graph3d\/relationship\/propose'/);
+  assert.match(src, /data-propose-manual/);
+  assert.match(src, /api\('\/api\/graph3d\/relationship\/propose-manual'/);
+  assert.match(src, /updateManualTargetOptions/);
+  assert.match(src, /maxlength="320"/i);
   assert.match(src, /notes3d\.saveSuggestionConfirm/);
   assert.match(src, /api\('\/api\/graph3d\/reviews'/, 'the graph loads a central review queue');
   assert.match(src, /data-approve-queued/, 'queued proposals can be approved from the central review list');

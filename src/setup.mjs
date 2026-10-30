@@ -30,7 +30,7 @@ import { sessionsService } from './host.mjs';
 import { addAgent, renameAgent, removeAgent, revokeAgent, markConnected, findAgentByToken, publicAgent, localAgentSnippet, remoteAgentSnippet, generateAgentToken, hashToken } from './mcp-agents.mjs';
 import { analyzeActivitySignals } from './rsi-observations.mjs';
 import { buildGraph3D, noteDetail3D, listProposedTypedRelations, discoverVaultRelationshipCandidates, listGraphVaults } from './graph3d.mjs';
-import { deriveTypedRelations, deriveProposedTypedRelations, deriveRejectedTypedRelations, discoverTypedRelationshipCandidates, appendTypedRelationProposal, approveTypedRelation, rejectTypedRelation, reopenTypedRelation } from './typed-graph.mjs';
+import { deriveTypedRelations, deriveProposedTypedRelations, deriveRejectedTypedRelations, discoverTypedRelationshipCandidates, typedEntityMetadataMap, typedRelationTargetAllowed, appendTypedRelationProposal, approveTypedRelation, rejectTypedRelation, reopenTypedRelation } from './typed-graph.mjs';
 import { snapshotSettings, chooseSnapshot, suggestSnapshotFolder, clearSnapshot, startSnapshotWatcher, writeSnapshotOnce, loadSnapshotStatus, saveSnapshotStatus } from './snapshot.mjs';
 import { listHandoffs, proposeNote } from './writes.mjs';
 import { backupOnce, verifyBackup, restoreBackupToEmpty, loadBackupStatus, saveBackupStatus, pruneBackups, listVerifiedBackups } from './backup.mjs';
@@ -1698,6 +1698,43 @@ export async function startSetup(opts = {}) {
       const etag = createHash('sha256').update(raw).digest('hex');
       if (typeof b.etag !== 'string' || b.etag !== etag) throw new Error('This note changed since it was opened. Reload it before saving the suggestion.');
       const next = appendTypedRelationProposal(raw, candidate);
+      const tmp = `${full}.brainlink-${randomBytes(6).toString('hex')}.tmp`;
+      try { await writeFile(tmp, next, 'utf8'); await rename(tmp, full); }
+      catch (e) { try { await unlink(tmp); } catch {} throw e; }
+      return { ok: true, etag: createHash('sha256').update(next).digest('hex') };
+    },
+    'POST /api/graph3d/relationship/propose-manual': async (b) => {
+      const cfg = await loadConfig(file);
+      const ctx = localContext(cfg, { ...env, BRAINLINK_SEMANTIC: '0' });
+      if (!b.vault || !ctx.enabled.includes(b.vault)) throw new Error('Unknown vault.');
+      const vault = ctx.byName.get(b.vault);
+      if (vault.private) throw new Error('Relationships in a private vault cannot be suggested in the shared graph.');
+      if (ctx.readOnly || vault.writes !== 'on') throw new Error('This vault does not allow relationship suggestions.');
+      const current = await readNote(ctx, b.vault, String(b.path || ''));
+      const index = await loadVault(ctx, b.vault);
+      const sourceIndex = index.byRel.get(current.path);
+      if (sourceIndex === undefined || index.notes[sourceIndex].generated) throw new Error('This record cannot receive a relationship suggestion.');
+      const visible = index.notes.filter((note) => !note.private && !note.generated);
+      const entityMap = typedEntityMetadataMap(visible);
+      const source = index.notes[sourceIndex];
+      const sourceMeta = entityMap.get(source);
+      const targetId = String(b.target_id || '');
+      const targetEntry = [...entityMap.entries()].find(([, meta]) => meta.entity_id === targetId);
+      const targetMeta = targetEntry?.[1];
+      const evidence = String(b.evidence || '').trim();
+      const predicate = String(b.predicate || '');
+      if (!sourceMeta || !targetMeta || targetEntry[0] === source || sourceMeta.scope !== targetMeta.scope
+        || !typedRelationTargetAllowed(predicate, targetMeta.type)) {
+        throw new Error('Choose a current typed record in the same Twin scope and a compatible relationship.');
+      }
+      if (!evidence || evidence.length > 320 || !String(source.body || '').includes(evidence)) {
+        throw new Error('Evidence must be an exact excerpt of up to 320 characters from this note.');
+      }
+      const full = safeJoin(vaultRoot(ctx, b.vault), current.path);
+      const raw = await readFile(full, 'utf8');
+      const etag = createHash('sha256').update(raw).digest('hex');
+      if (typeof b.etag !== 'string' || b.etag !== etag) throw new Error('This note changed since it was opened. Reload it before saving the suggestion.');
+      const next = appendTypedRelationProposal(raw, { predicate, target_id: targetMeta.entity_id, evidence, confidence: 0.5 });
       const tmp = `${full}.brainlink-${randomBytes(6).toString('hex')}.tmp`;
       try { await writeFile(tmp, next, 'utf8'); await rename(tmp, full); }
       catch (e) { try { await unlink(tmp); } catch {} throw e; }
