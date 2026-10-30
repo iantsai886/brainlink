@@ -1617,6 +1617,10 @@ These unsigned artifacts stayed in a detached QA worktree and were not published
 
 On exact source commit `c51d956c06bc28ef0385fc2670cdbb22f30aecb1`, Windows x64 with Node.js 24.22.1, `npm run test:all` exited 0. Core suite: 609 total, 601 passed, 0 failed, 8 Windows privilege/platform skips. UI suite: 44 passed, 0 failed. This is local verification; GitHub Actions remains queued, and Claude Code is signed out, so the paired live cross-client handoff is still unverified.
 
+### Check live local-summary model availability (2026-10-31; source commit `6da2832`)
+
+Checked for the Ollama executable and requested its local model list from `http://127.0.0.1:11434/api/tags` with a two-second timeout. Ollama was not found on PATH and no local service answered. No session or note content was sent. Live local summarization and embedding search therefore remain unverified on this computer; existing automated summary tests use a fake local model service.
+
 ### Recheck saved Claude Desktop Anna access (2026-10-31; repository commit `0b49eaf`)
 
 Read the local BrainLink configuration without printing its token or note contents. The configured Organisation Twin contains the `Anna` role. Then loaded the exact BrainLink token from Claude Desktop's saved MCP entry into the current local server and called MCP `tools/list`: both `agent_connect_anna` and `agent_connect_brain` were present among 17 authorized tools. The oldest running Claude Desktop process still started before the saved config's modification time. This confirms BrainLink's saved server-side role and token scope; it does not confirm Claude Desktop has reloaded the tools or made a live Anna call. The remaining user-side step is to fully quit Claude Desktop, including its tray/background process, reopen it, and start a new chat.
