@@ -13,6 +13,10 @@ Verification on Windows with Node.js 24.22.1: `test/sessions.test.mjs` passed 24
 
 The same source commit `310f3d3` also passed `npm run smoke:backup-recovery`: encrypted fictional Personal, Organisation and Client-A data; four files verified and restored; wrong-key refusal; artifact restored; source files unchanged. The output reported `ok: true` and `fixture_contents: fictional`.
 
+### Windows install and upgrade on the current source (commit `4527349`, 2026-10-30)
+
+`npm run smoke:installed:win` built an unsigned local 1.2.8 installer and passed: bundled runtime launch, desktop and Start Menu shortcuts, Setup health, temporary Hermes hook enable/disable, isolated uninstall, user-data preservation, and PATH restoration. `npm run smoke:upgrade:win` built an isolated 1.2.7 installer from the repository tag and the current 1.2.8 installer; both launched, the upgrade preserved the user-data canary and passed Setup health, and uninstall preserved data and restored PATH. Temporary test profiles were cleaned up. These are local Windows package tests, not a signed or published release, customer upgrade, macOS install, or native Linux desktop test.
+
 ### Hosted GitHub Actions runner gate (commit `799fcb7`, 2026-10-30)
 
 GitHub Actions run `41080930432` on commit `6f414f1` did not execute any job steps. GitHub's check annotation says the job was not started because recent account payments failed or the spending limit needs to be increased. This is an account billing gate, not a test failure in BrainLink. Hosted CI will remain unverified until the account owner resolves it in GitHub Billing & plans and a new run completes.
