@@ -5,6 +5,10 @@ GitHub repository: `iantsai886/brainlink`
 Branch: `integration/brainlink-retrieval-evaluation` (integrates profile-scoped GitHub, RSI discovery, and independent retrieval evaluation)
 Code baseline: development target `1.2.8`, with `package.json` as the canonical version source. The `v1.2.7` tag belongs to the separate `wip/v1.2.7` release line; this branch continues from the full-source `main` history and does not move or recreate that tag.
 
+### Live Codex receiver handoff recheck (2026-10-30)
+
+At source commit `1569062edc28b1a7ef64b3e989cf8b0edab8f837`, `node scripts/smoke-live-codex-handoff.mjs --live` passed on the signed-in Windows Codex CLI. One ephemeral read-only model turn used temporary fictional Organisation, restricted, and mailbox vaults. Codex read the exact BrainLink handoff and cited fictional source, then wrote a `COMPLETED` append-only reply linked to the request. The planted private canary did not appear in Codex output or mailbox results, and temporary fixtures were removed. This validates one live Codex receiver path and that fixture's permission boundary; it does not validate a Claude sender, production notes, repeated-task reliability, or user acceptance.
+
 ### Windows backup recovery and local AI connector checks (2026-10-30)
 
 On Windows with Node.js 24.22.1, `npm run smoke:backup-recovery` passed with fictional Personal, Organisation and Client-A vaults: encrypted backup verification and restoration succeeded for four files, the RSI artifact restored, a wrong key was rejected without writing into the empty destination, the encrypted objects contained no fixture plaintext, and source files stayed unchanged. `npm run smoke:claude-code` passed in a temporary profile: installed Claude Code started BrainLink and reported the MCP connection healthy. `npm run smoke:codex-cli` recognized BrainLink as enabled, but Codex reported authentication `Unsupported`; this is not a live connection pass. Neither smoke made a model or tool call. The results support local backup/recovery and Claude connector startup only; cross-AI handoff, Codex authentication, and model behavior remain unverified.
