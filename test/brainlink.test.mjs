@@ -1181,8 +1181,10 @@ test('identity and secret helpers', () => {
   assert.deepEqual(findSecrets('plain text with 2026-10-18 date'), []);
   assert.ok(findSecrets('-----BEGIN OPENSSH PRIVATE KEY-----').length);
   assert.deepEqual(findSecrets(JSON.stringify({ fixture_sha256: 'a'.repeat(64), source_commit_sha: 'b'.repeat(40) })), [], 'typed public fingerprints are not credentials');
+  assert.deepEqual(findSecrets(JSON.stringify({ question_sha256: 'c'.repeat(64) })), [], 'typed question fingerprints are public hashes, never question text');
   assert.ok(findSecrets('Unlabelled digest: ' + 'a'.repeat(64)).length, 'an unlabeled long hex string still needs review');
   assert.ok(findSecrets(JSON.stringify({ fixture_sha256: 'a'.repeat(63) })).length, 'a malformed public-hash field is not exempt');
+  assert.ok(findSecrets(JSON.stringify({ question_sha256: 'c'.repeat(63) })).length, 'a malformed question fingerprint is not exempt');
   assert.ok(findSecrets(JSON.stringify({ fixture_sha256: 'sk-' + 'a'.repeat(40) })).length, 'key patterns remain active in recognized fields');
 });
 
