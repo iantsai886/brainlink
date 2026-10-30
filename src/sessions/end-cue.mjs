@@ -2,7 +2,7 @@ import { createHash } from 'node:crypto';
 import { mkdir, readdir, readFile, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 
-const CLIENTS = new Set(['claude-code', 'codex', 'deepseek-harness']);
+const CLIENTS = new Set(['claude-code', 'codex', 'deepseek-harness', 'hermes']);
 const MAX_EVENT_BYTES = 32 * 1024;
 const MAX_HARNESS_CUE_AGE_MS = 14 * 24 * 60 * 60 * 1000;
 export const HARNESS_AUTO_DRAFT_IDLE_MS = 30 * 60 * 1000;
@@ -26,6 +26,7 @@ export function matchSessionEndCue(cue, sessions) {
     : cue.client === 'codex' ? `rollout-${cue.session_id}.jsonl` : null;
   const matches = sessions.filter((session) => {
     if (session?.client !== cue.client || typeof session.source_id !== 'string') return false;
+    if (cue.client === 'hermes') return session.source_id === cue.session_id;
     const source = session.source_id.replace(/\\/g, '/');
     if (cue.client === 'deepseek-harness') {
       const parts = source.split('/');
@@ -44,22 +45,29 @@ export async function dismissSessionEndCue(dir, id) {
 }
 
 export function parseSessionEndEvent(input, client) {
-  if (!CLIENTS.has(client) || client === 'deepseek-harness') throw new Error('client must be claude-code or codex');
+  if (!CLIENTS.has(client) || client === 'deepseek-harness') throw new Error('client must be claude-code, codex, or hermes');
   const text = Buffer.isBuffer(input) ? input.toString('utf8') : String(input ?? '');
   if (Buffer.byteLength(text, 'utf8') > MAX_EVENT_BYTES) throw new Error('hook event is too large');
   let event;
   try { event = JSON.parse(text); } catch { throw new Error('hook event must be valid JSON'); }
-  if (event?.hook_event_name !== 'SessionEnd') throw new Error('expected a SessionEnd hook event');
+  const expectedEvent = client === 'hermes' ? 'on_session_finalize' : 'SessionEnd';
+  if (event?.hook_event_name !== expectedEvent) throw new Error(`expected a ${expectedEvent} hook event`);
+  if (client === 'hermes' && (event.platform ?? event.extra?.platform) !== 'cli') throw new Error('Hermes closeout reminders support CLI sessions only');
   const sessionId = event.session_id;
   if (typeof sessionId !== 'string' || !/^[a-zA-Z0-9_-]{1,200}$/.test(sessionId)) throw new Error('hook event needs a valid session_id');
-  const reason = ['clear', 'logout', 'prompt_input_exit', 'bypass_permissions_disabled', 'other'].includes(event.reason) ? event.reason : 'other';
+  const reason = client === 'hermes' ? 'session-finalized' : ['clear', 'logout', 'prompt_input_exit', 'bypass_permissions_disabled', 'other'].includes(event.reason) ? event.reason : 'other';
   // Deliberately discard cwd and transcript_path. The hook only creates a local reminder;
   // reading a transcript requires a separate, explicit integration and privacy decision.
   return { schema: 1, client, session_id: sessionId, ended_at: new Date().toISOString(), reason };
 }
 
-export async function recordSessionEndCue({ input, client, dir, now = new Date() }) {
+export async function recordSessionEndCue({ input, client, dir, sessionRoot, now = new Date() }) {
   const cue = parseSessionEndEvent(input, client);
+  if (client === 'hermes') {
+    if (typeof sessionRoot !== 'string' || !path.isAbsolute(sessionRoot)) throw new Error('Hermes closeout cue requires an absolute profile folder');
+    const { hermesSourceId } = await import('./hermes.mjs');
+    cue.session_id = hermesSourceId(sessionRoot, cue.session_id);
+  }
   cue.ended_at = now.toISOString();
   const key = sessionEndCueId(cue);
   const file = path.join(dir, `${key}.json`);

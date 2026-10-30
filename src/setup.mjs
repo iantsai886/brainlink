@@ -42,7 +42,7 @@ import { recommendSessionVault, exactSessionFilingDestination } from './sessions
 import { harnessCueIsIdle, listSessionEndCues, dismissSessionEndCue, sessionEndCueId, matchSessionEndCue } from './sessions/end-cue.mjs';
 import { listSessionFilingFolders, suggestedSessionFolder } from './sessions/folders.mjs';
 import { generateLocalSessionSummary, LOCAL_OLLAMA_URL, readLocalSummaryDraft, saveLocalSummaryDraft, validLocalModelName } from './sessions/local-summary.mjs';
-import { sessionHookStatus, setSessionHook } from './sessions/hooks.mjs';
+import { sessionHookStatus, setSessionHook, hermesSessionHookStatus, setHermesSessionHook } from './sessions/hooks.mjs';
 import { twinProfileStatus, profileScopeEditable } from './twin-profiles.mjs';
 import { createRsiLedger } from './rsi-ledger.mjs';
 import { createRsiExperiments } from './rsi-experiments.mjs';
@@ -1812,13 +1812,23 @@ export async function startSetup(opts = {}) {
         try { return { ...await deepSeekSessionCueStatus(client, clientOpts()), title: detected[client].title }; }
         catch (e) { return { client, title: detected[client].title, error: e.message }; }
       }));
-      return { clients: [...base, ...harness] };
+      const cfg = await loadConfig(file);
+      const hermesHome = cfg.sessions?.hermesHome || hermesDefaultRoot(home, env);
+      let hermes;
+      try { hermes = await hermesSessionHookStatus(hermesHome); }
+      catch (e) { hermes = { client: 'hermes', profile: hermesHome, error: e.message, trust_required: true, privileged_shell_hook: true }; }
+      return { clients: [...base, ...harness, hermes] };
     },
     'POST /api/sessions/hooks/set': async (b) => {
       if (String(b.client || '').startsWith('deepseek-harness@')) {
         const detected = await detect(clientOpts());
         if (!detected[b.client]?.connected) throw new Error('Connect this named Harness profile to BrainLink first.');
         return setDeepSeekSessionCue(b.client, b.enabled, clientOpts());
+      }
+      if (b.client === 'hermes') {
+        const cfg = await loadConfig(file);
+        const hermesHome = cfg.sessions?.hermesHome || hermesDefaultRoot(home, env);
+        return setHermesSessionHook(hermesHome, b.enabled, { env, os });
       }
       return setSessionHook(b.client, b.enabled, { home, env, os });
     },

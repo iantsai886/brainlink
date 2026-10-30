@@ -19,6 +19,15 @@ export const defaultRoot = (home = homedir(), env = process.env) => path.resolve
     : path.join(home, '.hermes')),
 );
 
+// Stable, profile-scoped identifier shared by imported rows and closeout cues. Neither the
+// Hermes session ID nor the profile path is exposed in the BrainLink UI/API.
+export function hermesSourceId(root, sessionId) {
+  const profile = path.resolve(root);
+  const key = createHash('sha256').update(profile).digest('hex').slice(0, 16);
+  const opaqueId = createHash('sha256').update(`${profile}\0${String(sessionId)}`).digest('hex').slice(0, 32);
+  return `${key}:${opaqueId}`;
+}
+
 function supportsReadOnlySqlite(version) {
   const [major, minor] = String(version).split('.').map(Number);
   return (major === 22 && minor >= 18) || (major === 24 && minor >= 4) || major >= 25;
@@ -108,8 +117,7 @@ export async function importHermes({ store, root = defaultRoot(), cursorsFile })
           if (typeof m.content === 'string' && m.content.length > MAX_MESSAGE_BYTES) result.truncated = (result.truncated || 0) + 1;
         }
         if (messages.length) {
-          const opaqueId = createHash('sha256').update(`${path.resolve(root)}\0${String(row.id)}`).digest('hex').slice(0, 32);
-          const source_id = `${key}:${opaqueId}`;
+          const source_id = hermesSourceId(root, row.id);
           const project = typeof row.cwd === 'string' ? row.cwd : '';
           await store.putSession({
             client: CLIENT, source_id, project,

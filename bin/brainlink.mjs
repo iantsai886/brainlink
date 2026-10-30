@@ -89,7 +89,7 @@ const HELP = `BrainLink MCP ${VERSION} — one Markdown brain for every AI
   brainlink eval-graph --fixture FILE evaluate typed relationship proposals (read-only)
   brainlink map                        rebuild each vault's Home map
   brainlink sync                       one sync pass (local by default; set up in Setup)
-  brainlink session-end-cue --client claude-code|codex  record a local, metadata-only end cue from stdin
+  brainlink session-end-cue --client claude-code|codex|hermes  record a local, metadata-only end cue from stdin
   brainlink session-end-cues            list local end cues (no transcripts are read)
   brainlink ui [--no-open] [--port N]  open the milestone UI (notes, search, graph) on your vaults
   brainlink demo [--no-open]           try the UI on a throwaway sample vault; touches nothing real
@@ -299,7 +299,8 @@ async function main() {
         chunks.push(chunk);
       }
       const dir = path.join(opt('data-home', appHome()), 'sessions', 'end-cues');
-      const result = await recordSessionEndCue({ input: Buffer.concat(chunks), client, dir });
+      const sessionRoot = client === 'hermes' ? opt('session-root', '') : undefined;
+      const result = await recordSessionEndCue({ input: Buffer.concat(chunks), client, dir, sessionRoot });
       out(result.duplicate ? 'BrainLink: session end cue already recorded.' : 'BrainLink: local session end cue recorded; transcript was not read.');
       return;
     }
