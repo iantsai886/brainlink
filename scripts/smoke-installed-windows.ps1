@@ -31,6 +31,7 @@ $OriginalPathExists = Test-Path 'HKCU:\Environment'
 $OriginalPath = if ($OriginalPathExists) { (Get-ItemProperty 'HKCU:\Environment' -Name Path -ErrorAction SilentlyContinue).Path } else { $null }
 $OldBrainLinkHome = $env:BRAINLINK_HOME
 $OldBrainLinkVersion = $env:BRAINLINK_VERSION
+$OldHermesHome = $env:HERMES_HOME
 $OldSetupPort = $env:BRAINLINK_SETUP_PORT
 $OldNoOpen = $env:BRAINLINK_NO_OPEN
 $Process = $null
@@ -71,6 +72,11 @@ try {
   }
 
   $env:BRAINLINK_HOME = $BrainLinkHome
+  $HermesHome = Join-Path $TestRoot 'hermes-profile'
+  New-Item -ItemType Directory -Path $HermesHome -Force | Out-Null
+  $HermesConfig = Join-Path $HermesHome 'config.yaml'
+  Set-Content -LiteralPath $HermesConfig -Value "model: deepseek/deepseek-chat`nhooks:`n  on_session_start:`n    - command: 'echo preserve-user-hook'`n" -NoNewline
+  $env:HERMES_HOME = $HermesHome
   New-Item -ItemType Directory -Path $BrainLinkHome -Force | Out-Null
   Set-Content -LiteralPath (Join-Path $BrainLinkHome 'qa-preserve.txt') -Value 'keep-local-settings-on-uninstall' -NoNewline
   $env:BRAINLINK_NO_OPEN = '1'
@@ -103,7 +109,23 @@ try {
   $token = (Get-Content -LiteralPath (Join-Path $BrainLinkHome 'setup-token') -Raw).Trim()
   $page = Invoke-WebRequest "http://127.0.0.1:$($instance.port)/?t=$token" -Headers @{ 'X-BrainLink-Token' = $token } -TimeoutSec 5
   if ($page.StatusCode -ne 200 -or $page.Content -notmatch 'BrainLink Setup') { throw 'Installed Setup UI did not load with its local session token.' }
-  Write-Output "PASS: installed BrainLink $Version starts from its bundled runtime; both shortcuts point to the installed launcher; Setup health and UI checks passed."
+  $headers = @{ 'X-BrainLink-Token' = $token }
+  $hooksUrl = "http://127.0.0.1:$($instance.port)/api/sessions/hooks"
+  $hookSetUrl = "http://127.0.0.1:$($instance.port)/api/sessions/hooks/set"
+  $hookState = Invoke-RestMethod -Uri $hooksUrl -Method Post -Headers $headers -ContentType 'application/json' -Body '{}' -TimeoutSec 5
+  $hermesHook = @($hookState.clients | Where-Object client -eq 'hermes') | Select-Object -First 1
+  if (-not $hermesHook -or $hermesHook.configured -or -not $hermesHook.privileged_shell_hook) { throw 'Installed Setup did not show the isolated Hermes reminder as disabled and privilege-scoped.' }
+  $enableBody = @{ client = 'hermes'; enabled = $true } | ConvertTo-Json -Compress
+  $enabledHook = Invoke-RestMethod -Uri $hookSetUrl -Method Post -Headers $headers -ContentType 'application/json' -Body $enableBody -TimeoutSec 5
+  if (-not $enabledHook.configured) { throw 'Installed Setup could not enable its Hermes reminder in the isolated profile.' }
+  $configuredYaml = Get-Content -LiteralPath $HermesConfig -Raw
+  if ($configuredYaml -notmatch 'echo preserve-user-hook' -or $configuredYaml -notmatch 'on_session_finalize' -or $configuredYaml -notmatch 'session-end-cue') { throw 'Installed Hermes setup did not preserve the existing hook while adding BrainLink.' }
+  $disableBody = @{ client = 'hermes'; enabled = $false } | ConvertTo-Json -Compress
+  $disabledHook = Invoke-RestMethod -Uri $hookSetUrl -Method Post -Headers $headers -ContentType 'application/json' -Body $disableBody -TimeoutSec 5
+  $restoredYaml = Get-Content -LiteralPath $HermesConfig -Raw
+  if ($disabledHook.configured -or $restoredYaml -notmatch 'echo preserve-user-hook' -or $restoredYaml -match 'session-end-cue') { throw 'Installed Hermes setup did not remove only its own hook.' }
+  if ($page.Content -notmatch 'sessions\.hookHermesConfirm|user permissions') { throw 'Installed UI is missing the Hermes shell-hook permission warning.' }
+  Write-Output "PASS: installed BrainLink $Version starts from its bundled runtime; both shortcuts work; Setup loads; and Hermes hook enable/disable preserves only the temporary profile settings."
   $Success = $true
 } finally {
   try {
@@ -128,6 +150,7 @@ try {
   } finally {
     $env:BRAINLINK_HOME = $OldBrainLinkHome
     $env:BRAINLINK_VERSION = $OldBrainLinkVersion
+    $env:HERMES_HOME = $OldHermesHome
     $env:BRAINLINK_SETUP_PORT = $OldSetupPort
     $env:BRAINLINK_NO_OPEN = $OldNoOpen
   }

@@ -47,6 +47,11 @@ test('every native installer bundles all production dependencies and portable Br
   assert.match(installedWindowsSmoke, /Join-Path \$Root "dist\\BrainLink-QA-Smoke-Setup-\$Version\.exe"/, 'the reusable installer must keep the existing QA artifact path');
   assert.match(installedWindowsSmoke, /"\/O\$TestRoot"/, 'the compiler must not overwrite a shared QA installer artifact');
   assert.match(installedWindowsSmoke, /setup-instance\.json/, 'the smoke must verify it started its own Setup process');
+  assert.match(installedWindowsSmoke, /HERMES_HOME = \$OldHermesHome/, 'the smoke must restore the caller Hermes environment');
+  assert.match(installedWindowsSmoke, /\$HermesHome = Join-Path \$TestRoot 'hermes-profile'/, 'Hermes settings must stay inside the unique test directory');
+  assert.match(installedWindowsSmoke, /api\/sessions\/hooks\/set/, 'the installed package smoke must exercise its Hermes hook controls');
+  assert.match(installedWindowsSmoke, /echo preserve-user-hook/, 'the installed Hermes hook check must preserve an unrelated user hook');
+  assert.match(installedWindowsSmoke, /privileged_shell_hook/, 'the installed UI must report Hermes shell-hook permissions');
   assert.match(installedWindowsSmoke, /CreateShortcut\(\$StartMenuShortcut\)/, 'the smoke must read the installed Start menu shortcut settings');
   assert.match(installedWindowsSmoke, /Start-Process -FilePath \$shortcut\.TargetPath -ArgumentList \$shortcut\.Arguments/, 'the smoke must execute the installed Start menu shortcut target and arguments');
   assert.match(windowsLauncher, /BRAINLINK_SETUP_PORT/, 'the Windows shortcut launcher must support a controlled test port');
