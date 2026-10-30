@@ -30,7 +30,7 @@ import { sessionsService } from './host.mjs';
 import { addAgent, renameAgent, removeAgent, revokeAgent, markConnected, findAgentByToken, publicAgent, localAgentSnippet, remoteAgentSnippet, generateAgentToken, hashToken } from './mcp-agents.mjs';
 import { analyzeActivitySignals } from './rsi-observations.mjs';
 import { buildGraph3D, noteDetail3D, listProposedTypedRelations, discoverVaultRelationshipCandidates, listGraphVaults } from './graph3d.mjs';
-import { deriveTypedRelations, deriveProposedTypedRelations, deriveRejectedTypedRelations, discoverTypedRelationshipCandidates, typedEntityMetadataMap, typedRelationTargetAllowed, appendTypedRelationProposal, approveTypedRelation, rejectTypedRelation, reopenTypedRelation } from './typed-graph.mjs';
+import { deriveTypedRelations, deriveProposedTypedRelations, deriveRejectedTypedRelations, discoverTypedRelationshipCandidates, typedEntityMetadataMap, typedRelationAllowed, appendTypedRelationProposal, approveTypedRelation, rejectTypedRelation, reopenTypedRelation } from './typed-graph.mjs';
 import { snapshotSettings, chooseSnapshot, suggestSnapshotFolder, clearSnapshot, startSnapshotWatcher, writeSnapshotOnce, loadSnapshotStatus, saveSnapshotStatus } from './snapshot.mjs';
 import { listHandoffs, proposeNote } from './writes.mjs';
 import { backupOnce, verifyBackup, restoreBackupToEmpty, loadBackupStatus, saveBackupStatus, pruneBackups, listVerifiedBackups } from './backup.mjs';
@@ -1723,12 +1723,14 @@ export async function startSetup(opts = {}) {
       const targetMeta = targetEntry?.[1];
       const evidence = String(b.evidence || '').trim();
       const predicate = String(b.predicate || '');
-      if (!sourceMeta || !targetMeta || targetEntry[0] === source || sourceMeta.scope !== targetMeta.scope
-        || !typedRelationTargetAllowed(predicate, targetMeta.type)) {
+      if (!sourceMeta || !targetMeta || targetEntry[0] === source || sourceMeta.scope !== targetMeta.scope) {
         throw new Error('Choose a current typed record in the same Twin scope and a compatible relationship.');
       }
       if (!evidence || evidence.length > 320 || !String(source.body || '').includes(evidence)) {
         throw new Error('Evidence must be an exact excerpt of up to 320 characters from this note.');
+      }
+      if (!typedRelationAllowed(predicate, sourceMeta.type, targetMeta.type)) {
+        throw new Error('Choose a current typed record in the same Twin scope and a compatible relationship.');
       }
       const full = safeJoin(vaultRoot(ctx, b.vault), current.path);
       const raw = await readFile(full, 'utf8');

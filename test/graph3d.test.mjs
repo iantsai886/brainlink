@@ -284,7 +284,7 @@ test('vault graph discovery is paged, scope-safe, excludes private records, and 
     assert.match(privateTarget.error, /same Twin scope/i);
     assert.doesNotMatch(JSON.stringify(privateTarget), /PRIVATE_TARGET_CANARY|Private Workflow/);
     const manual = await api('/api/graph3d/relationship/propose-manual', { vault: 'Main', path: 'A Product Team.md', etag: afterPatternSave.etag,
-      target_id: 'person.ava', predicate: 'assigned_to', evidence: 'Ava coordinates ownership of the product team intake workflow.' });
+      target_id: 'person.ava', predicate: 'communicates_with', evidence: 'Ava coordinates ownership of the product team intake workflow.' });
     assert.equal(manual.ok, true, JSON.stringify(manual));
     const graph = await api('/api/graph3d', {});
     assert.equal(graph.links.some((edge) => edge.predicate === candidate.predicate || edge.predicate === 'assigned_to'), false, 'a proposal must not become a live graph edge');
@@ -305,32 +305,32 @@ test('typed relationship review requires a current note revision and adds only t
     assert.equal(added.ok, true, JSON.stringify(added));
     await new Promise((resolve) => setTimeout(resolve, 350));
     const fs = await import('node:fs/promises');
-    await fs.writeFile(path.join(vaultPath, 'Team.md'), '---\ntype: team\nid: team.product\nscope: organisation\nstatus: current\n---\n# Product team\n');
-    const proposal = '---\ntype: workflow\nid: workflow.collect\nscope: organisation\nstatus: proposed\nrelations:\n  - predicate: runs\n    target: team.product\n    review: proposed\n    source: "Operations handbook section 2"\n    confidence: 0.9\n---\n# Collect questions\n';
-    await fs.writeFile(path.join(vaultPath, 'Workflow.md'), proposal);
-    const detail = await api('/api/graph3d/note', { vault: 'Main', path: 'Workflow.md' });
+    await fs.writeFile(path.join(vaultPath, 'Workflow.md'), '---\ntype: workflow\nid: workflow.collect\nscope: organisation\nstatus: current\n---\n# Collect questions\n');
+    const proposal = '---\ntype: team\nid: team.product\nscope: organisation\nstatus: proposed\nrelations:\n  - predicate: runs\n    target: workflow.collect\n    review: proposed\n    source: "Operations handbook section 2"\n    confidence: 0.9\n---\n# Product team\n';
+    await fs.writeFile(path.join(vaultPath, 'Team.md'), proposal);
+    const detail = await api('/api/graph3d/note', { vault: 'Main', path: 'Team.md' });
     assert.equal(detail.proposed_relationships.length, 1);
-    assert.equal(detail.proposed_relationships[0].note.title, 'Team');
+    assert.equal(detail.proposed_relationships[0].note.title, 'Workflow');
     assert.equal((await api('/api/graph3d', {})).links.some((link) => link.predicate === 'runs'), false);
 
-    const stale = await api('/api/graph3d/relationship/approve', { vault: 'Main', path: 'Workflow.md', etag: 'stale', relation_index: 0 });
+    const stale = await api('/api/graph3d/relationship/approve', { vault: 'Main', path: 'Team.md', etag: 'stale', relation_index: 0 });
     assert.match(stale.error, /changed since it was opened/i);
-    const approved = await api('/api/graph3d/relationship/approve', { vault: 'Main', path: 'Workflow.md', etag: detail.etag, relation_index: 0 });
+    const approved = await api('/api/graph3d/relationship/approve', { vault: 'Main', path: 'Team.md', etag: detail.etag, relation_index: 0 });
     assert.equal(approved.ok, true, JSON.stringify(approved));
-    const saved = await fs.readFile(path.join(vaultPath, 'Workflow.md'), 'utf8');
+    const saved = await fs.readFile(path.join(vaultPath, 'Team.md'), 'utf8');
     assert.match(saved, /^status: current$/m);
     assert.match(saved, /^    review: verified$/m);
     const graph = await api('/api/graph3d', {});
     assert.ok(graph.links.some((link) => link.predicate === 'runs'));
 
-    const repeated = await api('/api/graph3d/relationship/approve', { vault: 'Main', path: 'Workflow.md', etag: approved.etag, relation_index: 0 });
+    const repeated = await api('/api/graph3d/relationship/approve', { vault: 'Main', path: 'Team.md', etag: approved.etag, relation_index: 0 });
     assert.match(repeated.error, /no longer an eligible suggestion/i);
 
-    const staleRollback = await api('/api/graph3d/relationship/reopen', { vault: 'Main', path: 'Workflow.md', etag: detail.etag, relation_index: 0 });
+    const staleRollback = await api('/api/graph3d/relationship/reopen', { vault: 'Main', path: 'Team.md', etag: detail.etag, relation_index: 0 });
     assert.match(staleRollback.error, /changed since it was opened/i);
-    const reopened = await api('/api/graph3d/relationship/reopen', { vault: 'Main', path: 'Workflow.md', etag: approved.etag, relation_index: 0 });
+    const reopened = await api('/api/graph3d/relationship/reopen', { vault: 'Main', path: 'Team.md', etag: approved.etag, relation_index: 0 });
     assert.equal(reopened.ok, true, JSON.stringify(reopened));
-    const reopenedRaw = await fs.readFile(path.join(vaultPath, 'Workflow.md'), 'utf8');
+    const reopenedRaw = await fs.readFile(path.join(vaultPath, 'Team.md'), 'utf8');
     assert.match(reopenedRaw, /^    review: proposed$/m);
     assert.match(reopenedRaw, /^    source: "Operations handbook section 2"$/m);
     assert.ok(!(await api('/api/graph3d', {})).links.some((link) => link.predicate === 'runs'));
@@ -339,7 +339,7 @@ test('typed relationship review requires a current note revision and adds only t
       .filter((entry) => entry.tool === 'graph_relationship_review');
     assert.deepEqual(activity.map((entry) => entry.action), ['approved', 'reopened']);
     assert.ok(activity.every((entry) => entry.ok === true));
-    assert.doesNotMatch(JSON.stringify(activity), /Workflow\.md|Operations handbook section 2|team\.product/);
+    assert.doesNotMatch(JSON.stringify(activity), /Team\.md|Operations handbook section 2|team\.product/);
   } finally { s.server.close(); }
 });
 
@@ -355,16 +355,16 @@ test('typed relationship rejection is revision-checked, keeps evidence, and remo
     assert.equal((await api('/api/vault', { path: vaultPath, name: 'Main', pack: 'simple', scaffold: false })).ok, true);
     await new Promise((resolve) => setTimeout(resolve, 350));
     const fs = await import('node:fs/promises');
-    await fs.writeFile(path.join(vaultPath, 'Team.md'), '---\ntype: team\nid: team.product\nscope: organisation\nstatus: current\n---\n# Product team\n');
-    const source = '---\ntype: workflow\nid: workflow.collect\nscope: organisation\nstatus: proposed\nrelations:\n  - predicate: runs\n    target: team.product\n    review: proposed\n    source: "Operations handbook section 2"\n    confidence: 0.9\n---\n# Collect questions\n';
-    await fs.writeFile(path.join(vaultPath, 'Workflow.md'), source);
-    const detail = await api('/api/graph3d/note', { vault: 'Main', path: 'Workflow.md' });
-    const baseRequest = { vault: 'Main', path: 'Workflow.md', relation_index: 0 };
+    await fs.writeFile(path.join(vaultPath, 'Workflow.md'), '---\ntype: workflow\nid: workflow.collect\nscope: organisation\nstatus: current\n---\n# Collect questions\n');
+    const source = '---\ntype: team\nid: team.product\nscope: organisation\nstatus: proposed\nrelations:\n  - predicate: runs\n    target: workflow.collect\n    review: proposed\n    source: "Operations handbook section 2"\n    confidence: 0.9\n---\n# Product team\n';
+    await fs.writeFile(path.join(vaultPath, 'Team.md'), source);
+    const detail = await api('/api/graph3d/note', { vault: 'Main', path: 'Team.md' });
+    const baseRequest = { vault: 'Main', path: 'Team.md', relation_index: 0 };
     const stale = await api('/api/graph3d/relationship/reject', { ...baseRequest, etag: 'stale' });
     assert.match(stale.error, /changed since it was opened/i);
     const rejected = await api('/api/graph3d/relationship/reject', { ...baseRequest, etag: detail.etag });
     assert.equal(rejected.ok, true, JSON.stringify(rejected));
-    const saved = await fs.readFile(path.join(vaultPath, 'Workflow.md'), 'utf8');
+    const saved = await fs.readFile(path.join(vaultPath, 'Team.md'), 'utf8');
     assert.match(saved, /^    review: rejected$/m);
     assert.match(saved, /^    source: "Operations handbook section 2"$/m);
     assert.match(saved, /^status: proposed$/m, 'rejecting one edge does not promote the record');
@@ -372,11 +372,11 @@ test('typed relationship rejection is revision-checked, keeps evidence, and remo
     assert.equal((await api('/api/graph3d', {})).links.some((link) => link.predicate === 'runs'), false);
     const repeated = await api('/api/graph3d/relationship/reject', { ...baseRequest, etag: rejected.etag });
     assert.match(repeated.error, /no longer an eligible suggestion/i);
-    const noteAfterReject = await api('/api/graph3d/note', { vault: 'Main', path: 'Workflow.md' });
+    const noteAfterReject = await api('/api/graph3d/note', { vault: 'Main', path: 'Team.md' });
     assert.equal(noteAfterReject.rejected_relationships.length, 1);
     const reopened = await api('/api/graph3d/relationship/reopen', { ...baseRequest, etag: rejected.etag });
     assert.equal(reopened.ok, true, JSON.stringify(reopened));
-    const restored = await fs.readFile(path.join(vaultPath, 'Workflow.md'), 'utf8');
+    const restored = await fs.readFile(path.join(vaultPath, 'Team.md'), 'utf8');
     assert.match(restored, /^    review: proposed$/m);
     assert.match(restored, /^    source: "Operations handbook section 2"$/m);
     assert.equal((await api('/api/graph3d/reviews', {})).total, 1);
@@ -397,17 +397,17 @@ test('graph review queue returns bounded public proposals and excludes private n
     assert.equal((await api('/api/vault', { path: diary, name: 'Diary', pack: 'simple', scaffold: false, private: true })).ok, true);
     await new Promise((resolve) => setTimeout(resolve, 350));
     const fs = await import('node:fs/promises');
-    await fs.writeFile(path.join(main, 'Team.md'), '---\ntype: team\nid: team.product\nscope: organisation\nstatus: current\n---\n# Product team\n');
-    await fs.writeFile(path.join(main, 'Workflow.md'), '---\ntype: workflow\nid: workflow.collect\nscope: organisation\nstatus: proposed\nrelations:\n  - predicate: runs\n    target: team.product\n    review: proposed\n    source: "Public workflow evidence"\n    confidence: 0.8\n---\n# Collect questions\n');
-    await fs.writeFile(path.join(main, 'Workflow two.md'), '---\ntype: workflow\nid: workflow.collect-two\nscope: organisation\nstatus: proposed\nrelations:\n  - predicate: runs\n    target: team.product\n    review: proposed\n    source: "Second public workflow evidence"\n    confidence: 0.7\n---\n# Collect follow-ups\n');
-    await fs.writeFile(path.join(main, 'Private source.md'), '---\nprivate: true\ntype: workflow\nid: workflow.secret\nscope: organisation\nstatus: proposed\nrelations:\n  - predicate: runs\n    target: team.product\n    review: proposed\n    source: "PRIVATE_QUEUE_CANARY"\n    confidence: 0.8\n---\n# Private source\n');
-    await fs.writeFile(path.join(diary, 'Personal routine.md'), '---\ntype: workflow\nid: workflow.diary\nscope: personal\nstatus: proposed\nrelations:\n  - predicate: runs\n    target: routine.personal\n    review: proposed\n    source: "PRIVATE_VAULT_CANARY"\n    confidence: 0.8\n---\n# Personal routine\n');
+    await fs.writeFile(path.join(main, 'Dataset.md'), '---\ntype: dataset\nid: dataset.tickets\nscope: organisation\nstatus: current\n---\n# Dataset\n');
+    await fs.writeFile(path.join(main, 'Workflow.md'), '---\ntype: workflow\nid: workflow.collect\nscope: organisation\nstatus: proposed\nrelations:\n  - predicate: consumes\n    target: dataset.tickets\n    review: proposed\n    source: "Public workflow evidence"\n    confidence: 0.8\n---\n# Collect questions\n');
+    await fs.writeFile(path.join(main, 'Workflow two.md'), '---\ntype: workflow\nid: workflow.collect-two\nscope: organisation\nstatus: proposed\nrelations:\n  - predicate: consumes\n    target: dataset.tickets\n    review: proposed\n    source: "Second public workflow evidence"\n    confidence: 0.7\n---\n# Collect follow-ups\n');
+    await fs.writeFile(path.join(main, 'Private source.md'), '---\nprivate: true\ntype: workflow\nid: workflow.secret\nscope: organisation\nstatus: proposed\nrelations:\n  - predicate: consumes\n    target: dataset.tickets\n    review: proposed\n    source: "PRIVATE_QUEUE_CANARY"\n    confidence: 0.8\n---\n# Private source\n');
+    await fs.writeFile(path.join(diary, 'Personal routine.md'), '---\ntype: workflow\nid: workflow.diary\nscope: personal\nstatus: proposed\nrelations:\n  - predicate: consumes\n    target: routine.personal\n    review: proposed\n    source: "PRIVATE_VAULT_CANARY"\n    confidence: 0.8\n---\n# Personal routine\n');
     await fs.writeFile(path.join(diary, 'Personal task.md'), '---\ntype: dataset\nid: routine.personal\nscope: personal\nstatus: current\n---\n# Personal task\n');
     const result = await api('/api/graph3d/reviews', {});
     assert.equal(result.total, 2, JSON.stringify(result));
     assert.equal(result.proposals.length, 2);
     assert.deepEqual(new Set(result.proposals.map((item) => item.path)), new Set(['Workflow.md', 'Workflow two.md']));
-    assert.equal(result.proposals[0].target.title, 'Team');
+    assert.equal(result.proposals[0].target.title, 'Dataset');
     assert.equal(result.proposals[0].can_review, true);
     assert.doesNotMatch(JSON.stringify(result), /PRIVATE_QUEUE_CANARY|PRIVATE_VAULT_CANARY|Private source|Diary workflow/);
     const nextPage = await api('/api/graph3d/reviews', { offset: 1 });

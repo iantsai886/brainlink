@@ -6,22 +6,31 @@ const SCOPES = new Set(['personal', 'organisation', 'client']);
 const ID = /^[a-z][a-z0-9._:-]{1,127}$/;
 const phrase = (pattern, cjk = '') => new RegExp(`(?<![\\p{L}\\p{N}_])(?:${pattern})(?![\\p{L}\\p{N}_])${cjk ? `|(?:${cjk})` : ''}`, 'iu');
 const DISCOVERY_RULES = [
-  { predicate: 'owned_by', targets: ['team', 'person'], phrase: phrase('owned by|owner is|gerido por|responsável é|所有者是|負責人是|负责人是') },
-  { predicate: 'runs', targets: ['workflow'], phrase: phrase('runs|operates|executes|executa|opera|realiza', '執行|执行|運行|运行') },
-  { predicate: 'consumes', targets: ['dataset', 'artifact'], phrase: phrase('consumes|uses|reads|takes in|consome|usa|utiliza|lê', '消耗|使用|讀取|读取') },
-  { predicate: 'produces', targets: ['dataset', 'artifact'], phrase: phrase('produces|creates|outputs|generates|produz|cria|gera', '產生|产生|生成|輸出|输出') },
-  { predicate: 'depends_on', targets: ['workflow', 'dataset', 'project'], phrase: phrase('depends on|requires|relies on|depende de|requer|necessita de', '依賴|依赖|需要') },
+  { predicate: 'owned_by', sources: ['team', 'workflow', 'dataset', 'artifact', 'project', 'policy', 'concept'], targets: ['team', 'person'], phrase: phrase('owned by|owner is|gerido por|responsável é|所有者是|負責人是|负责人是') },
+  { predicate: 'runs', sources: ['team', 'person', 'project', 'workflow'], targets: ['workflow'], phrase: phrase('runs|operates|executes|executa|opera|realiza', '執行|执行|運行|运行') },
+  { predicate: 'consumes', sources: ['workflow'], targets: ['dataset', 'artifact'], phrase: phrase('consumes|uses|reads|takes in|consome|usa|utiliza|lê', '消耗|使用|讀取|读取') },
+  { predicate: 'produces', sources: ['workflow'], targets: ['dataset', 'artifact'], phrase: phrase('produces|creates|outputs|generates|produz|cria|gera', '產生|产生|生成|輸出|输出') },
+  { predicate: 'depends_on', sources: ['team', 'workflow', 'dataset', 'artifact', 'project', 'policy', 'concept'], targets: ['workflow', 'dataset', 'project'], phrase: phrase('depends on|requires|relies on|depende de|requer|necessita de', '依賴|依赖|需要') },
   // Membership phrases are kept distinct from explicit ownership phrases above. Treating
   // "belongs to" / "pertence a" as both predicates used to create two conflicting edges.
-  { predicate: 'part_of', targets: ['team', 'project'], phrase: phrase('part of|belongs to|pertence a|parte de|faz parte de', '屬於|属于') },
-  { predicate: 'assigned_to', targets: ['person', 'team'], phrase: phrase('assigned to|atribuído a|atribuída a|designado a', '分配給|分配给|指派給|指派给') },
-  { predicate: 'informed_by', targets: ['artifact', 'dataset', 'concept'], phrase: phrase('informed by|based on|derived from|informado por|com base em|derivado de|baseado em', '根據|根据|依據|依据') },
-  { predicate: 'communicates_with', targets: ['person', 'team'], phrase: phrase('communicates with|talks to|coordinates with|hands off to|comunica com|fala com|coordena com|encaminha para', '(?:與|和)[^。！？.!?]{0,80}?(?:溝通|沟通|協作|协作|交接給|交接给)') },
+  { predicate: 'part_of', sources: ['person', 'team', 'workflow', 'dataset', 'artifact', 'project', 'policy', 'concept'], targets: ['team', 'project'], phrase: phrase('part of|belongs to|pertence a|parte de|faz parte de', '屬於|属于') },
+  { predicate: 'assigned_to', sources: ['workflow', 'artifact', 'project'], targets: ['person', 'team'], phrase: phrase('assigned to|atribuído a|atribuída a|designado a', '分配給|分配给|指派給|指派给') },
+  { predicate: 'informed_by', sources: ['team', 'workflow', 'project', 'policy', 'concept'], targets: ['artifact', 'dataset', 'concept'], phrase: phrase('informed by|based on|derived from|informado por|com base em|derivado de|baseado em', '根據|根据|依據|依据') },
+  { predicate: 'communicates_with', sources: ['person', 'team', 'workflow'], targets: ['person', 'team'], phrase: phrase('communicates with|talks to|coordinates with|hands off to|comunica com|fala com|coordena com|encaminha para', '(?:與|和)[^。！？.!?]{0,80}?(?:溝通|沟通|協作|协作|交接給|交接给)') },
 ];
 const PREDICATE_TARGET_TYPES = new Map(DISCOVERY_RULES.map((rule) => [rule.predicate, new Set(rule.targets)]));
+const PREDICATE_SOURCE_TYPES = new Map(DISCOVERY_RULES.map((rule) => [rule.predicate, new Set(rule.sources)]));
 
 export function typedRelationTargetAllowed(predicate, targetType) {
   return PREDICATE_TARGET_TYPES.get(predicate)?.has(targetType) === true;
+}
+
+export function typedRelationSourceAllowed(predicate, sourceType) {
+  return PREDICATE_SOURCE_TYPES.get(predicate)?.has(sourceType) === true;
+}
+
+export function typedRelationAllowed(predicate, sourceType, targetType) {
+  return typedRelationSourceAllowed(predicate, sourceType) && typedRelationTargetAllowed(predicate, targetType);
 }
 
 function scalar(value) {
@@ -99,7 +108,7 @@ export function deriveTypedRelations(notes) {
       const targetMeta = records[target].meta;
       const confidenceText = relation.confidence || '';
       const confidence = Number(confidenceText);
-      if (!PREDICATES.has(relation.predicate) || relation.review !== 'verified' || !relation.source ||
+      if (!typedRelationAllowed(relation.predicate, meta.type, targetMeta.type) || relation.review !== 'verified' || !relation.source ||
           relation.source.length > 300 || !/^(?:0(?:\.\d+)?|1(?:\.0+)?)$/.test(confidenceText) || !Number.isFinite(confidence) || confidence < 0 || confidence > 1 || targetMeta.scope !== meta.scope) continue;
       edges.push({ source, target, relation_index, predicate: relation.predicate, evidence: relation.source, confidence });
     }
@@ -127,7 +136,7 @@ function deriveTypedRelationsWithReview(notes, reviewStatus) {
     relations.forEach((relation, relation_index) => {
       const target = byId.get(relation.target);
       const confidenceText = relation.confidence || '';
-      if (target === undefined || target === source || !PREDICATES.has(relation.predicate) || relation.review !== reviewStatus ||
+      if (target === undefined || target === source || !typedRelationAllowed(relation.predicate, meta.type, records[target].meta.type) || relation.review !== reviewStatus ||
           !relation.source || relation.source.length > 300 || !/^(?:0(?:\.\d+)?|1(?:\.0+)?)$/.test(confidenceText) ||
           records[target].meta.scope !== meta.scope) return;
       proposals.push({ source, target, relation_index, predicate: relation.predicate, evidence: relation.source, confidence: Number(confidenceText) });
@@ -168,7 +177,7 @@ export function typedGraphHealth(notes) {
         && /^(?:0(?:\.\d+)?|1(?:\.0+)?)$/.test(confidenceText)
         && Number.isFinite(confidence) && confidence >= 0 && confidence <= 1;
       const resolves = ENTITY_TYPES.has(source.meta.type) && source.meta.status === 'current'
-        && PREDICATES.has(relation.predicate) && validEvidence && target
+        && typedRelationAllowed(relation.predicate, source.meta.type, target?.meta.type) && validEvidence && target
         && target.note !== source.note && target.meta.scope === source.meta.scope;
       if (!resolves) { unresolved++; continue; }
       if (relation.review === 'verified') verified++;
@@ -229,12 +238,17 @@ function discoverCandidatesWithIndex(notes, sourceIndex, entities, positions, li
       if (!evidence || evidence.length > 320 || !mention.test(evidence)) continue;
       for (const rule of DISCOVERY_RULES) {
         const key = `${rule.predicate}\0${targetMeta.entity_id}`;
-        if (!rule.targets.includes(targetMeta.type) || existing.has(key) || found.has(key)) continue;
+        if (!rule.sources.includes(sourceMeta.type) || !rule.targets.includes(targetMeta.type) || existing.has(key) || found.has(key)) continue;
         const trigger = evidence.match(rule.phrase);
         if (!trigger) continue;
         if (isNegatedRelation(evidence, trigger.index)) continue;
         const targetAt = evidence.search(mention);
         if (targetAt < trigger.index) continue;
+        const interveningRelation = DISCOVERY_RULES.some((other) => {
+          const next = evidence.slice(trigger.index + trigger[0].length).match(other.phrase);
+          return next && trigger.index + trigger[0].length + next.index < targetAt;
+        });
+        if (interveningRelation) continue;
         found.set(key, { target_id: targetMeta.entity_id, target_title: title, target_index: positions.get(targetNote), predicate: rule.predicate, evidence, confidence: 0.5 });
       }
     }
@@ -294,7 +308,7 @@ export function appendTypedRelationProposal(raw, proposal) {
       typeof proposal?.evidence !== 'string' || !proposal.evidence.trim() || proposal.evidence.length > 320 ||
       !Number.isFinite(proposal.confidence) || proposal.confidence < 0 || proposal.confidence > 1) throw new Error('Invalid relationship suggestion.');
   const parsed = parseRecord(raw);
-  if (!ENTITY_TYPES.has(parsed.meta.type) || !ID.test(parsed.meta.id || '') || !SCOPES.has(parsed.meta.scope) || parsed.meta.status !== 'current') throw new Error('This typed record cannot receive a relationship suggestion.');
+  if (!ENTITY_TYPES.has(parsed.meta.type) || !ID.test(parsed.meta.id || '') || !SCOPES.has(parsed.meta.scope) || parsed.meta.status !== 'current' || !typedRelationSourceAllowed(proposal.predicate, parsed.meta.type)) throw new Error('This typed record cannot receive this kind of relationship suggestion.');
   if (parsed.relations.some((r) => r.predicate === proposal.predicate && r.target === proposal.target_id)) throw new Error('This relationship is already recorded.');
   const match = String(raw || '').match(/^(\uFEFF?---[^\S\r\n]*\r?\n)([\s\S]*?)(\r?\n---[^\S\r\n]*(?:\r?\n|$))/);
   if (!match) throw new Error('This note has no valid frontmatter.');
@@ -320,3 +334,4 @@ export function appendTypedRelationProposal(raw, proposal) {
 
 export const TYPED_ENTITY_TYPES = [...ENTITY_TYPES];
 export const TYPED_RELATION_PREDICATES = [...PREDICATES];
+export const TYPED_RELATION_SOURCE_TYPES = Object.fromEntries([...PREDICATE_SOURCE_TYPES].map(([predicate, types]) => [predicate, [...types]]));

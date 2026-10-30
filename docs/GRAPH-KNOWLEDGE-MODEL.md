@@ -80,6 +80,24 @@ Recommended initial predicates: `owned_by`, `runs`, `consumes`, `produces`, `dep
 
 Each edge should retain its source note, target ID, predicate, evidence/source span, confidence, review status, timestamps or validity interval when relevant, and the access scope of its source. Resolve IDs within the authorized vault/profile first. Do not automatically join Personal, Organisation, and Client graphs.
 
+### Relationship type checks
+
+BrainLink validates both the subject type and target type for each predicate before it suggests, accepts, reviews, or materializes a relationship. The current subject/target rules are:
+
+| Predicate | Allowed subject types | Allowed target types |
+| --- | --- | --- |
+| `owned_by` | team, workflow, dataset, artifact, project, policy, concept | team, person |
+| `runs` | team, person, project, workflow | workflow |
+| `consumes` | workflow | dataset, artifact |
+| `produces` | workflow | dataset, artifact |
+| `depends_on` | team, workflow, dataset, artifact, project, policy, concept | workflow, dataset, project |
+| `part_of` | person, team, workflow, dataset, artifact, project, policy, concept | team, project |
+| `assigned_to` | workflow, artifact, project | person, team |
+| `informed_by` | team, workflow, project, policy, concept | artifact, dataset, concept |
+| `communicates_with` | person, team, workflow | person, team |
+
+This prevents a sentence about a team running a workflow from incorrectly making the team itself the consumer or producer of the workflow's data. Existing YAML edges that do not match this type matrix are ignored by graph retrieval and excluded from the review queue; their source text remains unchanged so the owner can correct them. This is a validation rule, not automatic migration or deletion.
+
 ## User and AI workflow
 
 1. Capture a session or source document with provenance and its privacy scope.

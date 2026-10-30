@@ -6,7 +6,7 @@ import path from 'node:path';
 import { TEMPLATES, renderTemplate } from './templates.mjs';
 import { suggestLinks, relatedSection, safeUpdateMap } from './links.mjs';
 import { vault, vaultRoot, safeJoin, findSecrets, zonedNow, parseFrontmatter, isExcludedPath, isPrivateMeta, fmSaysPrivate, readNote, loadVault } from './core.mjs';
-import { typedEntityMetadataMap } from './typed-graph.mjs';
+import { typedEntityMetadataMap, typedRelationAllowed } from './typed-graph.mjs';
 import { createHandoffGitVerifier } from './handoff-git.mjs';
 
 export const slug = (s) => String(s || '').toLowerCase().replace(/[^a-z0-9㐀-鿿]+/g, '-').replace(/^-|-$/g, '') || 'unknown';
@@ -115,8 +115,11 @@ export async function proposeNote(ctx, a, now = new Date()) {
     // Resolve proposed endpoints only from the already privacy-filtered, single-vault index.
     // A private, excluded, duplicate, stale, or cross-scope target gets the same generic refusal.
     const index = await loadVault(ctx, vaultName);
-    const visible = new Set([...typedEntityMetadataMap(index.notes).values()].map((record) => `${record.entity_id}|${record.scope}`));
-    if ((a.relations || []).some((relation) => !visible.has(`${relation.target}|${a.entity_scope}`))) {
+    const visible = new Map([...typedEntityMetadataMap(index.notes).values()].map((record) => [`${record.entity_id}|${record.scope}`, record]));
+    if ((a.relations || []).some((relation) => {
+      const target = visible.get(`${relation.target}|${a.entity_scope}`);
+      return !target || !typedRelationAllowed(relation.predicate, a.type, target.type);
+    })) {
       errors.push('each relationship target must be a unique, current, visible typed record with the same scope in this vault');
     }
   }

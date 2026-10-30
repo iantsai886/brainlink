@@ -71,20 +71,20 @@ test('typed relationships resolve by stable ID and appear in graph links and not
 });
 
 test('rejecting a proposed relationship preserves source evidence and does not verify the edge', () => {
-  const raw = `---\ntype: workflow\nid: workflow.collect\nscope: organisation\nstatus: proposed\nrelations:\n  - predicate: runs\n    target: team.product\n    review: proposed\n    source: "Operations handbook section 2"\n    confidence: 0.8\n---\n# Collect questions\n`;
+  const raw = `---\ntype: team\nid: team.product\nscope: organisation\nstatus: proposed\nrelations:\n  - predicate: runs\n    target: workflow.collect\n    review: proposed\n    source: "Operations handbook section 2"\n    confidence: 0.8\n---\n# Product team\n`;
   const rejected = rejectTypedRelation(raw, 0);
   assert.match(rejected, /^status: proposed$/m, 'rejecting a link does not promote its record');
   assert.match(rejected, /^    review: rejected$/m);
   assert.match(rejected, /^    source: "Operations handbook section 2"$/m);
   assert.deepEqual(deriveTypedRelations([{ rel: 'Workflow.md', raw: rejected }]), []);
-  const notes = [{ rel: 'Workflow.md', raw: rejected }, { rel: 'Team.md', raw: entity({ type: 'team', id: 'team.product' }) }];
+  const notes = [{ rel: 'Team.md', raw: rejected }, { rel: 'Workflow.md', raw: entity({ type: 'workflow', id: 'workflow.collect' }) }];
   assert.equal(deriveRejectedTypedRelations(notes).length, 1);
   assert.match(reopenTypedRelation(rejected, 0, 'rejected'), /^    review: proposed$/m);
   assert.throws(() => rejectTypedRelation(rejected, 0), /no longer awaiting review/i);
 });
 
 test('reopening an approved relationship returns it to proposal state and preserves evidence', () => {
-  const raw = `---\ntype: workflow\nid: workflow.collect\nscope: organisation\nstatus: proposed\nrelations:\n  - predicate: runs\n    target: team.product\n    review: proposed\n    source: "Operations handbook section 2"\n    confidence: 0.8\n---\n# Collect questions\n`;
+  const raw = `---\ntype: team\nid: team.product\nscope: organisation\nstatus: proposed\nrelations:\n  - predicate: runs\n    target: workflow.collect\n    review: proposed\n    source: "Operations handbook section 2"\n    confidence: 0.8\n---\n# Product team\n`;
   const approved = approveTypedRelation(raw, 0);
   const reopened = reopenTypedRelation(approved, 0);
   assert.match(reopened, /^status: current$/m, 'undoing an edge does not demote the already approved record');
@@ -95,7 +95,7 @@ test('reopening an approved relationship returns it to proposal state and preser
 });
 
 test('reopening a rejected relation explicitly changes only its review marker', () => {
-  const raw = `---\ntype: workflow\nid: workflow.collect\nscope: organisation\nstatus: current\nrelations:\n  - predicate: runs\n    target: team.product\n    review: rejected\n    source: "Operations handbook section 2"\n    confidence: 0.8\n---\n# Collect questions\n`;
+  const raw = `---\ntype: team\nid: team.product\nscope: organisation\nstatus: current\nrelations:\n  - predicate: runs\n    target: workflow.collect\n    review: rejected\n    source: "Operations handbook section 2"\n    confidence: 0.8\n---\n# Product team\n`;
   const reopened = reopenTypedRelation(raw, 0, 'rejected');
   assert.match(reopened, /^status: current$/m);
   assert.match(reopened, /^    review: proposed$/m);
@@ -134,13 +134,36 @@ test('typed graph relationship suggestions are saved as proposed and become edge
 
 test('proposed relationship list shows only valid same-scope candidates targeting current visible entities', async () => {
   const notes = [
-    { rel: 'Target.md', raw: entity({ type: 'team', id: 'team.target' }) },
-    { rel: 'Proposal.md', raw: `---\ntype: workflow\nid: workflow.proposal\nscope: organisation\nstatus: proposed\nrelations:\n  - predicate: runs\n    target: team.target\n    review: proposed\n    source: "Team workflow map"\n    confidence: 0.8\n---\n# Proposal\n` },
+    { rel: 'Target.md', raw: entity({ type: 'workflow', id: 'workflow.target' }) },
+    { rel: 'Proposal.md', raw: `---\ntype: team\nid: team.proposal\nscope: organisation\nstatus: proposed\nrelations:\n  - predicate: runs\n    target: workflow.target\n    review: proposed\n    source: "Team workflow map"\n    confidence: 0.8\n---\n# Proposal\n` },
     { rel: 'Private.md', private: true, raw: entity({ type: 'team', id: 'team.private' }) },
     { rel: 'BadTarget.md', raw: entity({ type: 'workflow', id: 'workflow.bad', relations: '  - predicate: runs\n    target: team.private\n    review: proposed\n    source: private\n    confidence: 0.9\n' }) },
   ];
   const { deriveProposedTypedRelations } = await import('../src/typed-graph.mjs');
   assert.deepEqual(deriveProposedTypedRelations(notes).map(({ source, target, relation_index, predicate }) => [source, target, relation_index, predicate]), [[1, 0, 0, 'runs']]);
+});
+
+test('typed relation source and target types follow the workflow model at discovery, review, and graph materialization', async () => {
+  const notes = [
+    { rel: 'Product Team.md', title: 'Product Team', body: 'Product Team runs Slack Questions workflow, which consumes Ticket Data and produces Answers.', raw: entity({ type: 'team', id: 'team.product' }) },
+    { rel: 'Slack Questions workflow.md', title: 'Slack Questions workflow', body: 'Slack Questions workflow consumes Ticket Data and produces Answers.', raw: entity({ type: 'workflow', id: 'workflow.slack-questions' }) },
+    { rel: 'Ticket Data.md', title: 'Ticket Data', body: '', raw: entity({ type: 'dataset', id: 'dataset.tickets' }) },
+    { rel: 'Answers.md', title: 'Answers', body: '', raw: entity({ type: 'artifact', id: 'artifact.answers' }) },
+  ];
+  const teamCandidates = discoverTypedRelationshipCandidates(notes, 0);
+  assert.deepEqual(teamCandidates.map(({ predicate, target_id }) => [predicate, target_id]), [['runs', 'workflow.slack-questions']], 'team prose cannot attribute workflow inputs or outputs to the team');
+  const workflowCandidates = discoverTypedRelationshipCandidates(notes, 1);
+  assert.deepEqual(workflowCandidates.map(({ predicate, target_id }) => [predicate, target_id]), [
+    ['consumes', 'dataset.tickets'], ['produces', 'artifact.answers'],
+  ]);
+
+  const malformed = notes.map((note) => ({ ...note }));
+  malformed[0].raw = entity({ type: 'team', id: 'team.product', relations: '  - predicate: consumes\n    target: dataset.tickets\n    review: verified\n    source: invalid subject\n    confidence: 0.9\n' });
+  assert.deepEqual(deriveTypedRelations(malformed), [], 'a reviewed but semantically invalid edge is not materialized');
+  const { deriveProposedTypedRelations } = await import('../src/typed-graph.mjs');
+  malformed[0].raw = entity({ type: 'team', id: 'team.product', status: 'proposed', relations: '  - predicate: consumes\n    target: dataset.tickets\n    review: proposed\n    source: invalid subject\n    confidence: 0.9\n' });
+  assert.deepEqual(deriveProposedTypedRelations(malformed), [], 'invalid proposals are not shown in the review queue');
+  assert.throws(() => appendTypedRelationProposal(notes[0].raw, { predicate: 'consumes', target_id: 'dataset.tickets', evidence: 'Team consumes tickets', confidence: 0.5 }), /cannot receive this kind/i);
 });
 
 test('deterministic relationship discovery proposes only explicit same-scope text patterns', () => {
@@ -228,6 +251,7 @@ test('relationship review accepts valid quoted YAML status markers without chang
 test('typed relationship proposals reject invalid IDs, predicates, evidence and cross-profile scopes', async () => {
   const dir = await temp('relationship-validation');
   await mkdir(path.join(dir, 'Inbox'), { recursive: true });
+  await writeFile(path.join(dir, 'Questions Dataset.md'), entity({ type: 'dataset', id: 'dataset.questions' }));
   const ctx = await context([{ name: 'Company', path: dir }]);
   const base = { vault: 'Company', folder: 'Inbox', title: 'Workflow', type: 'workflow', entity_id: 'workflow.test', entity_scope: 'organisation', body: 'Do work.', source: 'test', confirm: true };
   const invalid = await proposeNote(ctx, { ...base, relations: [{ predicate: 'invented', target: 'x', source: '', confidence: 2 }] });
@@ -237,6 +261,12 @@ test('typed relationship proposals reject invalid IDs, predicates, evidence and 
   const mismatch = await proposeNote(ctx, base);
   assert.equal(mismatch.ok, false);
   assert.match(mismatch.errors.join(' '), /match the active Twin profile/);
+  ctx.twinScope = null;
+  const wrongDomain = await proposeNote(ctx, { ...base, ai_platform: 'ChatGPT', type: 'team', entity_id: 'team.questions', relations: [
+    { predicate: 'consumes', target: 'dataset.questions', source: 'Team reads the dataset.', confidence: 0.8 },
+  ] });
+  assert.equal(wrongDomain.ok, false, 'a direct AI note proposal cannot bypass relationship type rules');
+  assert.match(wrongDomain.errors.join(' '), /relationship target/i);
 });
 
 test('typed relationship proposals cannot reveal private or cross-scope target IDs', async () => {
