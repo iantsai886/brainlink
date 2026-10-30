@@ -6,7 +6,7 @@ import path from 'node:path';
 import { normalize, validate, saveConfig } from '../src/config.mjs';
 import { twinProfileStatus, profileScopeEditable, resolveTwinAgentScope } from '../src/twin-profiles.mjs';
 import { startSetup } from '../src/setup.mjs';
-import { createContext, loadVault, readNote } from '../src/core.mjs';
+import { createContext, loadVault, readNote, search } from '../src/core.mjs';
 import { createMcp } from '../src/server.mjs';
 import { hashToken } from '../src/mcp-agents.mjs';
 import { openSessionStore } from '../src/sessions/index.mjs';
@@ -574,26 +574,34 @@ test('semantic-only agents cannot search or directly read typed operating manual
   assert.match(JSON.stringify(allowedEpisode.result.structuredContent), /EPISODIC_TYPE_CANARY/);
 });
 
-test('direct note read checks current memory type before reading a stale-index file body', async () => {
+test('search and direct reads check current memory type before reusing a stale-index body', async () => {
   const root = await mkdtemp(path.join(tmpdir(), 'brainlink-twin-memory-read-race-'));
   const vaultPath = path.join(root, 'org');
   await mkdir(vaultPath, { recursive: true });
   const notePath = path.join(vaultPath, 'Mutable.md');
   const canary = 'FRESH_EPISODIC_RACE_CANARY';
-  await writeFile(notePath, `---\nmemory_type: semantic\n---\n# Mutable\n\n${'S'.repeat(canary.length)}`);
+  await writeFile(notePath, `---\nmemory_type: semantic\n---\n# Mutable\n\n${canary}`);
   const cfg = fixture(vaultPath);
   const ctx = createContext(cfg, { env: { BRAINLINK_AGENT_TOKEN: 'fictional-agent-token' } });
+  const searchCtx = createContext(cfg, { env: { BRAINLINK_AGENT_TOKEN: 'fictional-agent-token' } });
   ctx.twinScope.memory_policy.episodic = false;
+  searchCtx.twinScope.memory_policy.episodic = false;
   await loadVault(ctx, 'Fictional Org');
-  const cachedFile = ctx.cache.get('Fictional Org').files.get('Mutable.md');
+  await loadVault(searchCtx, 'Fictional Org');
+  const cachedFiles = [ctx, searchCtx].map((item) => item.cache.get('Fictional Org').files.get('Mutable.md'));
 
   await writeFile(notePath, `---\nmemory_type: episodic\n---\n# Mutable\n\n${canary}`);
-  const changed = await stat(notePath);
-  assert.equal(changed.size, cachedFile.bytes, 'the fixture preserves file size so the index cache can be stale');
-  // Model a filesystem timestamp collision: the incremental index sees matching stat data and
-  // keeps its prior semantic note, while readNote still reads the current body from disk.
-  cachedFile.mtime = changed.mtimeMs;
-  cachedFile.bytes = changed.size;
+  const changed = await stat(notePath, { bigint: true });
+  assert.equal(Number(changed.size), cachedFiles[0].bytes, 'the fixture preserves file size so the index cache can be stale');
+  // Model a filesystem stat collision by updating every cached stat field while leaving the
+  // old semantic body in each index. Search and direct-read paths must still inspect frontmatter.
+  for (const cachedFile of cachedFiles) {
+    cachedFile.mtime = Number(changed.mtimeNs) / 1e6;
+    cachedFile.bytes = Number(changed.size);
+    cachedFile.ctime = String(changed.ctimeNs);
+  }
+
+  assert.deepEqual(await search(searchCtx, 'Fictional Org', canary, { semantic: false }), [], 'search must remove the stale body before ranking');
 
   let bodyReads = 0;
   await assert.rejects(readNote(ctx, 'Fictional Org', 'Mutable.md', {

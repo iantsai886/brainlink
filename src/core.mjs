@@ -306,9 +306,21 @@ export async function loadVault(ctx, name) {
       state.files.set(rel, { hash: null, mtime, bytes, ctime, note: null });
       continue;
     }
-    if (prev?.note && prev.mtime === mtime && prev.bytes === bytes && prev.ctime === ctime &&
-        twinNoteMemoryAllowed(ctx, name, rel, prev.note.meta)) continue;
-    const header = await readIndexableHeader(full, bytes);
+    let header = null;
+    if (prev?.note && prev.mtime === mtime && prev.bytes === bytes && prev.ctime === ctime) {
+      // Scoped agents must not reuse a cached note based only on stat metadata: a sync tool or
+      // filesystem can preserve those values while changing the memory-type frontmatter.
+      // Check the bounded header before retaining the cached body for ranking or excerpts.
+      if (ctx.twinScope?.mode !== 'scoped') continue;
+      header = await readIndexableHeader(full, bytes);
+      if (!header.indexable || !twinNoteMemoryAllowed(ctx, name, rel, header.meta)) {
+        changed = true;
+        state.files.set(rel, { hash: null, mtime, bytes, ctime, note: null });
+        continue;
+      }
+      if (JSON.stringify(header.meta) === JSON.stringify(prev.note.meta)) continue;
+    }
+    header ||= await readIndexableHeader(full, bytes);
     if (!header.indexable || !twinNoteMemoryAllowed(ctx, name, rel, header.meta)) {
       if (prev?.note) changed = true;
       state.files.set(rel, { hash: null, mtime, bytes, ctime, note: null });
