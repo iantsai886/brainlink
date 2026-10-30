@@ -13,4 +13,6 @@ Verified 2026-10-24 in a Debian 12 x64 container: rebuilt x64 and arm64 archives
 
 **Verified again 2026-10-28:** the current 1.2.8 source built all four x64/ARM64 tar and `.deb` artifacts in Debian 12 with Node.js 24.22.1. Their SHA-256 sidecars matched. In a disposable Debian container, the amd64 `.deb` install/version/init/remove flow and the x64 tarball per-user install/version/init/uninstall flow passed using a fictional vault. The ARM64 `.deb` declares `arm64` and contains an AArch64 Node runtime; it was not executed on this x64 host. The latest source, checksums, test counts and limits are recorded in [`docs/IMPLEMENTATION-STATUS.md`](../../docs/IMPLEMENTATION-STATUS.md). A real desktop session/menu launch and signed distribution remain release checks.
 
+**Refreshed 2026-10-31 on source commit `4a8981c`:** all four unsigned 1.2.8 x64/ARM64 artifacts rebuilt in `node:24-bookworm`; every checksum passed. The amd64 `.deb` was extracted and its bundled runtime passed the staged MCP and private-note canary smoke. ARM64 artifacts were not run on ARM hardware. Outputs stayed in the disposable container and were not published.
+
 `ar.mjs` writes the `.deb` container, because macOS's `ar` only handles object files.

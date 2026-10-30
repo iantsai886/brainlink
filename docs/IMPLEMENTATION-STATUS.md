@@ -17,6 +17,10 @@ The exact pushed branch commit `5f7c7bc` also passed `npm ci && npm run test:all
 
 The exact pushed branch commit `27edc80` passed the same suite in a native Linux clone inside `node:22-bookworm` (Node.js 22.23.4): core 609 total (607 passed, 0 failed, 2 Windows-only skips); UI 44/44. No source changes occurred between `5f7c7bc` and `27edc80`; that intervening commit records the Linux Node 24 result. This provides local Linux evidence on both supported Node major versions.
 
+### Refresh current Linux packages and smoke the staged runtime (source commit `4a8981c`, 2026-10-31)
+
+In a Linux-native clone inside `node:24-bookworm`, `npm ci && npm run build:linux` built the four unsigned 1.2.8 artifacts: x64 and ARM64 tar archives and Debian packages. All four SHA-256 sidecars passed. The amd64 Debian package was extracted in the disposable container, and `scripts/smoke-staged-runtime.mjs` passed against its bundled Node runtime and app files: version and portable skills were present, the packaged MCP server initialized, a fictional public note was searchable, and its planted private-note canary remained absent. ARM64 artifacts were architecture-specific builds verified by the packaging script and checksums, not run on ARM hardware. Artifacts remained inside the disposable container; no release was published.
+
 ### Full Windows test suite on current integration head (`be4e41f`, 2026-10-31)
 
 Windows/Node.js 24.22.1 `npm run test:all` exited 0 on exact repository commit `be4e41fc1068254ee1ab0fa77fbb31fb990020d8`: core 603 total (595 passed, 0 failed, 8 platform/privilege skips); UI 44/44. This includes code commit `28cfafd` restore recovery hardening and code commit `7e535ce` Twin memory setup shortcut. GitHub Actions run `41096595465` for this commit did not execute steps; the check annotation reports the repository account payment/spending-limit gate. Local test success and hosted CI are separate.
