@@ -94,8 +94,11 @@ test('Setup offers authenticated manual scans and runs an enabled daily scan in 
   const env = { BRAINLINK_HOME: appHome, HOME: home, BRAINLINK_SEMANTIC: '0' };
   const now = new Date();
   const local = localDateAndTime(now, 'UTC');
-  const pastMinute = `${local.time.slice(0, 2)}:${String(Math.max(0, Number(local.time.slice(3)) - 1)).padStart(2, '0')}`;
-  await saveConfig(normalize({ timezone: 'UTC', vaults: [{ name: 'Fictional Team', path: vault }, { name: 'Fictional Project', path: secondVault }, { name: 'Private Notes', path: privateVault, private: true }], ingestion: { enabled: true, targets: [{ vault: 'Fictional Team', folder: 'Raw' }, { vault: 'Fictional Project', folder: 'Incoming' }], time: pastMinute } }), path.join(appHome, 'config.json'));
+  const previousDate = new Date(`${local.date}T00:00:00.000Z`);
+  previousDate.setUTCDate(previousDate.getUTCDate() - 1);
+  // Simulate BrainLink being closed at today's scheduled time, then started later.
+  // It should catch up once, while the existing last-run guard prevents a second scan.
+  await saveConfig(normalize({ timezone: 'UTC', vaults: [{ name: 'Fictional Team', path: vault }, { name: 'Fictional Project', path: secondVault }, { name: 'Private Notes', path: privateVault, private: true }], ingestion: { enabled: true, last_scheduled_date: previousDate.toISOString().slice(0, 10), targets: [{ vault: 'Fictional Team', folder: 'Raw' }, { vault: 'Fictional Project', folder: 'Incoming' }], time: '00:00' } }), path.join(appHome, 'config.json'));
   const app = await startSetup({ env, home, os: 'linux', port: 0, useCli: false, ingestionTickMs: 20 });
   const base = `http://127.0.0.1:${app.port}`;
   const get = (route, token = app.token) => fetch(base + route, { headers: { 'X-BrainLink-Token': token } });
@@ -107,7 +110,7 @@ test('Setup offers authenticated manual scans and runs an enabled daily scan in 
     assert.deepEqual((await folderChoices.json()).folders, ['Raw']);
     assert.notEqual((await post('/api/ingestion/folders', { vault: 'Private Notes' })).status, 200, 'private vault folders are never offered');
     assert.equal((await post('/api/ingestion/run', {}, 'wrong')).status, 401);
-    assert.notEqual((await post('/api/ingestion/settings', { enabled: true, autoDrafts: true, targets: [{ vault: 'Fictional Team', folder: 'Raw' }], time: pastMinute })).status, 200, 'scheduled AI drafts require local model opt-in first');
+    assert.notEqual((await post('/api/ingestion/settings', { enabled: true, autoDrafts: true, targets: [{ vault: 'Fictional Team', folder: 'Raw' }], time: '00:00' })).status, 200, 'scheduled AI drafts require local model opt-in first');
     let status;
     for (let i = 0; i < 100; i++) {
       status = await get('/api/state').then((r) => r.json());
@@ -134,15 +137,15 @@ test('Setup offers authenticated manual scans and runs an enabled daily scan in 
     const multiResult = await multi.json();
     assert.equal(multiResult.queued_total, 2);
     assert.deepEqual(new Set(multiResult.candidates.map((item) => item.vault)), new Set(['Fictional Team', 'Fictional Project']));
-    const unknownTarget = await post('/api/ingestion/settings', { enabled: true, targets: [{ vault: 'Fictional Team', folder: 'Raw' }, { vault: 'Missing Vault', folder: 'Raw' }], time: pastMinute });
+    const unknownTarget = await post('/api/ingestion/settings', { enabled: true, targets: [{ vault: 'Fictional Team', folder: 'Raw' }, { vault: 'Missing Vault', folder: 'Raw' }], time: '00:00' });
     assert.notEqual(unknownTarget.status, 200, 'unknown vault targets are refused before saving');
-    const privateTarget = await post('/api/ingestion/settings', { enabled: true, targets: [{ vault: 'Fictional Team', folder: 'Raw' }, { vault: 'Private Notes', folder: 'Raw' }], time: pastMinute });
+    const privateTarget = await post('/api/ingestion/settings', { enabled: true, targets: [{ vault: 'Fictional Team', folder: 'Raw' }, { vault: 'Private Notes', folder: 'Raw' }], time: '00:00' });
     assert.notEqual(privateTarget.status, 200, 'private vault targets are refused before saving');
     await post('/api/vault/private', { name: 'Fictional Project', private: true });
     const privacyConfig = JSON.parse(await readFile(path.join(appHome, 'config.json'), 'utf8'));
     assert.deepEqual(privacyConfig.ingestion.targets, [{ vault: 'Fictional Team', folder: 'Raw' }], 'making one vault private removes only its scan target');
     assert.equal(privacyConfig.ingestion.enabled, true, 'other public scan targets keep their schedule');
-    const saved = await post('/api/ingestion/settings', { enabled: false, vault: 'Fictional Team', folder: 'Raw', time: pastMinute });
+    const saved = await post('/api/ingestion/settings', { enabled: false, vault: 'Fictional Team', folder: 'Raw', time: '00:00' });
     assert.equal(saved.status, 200);
     assert.equal((await saved.json()).ingestion.enabled, false);
   } finally { app.server.close(); }
