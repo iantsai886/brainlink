@@ -14,6 +14,7 @@
     "smoke:claude-code": "node scripts/smoke-claude-code.mjs",
     "smoke:backup-recovery": "node scripts/smoke-backup-recovery.mjs",
     "smoke:installed:win": "pwsh -NoProfile -File scripts/smoke-installed-windows.ps1",
+    "smoke:upgrade:win": "pwsh -NoProfile -File scripts/smoke-upgrade-windows.ps1",
     "evaluate:rsi-discovery": "node bin/rsi-discovery-eval.mjs",
     "setup": "node bin/brainlink.mjs setup",
     "build:mac": "bash packaging/macos/build-pkg.sh",

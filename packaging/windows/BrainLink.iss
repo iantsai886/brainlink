@@ -66,6 +66,11 @@ Root: HKCU; Subkey: "Environment"; ValueType: expandsz; ValueName: "Path"; Value
 Filename: "{sys}\wscript.exe"; Parameters: """{app}\BrainLink.vbs"""; Description: "Open BrainLink Setup"; Flags: postinstall nowait skipifsilent
 
 [Code]
+var BrainLinkInstallBin: String;
+
+function GetCurrentProcessId: LongWord;
+  external 'GetCurrentProcessId@kernel32.dll stdcall';
+
 function NeedsAddPath(Dir: string): Boolean;
 var Paths: string;
 begin
@@ -92,13 +97,15 @@ end;
 
 procedure RemoveBrainLinkFromUserPath;
 var
-  Paths, Target, Segment: String;
+  Paths, Target, Segment, Remaining: String;
   StartPos, SeparatorPos, EndPos: Integer;
   Changed: Boolean;
 begin
   if not RegQueryStringValue(HKCU, 'Environment', 'Path', Paths) then exit;
-  Target := ExpandConstant('{app}\bin');
+  Target := BrainLinkInstallBin;
+  if Target = '' then Target := ExpandConstant('{app}\bin');
   Changed := False;
+  Remaining := '';
   StartPos := 1;
   while StartPos <= Length(Paths) + 1 do begin
     SeparatorPos := Pos(';', Copy(Paths, StartPos, Length(Paths) - StartPos + 1));
@@ -107,15 +114,15 @@ begin
     Segment := Copy(Paths, StartPos, EndPos - StartPos);
     if SamePathEntry(Segment, Target) then begin
       Changed := True;
-      if EndPos <= Length(Paths) then Delete(Paths, StartPos, EndPos - StartPos + 1)
-      else if StartPos > 1 then Delete(Paths, StartPos - 1, EndPos - StartPos + 1)
-      else Delete(Paths, StartPos, EndPos - StartPos);
-      StartPos := 1;
-    end else StartPos := EndPos + 1;
+    end else begin
+      if Remaining <> '' then Remaining := Remaining + ';';
+      Remaining := Remaining + Segment;
+    end;
+    StartPos := EndPos + 1;
   end;
   if Changed then begin
-    if Paths = '' then RegDeleteValue(HKCU, 'Environment', 'Path')
-    else if not RegWriteExpandStringValue(HKCU, 'Environment', 'Path', Paths) then Log('Could not remove BrainLink from the user PATH.');
+    if Remaining = '' then RegDeleteValue(HKCU, 'Environment', 'Path')
+    else if not RegWriteExpandStringValue(HKCU, 'Environment', 'Path', Remaining) then Log('Could not remove BrainLink from the user PATH.');
   end;
 end;
 
@@ -134,8 +141,49 @@ end;
 
 procedure CurUninstallStepChanged(CurUninstallStep: TUninstallStep);
 begin
+  if CurUninstallStep = usUninstall then begin
+    BrainLinkInstallBin := ExpandConstant('{app}\bin');
+    RemoveBrainLinkFromUserPath;
+  end;
   if CurUninstallStep = usPostUninstall then begin
     RemoveBrainLinkFromUserPath;
     RemoveBrainLinkStartupLauncher;
+  end;
+  if CurUninstallStep = usDone then begin
+    RemoveBrainLinkFromUserPath;
+    RemoveBrainLinkStartupLauncher;
+  end;
+end;
+
+procedure DeinitializeUninstall;
+var
+  CleanupScript, ScriptText, PowerShellExe, Parameters: String;
+  ResultCode: Integer;
+begin
+  RemoveBrainLinkStartupLauncher;
+  CleanupScript := ExpandConstant('{userappdata}\BrainLinkPathCleanup-' + IntToStr(GetCurrentProcessId) + '.ps1');
+  ScriptText := '$ErrorActionPreference = ''SilentlyContinue''' + #13#10 +
+    '$target = $args[0].Trim().Trim(''"'').TrimEnd(''\'', ''/'')' + #13#10 +
+    '$parentPid = [int]$args[1]' + #13#10 +
+    'while (Get-Process -Id $parentPid -ErrorAction SilentlyContinue) { Start-Sleep -Milliseconds 100 }' + #13#10 +
+    '$key = [Microsoft.Win32.Registry]::CurrentUser.OpenSubKey(''Environment'', $true)' + #13#10 +
+    'if ($key) {' + #13#10 +
+    '  $path = $key.GetValue(''Path'', $null, [Microsoft.Win32.RegistryValueOptions]::DoNotExpandEnvironmentNames)' + #13#10 +
+    '  if ($null -ne $path) {' + #13#10 +
+    '    $parts = @($path -split '';'' | Where-Object { -not [string]::Equals($_.Trim().Trim(''"'').TrimEnd(''\'', ''/''), $target, [StringComparison]::OrdinalIgnoreCase) })' + #13#10 +
+    '    if ($parts.Count -ne @($path -split '';'' ).Count) { if ($parts.Count) { $key.SetValue(''Path'', ($parts -join '';''), [Microsoft.Win32.RegistryValueKind]::ExpandString) } else { $key.DeleteValue(''Path'', $false) } }' + #13#10 +
+    '  }' + #13#10 +
+    '  $key.Close()' + #13#10 +
+    '}' + #13#10 +
+    'Remove-Item -LiteralPath $PSCommandPath -Force -ErrorAction SilentlyContinue' + #13#10;
+  if SaveStringToFile(CleanupScript, ScriptText, False) then begin
+    PowerShellExe := ExpandConstant('{sys}\WindowsPowerShell\v1.0\powershell.exe');
+    Parameters := '-NoProfile -WindowStyle Hidden -ExecutionPolicy Bypass -File "' + CleanupScript + '" "' + BrainLinkInstallBin + '" "' + IntToStr(GetCurrentProcessId) + '"';
+    if not Exec(PowerShellExe, Parameters, '', SW_HIDE, ewNoWait, ResultCode) then begin
+      Log('Could not start the final PATH cleanup helper.');
+      DeleteFile(CleanupScript);
+    end;
+  end else begin
+    Log('Could not write the final PATH cleanup helper.');
   end;
 end;
