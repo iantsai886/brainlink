@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtemp, writeFile, mkdir, readFile } from 'node:fs/promises';
+import { mkdtemp, writeFile, appendFile, mkdir, readFile, readdir, stat } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -14,7 +14,7 @@ import { importClaudeCode, defaultRoot as defaultClaudeRoot } from '../src/sessi
 import { importCodex, defaultRoot as defaultCodexRoot, defaultHistoryFile } from '../src/sessions/codex.mjs';
 import { importDeepSeekHarness, defaultRoot as defaultDeepSeekHarnessRoot } from '../src/sessions/deepseek-harness.mjs';
 import { importHermes, defaultRoot as defaultHermesRoot } from '../src/sessions/hermes.mjs';
-import { autoSummary } from '../src/sessions/import-util.mjs';
+import { autoSummary, loadCursors, saveCursors } from '../src/sessions/import-util.mjs';
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const FIXTURES = path.join(ROOT, 'test', 'fixtures');
@@ -181,6 +181,46 @@ test('claude-code importer: imports fixture session, redacts secrets, skips tool
   assert.equal((await store.listSessions()).length, 1);
 });
 
+test('session cursor files replace atomically and remain valid JSON', async () => {
+  const dir = await tmp('session-cursor-atomic');
+  const file = path.join(dir, 'cursors.json');
+  await saveCursors(file, { first: { mtimeMs: 1, size: 2 } });
+  await saveCursors(file, { second: { mtimeMs: 3, size: 4 } });
+  assert.deepEqual(await loadCursors(file), { second: { mtimeMs: 3, size: 4 } });
+  assert.deepEqual((await readdir(dir)).sort(), ['cursors.json']);
+});
+
+async function growingFileIo(file, appendedLine) {
+  let appended = false;
+  return {
+    stat,
+    readFile: async (target, encoding) => {
+      const snapshot = await readFile(target, encoding);
+      if (target === file && !appended) { appended = true; await appendFile(file, `${appendedLine}\n`); }
+      return snapshot;
+    },
+  };
+}
+
+test('Claude Code importer defers a transcript that grows during read and retries the full session', async () => {
+  const dir = await tmp('cc-growing');
+  const root = path.join(dir, 'projects');
+  await mkdir(root, { recursive: true });
+  const file = path.join(root, 'fictional-session.jsonl');
+  const firstLine = JSON.stringify({ type: 'user', timestamp: '2026-10-30T01:00:00Z', message: { role: 'user', content: 'Fictional first turn' } });
+  const finalLine = JSON.stringify({ type: 'assistant', timestamp: '2026-10-30T01:00:01Z', message: { role: 'assistant', content: 'Fictional completed reply' } });
+  await writeFile(file, `${firstLine}\n`);
+  const store = await createSessionStore({ dir: path.join(dir, 'store') });
+  const cursorsFile = path.join(dir, 'cursors.json');
+  const first = await importClaudeCode({ store, root, cursorsFile, io: await growingFileIo(file, finalLine) });
+  assert.equal(first.deferred, 1);
+  assert.equal((await store.listSessions()).length, 0, 'no partial session is saved when the file grows during read');
+  assert.deepEqual(await loadCursors(cursorsFile), {}, 'a changing source does not advance its cursor');
+  const retry = await importClaudeCode({ store, root, cursorsFile });
+  assert.equal(retry.imported, 1);
+  assert.deepEqual((await store.readSession((await store.listSessions())[0].id, { limit: 10 })).messages.map((m) => m.text), ['Fictional first turn', 'Fictional completed reply']);
+});
+
 // ---- Codex importer ----
 
 test('codex importer: rollouts take priority, skips function_call/output/event_msg, redacts keys', async () => {
@@ -200,6 +240,25 @@ test('codex importer: rollouts take priority, skips function_call/output/event_m
   assert.ok(!blob.includes('function_call'), 'tool call items never reach the store');
   assert.ok(!blob.includes('token_count'));
   assert.equal(page.messages.length, 2);
+});
+
+test('Codex importer defers a rollout that grows during read and retries the complete transcript', async () => {
+  const dir = await tmp('codex-growing');
+  const root = path.join(dir, 'rollouts');
+  await mkdir(root, { recursive: true });
+  const file = path.join(root, 'rollout-fictional.jsonl');
+  const firstLine = JSON.stringify({ type: 'response_item', timestamp: '2026-10-30T01:00:00Z', payload: { type: 'message', role: 'user', content: [{ type: 'input_text', text: 'Fictional first turn' }] } });
+  const finalLine = JSON.stringify({ type: 'response_item', timestamp: '2026-10-30T01:00:01Z', payload: { type: 'message', role: 'assistant', content: [{ type: 'output_text', text: 'Fictional completed reply' }] } });
+  await writeFile(file, `${firstLine}\n`);
+  const store = await createSessionStore({ dir: path.join(dir, 'store') });
+  const cursorsFile = path.join(dir, 'cursors.json');
+  const first = await importCodex({ store, root, historyFile: path.join(dir, 'missing-history.jsonl'), cursorsFile, io: await growingFileIo(file, finalLine) });
+  assert.equal(first.deferred, 1);
+  assert.equal((await store.listSessions()).length, 0, 'no partial session is saved when the rollout grows during read');
+  assert.deepEqual(await loadCursors(cursorsFile), {}, 'a changing source does not advance its cursor');
+  const retry = await importCodex({ store, root, historyFile: path.join(dir, 'missing-history.jsonl'), cursorsFile });
+  assert.equal(retry.imported, 1);
+  assert.deepEqual((await store.readSession((await store.listSessions())[0].id, { limit: 10 })).messages.map((m) => m.text), ['Fictional first turn', 'Fictional completed reply']);
 });
 
 // ---- DeepSeek Harness importer ----
@@ -237,6 +296,26 @@ test('DeepSeek Harness importer: reads concatenated Zstandard frames, imports on
   const second = await importDeepSeekHarness({ store, root, cursorsFile });
   assert.equal(second.imported, 0);
   assert.equal(second.unchanged, 1);
+});
+
+test('DeepSeek Harness importer defers a session that grows during read and retries all events', async () => {
+  const dir = await tmp('dsh-growing');
+  const root = path.join(dir, 'sessions');
+  await mkdir(root, { recursive: true });
+  const file = path.join(root, 'session.v4.jsonl');
+  const header = { type: 'session', version: 4, id: 'fictional-growing-session', cwd: '/fictional/project', createdAt: Date.parse('2026-10-30T01:00:00Z') };
+  const firstEvent = { type: 'user/message', seq: 0, time: header.createdAt, data: { role: 'user', source: { kind: 'user' }, content: [{ type: 'text', text: 'Fictional first turn' }] } };
+  const finalEvent = JSON.stringify({ type: 'assistant/message', seq: 1, time: header.createdAt + 1, data: { message: { role: 'assistant', content: [{ type: 'text', text: 'Fictional completed reply' }] } } });
+  await writeFile(file, `${JSON.stringify(header)}\n${JSON.stringify(firstEvent)}\n`);
+  const store = await createSessionStore({ dir: path.join(dir, 'store') });
+  const cursorsFile = path.join(dir, 'cursors.json');
+  const first = await importDeepSeekHarness({ store, root, cursorsFile, io: await growingFileIo(file, finalEvent) });
+  assert.equal(first.deferred, 1);
+  assert.equal((await store.listSessions()).length, 0, 'no partial session is saved when the source grows during read');
+  assert.deepEqual(await loadCursors(cursorsFile), {}, 'a changing source does not advance its cursor');
+  const retry = await importDeepSeekHarness({ store, root, cursorsFile });
+  assert.equal(retry.imported, 1);
+  assert.deepEqual((await store.readSession((await store.listSessions())[0].id, { limit: 10 })).messages.map((m) => m.text), ['Fictional first turn', 'Fictional completed reply']);
 });
 
 test('DeepSeek Harness importer: rejects a truncated later Zstandard frame without importing partial text', async () => {

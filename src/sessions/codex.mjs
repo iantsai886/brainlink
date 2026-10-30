@@ -11,10 +11,10 @@
 // Caveat: the installed @openai/codex package ships a compiled binary with no bundled schema docs,
 // so this shape comes from Codex's public rollout format rather than anything readable on this box.
 // The parser is defensive: unrecognized lines/shapes are skipped, never thrown on.
-import { readFile } from 'node:fs/promises';
+import { readFile, stat } from 'node:fs/promises';
 import { homedir } from 'node:os';
 import path from 'node:path';
-import { walkFiles, loadCursors, saveCursors, changedSince, extractText, autoSummary, autoTitle, redactText } from './import-util.mjs';
+import { walkFiles, loadCursors, saveCursors, changedSince, readStableFile, sameFileVersion, cursorFor, extractText, autoSummary, autoTitle, redactText } from './import-util.mjs';
 
 export const CLIENT = 'codex';
 export const defaultRoot = (home = homedir()) => path.join(home, '.codex', 'sessions');
@@ -43,16 +43,18 @@ function parseRollout(raw) {
   return { project, messages };
 }
 
-async function importRollouts({ store, root, cursorsFile }) {
+async function importRollouts({ store, root, cursorsFile, readFileImpl, statImpl }) {
   const files = await walkFiles(root, '.jsonl');
   const cursors = await loadCursors(cursorsFile);
   const result = { imported: 0, unchanged: 0, empty: 0, errors: [] };
   for (const full of files) {
-    const st = await changedSince(full, cursors);
+    const st = await changedSince(full, cursors, statImpl);
     if (!st) { result.unchanged++; continue; }
     try {
-      const { project, messages } = parseRollout(await readFile(full, 'utf8'));
-      if (!messages.length) { result.empty++; cursors[full] = { mtimeMs: st.mtimeMs, size: st.size }; continue; }
+      const snapshot = await readStableFile(full, st, { readFileImpl, statImpl, encoding: 'utf8' });
+      if (!snapshot) { result.deferred = (result.deferred || 0) + 1; continue; }
+      const { project, messages } = parseRollout(snapshot.content);
+      if (!messages.length) { result.empty++; cursors[full] = cursorFor(snapshot.stat); continue; }
       const source_id = path.relative(root, full).split(path.sep).join('/');
       await store.putSession({
         client: CLIENT, source_id, project,
@@ -60,21 +62,25 @@ async function importRollouts({ store, root, cursorsFile }) {
         started_at: messages[0].at, note_refs: [], private: true, messages,
       });
       result.imported++;
-      cursors[full] = { mtimeMs: st.mtimeMs, size: st.size };
+      const after = await statImpl(full);
+      if (!sameFileVersion(snapshot.stat, after)) { result.deferred = (result.deferred || 0) + 1; continue; }
+      cursors[full] = cursorFor(after);
     } catch (e) { result.errors.push({ file: full, error: e.message || String(e) }); }
   }
   await saveCursors(cursorsFile, cursors);
   return { ...result, files: files.length };
 }
 
-async function importHistoryFallback({ store, historyFile, cursorsFile }) {
+async function importHistoryFallback({ store, historyFile, cursorsFile, readFileImpl, statImpl }) {
   const cursors = await loadCursors(cursorsFile);
-  const st = await changedSince(historyFile, cursors).catch(() => null);
+  const st = await changedSince(historyFile, cursors, statImpl).catch(() => null);
   const result = { imported: 0, unchanged: 0, empty: 0, errors: [] };
   if (!st) { result.unchanged = 1; return result; }
   const bySession = new Map();
   try {
-    const raw = await readFile(historyFile, 'utf8');
+    const snapshot = await readStableFile(historyFile, st, { readFileImpl, statImpl, encoding: 'utf8' });
+    if (!snapshot) { result.deferred = 1; return result; }
+    const raw = snapshot.content;
     for (const line of raw.split('\n')) {
       if (!line.trim()) continue;
       let rec;
@@ -94,7 +100,9 @@ async function importHistoryFallback({ store, historyFile, cursorsFile }) {
       });
       result.imported++;
     }
-    cursors[historyFile] = { mtimeMs: st.mtimeMs, size: st.size };
+    const after = await statImpl(historyFile);
+    if (!sameFileVersion(snapshot.stat, after)) { result.deferred = 1; return result; }
+    cursors[historyFile] = cursorFor(after);
     await saveCursors(cursorsFile, cursors);
   } catch (e) { result.errors = [{ file: historyFile, error: e.message || String(e) }]; }
   if (!result.imported) result.empty = 1;
@@ -103,9 +111,10 @@ async function importHistoryFallback({ store, historyFile, cursorsFile }) {
 
 // opts: { store, root?, historyFile?, cursorsFile }. Rollouts first; history.jsonl only as a
 // fallback when no rollout files exist at all (older Codex versions, or sessions/ not yet created).
-export async function importCodex({ store, root = defaultRoot(), historyFile = defaultHistoryFile(), cursorsFile }) {
-  const rollouts = await importRollouts({ store, root, cursorsFile });
+export async function importCodex({ store, root = defaultRoot(), historyFile = defaultHistoryFile(), cursorsFile, io = {} }) {
+  const readFileImpl = io.readFile || readFile, statImpl = io.stat || stat;
+  const rollouts = await importRollouts({ store, root, cursorsFile, readFileImpl, statImpl });
   if (rollouts.files > 0) return { source: 'rollouts', ...rollouts };
-  const history = await importHistoryFallback({ store, historyFile, cursorsFile });
+  const history = await importHistoryFallback({ store, historyFile, cursorsFile, readFileImpl, statImpl });
   return { source: 'history', ...history };
 }

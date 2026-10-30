@@ -2,11 +2,11 @@
 // concatenated Zstandard frames; raw JSONL is supported when its backend uses compression:none.
 // Only direct user prompts and visible assistant text are retained. Tool, system, developer,
 // injected user context, reasoning, and all other event data stay out of BrainLink.
-import { readFile } from 'node:fs/promises';
+import { readFile, stat } from 'node:fs/promises';
 import { homedir } from 'node:os';
 import path from 'node:path';
 import { zstdDecompressSync } from 'node:zlib';
-import { walkFiles, loadCursors, saveCursors, changedSince, autoSummary, autoTitle, redactText } from './import-util.mjs';
+import { walkFiles, loadCursors, saveCursors, changedSince, readStableFile, sameFileVersion, cursorFor, autoSummary, autoTitle, redactText } from './import-util.mjs';
 
 export const CLIENT = 'deepseek-harness';
 const MAX_INPUT_BYTES = 32 * 1024 * 1024;
@@ -60,11 +60,11 @@ function parseSession(raw) {
   return { header, messages };
 }
 
-async function readLog(file, size) {
+async function readLog(file, size, readFileImpl = readFile) {
   if (!Number.isSafeInteger(size) || size < 0 || size > MAX_INPUT_BYTES) {
     throw new Error(`DeepSeek Harness session file exceeds the ${MAX_INPUT_BYTES / 1024 / 1024} MiB import limit`);
   }
-  const bytes = await readFile(file);
+  const bytes = await readFileImpl(file);
   if (bytes.length > MAX_INPUT_BYTES) throw new Error(`DeepSeek Harness session file exceeds the ${MAX_INPUT_BYTES / 1024 / 1024} MiB import limit`);
   const raw = file.endsWith('.zstd')
     ? decompressFrames(bytes).toString('utf8')
@@ -122,7 +122,8 @@ function decompressFrames(bytes) {
 }
 
 // opts: { store, root?, cursorsFile }. This importer never writes to the Harness source.
-export async function importDeepSeekHarness({ store, root = defaultRoot(), cursorsFile }) {
+export async function importDeepSeekHarness({ store, root = defaultRoot(), cursorsFile, io = {} }) {
+  const readFileImpl = io.readFile || readFile, statImpl = io.stat || stat;
   const files = [...new Set([
     ...(await walkFiles(root, '.jsonl')),
     ...(await walkFiles(root, '.jsonl.zstd')),
@@ -130,11 +131,13 @@ export async function importDeepSeekHarness({ store, root = defaultRoot(), curso
   const cursors = await loadCursors(cursorsFile);
   const result = { imported: 0, unchanged: 0, empty: 0, errors: [], files: files.length };
   for (const full of files) {
-    const st = await changedSince(full, cursors).catch(() => null);
+    const st = await changedSince(full, cursors, statImpl).catch(() => null);
     if (!st) { result.unchanged++; continue; }
     try {
-      const { header, messages } = parseSession(await readLog(full, st.size));
-      if (!messages.length) { result.empty++; cursors[full] = { mtimeMs: st.mtimeMs, size: st.size }; continue; }
+      const snapshot = await readStableFile(full, st, { readFileImpl, statImpl, encoding: null });
+      if (!snapshot) { result.deferred = (result.deferred || 0) + 1; continue; }
+      const { header, messages } = parseSession(await readLog(full, st.size, async () => snapshot.content));
+      if (!messages.length) { result.empty++; cursors[full] = cursorFor(snapshot.stat); continue; }
       const source_id = path.relative(root, full).split(path.sep).join('/');
       const project = typeof header.cwd === 'string' ? header.cwd : '';
       await store.putSession({
@@ -144,7 +147,9 @@ export async function importDeepSeekHarness({ store, root = defaultRoot(), curso
         note_refs: [], private: true, messages,
       });
       result.imported++;
-      cursors[full] = { mtimeMs: st.mtimeMs, size: st.size };
+      const after = await statImpl(full);
+      if (!sameFileVersion(snapshot.stat, after)) { result.deferred = (result.deferred || 0) + 1; continue; }
+      cursors[full] = cursorFor(after);
     } catch (error) {
       result.errors.push({ file: full, error: error.message || String(error) });
     }

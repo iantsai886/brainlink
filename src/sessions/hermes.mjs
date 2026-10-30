@@ -5,7 +5,7 @@ import { createHash } from 'node:crypto';
 import { stat } from 'node:fs/promises';
 import { homedir } from 'node:os';
 import path from 'node:path';
-import { autoSummary, autoTitle, redactText } from './import-util.mjs';
+import { autoSummary, autoTitle, redactText, saveCursors } from './import-util.mjs';
 
 export const CLIENT = 'hermes';
 const PAGE_SIZE = 100;
@@ -134,10 +134,9 @@ export async function importHermes({ store, root = defaultRoot(), cursorsFile })
       }
     }
     if (cursorsFile && sessionRows.length) {
-      const { mkdir, readFile, writeFile } = await import('node:fs/promises');
+      const { readFile } = await import('node:fs/promises');
       const prior = await readFile(cursorsFile, 'utf8').then(JSON.parse).catch(() => ({}));
-      await mkdir(path.dirname(cursorsFile), { recursive: true });
-      await writeFile(cursorsFile, JSON.stringify({ ...prior, [key]: cursor }, null, 1));
+      await saveCursors(cursorsFile, { ...prior, [key]: cursor });
     }
     if (!sessionRows.length) result.unchanged = 1;
   } catch (error) {
