@@ -1,6 +1,6 @@
 # Structured cross-AI handoff
 
-Status: implemented and locally tested through a two-client MCP integration fixture. Live Codex CLI privacy and Hermes MCP tool-discovery checks have passed. Claude Code's earlier MCP health check connected in a prior fixture, but the current development host reports no Claude MCP servers configured. A full model-driven cross-AI handoff remains unverified and unreleased.
+Status: implemented and locally tested through a two-client MCP integration fixture. Live Codex CLI privacy and Hermes MCP tool-discovery checks have passed. An opt-in live Claude Code receiver smoke is now available; this host is signed out, so that path and a full model-driven cross-AI handoff remain unverified and unreleased.
 
 `send_handoff` now accepts either the original free-form `body` or a structured
 handoff with `goal`. Optional fields are `current_state`, `decisions`,
@@ -62,6 +62,7 @@ real handoff together.
 Codex CLI 0.164.0-alpha.11.1, using `gpt-6-luna`, called `brainlink_guide` and searched a temporary fictional vault for `ZQXPRIVATECLI_CANARY_71A9`. BrainLink returned `not_in_brain` with no results. The Codex run was ephemeral, used a read-only shell, and had only the temporary BrainLink server enabled. Claude Code 2.1.310's `claude mcp list` health check reported `Connected` to that same temporary fixture. `claude auth status` reported signed out, so Claude made no model call and did not pick up or acknowledge the task. The fixture contains only synthetic files and an isolated BrainLink home; its recursive cleanup was blocked by automatic review, so it remains in the Windows temporary folder for removal. This validates one live Codex model-to-MCP path, the private-note search gate for that probe, and Claude's MCP server startup; it does not validate a cross-client task transfer.
 
 Reproduce the complete local handoff flow with `node --import ./test/_preload.mjs --test test/cross-client-handoff.test.mjs test/brainlink.test.mjs`.
+After signing in to Claude Code, the fictional live receiver check can be run with `npm run smoke:live-claude-handoff`. It uses a strict temporary MCP configuration, disables built-in tools, requires explicit MCP tool allowlisting, runs one bounded model turn without saving a session, and exits before creating fixture data when Claude is signed out. It does not change the normal Claude MCP configuration.
 Latest full suite on Windows/Node 24.18.0: `npm run test:all` — core 329 tests
 (323 passed, 0 failed, 6 skipped) and UI 28/28 passed. Skips are platform or
 privilege-specific; see `docs/IMPLEMENTATION-STATUS.md` for dated evidence.

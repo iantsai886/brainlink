@@ -12,6 +12,7 @@
     "test:all": "npm test && npm run test:ui",
     "smoke:codex-cli": "node scripts/smoke-codex-cli.mjs",
     "smoke:claude-code": "node scripts/smoke-claude-code.mjs",
+    "smoke:live-claude-handoff": "node scripts/smoke-live-claude-handoff.mjs --live",
     "smoke:backup-recovery": "node scripts/smoke-backup-recovery.mjs",
     "smoke:installed:win": "pwsh -NoProfile -File scripts/smoke-installed-windows.ps1",
     "smoke:upgrade:win": "pwsh -NoProfile -File scripts/smoke-upgrade-windows.ps1",
