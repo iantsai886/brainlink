@@ -139,6 +139,21 @@ test('/api/client-health: explains when Claude was open before its BrainLink con
   } finally { s.server.close(); }
 });
 
+test('/api/client-health: says to open Claude when it is fully closed', async () => {
+  const { home, s, api } = await withSampleVault('health-claude-closed', {
+    agentName: 'Anna', os: 'win32',
+    inspectClientRuntime: async () => ({ status: 'not_running', started_before_config: null }),
+  });
+  const claudeConfig = path.join(home, 'AppData', 'Roaming', 'Claude', 'claude_desktop_config.json');
+  await mkdir(path.dirname(claudeConfig), { recursive: true });
+  await writeFile(claudeConfig, '{}');
+  try {
+    const r = await (await api('/api/client-health', { client: 'claude-desktop' })).json();
+    assert.equal(r.ok, true, JSON.stringify(r));
+    assert.match(r.message, /Claude Desktop is not running now\. Open it and start a new chat/i);
+  } finally { s.server.close(); }
+});
+
 test('/api/client-health: with no vault yet, reports a friendly message instead of an empty success', async () => {
   const home = await tmp('health-empty-home');
   const env = { BRAINLINK_HOME: path.join(home, 'app'), BRAINLINK_SEMANTIC: '0' };

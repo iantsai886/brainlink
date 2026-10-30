@@ -1089,7 +1089,9 @@ export async function startSetup(opts = {}) {
       : undefined;
     const restartHint = client_runtime?.started_before_config === true
       ? ' Claude Desktop was already running when its BrainLink settings changed. Fully quit it (including the tray icon), reopen it, and start a new chat.'
-      : '';
+      : client_runtime?.status === 'not_running'
+        ? ' Claude Desktop is not running now. Open it and start a new chat to load BrainLink.'
+        : '';
     return {
       ok, verification: 'brainlink_local_mcp', external_client_verified: false,
       client: clientId, tool, took_ms, available_agent_roles,

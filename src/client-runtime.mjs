@@ -29,6 +29,7 @@ export async function inspectClaudeDesktopRuntime({ os, configPath, readStartTim
   if (!configStat) return { status: 'unknown', started_before_config: null };
   try {
     const starts = await readStartTimes();
+    if (starts.length === 0) return { status: 'not_running', started_before_config: null };
     return compareClientStartToConfig(starts, configStat.mtimeMs);
   } catch {
     return { status: 'unknown', started_before_config: null };
