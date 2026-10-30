@@ -62,8 +62,9 @@ test('connection wording distinguishes configured settings from an AI app that l
   const catalogs = Object.fromEntries(await Promise.all(LOCALES.map(async (id) => [id, await loadLocale(id)])));
   const en = catalogs.en;
   assert.equal(en['connect.connected'], 'Configured');
-  assert.match(en['connect.hint'], /checks the selected permissions locally/i);
-  assert.match(en['connect.hint'], /test BrainLink from inside that app/i);
+  assert.match(en['connect.hint'], /checks access locally/i);
+  assert.match(en['connect.hint'], /fully quit.*start a new chat/i);
+  assert.match(en['connect.hint'], /does not prove the app loaded the new tools/i);
   assert.match(en['connect.connectedToast'], /added to/);
   assert.match(en['connect.liveOk'], /BrainLink check passed/);
   assert.doesNotMatch(en['connect.hint'], /live test call/i);

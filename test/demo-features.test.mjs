@@ -15,7 +15,7 @@ import { openSessionStore } from '../src/sessions/index.mjs';
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const tmp = (p) => mkdtemp(path.join(tmpdir(), `brainlink-${p}-`));
 
-async function withSampleVault(label) {
+async function withSampleVault(label, { agentName } = {}) {
   const home = await tmp(`${label}-home`);
   const vaultPath = path.join(home, 'Acme Studio');
   await cp(path.join(ROOT, 'samples', 'acme-studio'), vaultPath, { recursive: true });
@@ -23,7 +23,7 @@ async function withSampleVault(label) {
   const s = await startSetup({ env, home, os: 'linux', port: 0, useCli: false });
   const base = `http://127.0.0.1:${s.port}`;
   const api = (p, body) => fetch(base + p, { method: 'POST', headers: { 'X-BrainLink-Token': s.token, 'Content-Type': 'application/json' }, body: JSON.stringify(body || {}) });
-  const r = await (await api('/api/vault', { path: vaultPath, name: 'Acme Studio', pack: 'simple', scaffold: false })).json();
+  const r = await (await api('/api/vault', { path: vaultPath, name: 'Acme Studio', pack: 'simple', agentName, scaffold: false })).json();
   assert.equal(r.ok, true, JSON.stringify(r));
   return { home, env, s, api, vaultPath };
 }
@@ -101,15 +101,18 @@ test('/api/ask and /api/note: no vault configured yet returns a clear error, not
 
 // ---- /api/client-health + /api/connect: local BrainLink permission check ----
 
-test('/api/client-health: local MCP call is logged and clearly does not claim external-client verification', async () => {
-  const { home, env, s, api } = await withSampleVault('health');
+test('/api/client-health: names the BrainLink roles this AI can call and gives clear full-restart steps', async () => {
+  const { home, env, s, api } = await withSampleVault('health', { agentName: 'Anna' });
   try {
     const r = await (await api('/api/client-health', { client: 'cursor' })).json();
     assert.equal(r.ok, true, JSON.stringify(r));
     assert.equal(r.tool, 'brainlink_guide');
     assert.equal(r.verification, 'brainlink_local_mcp');
     assert.equal(r.external_client_verified, false);
-    assert.match(r.message, /Restart the AI app.*inside that app/i);
+    assert.deepEqual(r.available_agent_roles, ['Anna']);
+    assert.match(r.message, /Named BrainLink roles available: Anna/);
+    assert.match(r.message, /Fully quit.*tray\/background process.*start a new chat/i);
+    assert.match(r.message, /does not confirm that the app loaded the updated tools/i);
     assert.ok(typeof r.took_ms === 'number');
 
     const log = await readFile(path.join(env.BRAINLINK_HOME, 'activity.log'), 'utf8');
@@ -141,7 +144,7 @@ test('/api/connect: one-click connect returns a local BrainLink check, not an ex
     assert.equal(r.health.tool, 'brainlink_guide');
     assert.equal(r.health.verification, 'brainlink_local_mcp');
     assert.equal(r.health.external_client_verified, false);
-    assert.match(r.health.message, /Restart the AI app.*inside that app/i);
+    assert.match(r.health.message, /Fully quit.*start a new chat/i);
   } finally { s.server.close(); }
 });
 

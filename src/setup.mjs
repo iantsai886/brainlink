@@ -982,10 +982,15 @@ export async function startSetup(opts = {}) {
     const mcp = createMcp(ctx, { onCall: (e) => pending.push(logActivity(env, { ...e, platform: c.platform, mode: 'health-check' })) });
     const t0 = Date.now();
     await mcp.handle({ jsonrpc: '2.0', id: 1, method: 'initialize', params: {} });
-    const listed = ctx.twinScope.mode === 'scoped'
-      ? await mcp.handle({ jsonrpc: '2.0', id: 2, method: 'tools/list', params: {} })
-      : null;
-    const toolNames = (listed?.result?.tools || []).map((item) => item.name);
+    // Always inspect the exact tool list for this identity. Besides proving which data tool is
+    // usable, this tells Setup which named BrainLink roles the connected AI can actually call.
+    const listed = await mcp.handle({ jsonrpc: '2.0', id: 2, method: 'tools/list', params: {} });
+    const listedTools = listed?.result?.tools || [];
+    const toolNames = listedTools.map((item) => item.name);
+    const available_agent_roles = listedTools
+      .filter((item) => item.name.startsWith('agent_connect_'))
+      .map((item) => String(item.title || '').replace(/^Connect to\s+/i, '').trim())
+      .filter(Boolean);
     const scopedGrant = ctx.twinScope.mode === 'scoped'
       ? ctx.twinScope.grants.find((grant) => grant.operations.includes('search') && ctx.twinScope.memory_policy?.semantic && ctx.enabled.includes(grant.name))
       : null;
@@ -1012,9 +1017,9 @@ export async function startSetup(opts = {}) {
     const ok = Boolean(called?.result) && !called.result.isError;
     return {
       ok, verification: 'brainlink_local_mcp', external_client_verified: false,
-      client: clientId, tool, took_ms,
+      client: clientId, tool, took_ms, available_agent_roles,
       message: ok
-        ? `BrainLink access check passed: ${tool} (${took_ms}ms). Restart the AI app, then verify the connection from inside that app.`
+        ? `BrainLink access check passed: ${tool} (${took_ms}ms).${available_agent_roles.length ? ` Named BrainLink roles available: ${available_agent_roles.join(', ')}.` : ''} Fully quit ${c.title} (including any tray/background process), reopen it, and start a new chat. This check does not confirm that the app loaded the updated tools.`
         : 'BrainLink access check failed; see Activity below.',
     };
   }
