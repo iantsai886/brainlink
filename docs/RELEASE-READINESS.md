@@ -4,6 +4,10 @@ Status checked: 2026-10-31 (Asia/Taipei)
 Repository: `iantsai886/brainlink`  
 Integration branch: `integration/brainlink-retrieval-evaluation`
 
+## Latest verification
+
+- **Current full local suite:** exact source commit `16425b7` on Windows/Node.js 24.22.1 passed `npm run test:all` on 2026-10-31: core 609 total (601 passed, 0 failed, 8 platform/privilege skips); UI 44/44. The paired live Claude Code-to-Codex test remains unverified because Claude Code is signed out. GitHub Actions are queued and are not represented as passing.
+
 ## Product state
 
 BrainLink's main product pieces are implemented in the development branch: local desktop Setup, multiple vaults and Personal/Organisation/Client profiles, four memory types, permission-scoped AI access, source-backed session filing and handoffs, a reviewable knowledge graph, Git-based shared knowledge, scheduled backup and restore, and governed RSI proposals.

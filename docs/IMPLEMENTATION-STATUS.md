@@ -5,6 +5,10 @@ GitHub repository: `iantsai886/brainlink`
 Branch: `integration/brainlink-retrieval-evaluation` (integrates profile-scoped GitHub, RSI discovery, and independent retrieval evaluation)
 Code baseline: development target `1.2.8`, with `package.json` as the canonical version source. The `v1.2.7` tag belongs to the separate `wip/v1.2.7` release line; this branch continues from the full-source `main` history and does not move or recreate that tag.
 
+### Full current-branch verification (source commit `16425b7`, 2026-10-31)
+
+On Windows/Node.js 24.22.1, `npm run test:all` exited 0: core 609 total (601 passed, 0 failed, 8 platform/privilege skips); UI 44/44 passed. The run covers vault and Twin isolation, private-content filtering, graph editing and review, scheduled backups and restore, session capture/closeout, Git-backed sync, retrieval evaluation, RSI governance, and client connectors. This is local verification only. The live Claude Code-to-Codex handoff remains unverified because Claude Code is signed out; hosted GitHub Actions are still queued and are not counted as passing evidence.
+
 ### Diagnose stale Claude Desktop processes after BrainLink setup changes (pre-commit working tree based on `eb08162`, 2026-10-31)
 
 The Windows Setup health check now compares Claude Desktop process start times with the saved Claude MCP configuration's modification time. If the oldest Claude process predates that configuration, the message says Claude was already running when the settings changed and asks the user to fully quit it, including the tray icon, then reopen and start a new chat. The check returns only a small status (`running` and whether it predates the config); it does not expose process IDs or timestamps, inspect conversation data, restart Claude, or claim that Claude loaded or called BrainLink. Non-Windows systems and inspection failures report unknown and keep the existing general instruction. This is a diagnostic hint because some client versions may reload MCP settings while running.
