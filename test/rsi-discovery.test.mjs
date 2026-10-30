@@ -302,6 +302,21 @@ test('research relevance supports Chinese phrases without spaces and reports mat
     'a topical partial match still needs enough shared topic terms');
 });
 
+test('research relevance matches the reviewed BrainLink vocabulary across Traditional and Simplified Chinese', () => {
+  const traditionalSignal = '降低 AI 知識檢索成本並改善智能體交接';
+  const simplifiedEntry = { title: '人工智能智能体的知识检索与交接', summary: '精简上下文能降低检索成本。' };
+  const traditionalTopicMatch = assessRelevance(simplifiedEntry, [traditionalSignal], { topic: '知識檢索' });
+  assert.ok(traditionalTopicMatch, 'Simplified public metadata should match a Traditional Chinese topic and problem statement');
+  assert.ok(traditionalTopicMatch.memory_types.includes('semantic') && traditionalTopicMatch.memory_types.includes('working'));
+  assert.ok(traditionalTopicMatch.topic_matched_terms.length >= 2);
+
+  const simplifiedSignal = '降低人工智能知识检索成本并改善智能体交接';
+  const traditionalEntry = { title: '人工智慧智能體的知識檢索與交接', summary: '精簡上下文能降低檢索成本。' };
+  assert.ok(assessRelevance(traditionalEntry, [simplifiedSignal], { topic: '知识检索' }), 'the reverse script direction should also match');
+  assert.equal(assessRelevance({ ...simplifiedEntry, title: '知识与趋势', summary: '人工智能智能体交接与精简上下文。' }, [traditionalSignal], { topic: '知識檢索' }), null,
+    'cross-script normalization must not weaken the two-term topic gate');
+});
+
 test('Chinese relevance rejects unrelated text that has no matching multi-character concepts', () => {
   const signal = '改善人工智慧知識檢索效率與智能體交接';
   assert.equal(assessRelevance({ title: '台灣山區降雨觀測', summary: '分析季節性氣候與水庫蓄水變化。' }, [signal]), null);
@@ -327,7 +342,7 @@ test('a run files relevant entries as discovered proposals with full provenance 
   assert.equal(idea.status, 'discovered');
   assert.equal(idea.origin, 'discovery');
   assert.equal(idea.discovery.run_id, receipt.run_id);
-  assert.equal(idea.discovery.method_version, 'lexical-topic-gate-v2');
+  assert.equal(idea.discovery.method_version, 'lexical-topic-gate-v3');
   assert.equal(idea.discovery.source, 'arxiv');
   assert.equal(idea.discovery.topic, 'agent memory');
   assert.deepEqual(idea.discovery.topic_matched_terms, ['agent', 'memory']);

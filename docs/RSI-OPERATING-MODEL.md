@@ -96,7 +96,7 @@ Every new RSI experiment receipt records the Git commit before and after the run
 
 Current update: discovery settings include an off-by-default option to recheck up to three 30-day-old public citations from BrainLink discovery records after each manual or scheduled discovery run. It uses only still-selected sources and exact stored public identifiers, appends freshness fingerprints/statuses, and leaves proposal content unchanged. This is citation maintenance, not independent verification of claims or evidence of recursive improvement.
 
-Newly discovered proposals also record the relevance method version (`lexical-topic-gate-v2`) in their provenance. The current matcher requires a candidate to match both a configured research topic and a problem signal, plus a BrainLink workflow term. Older records remain readable. Version labels establish which method produced a proposal; they do not establish that a later method is better. The ledger rejects unversioned and malformed new method labels.
+Newly discovered proposals also record the relevance method version (`lexical-topic-gate-v3`) in their provenance. The current matcher requires a candidate to match both a configured research topic and a problem signal, plus a BrainLink workflow term. Version 3 normalizes a reviewed set of BrainLink memory and agent terms between Traditional and Simplified Chinese. Older records remain readable. Version labels establish which method produced a proposal; they do not establish that a later method is better. The ledger rejects unversioned and malformed new method labels.
 
 The authenticated **Download review record** export includes a SHA-256 integrity checksum over its JSON payload. The checksum detects accidental changes but does not authenticate the author.
 

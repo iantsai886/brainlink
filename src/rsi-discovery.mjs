@@ -54,6 +54,21 @@ const WORKFLOW_TERMS = {
   episodic: ['episodic memory', 'conversation history', 'reflection', 'trajectory', 'experience replay', '情節記憶', '情节记忆', '對話歷史', '对话历史', '反思', '軌跡', '轨迹', '經驗重播', '经验重放'],
 };
 const GENERAL_TERMS = ['agent', 'memory', 'language model', 'llm'];
+// Discovery is configured and reviewed locally, often in Traditional Chinese, while public
+// metadata may use Simplified Chinese. Normalize only this reviewed BrainLink vocabulary rather
+// than guessing character-by-character conversions that are ambiguous in general text.
+const CHINESE_SCRIPT_PAIRS = [
+  ['工作记忆', '工作記憶'], ['工作阶段', '工作階段'], ['会话', '會話'], ['脉络压缩', '脈絡壓縮'], ['工作延续', '工作延續'],
+  ['知识图谱', '知識圖譜'], ['知识库', '知識庫'], ['语义记忆', '語意記憶'], ['语义搜索', '語意搜尋'],
+  ['知识', '知識'], ['语义', '語意'], ['检索', '檢索'], ['笔记', '筆記'], ['精简', '精簡'],
+  ['程序记忆', '程序記憶'], ['规划', '規劃'], ['情节记忆', '情節記憶'], ['对话历史', '對話歷史'], ['经验重放', '經驗重播'],
+  ['轨迹', '軌跡'], ['人工智能', '人工智慧'], ['智能体', '智能體'],
+];
+const normalizeChineseVocabulary = (value) => {
+  let normalized = String(value).normalize('NFKC');
+  for (const [simplified, traditional] of CHINESE_SCRIPT_PAIRS) normalized = normalized.replaceAll(simplified, traditional);
+  return normalized;
+};
 const STOPWORDS = new Set('a an and are as at be by can do does for from has have how in into is it its of on or our so than that the their them then there these this to too was we were what when which while who why will with without you your after before about across again all also any because been being both but each few more most much need needs not only other over same should some such very via who'.split(' '));
 
 // Text that tries to address an AI or a reviewer is treated as hostile and the entry is dropped,
@@ -424,12 +439,12 @@ export function parseGitHubIssues(json, { single = false } = {}) {
 
 // Keep the discovery strategy in each saved proposal so future method changes can be
 // compared against the method that found an earlier idea.
-export const DISCOVERY_METHOD_VERSION = 'lexical-topic-gate-v2';
+export const DISCOVERY_METHOD_VERSION = 'lexical-topic-gate-v3';
 
 const stem = (w) => w.length > 3 ? w.replace(/(?:ies)$/, 'y').replace(/(?<!s)s$/, '') : w;
 const tokens = (text) => {
   const out = [];
-  for (const part of text.toLowerCase().normalize('NFKC').match(/[\p{Script=Han}]+|[\p{L}\p{N}]+/gu) || []) {
+  for (const part of normalizeChineseVocabulary(text).toLowerCase().match(/[\p{Script=Han}]+|[\p{L}\p{N}]+/gu) || []) {
     if (/^\p{Script=Han}+$/u.test(part)) {
       // Chinese does not mark word boundaries with spaces. Overlapping bigrams let exact
       // concepts match across a phrase without treating one long sentence as a single token.
@@ -441,12 +456,14 @@ const tokens = (text) => {
 };
 const words = (text) => tokens(text).map(stem);
 const containsPhrase = (haystack, phrase) => {
-  if (/\p{Script=Han}/u.test(phrase)) return haystack.normalize('NFKC').toLowerCase().includes(phrase.normalize('NFKC').toLowerCase());
+  haystack = normalizeChineseVocabulary(haystack).toLowerCase();
+  phrase = normalizeChineseVocabulary(phrase).toLowerCase();
+  if (/\p{Script=Han}/u.test(phrase)) return haystack.includes(phrase);
   const escaped = phrase.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
   return new RegExp('(?:^|[^\\p{L}\\p{N}])' + escaped + 's?(?:$|[^\\p{L}\\p{N}])', 'iu').test(haystack);
 };
 export function assessRelevance(entry, signals, { topic = '' } = {}) {
-  const text = `${entry.title} ${entry.summary}`.toLowerCase();
+  const text = normalizeChineseVocabulary(`${entry.title} ${entry.summary}`).toLowerCase();
   const memoryTypes = Object.entries(WORKFLOW_TERMS).filter(([, terms]) => terms.some(t => containsPhrase(text, t))).map(([type]) => type);
   const workflowTerms = [...Object.values(WORKFLOW_TERMS).flat(), ...GENERAL_TERMS].filter(t => containsPhrase(text, t)).slice(0, 8);
   if (!workflowTerms.length) return null;
