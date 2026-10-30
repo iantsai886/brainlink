@@ -5,11 +5,15 @@ GitHub repository: `iantsai886/brainlink`
 Branch: `integration/brainlink-retrieval-evaluation` (integrates profile-scoped GitHub, RSI discovery, and independent retrieval evaluation)
 Code baseline: development target `1.2.8`, with `package.json` as the canonical version source. The `v1.2.7` tag belongs to the separate `wip/v1.2.7` release line; this branch continues from the full-source `main` history and does not move or recreate that tag.
 
+### Full Windows test suite on current integration head (`be4e41f`, 2026-10-31)
+
+Windows/Node.js 24.22.1 `npm run test:all` exited 0 on exact repository commit `be4e41fc1068254ee1ab0fa77fbb31fb990020d8`: core 603 total (595 passed, 0 failed, 8 platform/privilege skips); UI 44/44. This includes code commit `28cfafd` restore recovery hardening and code commit `7e535ce` Twin memory setup shortcut. GitHub Actions run `41096595465` for this commit did not execute steps; the check annotation reports the repository account payment/spending-limit gate. Local test success and hosted CI are separate.
+
 ### Preserve restore recovery paths when publication or rollback fails (code commit `28cfafd`, 2026-10-31)
 
 Restore still writes and verifies a complete staged copy before publishing it into the user's empty destination. If the final rename fails, BrainLink now explicitly attempts to return the original empty destination. If that rollback also fails, the error reports the exact sibling path where the original folder remains. If temporary recovered-copy cleanup fails, the error also reports that path instead of silently hiding the leftover. Added deterministic rename-failure tests with fictional data: publishing failure returns the original destination and cleans staging; a second rollback failure preserves the original folder and reports its location. On exact source commit `28cfafd`, Windows/Node.js 24.22.1 `npm run test:all` passed: core 602 total (594 passed, 0 failed, 8 Windows platform/privilege skips), UI 44/44. Focused `node --test test/backup.test.mjs` passed 20 total (19 passed, 0 failed, 1 Windows symlink-privilege skip). The subsequent changes to this file only record these results.
 
-GitHub Actions push run `41096510276` for documentation commit `11d89a1` confirms that hosted jobs were blocked before any steps because the account needs payment or spending-limit attention. This is an account runner gate, not a source-test failure; the local Windows test receipts above are separate evidence.
+GitHub Actions push run `41096595465` for branch commit `be4e41f` confirms that hosted jobs were blocked before any steps because the account needs payment or spending-limit attention. This is an account runner gate, not a source-test failure; the local Windows test receipts above are separate evidence.
 
 ### Make Twin memory setup quicker without saving automatically (code commit `7e535ce`, 2026-10-31)
 
