@@ -6,6 +6,7 @@ import { useNotes } from '../lib/notes.mjs';
 import { markdown, notesView } from '../views/notes.mjs';
 import { searchView } from '../views/screens.mjs';
 import { memoryTypeInfo } from '../lib/memory-type.mjs';
+import { readFile } from 'node:fs/promises';
 
 test('v0.2 ranked search forwards canonical options without re-ranking',async()=>{
  const store=await makeStore();let seen;store.search=async(q,o)=>{seen={q,o};return [{id:'n_any',title:'As ranked by store',snippet:'hit',score:.3,sha12:'abcdef123456'}]};
@@ -109,6 +110,12 @@ test('Notes offers metadata-based suggestions separately from saved memory type'
  await h.load();await h.open(note.id);let view=notesView(h.get(),api);
  assert.match(view,/Current type: <strong>Unclassified<\/strong>/);assert.match(view,/Suggested from note metadata: <strong>Episodic<\/strong>/);assert.equal(h.get().dirty,false);
  h.changeMemoryType('episodic');view=notesView(h.get(),api);assert.match(view,/Current type: <strong>Episodic<\/strong>/);assert.equal(h.get().dirty,true);
+});
+test('desktop UI styles expose keyboard focus for every control and adapt to tablet and phone widths',async()=>{
+ const css=await readFile(new URL('../styles.css',import.meta.url),'utf8');
+ assert.match(css,/:focus-visible\s*\{[^}]*outline:/s);
+ assert.match(css,/@media\s*\(max-width:\s*820px\)/);assert.match(css,/@media\s*\(max-width:\s*640px\)/);
+ assert.match(css,/color-scheme:\s*dark/);assert.match(css,/\.layout\[data-theme="dark"\]/);
 });
 test('wikilinks render safely and backlinks resolve by target id',async()=>{
  const store=await makeStore(),api=createApi({store});const list=await api.listNotes();const website=list.find(n=>n.title==='Website relaunch');const backlinks=await api.backlinks(website.id);

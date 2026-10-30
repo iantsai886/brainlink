@@ -21,6 +21,10 @@ The Notes sidebar now lets users focus its folder tree on one accessible vault o
 
 Follow-up: when one vault is selected in the Notes tree, the new-note form now defaults to that same vault. Tests verify this for a private vault and confirm the choice is not derived from a disallowed vault name. Full Windows/Node.js `npm run test:all`: core 555 total (549 passed, 0 failed, 6 platform/privilege skips), UI 37/37. Visual user acceptance remains open.
 
+### Connected UI accessibility and responsive layout (2026-10-30)
+
+The connected UI stylesheet now provides one visible keyboard-focus outline for links, buttons, inputs, dropdowns, and text areas; improved color contrast and spacing; and responsive navigation/content layouts at tablet and phone widths. Dark mode now applies a dark browser color scheme to controls as well as page panels. A UI regression test checks these accessibility/layout rules exist. Windows/Node.js `npm run test:all`: core 555 total (549 passed, 0 failed, 6 platform/privilege skips), UI 38/38; `git diff --check` passed. CSS rule checks are not a screenshot, screen-reader audit, or user acceptance; those release gates remain open.
+
 ### Typed graph relation phrase disambiguation (working tree based on `6ea2fb3`, 2026-10-30)
 
 Relationship discovery previously treated “belongs to” and Portuguese “pertence a” as both ownership and membership. It now maps those phrases to `part_of`; explicit “owned by” / “owner is” remain `owned_by`. Regression tests cover both English rules and the Portuguese membership phrase. Focused Windows/Node.js 24.22.1 graph suites passed 38/38. Full `npm run test:all` also passed: core 551 total (545 passed, 0 failed, 6 platform/privilege skips), UI 29/29. Suggestions remain unverified proposals and still need human review. General natural-language relation extraction and live-vault precision are not established.
