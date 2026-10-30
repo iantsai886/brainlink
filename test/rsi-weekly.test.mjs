@@ -3,8 +3,11 @@ import assert from 'node:assert/strict';
 import { mkdtemp, writeFile, readFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { createRsiWeekly, validateMiss } from '../src/rsi-weekly.mjs';
+import { startSetup } from '../src/setup.mjs';
 
+const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const date = '2026-10-30T12:00:00+08:00';
 const example = { date, profile: 'Fictional Organisation', agent: 'Fictional Agent', question: 'Where is the fictional roadmap?', result: 'not_found', seconds: 3, fix_needed: 'add_index_entry' };
 const fixture = async () => createRsiWeekly({ home: await mkdtemp(path.join(tmpdir(), 'brainlink-rsi-weekly-')) });
@@ -59,4 +62,52 @@ test('week-on-week delta and applied fix type', async () => {
   assert.equal(report.length, 2);
   assert.equal(report[1].delta_pp, 20);
   assert.equal('applied_fix_types' in report[1], false);
+});
+
+test('Setup weekly benchmark is authenticated, uses only the built-in fictional vault, and stores aggregates', async () => {
+  const home = await mkdtemp(path.join(tmpdir(), 'brainlink-rsi-weekly-setup-'));
+  const app = await startSetup({ env: { BRAINLINK_HOME: path.join(home, 'app'), BRAINLINK_SEMANTIC: '0' }, home, os: 'linux', port: 0, useCli: false });
+  const base = `http://127.0.0.1:${app.port}`;
+  const api = (route, { method = 'GET', token = app.token } = {}) => fetch(`${base}${route}`, {
+    method,
+    ...(token ? { headers: { 'X-BrainLink-Token': token, ...(method === 'POST' ? { 'Content-Type': 'application/json' } : {}) } } : {}),
+    ...(method === 'POST' ? { body: '{}' } : {}),
+  });
+  try {
+    assert.equal((await api('/api/rsi/weekly-benchmark', { token: '' })).status, 401);
+    assert.equal((await api('/api/rsi/weekly-benchmark/run', { method: 'POST', token: '' })).status, 401);
+    assert.deepEqual((await (await api('/api/rsi/weekly-benchmark')).json()).runs, []);
+
+    const response = await api('/api/rsi/weekly-benchmark/run', { method: 'POST' });
+    assert.equal(response.status, 200);
+    const saved = await response.json();
+    assert.equal(saved.run.recorded, true);
+    assert.equal(saved.run.case_count, 20);
+    assert.equal(saved.run.first_try_correct.total, 20);
+    assert.equal(saved.run.privacy_violations, 0);
+    assert.equal(saved.run.software_version, '1.2.8');
+    assert.match(saved.run.source_commit_sha, /^[a-f0-9]{40}$/);
+    assert.equal(typeof saved.run.source_tree_clean, 'boolean');
+    assert.match(saved.run.fixture_sha256, /^[a-f0-9]{64}$/);
+    assert.equal(saved.runs.length, 1);
+    const serialized = JSON.stringify(saved);
+    assert.doesNotMatch(serialized, /fictional-marker-\d+|Fictional Topic \d+\.md|fictional-\d{2}/, 'case questions, paths and IDs must not be stored or returned');
+    assert.doesNotMatch(serialized, /connected vault|user vault/i);
+    const repeated = await (await api('/api/rsi/weekly-benchmark/run', { method: 'POST' })).json();
+    assert.equal(repeated.run.recorded, false, 'the same week, fixture, evaluator and source revision is idempotent');
+    assert.equal(repeated.runs.length, 1);
+    const fixture = JSON.parse(await readFile(path.join(ROOT, 'samples', 'evaluation', 'rsi-weekly-fictional-20.json'), 'utf8'));
+    assert.equal(fixture.cases.length, 20);
+  } finally { app.server.close(); }
+});
+
+test('Setup exposes localized, manual-only weekly benchmark controls and labels their evidence limits', async () => {
+  const html = await readFile(path.join(ROOT, 'ui', 'index.html'), 'utf8');
+  assert.match(html, /id="rsi-weekly-run"/);
+  assert.match(html, /POST', '\/api\/rsi\/weekly-benchmark\/run/);
+  assert.match(html, /loadWeeklyBenchmark\(\)\.catch/);
+  for (const locale of ['en', 'pt', 'zh-TW']) {
+    const catalog = JSON.parse(await readFile(path.join(ROOT, 'ui', 'locales', `${locale}.json`), 'utf8'));
+    for (const key of ['rsi.weekly.title', 'rsi.weekly.hint', 'rsi.weekly.run', 'rsi.weekly.running', 'rsi.weekly.saved', 'rsi.weekly.empty', 'rsi.weekly.result', 'rsi.weekly.sourceClean', 'rsi.weekly.sourceWorking', 'rsi.weekly.sourceUnknown']) assert.ok(catalog[key], `${locale} ${key}`);
+  }
 });

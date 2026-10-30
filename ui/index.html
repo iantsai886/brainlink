@@ -296,6 +296,13 @@ main #ready, main #ask-panel, main #brain-panel, main #sessions-panel, main #s-c
         <button class="primary" type="submit" data-i18n="rsi.save">Save idea</button>
       </form>
     </details>
+    <div class="card" id="rsi-weekly-benchmark" style="margin-bottom:10px">
+      <b data-i18n="rsi.weekly.title">Weekly retrieval benchmark</b>
+      <p class="muted" data-i18n="rsi.weekly.hint">Run the same 20 fictional questions against BrainLink's built-in sample vault. It reads no connected vault and never changes live search behavior.</p>
+      <button type="button" id="rsi-weekly-run" data-i18n="rsi.weekly.run">Run benchmark</button>
+      <p id="rsi-weekly-status" class="muted" role="status" aria-live="polite"></p>
+      <div id="rsi-weekly-history" aria-live="polite"></div>
+    </div>
     <div class="card" id="rsi-observations" style="margin-bottom:10px">
       <b data-i18n="rsi.observe.title">Review local usage signals</b>
       <p class="muted" data-i18n="rsi.observe.hint">BrainLink checks local tool outcomes, graph review choices, and rough response-size estimates. Optional link-health checks read one selected vault locally and save counts only.</p>
@@ -1057,6 +1064,28 @@ function renderObservationReport(report) {
     form.elements.namedItem('title').focus();
   }));
 }
+function renderWeeklyBenchmark(runs) {
+  const latest = [...(runs || [])].reverse();
+  $('rsi-weekly-history').innerHTML = latest.length
+    ? '<ol>' + latest.map(run => {
+      const source = run.source_commit_sha ? `${run.source_commit_sha.slice(0, 8)} · ${t(run.source_tree_clean ? 'rsi.weekly.sourceClean' : 'rsi.weekly.sourceWorking')}` : t('rsi.weekly.sourceUnknown');
+      return '<li>' + esc(t('rsi.weekly.result', { week: run.week, correct: run.first_try_correct.count, total: run.first_try_correct.total, percent: run.first_try_correct.percent, failures: run.failed_case_count, privacy: run.privacy_violations })) + ' · ' + esc(run.evaluator_version) + ' · ' + esc(run.software_version || '—') + ' · ' + esc(source) + '</li>';
+    }).join('') + '</ol>'
+    : '<p class="muted">' + esc(t('rsi.weekly.empty')) + '</p>';
+}
+async function loadWeeklyBenchmark() {
+  renderWeeklyBenchmark((await api('GET', '/api/rsi/weekly-benchmark')).runs);
+}
+document.getElementById('rsi-weekly-run').addEventListener('click', () => act(async () => {
+  const button = $('rsi-weekly-run');
+  button.disabled = true;
+  $('rsi-weekly-status').textContent = t('rsi.weekly.running');
+  try {
+    const result = await api('POST', '/api/rsi/weekly-benchmark/run');
+    renderWeeklyBenchmark(result.runs);
+    $('rsi-weekly-status').textContent = t('rsi.weekly.saved');
+  } finally { button.disabled = false; }
+}));
 document.getElementById('rsi-observe-run').addEventListener('click', () => act(async () => {
   const button = $('rsi-observe-run'); button.disabled = true;
   try {
@@ -1435,6 +1464,7 @@ async function load() {
   if (hasVault && !onboardingSync) loadHandoffs().catch(() => {});
   $('rsi-panel').hidden = !hasVault || onboardingSync;
   if (hasVault && !onboardingSync) loadRsi().catch(e => { $('rsi-ideas').innerHTML = '<p class="error-box">' + esc(e.message) + '</p>'; });
+  if (hasVault && !onboardingSync) loadWeeklyBenchmark().catch(e => { $('rsi-weekly-status').textContent = e.message; });
   if (hasVault && !onboardingSync) loadDiscovery().catch(e => { $('rsi-discovery-status').textContent = e.message; });
   if (hasVault && !onboardingSync) loadObservations().catch(e => { $('rsi-observe-status').textContent = e.message; });
   $('cfgpath').textContent = S.config_path;

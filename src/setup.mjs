@@ -48,6 +48,8 @@ import { createRsiLedger } from './rsi-ledger.mjs';
 import { createRsiExperiments } from './rsi-experiments.mjs';
 import { createRsiDiscovery } from './rsi-discovery.mjs';
 import { createRsiObservationSchedule } from './rsi-observation-schedule.mjs';
+import { createRsiWeekly, taipeiWeek } from './rsi-weekly.mjs';
+import { readGitSourceState } from './git-source-state.mjs';
 import { inspectAgentSkills, installAgentSkills, removeAgentSkills, skillClientRoot } from './agent-skills.mjs';
 import { ingestionQueue, readIngestionSource, recordIngestion } from './ingestion.mjs';
 import { generateLocalIngestionDraft } from './ingestion-draft.mjs';
@@ -227,6 +229,7 @@ export async function startSetup(opts = {}) {
   const localContext = (cfg, contextEnv = env) => createContext(cfg, { env: contextEnv, trustedLocal: true });
   const sessions = sessionsService(env, home); // src/host.mjs: imports only from this Setup user's home
   const rsiLedger = createRsiLedger({ home: appHome(env) });
+  const rsiWeekly = createRsiWeekly({ home: appHome(env) });
   const rsiExperiments = createRsiExperiments({ env, ...(opts.rsiSourceState ? { sourceState: opts.rsiSourceState } : {}) });
   // Opt-in research discovery: off until the user enables it; runs only while this process is open.
   const rsiDiscovery = createRsiDiscovery({ home: appHome(env), ledger: rsiLedger, fetchImpl: opts.discoveryFetch, lookup: opts.discoveryLookup });
@@ -1222,6 +1225,18 @@ export async function startSetup(opts = {}) {
       return { status: 'opened', version: pending.version, format: pending.format };
     },
     'GET /api/rsi': async () => ({ ideas: await rsiLedger.list() }),
+    'GET /api/rsi/weekly-benchmark': async () => ({ runs: await rsiWeekly.benchmarkReport(8) }),
+    'POST /api/rsi/weekly-benchmark/run': async () => {
+      const fixturePath = path.join(ROOT, 'samples', 'evaluation', 'rsi-weekly-fictional-20.json');
+      const vaultPath = path.join(ROOT, 'samples', 'rsi-fictional-vault');
+      const fixtureBytes = await readFile(fixturePath);
+      const fixture = JSON.parse(fixtureBytes.toString('utf8'));
+      if (fixture.vault !== 'RSI Fictional' || fixture.schema !== 2 || fixture.cases?.length !== 20) throw new Error('The built-in RSI benchmark fixture is invalid.');
+      const cfg = normalize({ vaults: [{ name: fixture.vault, path: vaultPath }] });
+      const ctx = createContext(cfg, { env: { ...env, BRAINLINK_SEMANTIC: '0' }, trustedLocal: true });
+      const run = await rsiWeekly.runBenchmark({ ctx, fixture, fixtureBytes, week: taipeiWeek(new Date().toISOString()), softwareVersion: VERSION, sourceState: readGitSourceState(ROOT) });
+      return { run, runs: await rsiWeekly.benchmarkReport(8) };
+    },
     'GET /api/rsi/observations': async () => ({ observations: await rsiObservationSchedule.status() }),
     'POST /api/rsi/observations/settings': async (b) => {
       if (b?.vault_health_enabled === true) {
