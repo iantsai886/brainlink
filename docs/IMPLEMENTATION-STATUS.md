@@ -1232,3 +1232,7 @@ Ran `node scripts/smoke-live-codex-handoff.mjs --live` using the signed-in Codex
 ### Package and smoke-test current Windows installer (2026-10-30, source `19e07dd`)
 
 `npm run smoke:installed:win` built the unsigned BrainLink 1.2.8 installer with Inno Setup 6.7.3, installed it under an isolated temporary user identity, launched both shortcuts through the bundled Node runtime, and passed authenticated Setup health/UI checks. The smoke then uninstalled the test app, confirmed the isolated user home remained intact, and restored the exact previous PATH. This verifies the current Windows package and launcher path with the new RSI source included. It does not verify signing/SmartScreen, macOS or Linux desktop behavior, customer data migration, visual usability, or release readiness.
+
+### Exercise current Windows in-place upgrade (2026-10-30, source `704c9b0`)
+
+`npm run smoke:upgrade:win` reconstructed a temporary 1.2.7 baseline from the tagged source, installed it into an isolated test identity, and upgraded it in place to the current 1.2.8 installer. Both versions launched, Setup health passed after upgrade, a user-data canary survived, and uninstall removed only the isolated app while preserving user data and restoring PATH. The 1.2.7 installer uses the currently pinned bundled runtime and dependencies, so this is not a byte-for-byte historical release upgrade. Windows upgrade handling is locally verified for this setup; macOS/Linux upgrades, signing/SmartScreen, and customer-data migration remain unverified.
