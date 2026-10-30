@@ -350,6 +350,8 @@ test('a same-size public-to-private edit invalidates the cached note even when m
   const ctx = ctxOf(normalize({ vaults: [{ name: 'Company', path: vault }] }));
   assert.equal((await search(ctx, 'Company', 'ZQX_PUBLIC_CACHE_CANARY')).some((note) => note.path === 'Cache transition.md'), true);
 
+  // Windows may report identical ctime values for back-to-back writes within one clock tick.
+  await new Promise((resolve) => setTimeout(resolve, 25));
   await writeFile(file, privateText);
   await utimes(file, fixedTime, fixedTime);
   const current = await stat(file);
