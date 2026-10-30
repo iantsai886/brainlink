@@ -63,6 +63,64 @@ test('buildGraph3D: a whole private vault is omitted even when another vault is 
   assert.equal(g.total, 2, 'the total count must not disclose notes in the private vault');
 });
 
+test('buildGraph3D: keeps typed relationships separate and derives graph metadata only from visible notes', async () => {
+  const dir = await tmp('graph3d-parallel-relations');
+  await mkdir(dir, { recursive: true });
+  await writeFile(path.join(dir, 'Workflow.md'), `---
+type: workflow
+id: workflow.collect
+scope: organisation
+status: current
+relations:
+  - predicate: owned_by
+    target: team.product
+    review: verified
+    source: "The Product team owns this intake workflow."
+    confidence: 0.98
+  - predicate: communicates_with
+    target: team.product
+    review: verified
+    source: "The intake workflow hands off reviewed questions to the Product team."
+    confidence: 0.91
+---
+# Collect questions
+
+Related team: [[Product Team]]
+`);
+  await writeFile(path.join(dir, 'Product Team.md'), '---\ntype: team\nid: team.product\nscope: organisation\nstatus: current\n---\n# Product team\n');
+  await writeFile(path.join(dir, 'Private Duplicate.md'), '---\nprivate: true\ntype: team\nid: team.product\nscope: organisation\nstatus: current\n---\n# Private duplicate\nPRIVATE_DUPLICATE_CANARY\n');
+  await writeFile(path.join(dir, 'Private source.md'), `---
+private: true
+type: workflow
+id: workflow.secret
+scope: organisation
+status: current
+relations:
+  - predicate: runs
+    target: team.product
+    review: verified
+    source: "PRIVATE_RELATION_CANARY"
+    confidence: 1
+---
+# Private source
+`);
+
+  const graph = await buildGraph3D(await ctxFor(dir), 'Main');
+  const workflow = graph.nodes.find((node) => node.title === 'Workflow');
+  const team = graph.nodes.find((node) => node.title === 'Product Team');
+  assert.ok(workflow && team);
+  assert.equal(team.entity_id, 'team.product', 'a hidden duplicate must not alter visible entity metadata');
+  const edges = graph.links.filter((edge) => edge.source === workflow.id && edge.target === team.id);
+  assert.equal(edges.length, 3, 'two typed edges and one ordinary note link must stay distinct');
+  assert.equal(edges.filter((edge) => edge.kind === 'typed').length, 2);
+  assert.equal(edges.filter((edge) => edge.kind === 'note_link').length, 1);
+  assert.deepEqual(edges.filter((edge) => edge.kind === 'typed').map((edge) => edge.predicate).sort(), ['communicates_with', 'owned_by']);
+  assert.ok(edges.every((edge) => edge.parallel_count === 3));
+  assert.match(edges.find((edge) => edge.predicate === 'owned_by').evidence, /Product team owns/);
+  assert.equal(graph.total, 2, 'private source and duplicate do not affect the graph total');
+  assert.doesNotMatch(JSON.stringify(graph), /PRIVATE_DUPLICATE_CANARY|PRIVATE_RELATION_CANARY|Private source/);
+});
+
 test('noteDetail3D: refuses a private note, an excluded-folder note, and a private vault', async () => {
   const dir = await buildVault(await tmp('graph3d-detail-refuse'));
   const privDir = await tmp('graph3d-detail-privvault');
@@ -432,7 +490,8 @@ test('ui/notes3d.js: hover label is escaped, and the selected node is visibly hi
   const { readFile } = await import('node:fs/promises');
   const src = await readFile(new URL('../ui/notes3d.js', import.meta.url), 'utf8');
   assert.match(src, /\.nodeLabel\(\(n\) => `\$\{esc\(n\.title\)\}.*esc\(n\.type\)/, 'node labels show typed entity kind while escaping note-derived title and type text');
-  assert.match(src, /\.linkLabel\(\(l\) => l\.predicate \? esc\(l\.predicate\) : ''\)/, 'typed relationship labels are escaped before graph rendering');
+  assert.match(src, /\.linkLabel\(\(l\) => l\.predicate \? `\$\{esc\(l\.predicate\)\}.*esc\(l\.evidence\).*esc\(l\.confidence\)/, 'typed relationship labels, evidence, and confidence are escaped before graph rendering');
+  assert.match(src, /\.linkCurvature\(\(l\) => l\.parallel_count > 1/, 'parallel relationship edges are visually separated instead of drawn on top of each other');
   assert.match(src, /selectedId/, 'the currently-open node must be tracked so it can be highlighted');
   assert.match(src, /\.nodeColor\(\(n\) => \(n\.id === selectedId/, 'the selected node must render in a distinct color');
   assert.match(src, /\.nodeVal\(\(n\) => \(n\.id === selectedId/, 'the selected node must render larger, reinforcing which note is open');

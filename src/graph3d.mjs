@@ -5,7 +5,8 @@
 // frontmatter-flagged private notes are dropped before a single node is built.
 import { createHash } from 'node:crypto';
 import { loadVault, summarize } from './core.mjs';
-import { typedEntityMetadataMap, deriveProposedTypedRelations, deriveRejectedTypedRelations, discoverTypedRelationshipCandidates, discoverTypedRelationshipCandidatesForSources } from './typed-graph.mjs';
+import { linkGraph } from './graph.mjs';
+import { deriveTypedRelations, typedEntityMetadataMap, deriveProposedTypedRelations, deriveRejectedTypedRelations, discoverTypedRelationshipCandidates, discoverTypedRelationshipCandidatesForSources } from './typed-graph.mjs';
 
 // n.private is already computed once, at index-build time, by core.mjs's isPrivateMeta — reusing
 // it here (rather than re-deriving private-ness from n.meta.private with a second, independent
@@ -28,46 +29,44 @@ export async function listGraphVaults(ctx) {
 // { nodes: [{id, title, vault, group, tags, degree}], links: [{source, target}], shown, total }
 export async function buildGraph3D(ctx, vaultName, { limit = 2000 } = {}) {
   const vaults = await visibleVaults(ctx, vaultName);
-  const nodes = [], keep = []; // keep[k] = { vaultName, index, i } for edge lookups
-  const entityMetadata = new Map(vaults.flatMap(({ index }) => [...typedEntityMetadataMap(index.notes)]));
-  const typedByIndex = new Map(vaults.map(({ index }) => [index, new Map()]));
-  for (const { index } of vaults) for (const edge of index.typedRelations) {
-    if (!typedByIndex.get(index).has(edge.source)) typedByIndex.get(index).set(edge.source, new Map());
-    const byTarget = typedByIndex.get(index).get(edge.source);
-    if (!byTarget.has(edge.target)) byTarget.set(edge.target, []);
-    byTarget.get(edge.target).push(edge.predicate);
-  }
-  let total = 0;
+  const nodes = [], keep = [], graphByVault = new Map();
   for (const { name, index } of vaults) {
-    for (let i = 0; i < index.notes.length; i++) {
-      const n = index.notes[i];
-      if (n.generated || isPrivateNote(n)) continue;
-      // Even an aggregate count can reveal the presence of private material. Count only notes
-      // eligible for the caller's graph, just as listGraphVaults() does.
-      total++;
-      keep.push({ name, index, i });
-    }
+    // Build every graph-derived structure from the caller-visible note set. Private and generated
+    // notes must not affect entity-ID uniqueness, edge counts, ranking, or graph output.
+    const visible = index.notes.filter((note) => !note.generated && !isPrivateNote(note));
+    const plainEdges = linkGraph(visible).edges.map(([source, target]) => ({ source, target, kind: 'note_link' }));
+    const typedEdges = deriveTypedRelations(visible).map((edge) => ({ ...edge, kind: 'typed' }));
+    const edges = [...plainEdges, ...typedEdges];
+    const degree = new Array(visible.length).fill(0);
+    for (const edge of edges) { degree[edge.source]++; degree[edge.target]++; }
+    const entityMetadata = typedEntityMetadataMap(visible);
+    graphByVault.set(name, { visible, edges, degree, entityMetadata });
+    for (let i = 0; i < visible.length; i++) keep.push({ name, visibleIndex: i, note: visible[i], degree: degree[i], entityMetadata });
   }
+  const total = keep.length;
   // Big vaults: show the most-connected notes first so the graph stays smooth (~2,000 nodes).
-  const degreeOf = ({ index, i }) => index.backlinks[i].size + index.outlinks[i].size;
-  keep.sort((a, b) => degreeOf(b) - degreeOf(a));
+  keep.sort((a, b) => b.degree - a.degree || a.name.localeCompare(b.name) || a.note.rel.localeCompare(b.note.rel));
   const shown = keep.slice(0, limit);
-  const pos = new Map(); // `${vault}::${i}` -> node index
-  shown.forEach((k, pIdx) => pos.set(`${k.name}::${k.i}`, pIdx));
+  const pos = new Map(); // `${vault}::${visibleIndex}` -> node index
+  shown.forEach((k, pIdx) => pos.set(`${k.name}::${k.visibleIndex}`, pIdx));
   for (const k of shown) {
-    const n = k.index.notes[k.i];
-    nodes.push({ id: pos.get(`${k.name}::${k.i}`), title: n.title, path: n.rel, vault: k.name, group: n.rel.includes('/') ? n.rel.split('/')[0] : '', tags: [...n.tags], degree: degreeOf(k), ...(entityMetadata.get(n) || {}) });
+    const n = k.note;
+    nodes.push({ id: pos.get(`${k.name}::${k.visibleIndex}`), title: n.title, path: n.rel, vault: k.name, group: n.rel.includes('/') ? n.rel.split('/')[0] : '', tags: [...n.tags], degree: k.degree, ...(k.entityMetadata.get(n) || {}) });
   }
   const links = [];
-  for (const k of shown) {
-    const from = pos.get(`${k.name}::${k.i}`);
-    const typedByTarget = typedByIndex.get(k.index).get(k.i) || new Map();
-    for (const j of k.index.outlinks[k.i]) {
-      const to = pos.get(`${k.name}::${j}`);
-      if (to === undefined || isPrivateNote(k.index.notes[j])) continue;
-      const predicates = typedByTarget.get(j) || [];
-      links.push({ source: from, target: to, kind: predicates.length ? 'typed' : 'note_link', ...(predicates.length ? { predicate: [...new Set(predicates)].join(' · ') } : {}) });
+  const includedPairs = new Map();
+  for (const [name, graph] of graphByVault) {
+    for (const edge of graph.edges) {
+      const source = pos.get(`${name}::${edge.source}`), target = pos.get(`${name}::${edge.target}`);
+      if (source === undefined || target === undefined) continue;
+      const pair = source < target ? `${source}:${target}` : `${target}:${source}`;
+      if (!includedPairs.has(pair)) includedPairs.set(pair, []);
+      includedPairs.get(pair).push({ source, target, kind: edge.kind,
+        ...(edge.kind === 'typed' ? { predicate: edge.predicate, evidence: edge.evidence, confidence: edge.confidence } : {}) });
     }
+  }
+  for (const group of includedPairs.values()) {
+    group.forEach((edge, parallelIndex) => links.push({ ...edge, parallel_index: parallelIndex, parallel_count: group.length }));
   }
   return { vault: vaultName || null, nodes, links, shown: nodes.length, total };
 }

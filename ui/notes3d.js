@@ -451,7 +451,8 @@
         .nodeColor((n) => (n.id === selectedId ? selectedColor : colorOf(n.group)))
         .nodeVal((n) => (n.id === selectedId ? 1.6 : 1) + Math.sqrt(n.degree || 0))
         .linkColor((l) => l.kind === 'typed' ? selectedColor : css.getPropertyValue('--muted').trim())
-        .linkLabel((l) => l.predicate ? esc(l.predicate) : '')
+        .linkCurvature((l) => l.parallel_count > 1 ? (l.parallel_index - (l.parallel_count - 1) / 2) * 0.12 : 0)
+        .linkLabel((l) => l.predicate ? `${esc(l.predicate)}${l.evidence ? `<br><small>${esc(l.evidence)}</small>` : ''}${Number.isFinite(l.confidence) ? `<br><small>Confidence ${esc(l.confidence)}</small>` : ''}` : '')
         .linkOpacity(0.35)
         .onNodeClick((n) => openById(n.id));
       loadedOk = true;
