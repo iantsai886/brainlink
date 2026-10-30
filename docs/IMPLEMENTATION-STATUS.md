@@ -15,6 +15,8 @@ Follow-up package check on branch commit `b33eca8`: rebuilt `dist/BrainLink-Setu
 
 Upgrade follow-up on branch commit `b305e22`: `npm run smoke:upgrade:win` built isolated 1.2.7 and 1.2.8 installers from the real `v1.2.7` tag and current source. The 1.2.7 install launched first; the 1.2.8 installer upgraded it in place, preserved its user-data canary, passed Setup health, and uninstalled while preserving user data and restoring PATH. This verifies the Windows upgrade path in an isolated temporary profile; it does not prove migration on a customer's installation or on macOS/Linux.
 
+Current-source backup drill on commit `3bb9e48`: `npm run smoke:backup-recovery` passed with fictional Personal, Organisation and Client-A vaults. BrainLink encrypted and verified four files, restored all four into a separate clean folder, restored its test artifact, refused a wrong key, and left source files unchanged. This is a local Windows recovery check, not a second-device or customer-vault restore.
+
 ### Fast, content-free check for scoped AI connections (commit `5c7c073`, 2026-10-30)
 
 For scoped AI profiles, Setup now verifies the authenticated MCP `tools/list` response instead of running `vault_search` just to show connection status. It confirms that at least one tool permitted by the profile is available, returns the named BrainLink role tools, and states that no vault notes were read. Global/unscoped checks retain the `brainlink_guide` round trip. This avoids indexing or searching a large vault as a side effect of a connection check.
