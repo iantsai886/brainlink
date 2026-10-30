@@ -20,6 +20,7 @@ import { importAll } from '../src/sessions/index.mjs';
 import { recordSessionEndCue, listSessionEndCues } from '../src/sessions/end-cue.mjs';
 import { setSessionHook } from '../src/sessions/hooks.mjs';
 import { evaluateRetrieval, RETRIEVAL_EVALUATOR_VERSION } from '../src/retrieval-eval.mjs';
+import { createRsiWeekly, taipeiWeek } from '../src/rsi-weekly.mjs';
 import { evaluateSessionFiling } from '../src/sessions/filing-eval.mjs';
 import { evaluateTypedGraphDiscovery, TYPED_GRAPH_EVALUATOR_VERSION } from '../src/typed-graph-eval.mjs';
 
@@ -84,6 +85,10 @@ const HELP = `BrainLink MCP ${VERSION} — one Markdown brain for every AI
   brainlink clients                    show detected / configured AI apps
   brainlink status                     config, vaults, timezone
   brainlink brief [--vault V] [--days 7]  what changed and what is open
+  brainlink miss add --agent NAME --question TEXT --result found|not_found|stale --seconds N --fix-needed TYPE [--date ISO]
+  brainlink miss import --file FILE | miss list [--week YYYY-Www]
+  brainlink bench run --fixture FILE [--vault-root DIR --vault-name NAME] [--week YYYY-Www]
+  brainlink bench report [--weeks N]
   brainlink eval --fixture FILE [--vault-root DIR --vault-name NAME]  compare labelled retrieval (read-only)
   brainlink eval-filing --fixture FILE evaluate session folder suggestions (read-only)
   brainlink eval-graph --fixture FILE evaluate typed relationship proposals (read-only)
@@ -224,6 +229,27 @@ async function main() {
       out(`\nOpen: ${l.counts.tasks} tasks, ${l.counts.next_actions} next actions, ${l.counts.decisions_waiting} decisions waiting, ${l.counts.unresolved_questions} questions`);
       for (const x of [...l.decisions_waiting.map((d) => `decision: ${d.decision}`), ...l.next_actions.map((n) => `next: ${n.action}`)].slice(0, 8)) out(`  · ${x}`);
       return;
+    }
+    case 'miss': {
+      const rsi = createRsiWeekly({ home: appHome() });
+      if (argv[1] === 'add') {
+        const input = { date: opt('date', new Date(Date.now() + 8 * 3600000).toISOString().replace('Z', '+08:00').replace(/\.\d+/, '')), agent: opt('agent'), question: opt('question'), result: opt('result'), seconds: Number(opt('seconds')), fix_needed: opt('fix-needed') };
+        out(JSON.stringify(await rsi.addMiss(input))); return;
+      }
+      if (argv[1] === 'import') { if (!opt('file')) fail('--file required'); out(JSON.stringify(await rsi.importMarkdown(path.resolve(opt('file'))))); return; }
+      if (argv[1] === 'list') { out(JSON.stringify({ misses: await rsi.listMisses(opt('week')), summary: await rsi.aggregateMisses(opt('week')) }, null, 2)); return; }
+      fail('use miss add, import or list');
+    }
+    case 'bench': {
+      const rsi = createRsiWeekly({ home: appHome() });
+      if (argv[1] === 'report') { out(JSON.stringify(await rsi.benchmarkReport(Number(opt('weeks', 8))), null, 2)); return; }
+      if (argv[1] !== 'run') fail('use bench run or report');
+      if (!opt('fixture')) fail('--fixture required');
+      const fixtureBytes = await readFile(path.resolve(opt('fixture')));
+      const fixture = JSON.parse(fixtureBytes.toString('utf8'));
+      const root = opt('vault-root'), name = opt('vault-name', fixture.vault);
+      const { ctx } = root ? { ctx: createContext(normalize({ vaults: [{ name, path: path.resolve(root) }] }), { env: { ...process.env, BRAINLINK_SEMANTIC: '0' } }) } : await openContext(process.env, { trustedLocal: true });
+      out(JSON.stringify(await rsi.runBenchmark({ ctx, fixture, fixtureBytes, week: opt('week', taipeiWeek(new Date().toISOString())) }), null, 2)); return;
     }
     case 'eval': {
       const fixtureFile = opt('fixture');
