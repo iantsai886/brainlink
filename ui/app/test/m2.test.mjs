@@ -4,6 +4,7 @@ import { makeStore, mockServices } from './harness.mjs';
 import { createApi } from '../lib/api.mjs';
 import { useNotes } from '../lib/notes.mjs';
 import { markdown, notesView } from '../views/notes.mjs';
+import { memoryTypeInfo } from '../lib/memory-type.mjs';
 
 test('v0.2 ranked search forwards canonical options without re-ranking',async()=>{
  const store=await makeStore();let seen;store.search=async(q,o)=>{seen={q,o};return [{id:'n_any',title:'As ranked by store',snippet:'hit',score:.3,sha12:'abcdef123456'}]};
@@ -82,6 +83,18 @@ test('memory type picker rejects unknown types and cancel restores original meta
  const original=h.get().frontmatter;assert.equal(h.changeMemoryType('admin'),false);assert.equal(h.get().dirty,false);
  assert.equal(h.changeMemoryType('episodic'),true);assert.equal(h.get().dirty,true);assert.equal(h.cancel(),true);
  assert.equal(h.get().frontmatter,original);assert.equal(h.get().dirty,false);
+});
+test('memory type suggestions use only known frontmatter types and tags and never override an explicit type',()=>{
+ assert.deepEqual(memoryTypeInfo({type:'session_summary'}),{current:null,suggested:'episodic'});
+ assert.deepEqual(memoryTypeInfo({tags:['team','agent_skill']}),{current:null,suggested:'procedural'});
+ assert.deepEqual(memoryTypeInfo({type:'episode',memory_type:'semantic'}),{current:'semantic',suggested:null});
+ assert.deepEqual(memoryTypeInfo({type:'personal_story'}),{current:null,suggested:null});
+});
+test('Notes offers metadata-based suggestions separately from saved memory type',async()=>{
+ const store=await makeStore(),api=createApi({store}),h=useNotes(api);const note=await store.write({vault:'Work',path:'Episode.md',body:'Summary',frontmatter:{type:'session_summary'}},{expected_etag:''});
+ await h.load();await h.open(note.id);let view=notesView(h.get(),api);
+ assert.match(view,/Current type: <strong>Unclassified<\/strong>/);assert.match(view,/Suggested from note metadata: <strong>Episodic<\/strong>/);assert.equal(h.get().dirty,false);
+ h.changeMemoryType('episodic');view=notesView(h.get(),api);assert.match(view,/Current type: <strong>Episodic<\/strong>/);assert.equal(h.get().dirty,true);
 });
 test('wikilinks render safely and backlinks resolve by target id',async()=>{
  const store=await makeStore(),api=createApi({store});const list=await api.listNotes();const website=list.find(n=>n.title==='Website relaunch');const backlinks=await api.backlinks(website.id);
