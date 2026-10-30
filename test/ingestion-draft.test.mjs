@@ -153,3 +153,44 @@ test('scheduled AI drafts are disabled by default and limited to the explicitly 
   const changed = validateIngestionSchedule({ ...schedule, autoDrafts: false }, { ...schedule, last_scheduled_date: '2026-10-30' });
   assert.equal(changed.last_scheduled_date, null, 'changing AI draft behavior resets the previous schedule receipt');
 });
+
+test('scheduled local draft failures use bounded schedule retries and do not repeat successful drafts', async () => {
+  const home = await mkdtemp(path.join(tmpdir(), 'brainlink-ingestion-draft-retry-'));
+  const appHome = path.join(home, 'app'), vault = path.join(home, 'vault');
+  await mkdir(path.join(vault, 'Raw'), { recursive: true });
+  await mkdir(path.join(vault, 'Knowledge'), { recursive: true });
+  await writeFile(path.join(vault, 'Raw', 'Source.md'), '# Fictional source\n\nRetry this local draft once.');
+  const env = { BRAINLINK_HOME: appHome, HOME: home, BRAINLINK_SEMANTIC: '0' };
+  const local = localDateAndTime(new Date(), 'UTC');
+  const pastMinute = `${local.time.slice(0, 2)}:${String(Math.max(0, Number(local.time.slice(3)) - 1)).padStart(2, '0')}`;
+  const config = normalize({ timezone: 'UTC', vaults: [{ name: 'Fictional Team', path: vault }], ingestion: { enabled: true, autoDrafts: true, targets: [{ vault: 'Fictional Team', folder: 'Raw' }], time: pastMinute } });
+  config.sessions.localSummary = { enabled: true, model: 'qwen2.5:3b', autoDraftOnEnd: false, autoFileOnEnd: false };
+  await saveConfig(config, path.join(appHome, 'config.json'));
+  let modelCalls = 0;
+  const app = await startSetup({
+    env, home, os: 'linux', port: 0, useCli: false, ingestionTickMs: 10, ingestionRetryMs: 20,
+    ingestionDraftFetch: async () => {
+      modelCalls++;
+      if (modelCalls === 1) return { ok: false, status: 503 };
+      return { ok: true, json: async () => ({ message: { content: JSON.stringify({ title: 'Retry result', memory_type: 'semantic', summary: 'A fictional retry result.', key_points: [] }) } }) };
+    },
+  });
+  try {
+    const base = `http://127.0.0.1:${app.port}`;
+    const headers = { 'X-BrainLink-Token': app.token };
+    const deadline = Date.now() + 5000;
+    let state, drafts;
+    while (Date.now() < deadline) {
+      state = await fetch(base + '/api/state', { headers }).then((r) => r.json());
+      drafts = await fetch(base + '/api/ingestion/drafts', { headers }).then((r) => r.json());
+      if (modelCalls === 2 && drafts.drafts.length === 1 && state.ingestion_drafts.status.ok) break;
+      await new Promise((resolve) => setTimeout(resolve, 10));
+    }
+    assert.equal(modelCalls, 2, 'the local-model failure gets one bounded retry');
+    assert.equal(drafts.drafts.length, 1);
+    assert.equal(state.ingestion_drafts.status.created, 1);
+    const savedConfig = JSON.parse(await readFile(path.join(appHome, 'config.json'), 'utf8'));
+    assert.equal(savedConfig.ingestion.retry_after, null, 'successful retry clears the retry schedule');
+    assert.deepEqual(await readdir(path.join(vault, 'Knowledge')), [], 'the retry still does not write a vault note');
+  } finally { await new Promise((resolve) => app.server.close(resolve)); }
+});

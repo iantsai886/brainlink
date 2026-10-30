@@ -557,7 +557,10 @@ export async function startSetup(opts = {}) {
       try {
         const result = await runIngestion(cfg, { trigger: 'schedule' });
         if (!result.ok) throw new Error(result.error || 'One or more scan folders could not be read.');
-        if (cfg.ingestion.autoDrafts) await runScheduledIngestionDrafts(cfg, result.candidates);
+        if (cfg.ingestion.autoDrafts) {
+          const draftResult = await runScheduledIngestionDrafts(cfg, result.candidates);
+          if (!draftResult.ok) throw new Error('One or more scheduled local drafts failed.');
+        }
         const latest = await loadConfig(file);
         if (JSON.stringify(latest.ingestion?.targets || []) === JSON.stringify(cfg.ingestion?.targets || [])) {
           latest.ingestion.retry_count = 0;
