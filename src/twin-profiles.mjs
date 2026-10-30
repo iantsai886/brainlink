@@ -5,13 +5,24 @@ export function profileScopeEditable(profile) {
   return (profile?.agent_access || []).every((agent) => {
     const grants = agent.vaults || [];
     const names = grants.map((grant) => grant.name);
+    const memory = agent.memory_policy;
     return grants.length > 0
       && new Set(names).size === names.length
       && grants.every((grant) => profileVaults.has(grant.name)
         && ['read', 'propose'].includes(grant.access)
         && Array.isArray(grant.operations)
-        && grant.operations.length > 0);
+        && grant.operations.length > 0)
+      && (memory == null || ['working', 'semantic', 'procedural', 'episodic'].every((type) => typeof memory[type] === 'boolean'));
   });
+}
+
+const MEMORY_TYPES = ['working', 'semantic', 'procedural', 'episodic'];
+export function effectiveAgentMemoryPolicy(profile, agentAccess) {
+  return Object.fromEntries(MEMORY_TYPES.map((type) => [
+    type,
+    profile?.memory_policy?.[type] === true
+      && (agentAccess?.memory_policy == null || agentAccess.memory_policy[type] === true),
+  ]));
 }
 
 export function twinProfileStatus(cfg) {
@@ -24,11 +35,17 @@ export function twinProfileStatus(cfg) {
     source_policy: { ...profile.source_policy },
     memory_policy: { ...profile.memory_policy },
     allowed_actions: [...(profile.allowed_actions || [])],
-    agents: (profile.agent_access || []).map(({ agent_id, vaults }) => ({
-      id: agent_id,
-      name: cfg.ai_agents.find((agent) => agent.id === agent_id)?.name || 'Unknown agent',
-      vaults: vaults.map(({ name, access, operations }) => ({ name, access, operations: [...operations] })),
-    })),
+    agents: (profile.agent_access || []).map((agentAccess) => {
+      const agent = cfg.ai_agents.find((item) => item.id === agentAccess.agent_id);
+      return {
+        id: agentAccess.agent_id,
+        name: agent?.name || 'Unknown agent',
+        preset_client_id: agent?.preset_client_id || null,
+        memory_policy: effectiveAgentMemoryPolicy(profile, agentAccess),
+        memory_policy_inherited: agentAccess.memory_policy == null,
+        vaults: (agentAccess.vaults || []).map(({ name, access, operations }) => ({ name, access, operations: [...operations] })),
+      };
+    }),
     editable_scope: profileScopeEditable(profile),
     declaration_status: 'agent_profile_scope_active',
     memory_policy_enforcement: 'tools_prompts_resources',
@@ -55,7 +72,7 @@ export function resolveTwinAgentScope(cfg, agent, tokenProvided = false) {
   if (matches.length !== 1) return { mode: 'unassigned', profile_id: null, grants: [] };
   const { profile, entry } = matches[0];
   const grants = (entry.vaults || []).map(({ name, access, operations }) => ({ name, access, operations: Array.isArray(operations) ? [...operations] : [] }));
-  return { mode: 'scoped', profile_id: profile.id, profile_name: profile.name, memory_policy: { ...profile.memory_policy }, grants };
+  return { mode: 'scoped', profile_id: profile.id, profile_name: profile.name, memory_policy: effectiveAgentMemoryPolicy(profile, entry), grants };
 }
 
 // Memory policy is enforced on the same boundary as vault and operation grants. This map

@@ -4,7 +4,7 @@ import { mkdtemp, mkdir, readFile, readdir, writeFile, stat } from 'node:fs/prom
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { normalize, validate, saveConfig } from '../src/config.mjs';
-import { twinProfileStatus, profileScopeEditable } from '../src/twin-profiles.mjs';
+import { twinProfileStatus, profileScopeEditable, resolveTwinAgentScope } from '../src/twin-profiles.mjs';
 import { startSetup } from '../src/setup.mjs';
 import { createContext, loadVault, readNote } from '../src/core.mjs';
 import { createMcp } from '../src/server.mjs';
@@ -55,10 +55,18 @@ test('Twin profile declarations validate references and prevent permission escal
   const revoked = structuredClone(cfg);
   revoked.ai_agents[0].revoked = true;
   assert.match(validate(revoked).join('; '), /unknown or revoked/);
+  const invalidMemoryGrant = structuredClone(cfg);
+  invalidMemoryGrant.twin_profiles[0].agent_access[0].memory_policy = { working: false, semantic: true, procedural: false };
+  assert.match(validate(invalidMemoryGrant).join('; '), /must declare all four memory types/);
+  const escalatedMemory = structuredClone(cfg);
+  escalatedMemory.twin_profiles[0].agent_access[0].memory_policy = { working: false, semantic: true, procedural: true, episodic: false };
+  escalatedMemory.twin_profiles[0].memory_policy.procedural = false;
+  assert.match(validate(escalatedMemory).join('; '), /cannot exceed the Twin profile policy/);
 });
 
-test('Twin status shows limited runtime scope and never exposes agent credentials', () => {
+test('Twin status shows limited runtime scope and never exposes agent credentials', async () => {
   const status = twinProfileStatus(fixture('C:\\fictional-vault'));
+  const cfg = fixture('C:\\fictional-vault');
   assert.equal(status.enforcement, 'scoped_agent_read_only');
   assert.equal(status.profiles[0].declaration_status, 'agent_profile_scope_active');
   assert.equal(status.profiles[0].memory_policy_enforcement, 'tools_prompts_resources');
@@ -71,8 +79,18 @@ test('Twin status shows limited runtime scope and never exposes agent credential
   scoped.twin_profiles[0].vaults.push({ name: 'Fictional Other', access: 'read' });
   assert.equal(profileScopeEditable(scoped.twin_profiles[0]), true, 'the matrix editor supports an agent scoped to only one of several profile vaults');
   assert.equal(status.profiles[0].agents[0].name, 'Fictional Codex');
+  assert.equal(status.profiles[0].agents[0].memory_policy_inherited, true);
+  assert.deepEqual(status.profiles[0].agents[0].memory_policy, cfg.twin_profiles[0].memory_policy);
   assert.equal(status.profiles[0].agents[0].vaults[0].operations.includes('write_note'), false);
   assert.doesNotMatch(JSON.stringify(status), /tokenHash|f{64}/);
+  const scopedCfg = structuredClone(cfg);
+  scopedCfg.twin_profiles[0].agent_access[0].memory_policy = { working: false, semantic: true, procedural: true, episodic: false };
+  const resolvedScope = resolveTwinAgentScope(scopedCfg, scopedCfg.ai_agents[0], true);
+  assert.deepEqual(resolvedScope.memory_policy, scopedCfg.twin_profiles[0].agent_access[0].memory_policy);
+  scopedCfg.twin_profiles[0].agent_access[0].memory_policy.procedural = false;
+  const noProcedural = createMcp(createContext(scopedCfg, { env: { BRAINLINK_AGENT_TOKEN: 'fictional-agent-token' } }));
+  const noProceduralTools = await noProcedural.handle({ jsonrpc: '2.0', id: 1, method: 'tools/list', params: {} });
+  assert.equal(noProceduralTools.result.tools.some((tool) => tool.name === 'brainlink_guide'), false);
 });
 
 test('Twin setup creates profiles from local UI choices and escapes every profile-provided label', async () => {
@@ -110,23 +128,25 @@ test('Twin permission controls disable and clear actions when their memory type 
   const end = html.indexOf("$('twin-new-memory').addEventListener", start);
   assert.ok(start >= 0 && end > start, 'permission helper is connected to memory changes');
   const memories = ['semantic', 'episodic', 'working', 'procedural'].map((key) => ({ dataset: { twinMemory: key }, checked: key === 'episodic' || key === 'procedural' }));
+  const agentMemories = ['working', 'semantic', 'procedural', 'episodic'].map((key) => ({ dataset: { twinAgentMemory: 'agent', memoryType: key }, checked: key === 'episodic' || key === 'procedural', disabled: false }));
   const operations = ['search', 'read_note', 'read_session', 'log_session', 'propose_note', 'handoff_read', 'write_handoff'].map((value) => ({ value, checked: true, disabled: false }));
-  const document = { querySelectorAll: (selector) => selector === '[data-twin-memory]' ? memories : operations };
+  const agentOperations = operations.map((input) => ({ ...input, dataset: { twinOperation: 'agent' } }));
+  const document = { querySelectorAll: (selector) => selector === '[data-twin-memory]' ? memories : selector === '[data-twin-agent-memory]' ? agentMemories : selector === '[data-twin-operation]' ? agentOperations : operations };
   const helpers = new Function('document', `${html.slice(start, end)}; return { updateTwinPermissionControls, twinActionMemoryAllowed };`)(document);
   const update = helpers.updateTwinPermissionControls;
   update();
-  assert.deepEqual(operations.map(({ disabled, checked }) => ({ disabled, checked })), [
+  assert.deepEqual(agentOperations.map(({ disabled, checked }) => ({ disabled, checked })), [
     { disabled: true, checked: false }, { disabled: true, checked: false },
     { disabled: false, checked: true }, { disabled: false, checked: true }, { disabled: true, checked: false },
     { disabled: true, checked: false }, { disabled: true, checked: false },
   ]);
-  memories.find((item) => item.dataset.twinMemory === 'semantic').checked = true;
-  memories.find((item) => item.dataset.twinMemory === 'working').checked = true;
+  memories.forEach((item) => { item.checked = true; });
+  agentMemories.forEach((item) => { item.checked = true; });
   update();
-  assert.deepEqual(operations.map(({ disabled }) => disabled), [false, false, false, false, false, false, false]);
+  assert.deepEqual(agentOperations.map(({ disabled }) => disabled), [false, false, false, false, false, false, false]);
   memories.find((item) => item.dataset.twinMemory === 'episodic').checked = false;
   update();
-  assert.deepEqual(operations.map(({ disabled }) => disabled), [false, false, true, true, false, false, false], 'semantic note proposals remain available when episodic memory is off');
+  assert.deepEqual(agentOperations.map(({ disabled }) => disabled), [false, false, true, true, false, false, false], 'semantic note proposals remain available when episodic memory is off');
   assert.equal(helpers.twinActionMemoryAllowed('log_session', { episodic: true }), true);
   assert.equal(helpers.twinActionMemoryAllowed('log_session', { episodic: false }), false);
   assert.equal(helpers.twinActionMemoryAllowed('propose_note', { semantic: true, episodic: false }), true);
@@ -769,7 +789,7 @@ test('DeepSeek Harness named profile connects through Setup with its own Twin-sc
   try {
     const state = await (await fetch(`${base}/api/state`, { headers: { 'X-BrainLink-Token': setup.token } })).json();
     assert.equal(state.clients['deepseek-harness@web'].title, 'DeepSeek Harness · web');
-    const connected = await api('/api/connect', { client: 'deepseek-harness@web', profile_id: 'org_twin_1', vaults: [{ name: 'Fictional Org', operations: ['search', 'read_note', 'log_session'] }] });
+  const connected = await api('/api/connect', { client: 'deepseek-harness@web', profile_id: 'org_twin_1', vaults: [{ name: 'Fictional Org', operations: ['search', 'read_note', 'log_session'] }], memory_policy: { working: false, semantic: true, procedural: false, episodic: true } });
     assert.equal(connected.status, 200, JSON.stringify(connected.body));
     assert.equal(connected.body.health.ok, true, JSON.stringify(connected.body));
     const patch = parseYaml(await readFile(path.join(dshProfile, 'cordis.patch.yml'), 'utf8'));
@@ -783,6 +803,7 @@ test('DeepSeek Harness named profile connects through Setup with its own Twin-sc
     assert.equal(managed.tokenHash, hashToken(token));
     assert.equal(saved.twin_profiles[0].agent_access[0].agent_id, managed.id);
     assert.ok(saved.twin_profiles[0].agent_access[0].vaults[0].operations.includes('log_session'));
+    assert.deepEqual(saved.twin_profiles[0].agent_access[0].memory_policy, { working: false, semantic: true, procedural: false, episodic: true });
     const dshMcp = createMcp(createContext(saved, { env: { ...env, BRAINLINK_AGENT_TOKEN: token, BRAINLINK_AI_PLATFORM: 'DeepSeek Harness' } }));
     const logResult = await dshMcp.handle({ jsonrpc: '2.0', id: 8, method: 'tools/call', params: { name: 'session_log', arguments: { title: 'Fictional Harness session', text: 'Saved by synthetic test.', private: false } } });
     assert.equal(logResult.result.isError, false);
@@ -823,7 +844,7 @@ test('preset AI apps can receive scoped session and handoff tools without semant
     return { status: response.status, body: await response.json() };
   };
   try {
-    const connected = await api('/api/connect', { client: 'cursor', profile_id: 'org_twin_1', vaults: [{ name: 'Fictional Org', operations: ['read_session', 'handoff_read', 'write_handoff'] }] });
+  const connected = await api('/api/connect', { client: 'cursor', profile_id: 'org_twin_1', vaults: [{ name: 'Fictional Org', operations: ['read_session', 'handoff_read', 'write_handoff'] }], memory_policy: { working: true, semantic: false, procedural: false, episodic: true } });
     assert.equal(connected.status, 200, JSON.stringify(connected.body));
     assert.equal(connected.body.health.ok, true, JSON.stringify(connected.body));
     assert.equal(connected.body.health.tool, 'session_list');
@@ -832,6 +853,8 @@ test('preset AI apps can receive scoped session and handoff tools without semant
     const saved = JSON.parse(await readFile(path.join(env.BRAINLINK_HOME, 'config.json'), 'utf8'));
     const agent = saved.ai_agents.find((item) => item.preset_client_id === 'cursor');
     const grant = saved.twin_profiles[0].agent_access.find((item) => item.agent_id === agent.id).vaults[0];
+    const memoryPolicy = saved.twin_profiles[0].agent_access.find((item) => item.agent_id === agent.id).memory_policy;
+    assert.deepEqual(memoryPolicy, { working: true, semantic: false, procedural: false, episodic: true });
     assert.equal(grant.access, 'propose');
     assert.deepEqual(grant.operations.sort(), ['handoff_read', 'read_session', 'write_handoff']);
     const ctx = createContext(saved, { env: { ...env, BRAINLINK_AGENT_TOKEN: token } });

@@ -140,12 +140,24 @@ function assertTwinActionsMatchMemory(agentAccess, memoryPolicy) {
     read_session: 'episodic', log_session: 'episodic', propose_note: 'semantic',
     handoff_read: 'working', write_handoff: 'working',
   };
-  for (const grant of agentAccess.flatMap((agent) => agent.vaults)) {
+  for (const agent of agentAccess) for (const grant of agent.vaults) {
     for (const operation of grant.operations) {
       const memoryType = requiredMemory[operation];
-      if (memoryType && memoryPolicy[memoryType] !== true) throw new Error(`Enable ${memoryType} memory before granting ${operation} access.`);
+      const effective = agent.memory_policy || memoryPolicy;
+      if (memoryType && effective[memoryType] !== true) throw new Error(`Enable ${memoryType} memory for this AI before granting ${operation} access.`);
     }
   }
+}
+
+const TWIN_MEMORY_TYPES = ['working', 'semantic', 'procedural', 'episodic'];
+function normalizeAgentMemoryPolicy(requested, profilePolicy, inheritedPolicy = profilePolicy) {
+  if (requested === undefined || requested === null) return { ...inheritedPolicy };
+  if (!requested || typeof requested !== 'object' || Array.isArray(requested) || TWIN_MEMORY_TYPES.some((type) => typeof requested[type] !== 'boolean')) {
+    throw new Error('Choose on or off for each of the four memory types for this AI.');
+  }
+  const policy = Object.fromEntries(TWIN_MEMORY_TYPES.map((type) => [type, requested[type]]));
+  if (TWIN_MEMORY_TYPES.some((type) => policy[type] && profilePolicy[type] !== true)) throw new Error('An AI cannot receive memory access that the Twin profile has disabled.');
+  return policy;
 }
 
 export function pickFolder(os = process.platform, prompt = 'Choose your Obsidian / Markdown vault folder') {
@@ -968,6 +980,12 @@ export async function startSetup(opts = {}) {
     const profileId = String(b.profile_id || '');
     const profile = cfg.twin_profiles.find((item) => item.id === profileId);
     if (!profile) throw new Error('Choose an existing Twin profile.');
+    const existingPresetAgent = cfg.ai_agents.find((item) => item.preset_client_id === clientId);
+    const existingProfileGrant = existingPresetAgent && profile.agent_access.find((item) => item.agent_id === existingPresetAgent.id);
+    const defaultAgentMemory = existingProfileGrant?.memory_policy || (existingProfileGrant ? profile.memory_policy : {
+      working: false, semantic: profile.memory_policy.semantic === true, procedural: false, episodic: false,
+    });
+    const memory_policy = normalizeAgentMemoryPolicy(b.memory_policy, profile.memory_policy, defaultAgentMemory);
     const requested = Array.isArray(b.vaults) ? b.vaults : [];
     if (!requested.length || requested.length > profile.vaults.length) throw new Error('Choose at least one vault for this AI app.');
     const seen = new Set();
@@ -981,9 +999,9 @@ export async function startSetup(opts = {}) {
       const needsSemantic = operations.some((action) => ['search', 'read_note', 'propose_note'].includes(action));
       const needsEpisodic = operations.includes('read_session');
       const needsWorking = operations.some((action) => ['handoff_read', 'write_handoff'].includes(action));
-      if (needsSemantic && profile.memory_policy?.semantic !== true) throw new Error('Turn on semantic memory in this Twin profile before granting note or search access.');
-      if ((needsEpisodic || operations.includes('log_session')) && profile.memory_policy?.episodic !== true) throw new Error('Turn on episodic memory in this Twin profile before granting session access.');
-      if (needsWorking && profile.memory_policy?.working !== true) throw new Error('Turn on working memory in this Twin profile before granting handoff access.');
+      if (needsSemantic && memory_policy.semantic !== true) throw new Error('Enable semantic memory for this AI before granting note or search access.');
+      if ((needsEpisodic || operations.includes('log_session')) && memory_policy.episodic !== true) throw new Error('Enable episodic memory for this AI before granting session access.');
+      if (needsWorking && memory_policy.working !== true) throw new Error('Enable working memory for this AI before granting handoff access.');
       if (operations.some((action) => ['handoff_read', 'write_handoff'].includes(action)) && cfg.handoff?.vault !== name) throw new Error('Handoff access is available only in the vault configured as BrainLink’s handoff mailbox.');
       if (operations.some((action) => ['propose_note', 'write_handoff'].includes(action)) && profileVault.access !== 'propose') throw new Error('Choose propose access for a vault before allowing session closeouts or sending handoffs.');
       seen.add(name);
@@ -1006,7 +1024,7 @@ export async function startSetup(opts = {}) {
     }
     for (const item of cfg.twin_profiles) item.agent_access = (item.agent_access || []).filter((grant) => grant.agent_id !== agent.id);
     const currentProfile = cfg.twin_profiles.find((item) => item.id === profileId);
-    currentProfile.agent_access.push({ agent_id: agent.id, vaults: grants });
+    currentProfile.agent_access.push({ agent_id: agent.id, memory_policy, vaults: grants });
     currentProfile.allowed_actions = [...new Set([...(currentProfile.allowed_actions || []), ...grants.flatMap((grant) => grant.operations)])];
     const validationErrors = validate(cfg);
     if (validationErrors.length) throw new Error(`These permissions cannot be saved: ${validationErrors[0]}`);
@@ -1299,6 +1317,8 @@ export async function startSetup(opts = {}) {
         profileVaults.push({ name: vault.name, access: item.access });
       }
       if (new Set(profileVaults.map((item) => item.name)).size !== profileVaults.length) throw new Error('Choose each vault only once.');
+      const memory = b.memory_policy || {};
+      const memory_policy = Object.fromEntries(TWIN_MEMORY_TYPES.map((key) => [key, memory[key] === true]));
       const allowedOperations = new Set(['search', 'read_note', 'read_session', 'log_session', 'propose_note', 'handoff_read', 'write_handoff']);
       const rawAgents = Array.isArray(b.agent_access) ? b.agent_access : [];
       const agentIds = new Set();
@@ -1320,10 +1340,8 @@ export async function startSetup(opts = {}) {
         if (vaultGrants.some((grant) => grant.operations.includes('read_session')) && vaultGrants.some((grant) => !grant.operations.includes('read_session'))) throw new Error('Session history access applies across this AI connection. Grant session access to every selected vault or remove the other vaults.');
         if (vaultGrants.some((grant) => grant.operations.includes('log_session')) && vaultGrants.some((grant) => !grant.operations.includes('log_session'))) throw new Error('Private session logging applies across this AI connection. Grant it for every selected vault or remove the other vaults.');
         agentIds.add(agent.id);
-        return { agent_id: agent.id, vaults: vaultGrants };
+        return { agent_id: agent.id, memory_policy: normalizeAgentMemoryPolicy(entry.memory_policy, memory_policy), vaults: vaultGrants };
       });
-      const memory = b.memory_policy || {};
-      const memory_policy = Object.fromEntries(['working', 'semantic', 'procedural', 'episodic'].map((key) => [key, memory[key] === true]));
       assertTwinActionsMatchMemory(agentAccess, memory_policy);
       const allowed_actions = [...new Set(agentAccess.flatMap((entry) => entry.vaults.flatMap((vault) => vault.operations)))];
       const profile = {
@@ -1359,6 +1377,8 @@ export async function startSetup(opts = {}) {
       if (new Set(profileVaults.map((item) => item.name)).size !== profileVaults.length) throw new Error('Choose each vault only once.');
       const assignmentVault = profile.github_repository?.vault;
       if (assignmentVault && !profileVaults.some((item) => item.name === assignmentVault)) throw new Error('Clear this profile’s GitHub assignment before removing its assigned vault.');
+      const memory = b.memory_policy || {};
+      const memory_policy = Object.fromEntries(TWIN_MEMORY_TYPES.map((key) => [key, memory[key] === true]));
       const allowedOperations = new Set(['search', 'read_note', 'read_session', 'log_session', 'propose_note', 'handoff_read', 'write_handoff']);
       const rawAgents = Array.isArray(b.agent_access) ? b.agent_access : [];
       const agentIds = new Set();
@@ -1380,10 +1400,8 @@ export async function startSetup(opts = {}) {
         if (vaultGrants.some((grant) => grant.operations.includes('read_session')) && vaultGrants.some((grant) => !grant.operations.includes('read_session'))) throw new Error('Session history access applies across this AI connection. Grant session access to every selected vault or remove the other vaults.');
         if (vaultGrants.some((grant) => grant.operations.includes('log_session')) && vaultGrants.some((grant) => !grant.operations.includes('log_session'))) throw new Error('Private session logging applies across this AI connection. Grant it for every selected vault or remove the other vaults.');
         agentIds.add(agent.id);
-        return { agent_id: agent.id, vaults: vaultGrants };
+        return { agent_id: agent.id, memory_policy: normalizeAgentMemoryPolicy(entry.memory_policy, memory_policy), vaults: vaultGrants };
       });
-      const memory = b.memory_policy || {};
-      const memory_policy = Object.fromEntries(['working', 'semantic', 'procedural', 'episodic'].map((key) => [key, memory[key] === true]));
       assertTwinActionsMatchMemory(agentAccess, memory_policy);
       profile.name = name;
       profile.owner = owner;

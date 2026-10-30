@@ -134,6 +134,11 @@ export function validate(cfg) {
     const profileAgents = new Set();
     for (const access of Array.isArray(p.agent_access) ? p.agent_access : []) {
       if (!cfg.ai_agents.some((agent) => agent.id === access.agent_id && !agent.revoked)) errors.push(`twin profile "${p.id || ''}": agent_access references an unknown or revoked AI agent`);
+      if (access.memory_policy !== undefined) {
+        const types = ['working', 'semantic', 'procedural', 'episodic'];
+        if (!access.memory_policy || typeof access.memory_policy !== 'object' || Array.isArray(access.memory_policy) || types.some((type) => typeof access.memory_policy[type] !== 'boolean')) errors.push(`twin profile "${p.id || ''}": each agent memory_policy must declare all four memory types`);
+        else if (types.some((type) => access.memory_policy[type] && p.memory_policy?.[type] !== true)) errors.push(`twin profile "${p.id || ''}": an agent memory policy cannot exceed the Twin profile policy`);
+      }
       if (profileAgents.has(access.agent_id)) errors.push(`twin profile "${p.id || ''}": duplicate agent access`);
       if (assignedTwinAgents.has(access.agent_id)) errors.push('an AI agent may be assigned to only one Twin profile');
       profileAgents.add(access.agent_id);
