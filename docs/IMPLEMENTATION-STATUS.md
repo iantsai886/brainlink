@@ -11,6 +11,10 @@ The background scan timer and Setup routes that change a vault's privacy or the 
 
 Evidence on Windows with Node.js 24.22.1: the existing end-to-end privacy/schedule regression passed 20/20 repeated runs; full `npm run test:all` passed on the exact code tree committed as `107b1e0`: core 600 total (592 passed, 0 failed, 8 platform/privilege skips), UI 44/44. Before the fix, the full run exposed the regression and the focused test reproduced it once in 10 runs. Tests use fictional vaults. Hosted GitHub Actions has not allocated runners, so this remains local test evidence.
 
+### Current Windows install and upgrade checks (commit `b579fb2`, 2026-10-31)
+
+`npm run smoke:installed:win` passed: the bundled runtime launched BrainLink 1.2.8, the desktop and Start Menu shortcuts worked, Setup health loaded, the temporary Hermes hook could be enabled and disabled without replacing unrelated profile settings, and isolated uninstall removed only the test app while preserving the test user's data and restoring PATH. `npm run smoke:upgrade:win` built the tagged 1.2.7 and current 1.2.8 installers, installed 1.2.7 in an isolated profile, upgraded in place, preserved a user-data canary, passed upgraded Setup health, and uninstalled while preserving data and restoring PATH. Temporary profiles were cleaned up. These are local Windows checks using fictional data; the installer is unsigned and was not published.
+
 ### Do not publish partial session imports while a source is changing (commit `310f3d3`, 2026-10-30)
 
 Claude Code, Codex, and DeepSeek Harness importers now compare source metadata before and after reading. If an active transcript changes during the read, BrainLink defers it without storing a partial session or advancing its cursor; the next scan retries the complete transcript. After storage, the importer checks again and keeps the cursor behind if the source changed during that step. Cursor files are replaced atomically, including for Hermes, so an interrupted write cannot leave truncated JSON.
