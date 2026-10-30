@@ -5,7 +5,7 @@ GitHub repository: `iantsai886/brainlink`
 Branch: `integration/brainlink-retrieval-evaluation` (integrates profile-scoped GitHub, RSI discovery, and independent retrieval evaluation)
 Code baseline: development target `1.2.8`, with `package.json` as the canonical version source. The `v1.2.7` tag belongs to the separate `wip/v1.2.7` release line; this branch continues from the full-source `main` history and does not move or recreate that tag.
 
-### Graph keeps relationship meaning and isolates graph construction (2026-10-30)
+### Graph keeps relationship meaning and isolates graph construction (2026-10-30, source `543be21`)
 
 The 3D graph now builds entity metadata, ordinary Markdown links, typed relationships, and degree counts only from visible, non-generated notes. Each approved typed relationship remains its own directional edge with its predicate, evidence, and confidence; it no longer merges separate relationships between the same two notes. Parallel edges are curved apart, and their escaped hover label shows the evidence and confidence. A regression fixture confirms that a private duplicate entity ID does not alter a public node and that private relationship evidence never reaches the graph. Verification on Windows/Node.js 24.22.1: graph suite 20/20, full core suite 535 total (529 passed, 0 failed, 6 platform/privilege skips), UI 29/29. Linux Docker/Node.js 24: full core suite 535 total (533 passed, 0 failed, 2 skips), UI 29/29. This is local automated verification; visual acceptance in a real desktop session and hosted CI remain open.
 
