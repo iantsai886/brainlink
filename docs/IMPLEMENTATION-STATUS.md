@@ -1,13 +1,19 @@
 # BrainLink implementation status
 
-Status snapshot: 2026-10-28 (Asia/Taipei).
+Status snapshot: 2026-10-30 (Asia/Taipei).
 GitHub repository: `iantsai886/brainlink`
 Branch: `integration/brainlink-retrieval-evaluation` (integrates profile-scoped GitHub, RSI discovery, and independent retrieval evaluation)
 Code baseline: development target `1.2.8`, with `package.json` as the canonical version source. The `v1.2.7` tag belongs to the separate `wip/v1.2.7` release line; this branch continues from the full-source `main` history and does not move or recreate that tag.
 
+### DeepSeek Harness company-Twin connection (2026-10-30)
+
+Configured the local DeepSeek Harness `desktop` profile through BrainLink Setup under an `Iango Organisation Twin`. Its only vault grant is the non-private `Brain` vault, with `search`, `read_note`, and `propose_note`; semantic memory is enabled, while working, procedural, and episodic memory are off. General note writes, session history, handoffs, private vaults, and other vaults were not granted. BrainLink's local MCP access check passed (`vault_search`, 22.2 seconds), and `brainlink clients` reports `deepseek-harness@desktop` connected. Its profile token is stored only in local BrainLink/Harness configuration and was not committed. The Harness app was not running during verification, so app-side config loading and model-driven tool use still require restarting the `desktop` profile and checking that BrainLink tools appear. This is local machine evidence, not cross-client acceptance.
+
+On the same Windows/Node.js 24.22.1 checkout at `e25d997e082bbaee7dd22a5e9dc900e7689668a3`, `npm run test:all` completed successfully: core 534 total (528 passed, 0 failed, 6 platform/privilege skips) and UI 29/29. GitHub hosted CI for this commit did not start source checks because the account's payment/spending limit needs attention; macOS runner capacity also prevented runner acquisition. Those are hosted infrastructure blockers, not reported source-test failures.
+
 ### Twin permission quick preset (2026-10-28)
 
-Added form-only **Apply read and propose access** and per-vault connection presets. The Twin setup preset fills only the already selected AI agents and vaults, selects `search`, `read_note`, and `propose_note`, sets proposal access, and enables semantic memory. The connection preset appears only when the selected Twin already grants proposal access and semantic memory; it selects those same three actions for that vault. Neither preset saves or connects by itself; the existing review and explicit confirmation remain required. English, Traditional Chinese and Portuguese text is present. Focused Windows/Node.js 24.22.1 verification: Twin API suite 26/26, locale and permission-preset checks 27/27, UI suite 29/29, embedded UI script passed `node --check`, and `git diff --check` passed. The full suite on the parent commit passed (core 526/526 with 6 platform skips; UI 29/29), before these UI changes. Live DeepSeek Harness profile/vault assignment and client loading remain unverified.
+Added form-only **Apply read and propose access** and per-vault connection presets. The Twin setup preset fills only the already selected AI agents and vaults, selects `search`, `read_note`, and `propose_note`, sets proposal access, and enables semantic memory. The connection preset appears only when the selected Twin already grants proposal access and semantic memory; it selects those same three actions for that vault. Neither preset saves or connects by itself; the existing review and explicit confirmation remain required. English, Traditional Chinese and Portuguese text is present. Focused Windows/Node.js 24.22.1 verification: Twin API suite 26/26, locale and permission-preset checks 27/27, UI suite 29/29, embedded UI script passed `node --check`, and `git diff --check` passed. The full suite on the parent commit passed (core 526/526 with 6 platform skips; UI 29/29), before these UI changes. At this earlier snapshot, the live DeepSeek Harness profile had not yet been configured; see the 2026-10-30 section above.
 
 ### RSI research discovery quick-start (2026-10-28)
 
