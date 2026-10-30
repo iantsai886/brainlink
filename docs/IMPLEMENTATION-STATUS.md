@@ -53,9 +53,9 @@ Added `src/update-signing.mjs`, `scripts/sign-update-manifest.mjs`, and `npm run
 
 Added an API-level regression to the existing fictional-vault scan test: if BrainLink was closed at the configured daily time, opening the background service later that day catches up the scan once; the saved local run date prevents a duplicate scan. Manual scanning, multi-folder scope, private-vault exclusion and content-free activity logging remain covered by the same test. Windows/Node.js 24.22.1 focused run: `node --import ./test/_preload.mjs --test --test-concurrency=1 test/ingestion-schedule.test.mjs test/startup.test.mjs` passed 12/12; `git diff --check` passed. This verifies scheduler recovery in the local service test fixture, not unattended startup on each packaged operating system.
 
-### Hosted Actions still cannot start (2026-10-30, source `97dba86`)
+### Hosted Actions still cannot start (2026-10-30, source `1d28fbb`)
 
-Pull request run `41057081923` and push run `41057091787` both failed all nine jobs before any step ran (`runner_id: 0`, empty step lists, no logs). The failed logs endpoint returned `log not found`. These runs provide no hosted test or build evidence and do not indicate a source failure; their cause is not exposed by the run metadata. The same runner-allocation failure has recurred on earlier commits. Local Windows and Linux receipts remain the available verification. See [PR run](https://github.com/iantsai886/brainlink/actions/runs/41057081923) and [push run](https://github.com/iantsai886/brainlink/actions/runs/41057091787).
+Pull request run `41058236744` and push run `41058224779` both failed all nine jobs before any step ran (empty step lists; the logs endpoint returns `log not found`). These runs provide no hosted test or build evidence and do not indicate a source failure; their cause is not exposed by the run metadata. The same runner-allocation failure has recurred on earlier commits. Local Windows and Linux receipts remain the available verification. See [PR run](https://github.com/iantsai886/brainlink/actions/runs/41058236744) and [push run](https://github.com/iantsai886/brainlink/actions/runs/41058224779).
 
 ### Live Claude-to-Codex handoff check prepared (2026-10-30)
 
