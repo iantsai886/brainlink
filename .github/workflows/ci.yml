@@ -38,6 +38,9 @@ jobs:
       - name: Run core and UI suites
         run: npm run test:all
 
+      - name: Run encrypted multi-scope backup and restore smoke
+        run: npm run smoke:backup-recovery
+
   windows-package:
     name: Build unsigned Windows installer
     runs-on: windows-latest
