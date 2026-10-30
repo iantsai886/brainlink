@@ -158,6 +158,16 @@ test('ui/index.html: #note-modal starts hidden (author CSS cannot override the h
   assert.match(html, /e\.key === 'Escape'\)\s*closeNote\(\)/, 'Escape must hide the modal');
 });
 
+test('ui/index.html: shared desktop content width grows while the graph still stacks on narrow screens', async () => {
+  const html = await readFile(path.join(ROOT, 'ui', 'index.html'), 'utf8');
+  const css = html.match(/<style>([\s\S]*?)<\/style>/)?.[1] || '';
+  assert.match(css, /--content-width:\s*1180px/, 'desktop content should use the wider shared layout size');
+  for (const selector of ['header', 'main', '#boot-loading, #boot-error', '#main-nav']) {
+    assert.match(css, new RegExp(`${selector.replace(/[.*+?^${}()|[\\]\\]/g, '\\$&')}\\s*\\{[^}]*max-width:\\s*var\\(--content-width\\)`), `${selector} should align to the same content grid`);
+  }
+  assert.match(css, /@media\s*\(max-width:\s*720px\)\s*\{\s*\.brain\s*\{\s*grid-template-columns:\s*1fr;/, 'graph and details should stack on narrow screens');
+});
+
 // ---- sync-cli / sync/engine: local-only `sessions` count (was hardcoded 0) ----
 
 test('runSync: local-only still counts imported, non-private sessions instead of always reporting 0', async () => {
