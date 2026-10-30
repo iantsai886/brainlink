@@ -505,6 +505,7 @@
   "agents.testFailed": "The call failed; see Activity below.",
   "notes3d.panelTitle": "Your brain",
   "notes3d.vaultFilter": "Vault",
+  "notes3d.resetView": "Reset view",
   "notes3d.allVaults": "All accessible vaults",
   "notes3d.loading": "Loading your 3D brain map…",
   "notes3d.loadError": "Could not load the map: {error}",

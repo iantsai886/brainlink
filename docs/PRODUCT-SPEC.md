@@ -112,7 +112,7 @@ Clean-room implementations of the strongest patterns in Obsidian Copilot, Khoj a
 | **Link health** | Unlinked notes, broken links, duplicate titles, stale active notes | — |
 | **Shared commands** | Notes in `BrainLink/Commands` can be listed as prompts by supported MCP clients that load BrainLink prompts (weekly review, meeting notes, link my notes ship as starters) | Copilot commands shared across agents |
 | **Smart connect** | "Connect to …" also loads what changed this week, open loops and memories | — |
-| **Graph view** | Setup shows a rotatable, depth-aware 3D wikilink map with zoom, reset, and click-to-open notes; a keyboard-accessible note list offers the same open action. Users can browse/edit notes and scan enabled, non-private vaults in small batches for same-scope typed relationship suggestions. Suggestions stay out of the graph until separately approved. | Brain 3D |
+| **Graph view** | Setup shows a rotatable 3D map of note links and approved typed relationships. Users can zoom, reset the view, click to open notes, or use the keyboard-accessible note list. Typed relationship suggestions stay out of the graph until separately approved. | Brain 3D |
 
 Not yet: cross-encoder rerank, cloud embedding providers. Scheduled briefs run locally while BrainLink is open; there are no remote notifications, and the brief is stored in BrainLink's local app data rather than written into the vault or shared with connected agents.
 

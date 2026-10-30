@@ -505,6 +505,7 @@
   "agents.testFailed": "連線測試失敗，請查看下方的活動記錄。",
   "notes3d.panelTitle": "你的大腦",
   "notes3d.vaultFilter": "資料庫",
+  "notes3d.resetView": "重設檢視",
   "notes3d.allVaults": "所有可存取的資料庫",
   "notes3d.loading": "正在載入 3D 筆記地圖…",
   "notes3d.loadError": "無法載入地圖：{error}",

@@ -543,7 +543,13 @@ test('3D graph has a searchable, keyboard-accessible note list in every supporte
   const { readFile } = await import('node:fs/promises');
   const src = await readFile(new URL('../ui/notes3d.js', import.meta.url), 'utf8');
   const css = await readFile(new URL('../ui/notes3d.css', import.meta.url), 'utf8');
+  const viewer = await readFile(new URL('../ui/vendor/3d-force-graph/3d-force-graph.min.js', import.meta.url), 'utf8');
   assert.match(src, /id="notes3d-search" type="search"/);
+  assert.match(src, /id="notes3d-reset-view"[^>]*data-i18n="notes3d\.resetView"[^>]*disabled/, 'the shipped Setup graph must expose a localized, initially disabled reset control');
+  assert.match(src, /zoomToFit\(700, 50\)/, 'reset restores a full-map camera view');
+  assert.match(viewer, /zoomToFit/, 'the packaged viewer supports the reset action');
+  assert.match(src, /resetView\.disabled = false/, 'reset becomes available only after a graph with notes has loaded');
+  assert.match(css, /\.notes3d-controls\s*\{[^}]*position:\s*absolute[^}]*right:\s*10px/, 'reset control remains reachable at the graph edge');
   assert.match(src, /role="status" aria-live="polite"/);
   assert.match(src, /matches\.slice\(0, 50\)/, 'large vaults must not render every note into the accessibility list at once');
   assert.match(src, /data-graph-note-id=.*aria-pressed=/);
@@ -555,9 +561,11 @@ test('3D graph has a searchable, keyboard-accessible note list in every supporte
   assert.match(src, /api\('\/api\/graph3d\/vaults'/, 'vault choices must come from the privacy-filtered API');
   assert.match(src, /brainlink:locale-changed[\s\S]*?renderVaultOptions\(\);/, 'vault filter choices must update when the app language changes');
   assert.match(css, /\.notes3d-node:focus-visible/);
-  const keys = ['notes3d.browseNotes', 'notes3d.browseSearch', 'notes3d.browsePlaceholder', 'notes3d.browseEmpty', 'notes3d.browseCount', 'notes3d.browseMore', 'notes3d.vaultFilter', 'notes3d.allVaults', 'notes3d.discoverVault', 'notes3d.discoverHint', 'notes3d.discoverRun', 'notes3d.discoverMore', 'notes3d.discoverDone', 'notes3d.discoverProgress', 'notes3d.discoverFailed', 'notes3d.discoverChanged', 'notes3d.discoverReadOnly'];
+  const keys = ['notes3d.browseNotes', 'notes3d.browseSearch', 'notes3d.browsePlaceholder', 'notes3d.browseEmpty', 'notes3d.browseCount', 'notes3d.browseMore', 'notes3d.vaultFilter', 'notes3d.allVaults', 'notes3d.resetView', 'notes3d.discoverVault', 'notes3d.discoverHint', 'notes3d.discoverRun', 'notes3d.discoverMore', 'notes3d.discoverDone', 'notes3d.discoverProgress', 'notes3d.discoverFailed', 'notes3d.discoverChanged', 'notes3d.discoverReadOnly'];
   for (const locale of ['en', 'zh-TW', 'pt']) {
-    const catalog = JSON.parse(await readFile(new URL(`../ui/locales/${locale}.json`, import.meta.url), 'utf8'));
+    const localeText = await readFile(new URL(`../ui/locales/${locale}.json`, import.meta.url), 'utf8');
+    const catalog = JSON.parse(localeText);
+    assert.equal((localeText.match(/"notes3d\.resetView"/g) || []).length, 1, `${locale} reset label is defined once`);
     for (const key of keys) assert.ok(catalog[key], `${locale} ${key}`);
   }
 });

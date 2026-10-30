@@ -505,6 +505,7 @@
   "agents.testFailed": "A chamada falhou; veja o Histórico abaixo.",
   "notes3d.panelTitle": "Seu cérebro",
   "notes3d.vaultFilter": "Vault",
+  "notes3d.resetView": "Repor vista",
   "notes3d.allVaults": "Todos os vaults acessíveis",
   "notes3d.loading": "Carregando o mapa 3D das suas notas…",
   "notes3d.loadError": "Não foi possível carregar o mapa: {error}",

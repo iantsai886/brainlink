@@ -5,9 +5,9 @@ GitHub repository: `iantsai886/brainlink`
 Branch: `integration/brainlink-retrieval-evaluation` (integrates profile-scoped GitHub, RSI discovery, and independent retrieval evaluation)
 Code baseline: development target `1.2.8`, with `package.json` as the canonical version source. The `v1.2.7` tag belongs to the separate `wip/v1.2.7` release line; this branch continues from the full-source `main` history and does not move or recreate that tag.
 
-### Interactive 3D graph in Setup (2026-10-30)
+### 3D graph controls and preview graph (2026-10-30)
 
-The Setup graph now uses a deterministic 3D force layout and perspective projection. Users can drag to rotate, use the wheel to zoom, reset the view, click a node to open its note, and use the keyboard-accessible note list for the same action. Existing vault and private-note filtering remains in `buildGraph` before layout. `npm run test:ui` passed 43/43, including deterministic and bounded 3D layout, the large-graph fallback, projection rotation/zoom, private-note exclusion, accessible controls, click-to-open, and listener cleanup. This verifies UI logic, not visual usability or graph readability on customer vaults. Large graphs over 400 nodes use a static 3D sphere layout for responsiveness; human evaluation of that layout remains open.
+The installed Setup already uses `ui/notes3d.js` with the authenticated `/api/graph3d` endpoint. It displays privacy-filtered note links and verified typed relations; suggested relations remain outside the graph until approved. This change adds a localized **Reset view** control that uses the vendored viewer's `zoomToFit`, stays disabled until graph notes load, and is available in English, Portuguese, and Traditional Chinese. `test/graph3d.test.mjs` passed 20/20, including structural checks on the shipped Setup UI, privacy, and typed edges; `npm run test:ui` passed 43/43 for the separate development preview UI. Neither UI has had a visual usability session on a real customer vault.
 
 ### Hosted CI runner allocation status (2026-10-30)
 

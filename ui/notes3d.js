@@ -78,6 +78,7 @@
     root.innerHTML = `
       <div class="notes3d-wrap">
         <div class="notes3d-vault-picker"><label for="notes3d-vault-select" data-i18n="notes3d.vaultFilter"></label><select id="notes3d-vault-select" aria-label="Choose a vault"></select></div>
+        <div class="notes3d-controls"><button type="button" class="chip" id="notes3d-reset-view" data-i18n="notes3d.resetView" disabled>Reset view</button></div>
         <div class="notes3d-canvas" id="notes3d-canvas"></div>
         <aside class="notes3d-panel" id="notes3d-panel-detail" hidden>
           <div class="notes3d-actions"><a class="chip" id="notes3d-edit" target="_blank" rel="noopener" hidden></a><button class="chip" id="notes3d-edit-toggle" hidden>Edit</button><button class="link notes3d-close" id="notes3d-close" data-i18n="notes3d.close">Close ✕</button></div>
@@ -294,6 +295,7 @@
     });
 
     root.addEventListener('click', (e) => {
+      if (e.target.closest('#notes3d-reset-view')) { graphInstance?.zoomToFit(700, 50); return; }
       if (e.target.closest('[data-review-load-more]')) { loadReviewQueue({ append: true }); return; }
       const graphNote = e.target.closest('[data-graph-note-id]');
       if (graphNote) { openById(graphNote.dataset.graphNoteId); return; }
@@ -437,6 +439,8 @@
 
     async function loadGraph() {
       const canvas = document.getElementById('notes3d-canvas');
+      const resetView = document.getElementById('notes3d-reset-view');
+      if (resetView) resetView.disabled = true;
       if (!graphInstance) canvas.innerHTML = '<p class="skeleton">Loading your 3D brain map…</p>';
       let g;
       try {
@@ -458,7 +462,7 @@
         else canvas.innerHTML = '<p class="muted">No notes yet — once you add some, their links show up here.</p>';
         loadedOk = false; return;
       }
-      if (graphInstance) { graphInstance.graphData({ nodes: g.nodes, links: g.links }); loadedOk = true; resizeToContainer(); return; }
+      if (graphInstance) { graphInstance.graphData({ nodes: g.nodes, links: g.links }); loadedOk = true; if (resetView) resetView.disabled = false; resizeToContainer(); return; }
       if (typeof ForceGraph3D !== 'function') { canvas.innerHTML = '<p class="error-box">Could not load the 3D map (missing viewer). Try reloading.</p>'; return; }
       canvas.innerHTML = '';
       const css = getComputedStyle(document.documentElement);
@@ -483,6 +487,7 @@
         .linkLabel((l) => l.predicate ? `${esc(l.predicate)}${l.evidence ? `<br><small>${esc(l.evidence)}</small>` : ''}${Number.isFinite(l.confidence) ? `<br><small>Confidence ${esc(l.confidence)}</small>` : ''}` : '')
         .linkOpacity(0.35)
         .onNodeClick((n) => openById(n.id));
+      if (resetView) resetView.disabled = false;
       loadedOk = true;
       resizeToContainer();
     }
