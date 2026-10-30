@@ -2089,20 +2089,51 @@ export function openInBrowser(url, os = process.platform, run = execFile) {
   else run('xdg-open', [url]);
 }
 
+function installedAppBrowserCandidates(os, env, exists) {
+  const pathApi = os === 'win32' ? path.win32 : path.posix;
+  const found = [];
+  const add = (browser, candidate) => { if (candidate && exists(candidate) && !found.some((item) => item.path === candidate)) found.push({ browser, path: candidate }); };
+  if (os === 'win32') {
+    for (const root of [env['ProgramFiles(x86)'], env.ProgramFiles, env.LOCALAPPDATA].filter(Boolean)) {
+      add('edge', pathApi.join(root, 'Microsoft', 'Edge', 'Application', 'msedge.exe'));
+    }
+    for (const root of [env.ProgramFiles, env['ProgramFiles(x86)'], env.LOCALAPPDATA].filter(Boolean)) {
+      add('chrome', pathApi.join(root, 'Google', 'Chrome', 'Application', 'chrome.exe'));
+    }
+  } else if (os === 'darwin') {
+    const homes = [env.HOME ? pathApi.join(env.HOME, 'Applications') : null, '/Applications'].filter(Boolean);
+    for (const home of homes) {
+      add('edge', pathApi.join(home, 'Microsoft Edge.app', 'Contents', 'MacOS', 'Microsoft Edge'));
+      add('chrome', pathApi.join(home, 'Google Chrome.app', 'Contents', 'MacOS', 'Google Chrome'));
+      add('chromium', pathApi.join(home, 'Chromium.app', 'Contents', 'MacOS', 'Chromium'));
+    }
+  } else if (os === 'linux') {
+    const binaries = [
+      ['edge', 'microsoft-edge-stable'], ['edge', 'microsoft-edge'],
+      ['chrome', 'google-chrome-stable'], ['chrome', 'google-chrome'],
+      ['chromium', 'chromium'], ['chromium', 'chromium-browser'],
+    ];
+    const search = String(env.PATH || '').split(pathApi.delimiter);
+    for (const [browser, binary] of binaries) for (const folder of search) {
+      if (folder) add(browser, pathApi.join(folder, binary));
+    }
+  }
+  return found;
+}
+
 // The installed desktop icon should feel like opening an app, while CLI use keeps
-// the user's normal browser. Never pass a non-loopback URL to Edge app mode.
+// the user's normal browser. Only pass a loopback Setup URL to a browser app window.
 export function openInAppWindow(url, { os = process.platform, env = process.env, exists = existsSync, run = execFile } = {}) {
   let parsed;
   try { parsed = new URL(url); } catch { parsed = null; }
   const local = parsed && ['127.0.0.1', 'localhost', '[::1]'].includes(parsed.hostname)
     && ['http:', 'https:'].includes(parsed.protocol);
-  if (os === 'win32' && local) {
-    const roots = [env['ProgramFiles(x86)'], env.ProgramFiles, env.LOCALAPPDATA].filter(Boolean);
-    const edge = roots.map((root) => path.join(root, 'Microsoft', 'Edge', 'Application', 'msedge.exe')).find((candidate) => exists(candidate));
-    if (edge) {
-      const child = run(edge, [`--app=${url}`], () => openInBrowser(url, os, run));
+  if (local) {
+    const browser = installedAppBrowserCandidates(os, env, exists)[0];
+    if (browser) {
+      const child = run(browser.path, [`--app=${url}`], (error) => { if (error) openInBrowser(url, os, run); });
       child?.unref?.();
-      return { mode: 'app', browser: 'edge' };
+      return { mode: 'app', browser: browser.browser };
     }
   }
   openInBrowser(url, os, run);
