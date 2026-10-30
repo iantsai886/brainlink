@@ -79,7 +79,7 @@ export function resolveTwinAgentScope(cfg, agent, tokenProvided = false) {
   if (matches.length !== 1) return { mode: 'unassigned', profile_id: null, grants: [] };
   const { profile, entry } = matches[0];
   const grants = (entry.vaults || []).map(({ name, access, operations }) => ({ name, access, operations: Array.isArray(operations) ? [...operations] : [] }));
-  return { mode: 'scoped', profile_id: profile.id, profile_name: profile.name, memory_policy: effectiveAgentMemoryPolicy(profile, entry), grants };
+  return { mode: 'scoped', profile_id: profile.id, profile_name: profile.name, source_policy: { ...profile.source_policy }, memory_policy: effectiveAgentMemoryPolicy(profile, entry), grants };
 }
 
 // Memory policy is enforced on the same boundary as vault and operation grants. This map
@@ -158,6 +158,8 @@ export function twinToolAuthorization(ctx, name, args = {}) {
   const scope = ctx.twinScope || { mode: 'legacy', grants: [] };
   if (scope.mode === 'legacy') return { allowed: true };
   if (scope.mode !== 'scoped') return { allowed: false, reason: 'This AI agent token is not assigned to an active Twin profile.' };
+  if (['session_log', 'session_close'].includes(name) && scope.source_policy?.session_capture === 'metadata-only') return { allowed: false, reason: 'This Twin profile allows metadata-only session capture.' };
+  if (name === 'session_read' && args.full === true && scope.source_policy?.session_capture !== 'full-text-opt-in') return { allowed: false, reason: 'Full session text requires this Twin profile to opt in to full-text capture.' };
   const action = READ_TOOL_ACTION[name];
   if (!action) return { allowed: false, reason: `This operation is not available to profile-scoped agents yet: ${name}.` };
   const memoryType = READ_TOOL_MEMORY[name];
@@ -191,6 +193,7 @@ export function twinToolListed(ctx, name) {
   const scope = ctx.twinScope || { mode: 'legacy', grants: [] };
   if (scope.mode === 'legacy') return true;
   if (scope.mode !== 'scoped') return false;
+  if (['session_log', 'session_close'].includes(name) && scope.source_policy?.session_capture === 'metadata-only') return false;
   if (!twinMemoryAllowed(ctx, READ_TOOL_MEMORY[name])) return false;
   const action = READ_TOOL_ACTION[name];
   if (!action) return false;

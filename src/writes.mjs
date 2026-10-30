@@ -79,6 +79,16 @@ export async function proposeNote(ctx, a, now = new Date()) {
   const root = vaultRoot(ctx, vaultName);
   const id = resolveIdentity(ctx, a);
   const errors = checkCommon(ctx, vaultName, a, id);
+  const twinSourcePolicy = ctx.twinScope?.mode === 'scoped' ? ctx.twinScope.source_policy : null;
+  let twinConfidence = a.confidence;
+  if (twinSourcePolicy?.provenance_required) {
+    const sourceId = String(a.session_or_task_id || '').trim();
+    if (!sourceId || sourceId !== a.session_or_task_id || sourceId.toLowerCase() === 'unknown') errors.push('this Twin requires a stable session_or_task_id for every proposed note');
+    if (!String(a.source || '').trim()) errors.push('this Twin requires a non-empty source for every proposed note');
+    twinConfidence = String(a.confidence || '').trim().toLowerCase();
+    if (!['verified', 'reported', 'inferred', 'unknown'].includes(twinConfidence)) errors.push('this Twin requires confidence: verified, reported, inferred, or unknown');
+    if (sourceId) id.session_or_task_id = sourceId;
+  }
   const title = String(a.title || '').trim();
   const te = titleError(title); if (te) errors.push(te);
   const tpl = a.template ? TEMPLATES[a.template] : null;
@@ -128,7 +138,8 @@ export async function proposeNote(ctx, a, now = new Date()) {
   const date = zonedNow(ctx.tz, now).slice(0, 10);
   const name = `${date} — ${title}.md`;
   const rel = folder ? `${folder}/${name}` : name;
-  const fm = frontmatter(ctx, vaultName, id, { ...a, type: a.type || tpl?.type || (intake ? 'intake' : undefined),
+  const fm = frontmatter(ctx, vaultName, id, { ...a, confidence: twinConfidence, private: twinSourcePolicy?.private_default === true ? true : a.private,
+    type: a.type || tpl?.type || (intake ? 'intake' : undefined),
     status: typed ? 'proposed' : a.status, relations: typed ? a.relations : undefined }, now);
   const decision = needsDecision ? `## Decision\n\n**${String(a.decision).toUpperCase()}**\n\n` : '';
   const body = tpl ? renderTemplate(a.template, a.fields || {}, a.body) : String(a.body).trim();

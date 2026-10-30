@@ -91,6 +91,9 @@ export function createMcp(ctx, { onCall = () => {} } = {}) {
     write_rules: ctx.twinScope?.mode === 'scoped' ? [
       'General memory writes are unavailable to this profile-scoped connection. propose_note is available only for the explicitly granted vaults listed under proposal_vaults; every note requires preview and separate user approval before saving.',
       'remember and append_daily are unavailable to profile-scoped agents. Handoff read/send require separate explicit grants.',
+      ...(ctx.twinScope.source_policy?.private_default ? ['New proposed notes in this Twin are marked private: true by default.'] : []),
+      ...(ctx.twinScope.source_policy?.provenance_required ? ['Every proposed note needs a source, a stable session_or_task_id, and confidence: verified, reported, inferred, or unknown.'] : []),
+      `Session capture policy: ${ctx.twinScope.source_policy?.session_capture || 'unset'}.`,
       ...(scopedSessionClose ? ['session_close is limited to a private summary and an explicit preview/confirmation flow in a granted vault.'] : []),
       'Only the profile permitted_vaults and available_operations listed above are available to this token.',
     ] : [
@@ -102,7 +105,7 @@ export function createMcp(ctx, { onCall = () => {} } = {}) {
     ],
     templates: Object.fromEntries(Object.entries(TEMPLATES).map(([k, t]) => [k, { folder: t.folder, fields: t.fields }])),
     ...(guideHasHandoff ? { handoff_mailbox: `${cfg.handoff.vault}/${cfg.handoff.folder}` } : {}),
-    ...(ctx.twinScope?.mode === 'scoped' ? { twin_profile_scope: { profile_id: ctx.twinScope.profile_id, permitted_vaults: ctx.enabled, memory_policy: { ...ctx.twinScope.memory_policy }, available_operations: [...new Set(ctx.twinScope.grants.flatMap((grant) => grant.operations))], writes_available: false, note_proposals_available: twinToolListed(ctx, 'propose_note'), proposal_vaults: twinToolVaultChoices(ctx, 'propose_note'), session_history_available: scopedSessionRead, session_logging_available: twinToolListed(ctx, 'session_log'), session_close_available: scopedSessionClose, handoffs_available: scopedHandoffRead || scopedHandoffWrite } } : {}),
+    ...(ctx.twinScope?.mode === 'scoped' ? { twin_profile_scope: { profile_id: ctx.twinScope.profile_id, permitted_vaults: ctx.enabled, source_policy: { ...ctx.twinScope.source_policy }, memory_policy: { ...ctx.twinScope.memory_policy }, available_operations: [...new Set(ctx.twinScope.grants.flatMap((grant) => grant.operations))], writes_available: false, note_proposals_available: twinToolListed(ctx, 'propose_note'), proposal_vaults: twinToolVaultChoices(ctx, 'propose_note'), session_history_available: scopedSessionRead, session_logging_available: twinToolListed(ctx, 'session_log'), session_close_available: scopedSessionClose, handoffs_available: scopedHandoffRead || scopedHandoffWrite } } : {}),
   });
 
   const vaultProp = { type: 'string', enum: ctx.enabled, description: 'Which vault. Vaults are never mixed.' };
@@ -190,16 +193,16 @@ export function createMcp(ctx, { onCall = () => {} } = {}) {
       // overwritten, not honoured.
       run: async (a) => { const store = await refreshSessions(); return sessionList(store, { ...a, include_private: false, allow_imported_private: cfg.sessions.shareSummaries, profile_id: ctx.twinScope?.mode === 'scoped' ? ctx.twinScope.profile_id : undefined, allow_profile_private: ctx.twinScope?.mode === 'scoped' }); } },
     { name: 'session_read', title: 'Read one AI session', annotations: RO,
-      description: 'Defaults to the summary plus up to 3 short key-turn snippets (no raw messages, ~800 tokens); needs the user\'s BrainLink Settings "share summaries" choice (off by default). Pass full=true to page the real message text at ~4k tokens via next_offset; needs the separate "share full text" choice (also off by default). Either way, a private session you are not allowed to see returns a private:true message, not an error.',
+      description: 'Defaults to the summary plus up to 3 short key-turn snippets (no raw messages, ~800 tokens); needs the user\'s BrainLink Settings "share summaries" choice (off by default). Pass full=true to page the real message text at ~4k tokens via next_offset; this also needs the separate "share full text" choice and, for a Twin profile, its full-text-opt-in session policy. Either way, a private session you are not allowed to see returns a private:true message, not an error.',
       inputSchema: { type: 'object', properties: {
         id: { type: 'string' }, offset: { type: 'integer', minimum: 0, default: 0 },
         full: { type: 'boolean', default: false } }, required: ['id'] },
       // Same fail-closed pattern as session_list: include_private is always false here, and the
       // allow_imported_private / allow_imported_full_private flags (from the user's own BrainLink
       // Settings choice) are always overwritten after the caller's arguments, never honoured from them.
-      run: async (a) => sessionRead(await sessionStore(), { ...a, include_private: false, allow_imported_private: cfg.sessions.shareSummaries, allow_imported_full_private: cfg.sessions.shareFullText, profile_id: ctx.twinScope?.mode === 'scoped' ? ctx.twinScope.profile_id : undefined, allow_profile_private: ctx.twinScope?.mode === 'scoped' }) },
+      run: async (a) => sessionRead(await sessionStore(), { ...a, include_private: false, allow_imported_private: cfg.sessions.shareSummaries, allow_imported_full_private: cfg.sessions.shareFullText && (ctx.twinScope?.mode !== 'scoped' || ctx.twinScope.source_policy?.session_capture === 'full-text-opt-in'), allow_profile_full_text: ctx.twinScope?.mode === 'scoped' && ctx.twinScope.source_policy?.session_capture === 'full-text-opt-in', profile_id: ctx.twinScope?.mode === 'scoped' ? ctx.twinScope.profile_id : undefined, allow_profile_private: ctx.twinScope?.mode === 'scoped' }) },
     { name: 'session_log', title: 'Log a note to an AI session', annotations: WR,
-      description: 'For clients with no readable local history: append a short note/turn to a session, creating one for today if session_id is omitted. Secret-filtered before storage. Profile-scoped agents need the separate log_session permission; their entries are always private and owned by that profile, and they can append only to their own sessions.',
+      description: 'For clients with no readable local history: append a short note/turn to a session, creating one for today if session_id is omitted. Secret-filtered before storage. Profile-scoped agents need the separate log_session permission and a session policy that permits content capture; their entries are always private and owned by that profile, and they can append only to their own sessions.',
       inputSchema: { type: 'object', properties: {
         title: { type: 'string' }, text: { type: 'string' }, role: { type: 'string', enum: ['note', 'user', 'assistant'], default: 'note' },
         session_id: { type: 'string' }, project: { type: 'string' }, private: { type: 'boolean', default: true } }, required: ['text'] },
@@ -239,13 +242,13 @@ export function createMcp(ctx, { onCall = () => {} } = {}) {
       inputSchema: { type: 'object', properties: { vault: vaultProp, text: { type: 'string' }, source: { type: 'string' }, ...idProps }, required: ['text'] },
       run: (a) => appendDaily(ctx, a) },
     { name: 'propose_note', title: 'Create a new attributed note', annotations: WR,
-      description: 'New note with the vault\'s attribution, linked automatically to related notes. Use a template for meetings, decisions, people, projects and ideas. Optional typed entity and evidence-backed relationship suggestions are always stored proposed and require human review before entering the graph. Never overwrites.',
+      description: `New note with the vault's attribution, linked automatically to related notes. Use a template for meetings, decisions, people, projects and ideas. Optional typed entity and evidence-backed relationship suggestions are always stored proposed and require human review before entering the graph. Never overwrites.${ctx.twinScope?.mode === 'scoped' && ctx.twinScope.source_policy?.private_default ? ' New notes in this Twin are private by default.' : ''}${ctx.twinScope?.mode === 'scoped' && ctx.twinScope.source_policy?.provenance_required ? ' Include a source, stable session_or_task_id, and confidence: verified, reported, inferred, or unknown.' : ''}`,
       inputSchema: { type: 'object', properties: {
         vault: vaultProp, folder: { type: 'string', description: 'Existing folder; omit for the intake folder (or the template\'s folder when it exists).' }, title: { type: 'string' }, body: { type: 'string', description: 'Markdown. Optional when a template is used.' },
         template: { type: 'string', enum: Object.keys(TEMPLATES), description: Object.entries(TEMPLATES).map(([k, t]) => `${k}: ${Object.keys(t.fields).join(', ')}`).join(' | ') },
         fields: { type: 'object', description: 'Template fields (see template).' },
         auto_link: { type: 'boolean', default: true, description: 'Add a Related section linking notes this one mentions or is about.' },
-        decision: { type: 'string', description: 'Required when the vault defines intake decisions (see brainlink_guide).' }, source: { type: 'string' }, confidence: { type: 'string' },
+        decision: { type: 'string', description: 'Required when the vault defines intake decisions (see brainlink_guide).' }, source: { type: 'string' }, confidence: { type: 'string', description: 'For a provenance-required Twin, use verified, reported, inferred, or unknown.' },
         type: { type: 'string', enum: ['note', 'meeting', 'decision', 'person', 'team', 'workflow', 'dataset', 'artifact', 'project', 'policy', 'concept'] },
         entity_id: { type: 'string', description: 'For a typed entity, a stable ID such as workflow.collect-questions.' },
         entity_scope: { type: 'string', enum: ['personal', 'organisation', 'client'], description: 'Must match the active Twin profile when one is in use.' },
@@ -255,7 +258,7 @@ export function createMcp(ctx, { onCall = () => {} } = {}) {
           source: { type: 'string', description: 'Short exact source excerpt or citation, up to 300 characters.' },
           confidence: { type: 'number', minimum: 0, maximum: 1 },
         }, required: ['predicate', 'target', 'source', 'confidence'], additionalProperties: false } },
-        status: { type: 'string' }, tags: strs, ...idProps }, required: ['title', 'body', 'source'] },
+        status: { type: 'string' }, tags: strs, ...idProps }, required: ['title', 'body', 'source', ...(ctx.twinScope?.mode === 'scoped' && ctx.twinScope.source_policy?.provenance_required ? ['confidence', 'session_or_task_id'] : [])] },
       run: (a) => proposeNote(ctx, a) },
     ...(hasHandoff ? [
       { name: 'send_handoff', title: 'Message another AI', annotations: WR,

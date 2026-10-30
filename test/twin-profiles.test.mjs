@@ -64,6 +64,83 @@ test('Twin profile declarations validate references and prevent permission escal
   assert.match(validate(escalatedMemory).join('; '), /cannot exceed the Twin profile policy/);
 });
 
+test('Twin source policy keeps proposed notes private and requires source confidence and a stable task id', async () => {
+  const root = await mkdtemp(path.join(tmpdir(), 'brainlink-twin-source-policy-'));
+  const vaultPath = path.join(root, 'vault');
+  await mkdir(path.join(vaultPath, 'Inbox'), { recursive: true });
+  const cfg = fixture(vaultPath);
+  cfg.twin_profiles[0].allowed_actions.push('propose_note');
+  cfg.twin_profiles[0].agent_access[0].vaults[0].operations.push('propose_note');
+  const env = { BRAINLINK_HOME: path.join(root, 'app'), HOME: root, BRAINLINK_AGENT_TOKEN: 'fictional-agent-token', BRAINLINK_AI_PLATFORM: 'Fictional Codex' };
+  const mcp = createMcp(createContext(cfg, { env }));
+  const tool = (await mcp.handle({ jsonrpc: '2.0', id: 1, method: 'tools/list' })).result.tools.find((item) => item.name === 'propose_note');
+  assert.ok(tool.inputSchema.required.includes('confidence'));
+  assert.ok(tool.inputSchema.required.includes('session_or_task_id'));
+  assert.match(tool.description, /private by default/);
+  const guide = await mcp.handle({ jsonrpc: '2.0', id: 1, method: 'tools/call', params: { name: 'brainlink_guide', arguments: {} } });
+  assert.equal(guide.result.structuredContent.twin_profile_scope.source_policy.private_default, true);
+  assert.match(guide.result.structuredContent.write_rules.join(' '), /stable session_or_task_id/);
+  const missing = await mcp.handle({ jsonrpc: '2.0', id: 2, method: 'tools/call', params: { name: 'propose_note', arguments: {
+    vault: 'Fictional Org', folder: 'Inbox', title: 'Policy check', body: 'A fictional finding.', source: 'fictional test',
+  } } });
+  assert.match(missing.result.structuredContent.errors.join(' '), /stable session_or_task_id/);
+  assert.match(missing.result.structuredContent.errors.join(' '), /confidence/);
+  const preview = await mcp.handle({ jsonrpc: '2.0', id: 3, method: 'tools/call', params: { name: 'propose_note', arguments: {
+    vault: 'Fictional Org', folder: 'Inbox', title: 'Private by default', body: 'A fictional finding.', source: 'fictional test',
+    confidence: 'reported', session_or_task_id: 'fixture-task-01',
+  } } });
+  assert.equal(preview.result.structuredContent.written, false);
+  assert.match(preview.result.structuredContent.preview, /private: true/);
+  assert.match(preview.result.structuredContent.preview, /session_or_task_id: "fixture-task-01"/);
+  const saved = await mcp.handle({ jsonrpc: '2.0', id: 4, method: 'tools/call', params: { name: 'propose_note', arguments: {
+    vault: 'Fictional Org', folder: 'Inbox', title: 'Private by default', body: 'A fictional finding.', source: 'fictional test',
+    confidence: 'reported', session_or_task_id: 'fixture-task-01', confirm: true,
+  } } });
+  assert.equal(saved.result.structuredContent.written, true);
+  assert.match(await readFile(path.join(vaultPath, 'Inbox/2026-10-30 — Private by default.md'), 'utf8'), /private: true/);
+});
+
+test('Twin session capture policy blocks content capture and full text until opted in', async () => {
+  const root = await mkdtemp(path.join(tmpdir(), 'brainlink-twin-session-policy-'));
+  const vaultPath = path.join(root, 'vault');
+  await mkdir(vaultPath);
+  const cfg = fixture(vaultPath);
+  cfg.twin_profiles[0].allowed_actions.push('read_session', 'log_session', 'propose_note');
+  cfg.twin_profiles[0].agent_access[0].vaults[0].operations.push('read_session', 'log_session', 'propose_note');
+  const env = { BRAINLINK_HOME: path.join(root, 'app'), HOME: root, BRAINLINK_AGENT_TOKEN: 'fictional-agent-token', BRAINLINK_AI_PLATFORM: 'Fictional Codex' };
+  const call = (mcp, name, args, id = 1) => mcp.handle({ jsonrpc: '2.0', id, method: 'tools/call', params: { name, arguments: args } });
+
+  cfg.twin_profiles[0].source_policy.session_capture = 'metadata-only';
+  let mcp = createMcp(createContext(cfg, { env }));
+  let names = (await mcp.handle({ jsonrpc: '2.0', id: 1, method: 'tools/list' })).result.tools.map((item) => item.name);
+  assert.ok(!names.includes('session_log'));
+  assert.ok(!names.includes('session_close'));
+  let denied = await call(mcp, 'session_log', { text: 'FICTIONAL_METADATA_ONLY_CANARY' });
+  assert.equal(denied.result.isError, true);
+  assert.doesNotMatch(JSON.stringify(denied), /FICTIONAL_METADATA_ONLY_CANARY/);
+  denied = await call(mcp, 'session_close', { title: 'Denied close', goal: 'fixture', outcome: 'fixture', session_or_task_id: 'fixture-metadata-only-close' }, 5);
+  assert.equal(denied.result.isError, true);
+
+  cfg.twin_profiles[0].source_policy.session_capture = 'summary-proposal';
+  mcp = createMcp(createContext(cfg, { env }));
+  names = (await mcp.handle({ jsonrpc: '2.0', id: 1, method: 'tools/list' })).result.tools.map((item) => item.name);
+  assert.ok(names.includes('session_log'));
+  const store = await openSessionStore(env);
+  const own = await store.putSession({ client: 'fictional-capture', source_id: 'own-summary', profile_id: 'org_twin_1', vault: 'Sessions', project: 'Fictional', title: 'Fictional summary', summary: 'Approved fictional summary.', started_at: new Date().toISOString(), private: true, messages: [{ role: 'assistant', at: new Date().toISOString(), text: 'FICTIONAL_FULL_TEXT_CANARY' }] });
+  denied = await call(mcp, 'session_read', { id: own.id, full: true }, 2);
+  assert.equal(denied.result.isError, true);
+  assert.doesNotMatch(JSON.stringify(denied), /FICTIONAL_FULL_TEXT_CANARY/);
+
+  cfg.twin_profiles[0].source_policy.session_capture = 'full-text-opt-in';
+  mcp = createMcp(createContext(cfg, { env }));
+  const full = await call(mcp, 'session_read', { id: own.id, full: true }, 3);
+  assert.match(JSON.stringify(full), /FICTIONAL_FULL_TEXT_CANARY/);
+  const imported = await store.putSession({ client: 'codex', source_id: 'imported-full', profile_id: 'org_twin_1', vault: 'Sessions', project: 'Fictional', title: 'Assigned imported session', summary: 'Imported summary.', started_at: new Date().toISOString(), private: true, messages: [{ role: 'assistant', at: new Date().toISOString(), text: 'FICTIONAL_IMPORTED_FULL_CANARY' }] });
+  const importedFull = await call(mcp, 'session_read', { id: imported.id, full: true }, 4);
+  assert.doesNotMatch(JSON.stringify(importedFull), /FICTIONAL_IMPORTED_FULL_CANARY/);
+  assert.match(JSON.stringify(importedFull), /Full message text for this session is private/);
+});
+
 test('Twin status shows limited runtime scope and never exposes agent credentials', async () => {
   const status = twinProfileStatus(fixture('C:\\fictional-vault'));
   const cfg = fixture('C:\\fictional-vault');
@@ -654,7 +731,13 @@ test('profile-scoped session reads stay inside the profile and closeouts remain 
   assert.deepEqual(listed.result.structuredContent.sessions.map((session) => session.id), [own.id]);
   assert.doesNotMatch(JSON.stringify(listed), /PERSONAL_SESSION_CANARY_88|CLIENT_SESSION_CANARY_98|UNASSIGNED_SESSION_CANARY_99/);
   const readOwn = await mcp.handle({ jsonrpc: '2.0', id: 22, method: 'tools/call', params: { name: 'session_read', arguments: { id: own.id, full: true } } });
-  assert.match(JSON.stringify(readOwn), /ORG_MESSAGE_CANARY_77/);
+  assert.equal(readOwn.result.isError, true, 'summary-proposal policy does not expose full session text, even for the owning Twin');
+  assert.doesNotMatch(JSON.stringify(readOwn), /ORG_MESSAGE_CANARY_77/);
+  const fullOptInCfg = structuredClone(cfg);
+  fullOptInCfg.twin_profiles[0].source_policy.session_capture = 'full-text-opt-in';
+  const fullOptInMcp = createMcp(createContext(fullOptInCfg, { env }));
+  const allowedFull = await fullOptInMcp.handle({ jsonrpc: '2.0', id: 22, method: 'tools/call', params: { name: 'session_read', arguments: { id: own.id, full: true } } });
+  assert.match(JSON.stringify(allowedFull), /ORG_MESSAGE_CANARY_77/);
   const scopedClients = [
     { id: 'organisation', mcp, own, foreign: [foreign, clientSession, unassigned], token: 'fictional-agent-token' },
     { id: 'personal', mcp: createMcp(createContext(cfg, { env: { ...env, BRAINLINK_AGENT_TOKEN: 'fictional-personal-token' } })), own: foreign, foreign: [own, clientSession, unassigned], token: 'fictional-personal-token' },

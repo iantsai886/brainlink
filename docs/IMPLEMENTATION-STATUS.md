@@ -11,6 +11,12 @@ BrainLink's MCP instructions and `agent_connect` tool description now say to cal
 
 Added assertions for the direct-call guidance. Windows/Node.js 24.22.1 `npm run test:all`: core 579 total (571 passed, 0 failed, 8 platform/privilege skips); UI 44/44. `git diff --check` passed. This verifies BrainLink's tool metadata and the locally configured token, not that every live Claude Desktop conversation will select the tool.
 
+### Enforce Twin source and session-capture policies (2026-10-30)
+
+Twin `source_policy` values now affect runtime behavior. Profile-scoped `propose_note` marks new notes private when `private_default` is enabled and enforces a non-empty source, stable task/session ID, and supported confidence label when `provenance_required` is enabled. `metadata-only` profiles cannot log or close session content; `summary-proposal` allows private summaries but blocks full-text reads; `full-text-opt-in` enables full-text access only when the profile selects it, with the separate BrainLink “share full text” choice still required for imported private sessions. The policy is returned to the agent in `brainlink_guide` and reflected in conditional tool requirements.
+
+Synthetic tests verify the policy both at tool-list and direct-call boundaries, that note previews carry the private flag and provenance, that metadata-only direct writes are refused, and that summary/full-text modes admit only their intended data. On Windows with Node.js 24.22.1, `npm run test:all` passed: core 581 total (573 passed, 0 failed, 8 platform/privilege skips); UI 44/44. Focused Twin/session tests passed 51/51. `git diff --check` passed. Tests use fictional vaults; no customer note content was changed. This is local automated evidence, not hosted CI or live cross-client acceptance.
+
 ### Claude Desktop Anna activation on a large vault (2026-10-30)
 
 Claude's first explicit `agent_connect` call timed out at the client's 60-second limit. The delay came from reading one known note through `readNote`, which built the full Brain vault index first, and from `agent_connect` building whole-vault recent activity/open-loop summaries on every activation. Commit `73ea027efb584d13c1140b749df6163d36f89af5` removes the full index build from direct note reads while preserving path containment, excluded-folder, symlink, privacy, and memory-type checks. Normal agent activation now reads configured notes only; the full activity summary is opt-in with `include_vault_context=true`.

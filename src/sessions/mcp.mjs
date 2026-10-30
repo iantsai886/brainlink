@@ -98,8 +98,12 @@ export async function sessionRead(store, a = {}) {
   const summaryOk = a.include_private || profilePrivate || (a.allow_imported_private && relaxable);
   if (session.private && !summaryOk) return { id: session.id, private: true, message: PRIVATE_MESSAGE };
   const base = summaryOf(session);
-  const fullOk = a.include_private || profilePrivate || (a.allow_imported_full_private && relaxable);
+  const fullOk = a.include_private
+    || (profilePrivate && a.allow_profile_full_text === true && (!relaxable || a.allow_imported_full_private === true))
+    || (a.allow_imported_full_private && relaxable);
   if (a.full) {
+    if (a.profile_id && a.allow_profile_full_text !== true) return { ...base, message: PRIVATE_FULL_MESSAGE };
+    if (a.profile_id && relaxable && !a.allow_imported_full_private) return { ...base, message: PRIVATE_FULL_MESSAGE };
     if (session.private && !fullOk) return { ...base, message: PRIVATE_FULL_MESSAGE };
     const batch = await store.readSession(a.id, { ...scope, offset: a.offset || 0, limit: FULL_PAGE_FETCH });
     const messages = fitByTokens(batch.messages, FULL_PAGE_TOKENS);
