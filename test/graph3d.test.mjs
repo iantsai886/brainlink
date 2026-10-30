@@ -235,6 +235,7 @@ test('vault graph discovery is paged, scope-safe, excludes private records, and 
   await writeFile(path.join(vaultPath, 'A Product Team.md'), '---\ntype: team\nid: team.product\nscope: organisation\nstatus: current\n---\n# Product Team\n\nProduct Team coordinates with Data Team every day. Ava coordinates ownership of the product team intake workflow.\n');
   await writeFile(path.join(vaultPath, 'Ava.md'), '---\ntype: person\nid: person.ava\nscope: organisation\nstatus: current\n---\n# Ava\n');
   await writeFile(path.join(vaultPath, 'Z Client Project.md'), '---\ntype: project\nid: project.client\nscope: client\nstatus: current\n---\n# Client Project\n');
+  await writeFile(path.join(vaultPath, 'Private Workflow.md'), '---\ntype: workflow\nid: workflow.hidden\nscope: organisation\nstatus: current\nprivate: true\n---\n# Private Workflow\nPRIVATE_TARGET_CANARY\n');
   await writeFile(path.join(vaultPath, 'Data Team.md'), '---\ntype: team\nid: team.data\nscope: organisation\nstatus: current\n---\n# Data Team\n');
   for (let i = 0; i < 22; i++) await writeFile(path.join(vaultPath, `Generic ${String(i).padStart(2, '0')}.md`), `# Generic ${i}\n\nOrdinary note ${i}.\n`);
   await writeFile(path.join(vaultPath, 'Private Source.md'), '---\ntype: workflow\nid: workflow.private\nscope: organisation\nstatus: current\nprivate: true\n---\n# Private\n\nThis workflow runs PRIVATE_CANARY.\n');
@@ -278,6 +279,10 @@ test('vault graph discovery is paged, scope-safe, excludes private records, and 
     const crossScope = await api('/api/graph3d/relationship/propose-manual', { vault: 'Main', path: 'A Product Team.md', etag: afterPatternSave.etag,
       target_id: 'project.client', predicate: 'part_of', evidence: 'Ava coordinates ownership of the product team intake workflow.' });
     assert.match(crossScope.error, /same Twin scope/i);
+    const privateTarget = await api('/api/graph3d/relationship/propose-manual', { vault: 'Main', path: 'A Product Team.md', etag: afterPatternSave.etag,
+      target_id: 'workflow.hidden', predicate: 'depends_on', evidence: 'Ava coordinates ownership of the product team intake workflow.' });
+    assert.match(privateTarget.error, /same Twin scope/i);
+    assert.doesNotMatch(JSON.stringify(privateTarget), /PRIVATE_TARGET_CANARY|Private Workflow/);
     const manual = await api('/api/graph3d/relationship/propose-manual', { vault: 'Main', path: 'A Product Team.md', etag: afterPatternSave.etag,
       target_id: 'person.ava', predicate: 'assigned_to', evidence: 'Ava coordinates ownership of the product team intake workflow.' });
     assert.equal(manual.ok, true, JSON.stringify(manual));
