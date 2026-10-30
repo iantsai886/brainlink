@@ -15,7 +15,7 @@ The same source commit `310f3d3` also passed `npm run smoke:backup-recovery`: en
 
 ### Hosted GitHub Actions runner gate (commit `799fcb7`, 2026-10-30)
 
-GitHub Actions run `41080789367` did not execute any job steps. GitHub's check annotation says the job was not started because recent account payments failed or the spending limit needs to be increased. This is an account billing gate, not a test failure in BrainLink. Hosted CI will remain unverified until the account owner resolves it in GitHub Billing & plans and a new run completes.
+GitHub Actions run `41080930432` on commit `6f414f1` did not execute any job steps. GitHub's check annotation says the job was not started because recent account payments failed or the spending limit needs to be increased. This is an account billing gate, not a test failure in BrainLink. Hosted CI will remain unverified until the account owner resolves it in GitHub Billing & plans and a new run completes.
 
 ### DeepSeek Harness Zstandard compatibility (2026-10-30)
 
