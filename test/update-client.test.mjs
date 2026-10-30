@@ -1,7 +1,10 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { createHash, generateKeyPairSync, sign } from 'node:crypto';
-import { checkForUpdate, UPDATE_MANIFEST_URL } from '../src/update-client.mjs';
+import { mkdtemp, readdir, rm } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import path from 'node:path';
+import { checkForUpdate, downloadVerifiedUpdate, UPDATE_MANIFEST_URL } from '../src/update-client.mjs';
 
 const { publicKey, privateKey } = generateKeyPairSync('ed25519');
 const publicPem = publicKey.export({ type: 'spki', format: 'pem' });
@@ -49,4 +52,18 @@ test('rejects untrusted redirects, a forged manifest, unexpected type, HTTP fail
   await assert.rejects(checkForUpdate({ ...options, fetchImpl: async () => response('{}', { type: 'text/html' }) }), /unexpected content type/);
   await assert.rejects(checkForUpdate({ ...options, fetchImpl: async () => response('{}', { status: 503 }) }), /HTTP 503/);
   await assert.rejects(checkForUpdate({ ...options, fetchImpl: async () => response('{}', { length: 100_000 }) }), /larger than the allowed limit/);
+});
+
+test('removes a partial package when its bytes do not match the signed size or hash', async () => {
+  const tempRoot = await mkdtemp(path.join(tmpdir(), 'brainlink-update-test-'));
+  const badPayload = { ...payload, assets: [{ ...payload.assets[0], size: 1, sha256: 'f'.repeat(64) }] };
+  const badBytes = Buffer.from(JSON.stringify(badPayload));
+  const badEnvelope = { schema: 1, key_id: keyId, payload: badBytes.toString('base64url'), signature: sign(null, badBytes, privateKey).toString('base64url') };
+  const fetchImpl = async (url) => url === UPDATE_MANIFEST_URL
+    ? response(JSON.stringify(badEnvelope))
+    : response(Buffer.from('x'), { type: 'application/octet-stream', length: 1 });
+  try {
+    await assert.rejects(downloadVerifiedUpdate({ ...options, fetchImpl, tempRoot }), /failed signed size or SHA-256 verification/);
+    assert.deepEqual(await readdir(tempRoot), [], 'failed package staging must be removed');
+  } finally { await rm(tempRoot, { recursive: true, force: true }); }
 });

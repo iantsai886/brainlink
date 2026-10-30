@@ -2,7 +2,7 @@
 
 ## Current state
 
-Setup has an explicit **Check for updates** action. It requests one fixed BrainLink GitHub release-manifest URL, follows at most three HTTPS redirects to approved GitHub release hosts, bounds the response size and time, checks the response type, verifies the Ed25519 signature against the public key compiled in `src/update-trust.mjs`, then checks version, channel, OS, CPU type, asset URL, size, and SHA-256 metadata. It does not fetch, install, or launch a package. The endpoint requires the local Setup session token.
+Setup has an explicit **Check for updates** action. It requests one fixed BrainLink GitHub release-manifest URL, follows at most three HTTPS redirects to approved GitHub release hosts, bounds the response size and time, checks the response type, verifies the Ed25519 signature against the public key compiled in `src/update-trust.mjs`, then checks version, channel, OS, CPU type, asset URL, size, and SHA-256 metadata. A separate **Prepare verified download** action streams the selected package into a temporary folder and checks its exact signed size and SHA-256 before making it available as a one-time, five-minute local download link. Setup requires its local session token for both actions. Temporary files are removed after a download, ticket expiry, or Setup shutdown. POSIX permissions are restricted by the OS temporary-directory defaults; Windows inherits its temporary-folder ACL, which has not been independently checked. BrainLink never installs or launches the package automatically.
 
 The publisher key is intentionally empty in the source today. Builds therefore report that automatic checks are not enabled and do not contact GitHub. Tests can inject a temporary key; production runtime trust cannot be changed by a network response, user settings, or environment variable.
 
@@ -19,7 +19,6 @@ Key rotation is not implemented. Do not replace a live publisher key until the a
 
 - Provision and pin the publisher key.
 - Automate asset hashing, payload creation, signing, and publication without exposing the private key.
-- Add a streamed package download that checks the exact signed size and hash before exposing the file to the user.
 - Design and test a clear, user-approved OS installer handoff, upgrade, and rollback flow.
 - Exercise signed releases on Windows, macOS, and Linux, including key rotation and interrupted downloads.
 

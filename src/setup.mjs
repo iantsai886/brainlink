@@ -1,9 +1,10 @@
 // Setup UI backend: a local-only web app (127.0.0.1, random session token) that picks the
 // vault folder, applies a rule pack and connects AI clients.
 import { createServer } from 'node:http';
+import { createReadStream } from 'node:fs';
 import { existsSync } from 'node:fs';
 import { watch as watchFs } from 'node:fs';
-import { readFile, stat, lstat, cp, mkdir, writeFile, rename, unlink, readdir } from 'node:fs/promises';
+import { readFile, stat, lstat, cp, mkdir, writeFile, rename, unlink, readdir, rm } from 'node:fs/promises';
 import { randomBytes, timingSafeEqual, createHash } from 'node:crypto';
 import { execFile } from 'node:child_process';
 import { setTimeout as delay } from 'node:timers/promises';
@@ -54,7 +55,7 @@ import { ingestionDraftId, listIngestionDrafts, readIngestionDraft, removeIngest
 import { INGESTION_MAX_ATTEMPTS, INGESTION_RETRY_DELAY_MS, ingestionScheduleDue, localDateAndTime, normalizeIngestionTargets, validateIngestionSchedule } from './ingestion-schedule.mjs';
 import { briefScheduleDue, validateBriefSchedule } from './brief-schedule.mjs';
 import { defaultRoot as hermesDefaultRoot } from './sessions/hermes.mjs';
-import { checkForUpdate } from './update-client.mjs';
+import { checkForUpdate, downloadVerifiedUpdate } from './update-client.mjs';
 import { UPDATE_PUBLIC_KEY } from './update-trust.mjs';
 
 const GRAPH_NOTE_MUTATIONS = new Set([
@@ -223,6 +224,7 @@ export async function startSetup(opts = {}) {
   const os = opts.os || process.platform;
   const file = configPath(env);
   const token = opts.token || randomBytes(18).toString('base64url');
+  const updateDownloads = new Map();
   const pick = opts.pick || (() => pickFolder(os));
   const pickSnapshotFolder = opts.pickSnapshotFolder || (() => pickFolder(os, 'Choose a folder to share a read-only copy with cloud agents'));
   const pickBackupFolder = opts.pickBackupFolder || (() => pickFolder(os, 'Choose a private backup destination'));
@@ -1153,6 +1155,25 @@ export async function startSetup(opts = {}) {
       arch: opts.arch || process.arch,
       fetchImpl: opts.updateFetch || fetch,
     }),
+    'POST /api/updates/download': async () => {
+      const download = await downloadVerifiedUpdate({
+        publicKey: opts.updatePublicKey ?? UPDATE_PUBLIC_KEY,
+        currentVersion: VERSION,
+        platform: os,
+        arch: opts.arch || process.arch,
+        fetchImpl: opts.updateFetch || fetch,
+        tempRoot: opts.updateTempRoot,
+      });
+      const ticket = randomBytes(32).toString('base64url');
+      const timer = setTimeout(() => {
+        const pending = updateDownloads.get(ticket);
+        updateDownloads.delete(ticket);
+        if (pending) rm(pending.folder, { recursive: true, force: true }).catch(() => {});
+      }, 5 * 60_000);
+      timer.unref?.();
+      updateDownloads.set(ticket, { ...download, timer, expiresAt: Date.now() + 5 * 60_000 });
+      return { status: 'ready', version: download.version, filename: download.filename, size: download.size, sha256: download.sha256, download_url: `/api/updates/download/${ticket}?t=${encodeURIComponent(token)}` };
+    },
     'GET /api/rsi': async () => ({ ideas: await rsiLedger.list() }),
     'GET /api/rsi/observations': async () => ({ observations: await rsiObservationSchedule.status() }),
     'POST /api/rsi/observations/settings': async (b) => {
@@ -2280,6 +2301,34 @@ export async function startSetup(opts = {}) {
       const file = await readUiStatic(url.pathname);
       if (file) { res.writeHead(200, { 'Content-Type': file.type, 'Cache-Control': 'no-store' }).end(file.body); return; }
     }
+    const updateDownloadMatch = req.method === 'GET' && url.pathname.match(/^\/api\/updates\/download\/([A-Za-z0-9_-]{40,48})$/);
+    if (updateDownloadMatch) {
+      const given = Buffer.from(String(url.searchParams.get('t') || req.headers['x-brainlink-token'] || ''));
+      const want = Buffer.from(token);
+      if (given.length !== want.length || !timingSafeEqual(given, want)) { json(res, 401, { error: 'Setup session expired. Reopen BrainLink.' }); return; }
+      const ticket = updateDownloadMatch[1];
+      const pending = updateDownloads.get(ticket);
+      if (!pending || pending.expiresAt <= Date.now()) {
+        if (pending) { clearTimeout(pending.timer); updateDownloads.delete(ticket); await rm(pending.folder, { recursive: true, force: true }).catch(() => {}); }
+        json(res, 404, { error: 'This verified download expired. Check for updates and try again.' });
+        return;
+      }
+      updateDownloads.delete(ticket);
+      clearTimeout(pending.timer);
+      res.writeHead(200, {
+        'Content-Type': 'application/octet-stream',
+        'Content-Length': String(pending.size),
+        'Content-Disposition': `attachment; filename="${pending.filename}"`,
+        'Cache-Control': 'no-store',
+        'X-Content-Type-Options': 'nosniff',
+      });
+      const stream = createReadStream(pending.file);
+      stream.once('error', () => res.destroy());
+      stream.once('close', () => { rm(pending.folder, { recursive: true, force: true }).catch(() => {}); });
+      res.once('close', () => stream.destroy());
+      stream.pipe(res);
+      return;
+    }
     const route = routes[`${req.method} ${url.pathname}`];
     if (!route) { res.writeHead(404).end(); return; }
     const given = Buffer.from(String(req.headers['x-brainlink-token'] || ''));
@@ -2298,7 +2347,7 @@ export async function startSetup(opts = {}) {
       json(res, 200, result);
     } catch (e) { json(res, 400, { error: String(e.message || e) }); }
   });
-  server.once('close', () => { snapshotWatcher?.stop(); vaultWatcher?.stop(); for (const client of eventClients) client.end(); eventClients.clear(); clearInterval(discoveryTimer); clearInterval(observationTimer); clearInterval(ingestionTimer); clearInterval(githubAutoTimer); clearInterval(localSummaryAutoDraftTimer); if (backupTimer) { clearTimeout(backupTimer); clearInterval(backupTimer); } if (syncTimer) { clearTimeout(syncTimer); clearInterval(syncTimer); } });
+  server.once('close', () => { snapshotWatcher?.stop(); vaultWatcher?.stop(); for (const client of eventClients) client.end(); eventClients.clear(); for (const pending of updateDownloads.values()) { clearTimeout(pending.timer); rm(pending.folder, { recursive: true, force: true }).catch(() => {}); } updateDownloads.clear(); clearInterval(discoveryTimer); clearInterval(observationTimer); clearInterval(ingestionTimer); clearInterval(githubAutoTimer); clearInterval(localSummaryAutoDraftTimer); if (backupTimer) { clearTimeout(backupTimer); clearInterval(backupTimer); } if (syncTimer) { clearTimeout(syncTimer); clearInterval(syncTimer); } });
   await new Promise((resolve, reject) => { server.once('error', reject); server.listen(port, '127.0.0.1', resolve); });
   port = server.address().port;
   const startupConfig = await loadConfig(file);

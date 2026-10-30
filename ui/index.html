@@ -340,7 +340,7 @@ main #ready, main #ask-panel, main #brain-panel, main #sessions-panel, main #s-c
   <section id="s-updates">
     <h2 data-i18n="updates.title">Updates</h2>
     <p class="hint" data-i18n="updates.hint">Check for a signed BrainLink release. Checking does not download or install anything.</p>
-    <div class="row"><button type="button" id="updates-check" data-i18n="updates.check">Check for updates</button><span id="updates-result" class="muted" role="status" aria-live="polite"></span></div>
+    <div class="row"><button type="button" id="updates-check" data-i18n="updates.check">Check for updates</button><div id="updates-result" class="muted" role="status" aria-live="polite"></div></div>
   </section>
   <section id="s-vault">
     <h2><span class="step" id="n1">1</span> <span data-i18n="vault.step1Title"></span></h2>
@@ -588,10 +588,33 @@ document.getElementById('updates-check')?.addEventListener('click', async (event
   result.textContent = t('updates.checking');
   try {
     const update = await api('GET', '/api/updates/check');
+    result.replaceChildren();
     if (update.status === 'unavailable') result.textContent = t('updates.unavailable');
-    else result.textContent = t('updates.available', { version: update.version, url: update.asset.url });
+    else {
+      result.append(document.createTextNode(t('updates.available', { version: update.version })));
+      const prepare = document.createElement('button');
+      prepare.type = 'button';
+      prepare.dataset.updatePrepare = '1';
+      prepare.textContent = t('updates.download');
+      result.append(prepare);
+    }
   } catch (error) { result.textContent = error.message || t('updates.failed'); }
   finally { button.disabled = false; }
+});
+document.addEventListener('click', async (event) => {
+  const button = event.target.closest('[data-update-prepare]');
+  if (!button) return;
+  const result = $('updates-result');
+  button.disabled = true;
+  try {
+    const download = await api('POST', '/api/updates/download', {});
+    result.replaceChildren(document.createTextNode(t('updates.downloadReady') + ' '));
+    const link = document.createElement('a');
+    link.href = download.download_url;
+    link.textContent = download.filename;
+    link.download = download.filename;
+    result.append(link);
+  } catch (error) { result.textContent = error.message || t('updates.failed'); }
 });
 function toast(msg, bad) { const t = $('toast'); t.textContent = msg; t.className = 'show' + (bad ? ' bad' : ''); clearTimeout(t._h); t._h = setTimeout(() => (t.className = ''), bad ? 6000 : 3500); }
 async function act(fn) { try { await fn(); await load(); } catch (e) { toast(e.message, true); } }
