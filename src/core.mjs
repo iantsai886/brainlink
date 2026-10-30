@@ -627,7 +627,7 @@ export async function search(ctx, name, query, opts = {}) {
 
 const PRIVATE_NOTE_ERROR = 'This note is private.';
 
-export async function readNote(ctx, name, rel) {
+export async function readNote(ctx, name, rel, { readBody = readFile } = {}) {
   const root = vaultRoot(ctx, name);
   const full = safeJoin(root, rel);
   if (!full.toLowerCase().endsWith('.md')) throw new Error('Only Markdown notes can be read');
@@ -641,7 +641,13 @@ export async function readNote(ctx, name, rel) {
   const index = await loadVault(ctx, name);
   const i = index.byRel.get(relNorm);
   if (i === undefined || index.notes[i].private) throw new Error(PRIVATE_NOTE_ERROR);
-  const raw = await readFile(full, 'utf8');
+  // The index can be stale if a file changes while preserving size and timestamps. Re-read
+  // only the bounded frontmatter first so a changed memory type is denied before loading the
+  // note body. Keep the post-read check below as a second guard against edits during the read.
+  const before = await stat(full);
+  const header = await readIndexableHeader(full, before.size);
+  if (!header.indexable || !twinNoteMemoryAllowed(ctx, name, relNorm, header.meta)) throw new Error(PRIVATE_NOTE_ERROR);
+  const raw = await readBody(full, 'utf8');
   const { meta, body, frontmatter } = parseFrontmatter(raw);
   if (isPrivateMeta(meta) || fmSaysPrivate(frontmatter) || !twinNoteMemoryAllowed(ctx, name, relNorm, meta)) throw new Error(PRIVATE_NOTE_ERROR);
   return { path: rel, meta, body, historical: isHistorical(rel, meta) };

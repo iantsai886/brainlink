@@ -574,7 +574,7 @@ test('semantic-only agents cannot search or directly read typed operating manual
   assert.match(JSON.stringify(allowedEpisode.result.structuredContent), /EPISODIC_TYPE_CANARY/);
 });
 
-test('direct note read rechecks memory type after reading a stale-index file', async () => {
+test('direct note read checks current memory type before reading a stale-index file body', async () => {
   const root = await mkdtemp(path.join(tmpdir(), 'brainlink-twin-memory-read-race-'));
   const vaultPath = path.join(root, 'org');
   await mkdir(vaultPath, { recursive: true });
@@ -595,7 +595,11 @@ test('direct note read rechecks memory type after reading a stale-index file', a
   cachedFile.mtime = changed.mtimeMs;
   cachedFile.bytes = changed.size;
 
-  await assert.rejects(readNote(ctx, 'Fictional Org', 'Mutable.md'), /private/i);
+  let bodyReads = 0;
+  await assert.rejects(readNote(ctx, 'Fictional Org', 'Mutable.md', {
+    readBody: async (...args) => { bodyReads++; return readFile(...args); },
+  }), /private/i);
+  assert.equal(bodyReads, 0, 'the current episodic type is denied from frontmatter before the note body is read');
 });
 
 test('profile-scoped session reads stay inside the profile and closeouts remain approval-gated', async () => {
