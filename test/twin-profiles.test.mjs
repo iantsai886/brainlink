@@ -249,7 +249,7 @@ test('AI connection review summary tracks exact checked memory types and per-vau
 test('Twin permission controls disable and clear actions when their memory type is off', async () => {
   const html = await readFile(new URL('../ui/index.html', import.meta.url), 'utf8');
   const start = html.indexOf('function twinActionMemoryAllowed(action, policy) {');
-  const end = html.indexOf("$('twin-new-memory').addEventListener", start);
+  const end = html.indexOf("$('twin-apply-memory-to-agents').addEventListener", start);
   assert.ok(start >= 0 && end > start, 'permission helper is connected to memory changes');
   const memories = ['semantic', 'episodic', 'working', 'procedural'].map((key) => ({ dataset: { twinMemory: key }, checked: key === 'episodic' || key === 'procedural' }));
   const agentMemories = ['working', 'semantic', 'procedural', 'episodic'].map((key) => ({ dataset: { twinAgentMemory: 'agent', memoryType: key }, checked: key === 'episodic' || key === 'procedural', disabled: false }));
@@ -277,6 +277,47 @@ test('Twin permission controls disable and clear actions when their memory type 
   assert.equal(helpers.twinActionMemoryAllowed('propose_note', { semantic: false, episodic: true }), false);
 });
 
+test('Twin memory shortcut copies its ceiling only to selected agents and waits for normal review/save', async () => {
+  const html = await readFile(new URL('../ui/index.html', import.meta.url), 'utf8');
+  const start = html.indexOf('function twinActionMemoryAllowed(action, policy) {');
+  const end = html.indexOf("$('twin-apply-memory-to-agents').addEventListener", start);
+  assert.ok(start >= 0 && end > start, 'memory copy helper is in the setup permission flow');
+  const ceilings = ['working', 'semantic', 'procedural', 'episodic'].map((key) => ({
+    dataset: { twinMemory: key }, checked: ['semantic', 'procedural'].includes(key),
+  }));
+  const agents = ['agent-a', 'agent-b'].map((id) => ({ dataset: { twinAgent: id } }));
+  const agentMemory = ['agent-a', 'agent-b', 'not-selected'].flatMap((agent) => ['working', 'semantic', 'procedural', 'episodic'].map((type) => ({
+    dataset: { twinAgentMemory: agent, memoryType: type }, checked: false, disabled: false,
+  })));
+  const operations = [];
+  const document = { querySelectorAll(selector) {
+    if (selector === '[data-twin-agent]:checked') return agents;
+    if (selector === '[data-twin-memory]') return ceilings;
+    if (selector === '[data-twin-agent-memory]') return agentMemory;
+    if (selector === '[data-twin-operation]') return operations;
+    throw new Error(`Unexpected selector: ${selector}`);
+  } };
+  const notices = [];
+  const helpers = new Function('document', 'toast', 't', `${html.slice(start, end)}; return { updateTwinPermissionControls, copyTwinMemoryToSelectedAgents };`)(
+    document, (message, bad) => notices.push({ message, bad }), (key) => key,
+  );
+
+  assert.equal(helpers.copyTwinMemoryToSelectedAgents(), true);
+  for (const id of ['agent-a', 'agent-b']) {
+    const selected = agentMemory.filter((item) => item.dataset.twinAgentMemory === id);
+    assert.deepEqual(selected.map((item) => item.checked), [false, true, true, false]);
+    assert.deepEqual(selected.map((item) => item.disabled), [true, false, false, true]);
+  }
+  assert.deepEqual(agentMemory.filter((item) => item.dataset.twinAgentMemory === 'not-selected').map((item) => item.checked), [false, false, false, false]);
+  assert.equal(notices.at(-1).message, 'twinProfiles.applyMemoryToAgentsDone');
+  assert.equal(notices.at(-1).bad, undefined);
+  assert.match(html, /id="twin-apply-memory-to-agents"[^>]*data-i18n="twinProfiles\.applyMemoryToAgents"/);
+  assert.match(html, /twin-apply-memory-to-agents'\)\.addEventListener\('click', copyTwinMemoryToSelectedAgents\)/);
+  agents.length = 0;
+  assert.equal(helpers.copyTwinMemoryToSelectedAgents(), false);
+  assert.deepEqual(notices.at(-1), { message: 'twinProfiles.applyMemoryToAgentsSelect', bad: true });
+});
+
 test('Twin setup explains all four memory switches in every supported language', async () => {
   const html = await readFile(new URL('../ui/index.html', import.meta.url), 'utf8');
   assert.match(html, /twinProfiles\.memoryDescription\.' \+ key/, 'each checkbox renders its matching short explanation');
@@ -285,6 +326,9 @@ test('Twin setup explains all four memory switches in every supported language',
     catalogs[locale] = JSON.parse(await readFile(new URL(`../ui/locales/${locale}.json`, import.meta.url), 'utf8'));
     for (const type of ['working', 'semantic', 'procedural', 'episodic']) {
       assert.ok(catalogs[locale][`twinProfiles.memoryDescription.${type}`], `${locale} ${type} description`);
+    }
+    for (const key of ['applyMemoryToAgents', 'applyMemoryToAgentsHint', 'applyMemoryToAgentsSelect', 'applyMemoryToAgentsDone']) {
+      assert.ok(catalogs[locale][`twinProfiles.${key}`], `${locale} ${key} text`);
     }
   }
   assert.match(catalogs.en['twinProfiles.memoryDescription.procedural'], /role instructions.*Skills/i);

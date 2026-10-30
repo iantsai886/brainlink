@@ -220,6 +220,7 @@ main #ready, main #ask-panel, main #brain-panel, main #sessions-panel, main #s-c
       <p class="muted" data-i18n="twinProfiles.chooseMemory"></p>
       <p class="muted" data-i18n="twinProfiles.memoryCeilingHint"></p>
       <div class="grid2" id="twin-new-memory"></div>
+      <div class="row" style="margin-top:8px"><button type="button" id="twin-apply-memory-to-agents" data-i18n="twinProfiles.applyMemoryToAgents"></button><span class="muted" data-i18n="twinProfiles.applyMemoryToAgentsHint"></span></div>
       <div class="notice" data-i18n="twinProfiles.privacyHint"></div>
         <div class="row" style="margin-top:10px"><button class="primary" id="twin-create" data-i18n="twinProfiles.createButton"></button><button id="twin-edit-cancel" hidden data-i18n="twinProfiles.cancelEdit"></button><span id="twin-create-status" class="muted" role="status"></span></div>
     </div>
@@ -2330,6 +2331,21 @@ function updateTwinPermissionControls() {
     if (!allowed) input.checked = false;
   });
 }
+function copyTwinMemoryToSelectedAgents() {
+  const agents = [...document.querySelectorAll('[data-twin-agent]:checked')];
+  if (!agents.length) { toast(t('twinProfiles.applyMemoryToAgentsSelect'), true); return false; }
+  const allowed = Object.fromEntries([...document.querySelectorAll('[data-twin-memory]')].map((input) => [input.dataset.twinMemory, input.checked]));
+  const agentMemory = [...document.querySelectorAll('[data-twin-agent-memory]')];
+  for (const agent of agents) {
+    for (const input of agentMemory) {
+      if (input.dataset.twinAgentMemory === agent.dataset.twinAgent) input.checked = allowed[input.dataset.memoryType] === true;
+    }
+  }
+  updateTwinPermissionControls();
+  toast(t('twinProfiles.applyMemoryToAgentsDone'));
+  return true;
+}
+$('twin-apply-memory-to-agents').addEventListener('click', copyTwinMemoryToSelectedAgents);
 $('twin-new-memory').addEventListener('change', updateTwinPermissionControls);
 $('twin-new-agents').addEventListener('change', (event) => {
   if (event.target.closest('[data-twin-agent-memory]')) updateTwinPermissionControls();
