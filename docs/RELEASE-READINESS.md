@@ -7,6 +7,7 @@ Integration branch: `integration/brainlink-retrieval-evaluation`
 ## Latest verification
 
 - **Current full local suite:** exact source commit `16425b7` on Windows/Node.js 24.22.1 passed `npm run test:all` on 2026-10-31: core 609 total (601 passed, 0 failed, 8 platform/privilege skips); UI 44/44. The paired live Claude Code-to-Codex test remains unverified because Claude Code is signed out. GitHub Actions are queued and are not represented as passing.
+- **Windows packaging checks:** exact current checkout `21ebb22` passed `npm run smoke:installed:win` and `npm run smoke:upgrade:win` on 2026-10-31. The fresh 1.2.8 installer launched from its bundled runtime, both shortcuts opened Setup, and isolated uninstall preserved test user data and restored PATH. The isolated 1.2.7-to-1.2.8 upgrade preserved its data canary, passed Setup health, and uninstalled without removing user data. These are local QA checks; the installer is unsigned and was not published.
 
 ## Product state
 
