@@ -11,7 +11,7 @@ After preparing a package from a signed release, Setup now offers **Open install
 
 Windows/Node.js 24.22.1 full validation passed on this change: core 584 total (576 passed, 0 failed, 8 platform/privilege skips), UI 44/44; `node --check` and `git diff --check` passed. API tests use a generated test key and fictional package; they verify local authentication, verified-file handoff, repeat-open refusal, download stability while the installer is open, and tamper refusal without launching an installer. The launcher command mapping is tested for Windows, macOS, and Linux, but was not launched on all three OSes. The pinned publisher key is still empty, so live update discovery/download remains unavailable. This is local automated verification, not a production release or cross-OS installer acceptance.
 
-GitHub Actions PR run `41062245393` for commit `5b6af17` failed before any job step: all nine jobs report runner ID `0` and empty step lists, and the failed-job log endpoint returned `log not found`. Hosted CI therefore did not execute this revision; the local Windows test results above are separate evidence.
+GitHub Actions PR run `41062245393` for commit `5b6af17`, plus push/PR runs `41062352857` and `41062362643` after documentation commit `1101a9f`, failed before any job step. The checked jobs report runner ID `0` and empty step lists; the failed-job log endpoint returned `log not found`. Hosted CI therefore did not execute either source revision; the local Windows test results above are separate evidence.
 
 ### Claude Desktop Anna activation diagnosis (2026-10-30)
 
