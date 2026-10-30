@@ -6,8 +6,10 @@ Obsidian / Markdown vaults that authorized AI agents can search and write to saf
 
 1. Install `BrainLink-<version>.pkg` (macOS), `BrainLink-Setup-<version>.exe` (Windows), or on Linux the `.deb` or `brainlink-<version>-linux-<arch>.tar.gz` (run `./install.sh`).
 2. Setup opens in a dedicated Edge app window on Windows (or your default browser if Edge is unavailable); on macOS/Linux it opens in your default browser. Choose your vault folder and a rule pack, then name your agent.
-3. Press **Connect** for each AI app, then restart that app.
-4. In the AI, say **"Connect to <agent>"**. Say **"<agent> close loop"** to save the session to your vault.
+3. Press **Connect** for each AI app. Then fully quit and reopen each app so it loads the new BrainLink tools. Closing a window may leave the app running in the background.
+4. Start a new chat and say **"Connect to <agent>"**. Existing chats may still show an older tool list. Say **"<agent> close loop"** to save the session to your vault.
+
+If an agent name is missing, check **BrainLink → Connect** first. A successful local connection check confirms BrainLink has that agent configured; a full app quit, reopen, and new chat are still needed for the AI app to load the updated tool list.
 
 ## Command line
 
