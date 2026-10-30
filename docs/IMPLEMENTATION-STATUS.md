@@ -9,6 +9,10 @@ Code baseline: development target `1.2.8`, with `package.json` as the canonical 
 
 The installed Setup already uses `ui/notes3d.js` with the authenticated `/api/graph3d` endpoint. It displays privacy-filtered note links and verified typed relations; suggested relations remain outside the graph until approved. This change adds a localized **Reset view** control that uses the vendored viewer's `zoomToFit`, stays disabled until graph notes load, and is available in English, Portuguese, and Traditional Chinese. `test/graph3d.test.mjs` passed 20/20, including structural checks on the shipped Setup UI, privacy, and typed edges; `npm run test:ui` passed 43/43 for the separate development preview UI. Neither UI has had a visual usability session on a real customer vault.
 
+### Current-source live Codex handoff receiver (2026-10-30)
+
+On source commit `af84cd761556f8a43da9856feebcb51d084ea7e7`, `node scripts/smoke-live-codex-handoff.mjs --live` passed using the signed-in Codex CLI. In one ephemeral model turn, Codex read a fictional handoff and its authorized fictional source through BrainLink, returned a scoped mailbox reply, and did not expose the planted private canary. The script used temporary fictional Company, restricted, and mailbox vaults and cleaned them up. This verifies the live Codex receiver path and that fixture's scope filter only; it does not verify a live Claude sender, a real Claude-to-Codex round trip, production notes, repeat reliability, or user acceptance. Claude Code is signed out in this environment, so the sender leg remains untested here.
+
 ### Hosted CI runner allocation status (2026-10-30)
 
 For current source `5d69162a386b2dc98e09c564bd71fbe14fdb63ae`, push run `41032141607` ended with all nine jobs failed before runner allocation (`runner_id: 0`, zero steps). GitHub supplied no job logs. This run does not test or reject the source; local UI and package evidence are recorded separately. Hosted CI remains unavailable for this repository at this time.
