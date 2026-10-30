@@ -8,7 +8,7 @@ A desktop app + local MCP server that turns user-controlled Obsidian / Markdown 
 
 The local-first product connects authorized clients to BrainLink. Data is filtered by vault and permissions before retrieval; a remote client requires a separately configured, secured relay and is never assumed to have access by default.
 
-**Promise:** "One brain. Every AI. Nothing overwritten."
+**Promise:** "One governed memory layer for your supported AI tools. No silent overwrites."
 
 ## 2. Who buys it
 
@@ -100,17 +100,17 @@ Clean-room implementations of the strongest patterns in Obsidian Copilot, Khoj a
 
 | Feature | What the user gets | Pattern source |
 |---|---|---|
-| **Auto-linking** | Every note an AI writes gets a Related section: existing notes it mentions by name, then the most similar notes. Close-loop captures get a Related line. Old notes are never edited. | Obsidian unlinked mentions; TF-IDF similarity |
+| **Auto-linking** | Eligible new notes can get a Related section with visible notes they mention by name and similar notes. Close-loop captures can get a Related line. Old notes are not changed by this linking step. | Obsidian unlinked mentions; TF-IDF similarity |
 | **Home map** | `BrainLink/Home.md` links every note, recent changes and unlinked notes; rebuilt after each write; never replaces a user's own note | Obsidian MOC practice |
 | **Meaning-based search** | If Ollama with an embedding model is installed, search fuses keyword and meaning results; vectors cached per chunk hash on this computer; off otherwise | Khoj bi-encoder + hash-incremental index |
 | **Context packets** | For a question, return a small, cited set of bounded excerpts; open the exact source only when more detail is needed | BrainLink |
 | **Smarter keyword search** | Stemming, `#tag` and `[[Note]]` guaranteed hits, rephrasings fused (RRF), folder / tag / date filters, graph boost from links, co-citations and shared tags | Copilot v3 search, query expansion, graph boost |
-| **Memories** | "Remember that…" saves a fact every AI sees when it connects; duplicates skipped | Copilot saved memories |
+| **Memories** | "Remember that…" saves a reported fact. An agent can receive it only when its profile enables semantic memory and grants access to that vault; duplicates are skipped. | Copilot saved memories |
 | **Open loops & brief** | Unchecked tasks, next actions, unresolved questions, decisions waiting; "Brief me" combines changes, open items and link health. Setup can run it on demand or daily for one explicitly chosen vault, including a private vault; private data stays in the local Setup app. | Khoj automations |
 | **Templates** | Meeting (transcripts → attendees as links, action items as tasks), decision, person, project, idea | Meetily / Anarlog meeting notes |
 | **Daily note** | Quick capture into today's note, honouring Obsidian's daily-note folder and format | Obsidian daily notes |
 | **Link health** | Unlinked notes, broken links, duplicate titles, stale active notes | — |
-| **Shared commands** | Notes in `BrainLink/Commands` become slash-command prompts in every MCP client (weekly review, meeting notes, link my notes ship as starters) | Copilot commands shared across agents |
+| **Shared commands** | Notes in `BrainLink/Commands` can be listed as prompts by supported MCP clients that load BrainLink prompts (weekly review, meeting notes, link my notes ship as starters) | Copilot commands shared across agents |
 | **Smart connect** | "Connect to …" also loads what changed this week, open loops and memories | — |
 | **Graph view** | Setup shows a live, clickable link map; users can browse/edit notes and scan enabled, non-private vaults in small batches for same-scope typed relationship suggestions. Suggestions stay out of the graph until separately approved. | Brain 3D |
 

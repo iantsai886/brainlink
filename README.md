@@ -1,6 +1,6 @@
 # BrainLink
 
-Obsidian / Markdown vaults that authorized AI agents can search and write to safely: Claude Desktop and Claude Code, ChatGPT Codex, Cursor, Gemini CLI, Google Antigravity, Hermes Agent, DeepSeek Harness, Windsurf, and any Streamable-HTTP MCP client (such as Grok bots). Product spec: [docs/PRODUCT-SPEC.md](docs/PRODUCT-SPEC.md). Typed company/workflow graph design: [docs/GRAPH-KNOWLEDGE-MODEL.md](docs/GRAPH-KNOWLEDGE-MODEL.md).
+Obsidian / Markdown vaults that authorized AI agents can search and write to safely through supported connectors: Claude Desktop and Claude Code, ChatGPT Codex, Cursor, Gemini CLI, Google Antigravity, Hermes Agent, DeepSeek Harness, Windsurf, and custom Streamable-HTTP MCP clients. Remote clients need a separately configured secure HTTPS relay. Product spec: [docs/PRODUCT-SPEC.md](docs/PRODUCT-SPEC.md). Typed company/workflow graph design: [docs/GRAPH-KNOWLEDGE-MODEL.md](docs/GRAPH-KNOWLEDGE-MODEL.md).
 
 ## For customers
 
@@ -24,18 +24,18 @@ brainlink setup | init | connect <client|all> | disconnect <client> | clients | 
 - **Separate workspaces:** connect multiple vaults and Personal, Organisation, or Client Twins with their own allowed data and memory types.
 - **Four memory types:** BrainLink organizes current work, past sessions, lasting knowledge, and reusable skills in the background. Users do not need to sort every note by hand.
 - **Tools:** `brain_brief`, `vault_recent`, `open_loops`, `vault_health`, `remember`, `append_daily`, `propose_note` templates (meeting, decision, person, project, idea), and the Raw-to-Wiki review flow (`ingestion_queue` / `ingestion_record`). Setup can scan one selected non-private folder manually or once daily; scans only prepare a review queue and never file knowledge automatically. `session_list` and `session_read` access approved local AI history; `session_log` saves short notes. For profile-scoped AIs, session logging is a separate opt-in permission; entries are forced private and tied to that Personal, Organisation, or Client profile. See `docs/SESSION-INDEX.md`.
-- **Shared commands:** notes in `BrainLink/Commands/` become slash commands in every AI.
+- **Shared commands:** notes in `BrainLink/Commands/` can appear as prompts in supported MCP clients that load configured BrainLink prompts.
 - **Portable Agent Skills:** `brainlink-session-closeout`, `brainlink-raw-to-wiki`, and `brainlink-cross-ai-handoff` are versioned in Git, with Claude/Codex-compatible copies. Desktop installers include these skills and all runtime packages.
 - **Scheduled backup:** choose a backup folder and schedule. BrainLink checks each backup; restore tools help recover a vault when needed. Encrypted backups use a recovery key.
 - **Governed improvement:** optional RSI research and health checks create review proposals. They do not change code, permissions, or vault content by themselves.
 
 ## How it is safe
 
-- New notes or appends only. Nothing is ever overwritten or deleted.
-- Every write is previewed first; `confirm=true` writes it. A close phrase authorises its capture.
+- AI note tools create new notes or append to approved targets; they do not replace an existing note. The user can still edit or delete notes through their vault and editor.
+- Note proposals show a preview and need explicit confirmation. Optional automatic closeout can save only a private, unverified draft to a previously approved route.
 - Attribution on every write (`ai_platform`, `agent_or_role`, `session_or_task_id`, timestamp) in the vault's schema (`standard` or `provenance`).
 - Vault scope per AI connection (`BRAINLINK_VAULTS`), read-only connections (`BRAINLINK_READ_ONLY=1`), proposal-only vaults and agents.
-- Refuses secret-looking content (API keys, tokens, card or account numbers).
+- Scans proposed text for common secret patterns and blocks flagged content; this cannot guarantee that every secret is detected.
 - Private vaults are left out of connector `search`/`fetch`.
 - HTTP mode listens on 127.0.0.1 only and needs a bearer token. The Setup UI is local-only, uses a per-session token and checks the Host header.
 

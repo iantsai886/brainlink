@@ -36,10 +36,16 @@ test('pre-release installer notice matches the full, non-expiring build', async 
   assert.doesNotMatch(notice, /14-day trial|limited features|circumvent the licence check/i);
 });
 
-test('customer one-pager does not advertise a trial or feature limit', async () => {
+test('product preview matches approved commercial status and verified feature boundaries', async () => {
   const page = await readFile(path.join(ROOT, 'docs', 'one-pager.html'), 'utf8');
-  assert.match(page, /available without a countdown, licence key, or account/i);
+  assert.match(page, /development build has no trial countdown or licence gate/i);
+  assert.match(page, /pricing, paid plans and a commercial release date have not been announced/i);
+  assert.match(page, /AI providers may receive retrieved context/i);
+  assert.match(page, /secure HTTPS relay/i);
   assert.doesNotMatch(page, /14.day trial|first 14 days|free trial|trial ended/i);
+  assert.doesNotMatch(page, /US\$79|US\$12|NT\$15,000|one year of updates|2 devices/i);
+  assert.doesNotMatch(page, /every AI app on the computer is connected|Windows 10 and 11 are coming soon|signed edits/i);
+  assert.doesNotMatch(page, /Setup in under a minute|Buy once for yourself/i);
 });
 const long = Array.from({ length: 300 }, (_, i) => `filler${i}`).join(' ');
 
