@@ -8,6 +8,8 @@ Integration branch: `integration/brainlink-retrieval-evaluation`
 
 - **Current full local suite:** exact source commit `16425b7` on Windows/Node.js 24.22.1 passed `npm run test:all` on 2026-10-31: core 609 total (601 passed, 0 failed, 8 platform/privilege skips); UI 44/44. The paired live Claude Code-to-Codex test remains unverified because Claude Code is signed out. GitHub Actions are queued and are not represented as passing.
 - **Windows packaging checks:** exact current checkout `21ebb22` passed `npm run smoke:installed:win` and `npm run smoke:upgrade:win` on 2026-10-31. The fresh 1.2.8 installer launched from its bundled runtime, both shortcuts opened Setup, and isolated uninstall preserved test user data and restored PATH. The isolated 1.2.7-to-1.2.8 upgrade preserved its data canary, passed Setup health, and uninstalled without removing user data. These are local QA checks; the installer is unsigned and was not published.
+- **Paired live handoff attempt:** exact current checkout `abe71c1` on Windows/Node.js 24.22.1 ran `npm run smoke:live-cross-client-handoff`; it stopped before creating fixtures because Claude Code is signed out. No test vault or note was created. Sign in to Claude Code, then rerun the same command to verify Claude Code-to-BrainLink-to-Codex continuation.
+- **Hosted CI:** run `41104923366` for `abe71c1` has three matrix jobs failed before any steps ran and the remaining jobs queued at the time of this check. This is runner/account access failure, not a source test result. The full local suite and local platform smoke checks remain separate evidence.
 
 ## Product state
 
