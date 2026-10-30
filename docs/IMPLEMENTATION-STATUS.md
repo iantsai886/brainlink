@@ -17,6 +17,10 @@ The same source commit `310f3d3` also passed `npm run smoke:backup-recovery`: en
 
 `npm run smoke:installed:win` built an unsigned local 1.2.8 installer and passed: bundled runtime launch, desktop and Start Menu shortcuts, Setup health, temporary Hermes hook enable/disable, isolated uninstall, user-data preservation, and PATH restoration. `npm run smoke:upgrade:win` built an isolated 1.2.7 installer from the repository tag and the current 1.2.8 installer; both launched, the upgrade preserved the user-data canary and passed Setup health, and uninstall preserved data and restored PATH. Temporary test profiles were cleaned up. These are local Windows package tests, not a signed or published release, customer upgrade, macOS install, or native Linux desktop test.
 
+### Linux full suite for the current implementation (commit `c0835af`, 2026-10-30)
+
+Ran `npm ci && npm run test:all` in Docker `node:24-bookworm` (Node.js 24.22.2, Linux x64), with a separate Docker volume for Linux `node_modules`. Core tests: 599 total, 597 passed, 0 failed, 2 Windows-only skips. UI tests: 44/44 passed. `npm ci` reported zero vulnerabilities. This is Linux container test evidence, not a native Linux desktop or ARM package test. The BrainLink source code matches the Windows full-suite run at `310f3d3`; commits since then only add evidence documentation and a fictional evaluation receipt.
+
 ### Hosted GitHub Actions runner gate (commit `6f414f1`, 2026-10-30)
 
 GitHub Actions run `41080930432` on commit `6f414f1` did not execute any job steps. GitHub's check annotation says the job was not started because recent account payments failed or the spending limit needs to be increased. This is an account billing gate, not a test failure in BrainLink. Hosted CI will remain unverified until the account owner resolves it in GitHub Billing & plans and a new run completes.
