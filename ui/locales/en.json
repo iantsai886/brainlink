@@ -784,7 +784,7 @@
   "twinProfiles.memory.episodic": "Episodic",
   "twinProfiles.memoryDescription.working": "Current tasks, handoffs, and open items.",
   "twinProfiles.memoryDescription.semantic": "Saved facts, notes, links, and graph data.",
-  "twinProfiles.memoryDescription.procedural": "Role instructions and Skills; needed to activate agent roles.",
+  "twinProfiles.memoryDescription.procedural": "Role instructions, operating manuals, runbooks, and Skills; requires procedural access.",
   "twinProfiles.memoryDescription.episodic": "Past work sessions and outcomes.",
   "twinProfiles.capture": "Session capture",
   "twinProfiles.limits": "These limits apply only to named agent tokens assigned to a profile. Session access requires an explicit grant and matching profile ownership; closeouts require approval. Handoff reading and sending each require a separate grant. General note writes remain blocked. Other AI connections keep their existing scope.",

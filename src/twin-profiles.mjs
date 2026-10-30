@@ -17,6 +17,13 @@ export function profileScopeEditable(profile) {
 }
 
 const MEMORY_TYPES = ['working', 'semantic', 'procedural', 'episodic'];
+const NOTE_TYPE_MEMORY = Object.freeze({
+  'operating-manual': 'procedural', 'operations-manual': 'procedural', 'role-manual': 'procedural',
+  'agent-manual': 'procedural', procedure: 'procedural', 'standard-operating-procedure': 'procedural',
+  runbook: 'procedural', skill: 'procedural', 'agent-skill': 'procedural', 'role-instructions': 'procedural',
+  handoff: 'working', 'handoff-request': 'working', task: 'working', 'open-loop': 'working', 'work-item': 'working',
+  episode: 'episodic', session_episode: 'episodic', 'session-episode': 'episodic', session_summary: 'episodic',
+});
 export function effectiveAgentMemoryPolicy(profile, agentAccess) {
   return Object.fromEntries(MEMORY_TYPES.map((type) => [
     type,
@@ -120,9 +127,12 @@ export function twinNoteMemoryAllowed(ctx, vaultName, rel, meta = {}) {
 
   const declared = String(meta.memory_type || meta.brainlink_memory_type || '').toLowerCase();
   if (['working', 'semantic', 'procedural', 'episodic'].includes(declared)) required.add(declared);
-  const type = String(meta.type || '').toLowerCase();
-  if (['episode', 'session_episode', 'session_summary'].includes(type)) required.add('episodic');
-  if (type === 'handoff') required.add('working');
+  const type = String(meta.type || meta.note_type || '').trim().toLowerCase().replace(/[\s_]+/g, '-');
+  if (NOTE_TYPE_MEMORY[type]) required.add(NOTE_TYPE_MEMORY[type]);
+  const tags = Array.isArray(meta.tags) ? meta.tags.flat(Infinity) : String(meta.tags || '').replace(/^\[|\]$/g, '').split(',');
+  for (const tag of tags.map((item) => String(item).trim().replace(/^['"]|['"]$/g, '').toLowerCase().replace(/[\s_]+/g, '-'))) {
+    if (NOTE_TYPE_MEMORY[tag]) required.add(NOTE_TYPE_MEMORY[tag]);
+  }
   return [...required].every((memoryType) => scope.memory_policy?.[memoryType] === true);
 }
 

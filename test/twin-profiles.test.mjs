@@ -163,9 +163,12 @@ test('Twin setup explains all four memory switches in every supported language',
       assert.ok(catalogs[locale][`twinProfiles.memoryDescription.${type}`], `${locale} ${type} description`);
     }
   }
-  assert.match(catalogs.en['twinProfiles.memoryDescription.procedural'], /activate agent roles/i);
-  assert.match(catalogs.pt['twinProfiles.memoryDescription.procedural'], /ativar agentes/i);
-  assert.match(catalogs['zh-TW']['twinProfiles.memoryDescription.procedural'], /啟用 Agent 角色/);
+  assert.match(catalogs.en['twinProfiles.memoryDescription.procedural'], /role instructions.*Skills/i);
+  assert.match(catalogs.en['twinProfiles.memoryDescription.procedural'], /requires procedural access/i);
+  assert.match(catalogs.pt['twinProfiles.memoryDescription.procedural'], /instruções de função.*Skills/i);
+  assert.match(catalogs.pt['twinProfiles.memoryDescription.procedural'], /exigem acesso procedural/i);
+  assert.match(catalogs['zh-TW']['twinProfiles.memoryDescription.procedural'], /角色指示.*Skills/);
+  assert.match(catalogs['zh-TW']['twinProfiles.memoryDescription.procedural'], /需要程序記憶權限/);
 });
 
 test('profile-scoped agents see only granted vaults and only supported read tools', async () => {
@@ -486,6 +489,38 @@ test('semantic vault tools exclude documents assigned to disabled memory types',
       assert.doesNotMatch(JSON.stringify(result), new RegExp(canaries[disabled].join('|')), `${tool} must not expose disabled memory content`);
     }
   }
+});
+
+test('semantic-only agents cannot search or directly read typed operating manuals or Skills', async () => {
+  const root = await mkdtemp(path.join(tmpdir(), 'brainlink-twin-procedural-types-'));
+  const vaultPath = path.join(root, 'org');
+  await mkdir(vaultPath, { recursive: true });
+  await writeFile(path.join(vaultPath, 'Knowledge.md'), '# Knowledge\n\nSEMANTIC_TYPE_CANARY is ordinary shared knowledge.');
+  await writeFile(path.join(vaultPath, 'Anna Manual.md'), '---\ntype: operating-manual\ntags:\n  - company-role\n---\n# Anna\n\nPROCEDURAL_MANUAL_CANARY is private to agents with procedural permission.');
+  await writeFile(path.join(vaultPath, 'Handoff Skill.md'), '---\ntags: [agent-skill]\n---\n# Handoff Skill\n\nPROCEDURAL_SKILL_CANARY is private to agents with procedural permission.');
+  const cfg = fixture(vaultPath);
+  const ctx = createContext(cfg, { env: { BRAINLINK_AGENT_TOKEN: 'fictional-agent-token' } });
+  ctx.twinScope.memory_policy.procedural = false;
+  const mcp = createMcp(ctx);
+  const call = (name, args) => mcp.handle({ jsonrpc: '2.0', id: 1, method: 'tools/call', params: { name, arguments: args } });
+  const query = 'SEMANTIC_TYPE_CANARY PROCEDURAL_MANUAL_CANARY PROCEDURAL_SKILL_CANARY';
+  const search = await call('vault_search', { vault: 'Fictional Org', query });
+  assert.equal(search.result.isError, false);
+  assert.match(JSON.stringify(search.result.structuredContent), /Knowledge\.md|SEMANTIC_TYPE_CANARY/);
+  assert.doesNotMatch(JSON.stringify(search.result.structuredContent), /PROCEDURAL_MANUAL_CANARY|PROCEDURAL_SKILL_CANARY/);
+  const packet = await call('context_packet', { vault: 'Fictional Org', query });
+  assert.equal(packet.result.isError, false);
+  assert.match(JSON.stringify(packet.result.structuredContent), /Knowledge\.md|SEMANTIC_TYPE_CANARY/);
+  assert.doesNotMatch(JSON.stringify(packet.result.structuredContent), /PROCEDURAL_MANUAL_CANARY|PROCEDURAL_SKILL_CANARY/);
+  for (const note of ['Anna Manual.md', 'Handoff Skill.md']) {
+    const read = await call('vault_read_note', { vault: 'Fictional Org', path: note });
+    assert.equal(read.result.isError, true, `${note} must be blocked by the procedural memory grant`);
+    assert.doesNotMatch(JSON.stringify(read), /PROCEDURAL_MANUAL_CANARY|PROCEDURAL_SKILL_CANARY/);
+  }
+  ctx.twinScope.memory_policy.procedural = true;
+  const allowed = await call('vault_read_note', { vault: 'Fictional Org', path: 'Anna Manual.md' });
+  assert.equal(allowed.result.isError, false, 'the existing Harness grant can still read the operating manual');
+  assert.match(JSON.stringify(allowed.result.structuredContent), /PROCEDURAL_MANUAL_CANARY/);
 });
 
 test('direct note read rechecks memory type after reading a stale-index file', async () => {
