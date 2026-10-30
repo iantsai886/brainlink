@@ -12,7 +12,7 @@ import path from 'node:path';
 import { loadConfig, saveConfig, configPath, normalize, validate, LOCALES, appHome } from './config.mjs';
 import { PACKS, buildPack, scaffold, mergePack } from './packs.mjs';
 import { CLIENTS, resolveClient, detect, connectClient, disconnectClient, readClientAgentToken, test, deepSeekSessionCueStatus, setDeepSeekSessionCue } from './connectors.mjs';
-import { createContext, search, searchWithVerdict, readNote, ensureDefaultIgnore, readExcludedFolders, writeExcludedFolders, DEFAULT_EXCLUDED_FOLDERS, SUGGESTED_EXCLUDED_FOLDERS, safeJoin, vaultRoot } from './core.mjs';
+import { createContext, search, searchWithVerdict, readNote, related as relatedNotes, ensureDefaultIgnore, readExcludedFolders, writeExcludedFolders, DEFAULT_EXCLUDED_FOLDERS, SUGGESTED_EXCLUDED_FOLDERS, safeJoin, vaultRoot } from './core.mjs';
 import { ROOT, launchSpec, readActivity, refreshMap, logActivity } from './runtime.mjs';
 import { detectEmbedder } from './embed.mjs';
 import { vaultHealth, brief as createBrief } from './insights.mjs';
@@ -2070,6 +2070,11 @@ export async function startSetup(opts = {}) {
       const ctx = localContext(cfg, { ...env, BRAINLINK_SEMANTIC: '0' });
       const source = await readIngestionSource(ctx, String(b.vault || ''), String(b.folder || ''), { source_id: b.source_id, revision: b.revision });
       const draft = await generateLocalIngestionDraft(source, local.model, { fetchImpl: opts.ingestionDraftFetch || fetch });
+      const related = await relatedNotes(ctx, draft.vault, source.rel);
+      draft.related_notes = related.suggested
+        .filter((item) => typeof item.path === 'string' && !/[[\]]/.test(item.path) && Array.isArray(item.shared_terms))
+        .slice(0, 8)
+        .map((item) => ({ path: item.path, title: String(item.title || '').slice(0, 160), shared_terms: item.shared_terms.slice(0, 6).map((term) => String(term).slice(0, 50)), score: Number(item.score) || 0 }));
       draft.destinations = (await listSessionFilingFolders(ctx, draft.vault))
         .map((entry) => entry.path)
         .filter((folder) => folder && folder !== draft.folder && !folder.startsWith(`${draft.folder}/`)
@@ -2105,8 +2110,18 @@ export async function startSetup(opts = {}) {
       if (!destination || !Array.isArray(draft.destinations) || !draft.destinations.includes(destination)) throw new Error('Choose an existing knowledge folder outside the selected source folder.');
       const ctx = localContext(cfg, { ...env, BRAINLINK_SEMANTIC: '0' });
       await readIngestionSource(ctx, draft.vault, draft.folder, { source_id: draft.source_id, revision: draft.revision });
+      const requestedRelated = b.related_note_paths === undefined ? [] : b.related_note_paths;
+      if (!Array.isArray(requestedRelated) || requestedRelated.length > 5 || requestedRelated.some((item) => typeof item !== 'string')) throw new Error('Choose up to five related-note suggestions from this draft.');
+      const selectedPaths = [...new Set(requestedRelated)];
+      if (selectedPaths.length !== requestedRelated.length) throw new Error('A related-note suggestion was selected more than once.');
+      const originalCandidates = new Set((draft.related_notes || []).map((item) => item.path));
+      const currentCandidates = new Set((await relatedNotes(ctx, draft.vault, draft.source_path)).suggested.map((item) => item.path));
+      if (selectedPaths.some((item) => !originalCandidates.has(item) || !currentCandidates.has(item))) throw new Error('A related-note suggestion is no longer visible. Review the source and prepare the draft again.');
+      const relatedSection = selectedPaths.length
+        ? `\n\n## Related notes (selected similarity suggestions; not verified facts)\n${selectedPaths.map((item) => `- [[${item.replace(/\.md$/i, '')}]]`).join('\n')}`
+        : '';
       const result = await proposeNote(ctx, {
-        vault: draft.vault, folder: destination, title: draft.title, body: draft.body,
+        vault: draft.vault, folder: destination, title: draft.title, body: `${draft.body}${relatedSection}`,
         type: draft.memory_type, confidence: 'reported',
         source: `Local AI draft from ${draft.source_path}`,
         ai_platform: 'BrainLink Local Review', agent_or_role: 'Raw-to-Wiki draft',

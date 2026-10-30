@@ -616,7 +616,9 @@ async function renderIngestionDraftList() {
   const { drafts = [] } = await api('GET', '/api/ingestion/drafts');
   host.innerHTML = drafts.length ? drafts.map((record) => {
     const d = record.draft;
-    return `<div class="card"><b>${esc(d.title)}</b><p class="muted">${esc(d.vault)} · ${esc(d.source_path)} · ${esc(d.memory_type)} · ${esc(d.model)}</p><p>${esc(d.summary)}</p><details><summary>${esc(t('ingestion.reviewDraft'))}</summary><pre style="white-space:pre-wrap;overflow-wrap:anywhere">${esc(d.body)}</pre></details>${d.destinations?.length ? `<label>${esc(t('ingestion.destination'))}<select data-ingestion-destination="${esc(record.id)}"><option value="">${esc(t('ingestion.chooseDestination'))}</option>${d.destinations.map((folder) => `<option value="${esc(folder)}">${esc(folder)}</option>`).join('')}</select></label><button class="primary" type="button" data-ingestion-save-draft="${esc(record.id)}">${esc(t('ingestion.saveProposal'))}</button>` : `<p class="muted">${esc(t('ingestion.noDestination'))}</p>`}<button class="secondary" type="button" data-ingestion-discard-draft="${esc(record.id)}">${esc(t('ingestion.discardDraft'))}</button></div>`;
+    const links = (d.related_notes || []).map((item) => `<label class="muted" style="display:flex;flex-direction:row;gap:8px;align-items:flex-start"><input type="checkbox" data-ingestion-related="${esc(record.id)}" value="${esc(item.path)}" style="width:auto;margin-top:3px"><span><b>${esc(item.title)}</b><br><span>${esc(t('ingestion.sharedTerms', { terms: item.shared_terms.join(', ') }))}</span></span></label>`).join('');
+    const relatedChoices = links ? `<fieldset style="margin:10px 0"><legend>${esc(t('ingestion.relatedTitle'))}</legend><p class="muted">${esc(t('ingestion.relatedHint'))}</p>${links}</fieldset>` : '';
+    return `<div class="card"><b>${esc(d.title)}</b><p class="muted">${esc(d.vault)} · ${esc(d.source_path)} · ${esc(d.memory_type)} · ${esc(d.model)}</p><p>${esc(d.summary)}</p><details><summary>${esc(t('ingestion.reviewDraft'))}</summary><pre style="white-space:pre-wrap;overflow-wrap:anywhere">${esc(d.body)}</pre></details>${relatedChoices}${d.destinations?.length ? `<label>${esc(t('ingestion.destination'))}<select data-ingestion-destination="${esc(record.id)}"><option value="">${esc(t('ingestion.chooseDestination'))}</option>${d.destinations.map((folder) => `<option value="${esc(folder)}">${esc(folder)}</option>`).join('')}</select></label><button class="primary" type="button" data-ingestion-save-draft="${esc(record.id)}">${esc(t('ingestion.saveProposal'))}</button>` : `<p class="muted">${esc(t('ingestion.noDestination'))}</p>`}<button class="secondary" type="button" data-ingestion-discard-draft="${esc(record.id)}">${esc(t('ingestion.discardDraft'))}</button></div>`;
   }).join('') : `<p class="muted">${esc(t('ingestion.noPendingDrafts'))}</p>`;
 }
 
@@ -2102,12 +2104,14 @@ document.addEventListener('click', async (event) => {
   }
   const saveDraft = event.target.closest('[data-ingestion-save-draft]');
   if (saveDraft) {
-    const selector = document.querySelector(`[data-ingestion-destination="${CSS.escape(saveDraft.dataset.ingestionSaveDraft)}"]`);
+    const draftId = saveDraft.dataset.ingestionSaveDraft;
+    const selector = document.querySelector(`[data-ingestion-destination="${CSS.escape(draftId)}"]`);
     if (!selector?.value) { toast(t('ingestion.chooseDestination'), true); return; }
     if (!window.confirm(t('ingestion.confirmSaveProposal'))) return;
     try {
       saveDraft.disabled = true;
-      const result = await api('POST', '/api/ingestion/save-draft', { draft_id: saveDraft.dataset.ingestionSaveDraft, destination: selector.value, confirm: true });
+      const related_note_paths = [...document.querySelectorAll(`[data-ingestion-related="${CSS.escape(draftId)}"]:checked`)].map((item) => item.value);
+      const result = await api('POST', '/api/ingestion/save-draft', { draft_id: draftId, destination: selector.value, related_note_paths, confirm: true });
       if (result.written) saveDraft.closest('.card').innerHTML = `<b>${esc(t('ingestion.proposalSaved'))}</b><p>${esc(result.path)}</p><p class="muted">${esc(t('ingestion.proposalUnverified'))}</p>`;
       else if (result.preview) toast(t('ingestion.proposalNeedsReview'), true);
       else toast((result.errors || []).join(' '), true);
