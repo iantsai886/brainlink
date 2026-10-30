@@ -168,7 +168,7 @@ test('opt-in auto-file writes only to the exact saved project folder and is idem
       cue = listed.cues.find((item) => item.session_ref === session.id);
       const destination = path.join(vault, 'Projects', 'Fictional');
       const note = (await readdir(destination)).find((name) => name.toLowerCase().endsWith('.md'));
-      if (note) notePath = path.join(destination, note);
+      if (note && cue?.summary_filed) notePath = path.join(destination, note);
     }
     assert.ok(notePath, `eligible closeout should file to the exact saved folder; cue=${JSON.stringify(cue)}; modelCalls=${calls}`);
     const saved = await readFile(notePath, 'utf8');

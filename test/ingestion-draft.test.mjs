@@ -5,6 +5,7 @@ import { mkdtemp, mkdir, readFile, readdir, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { normalize, saveConfig } from '../src/config.mjs';
 import { generateLocalIngestionDraft } from '../src/ingestion-draft.mjs';
+import { ingestionScheduleDue, localDateAndTime, validateIngestionSchedule } from '../src/ingestion-schedule.mjs';
 import { startSetup } from '../src/setup.mjs';
 
 test('local ingestion drafts use only loopback Ollama and keep source links and review labels', async () => {
@@ -83,4 +84,72 @@ test('selected source can become a proposed note only after explicit confirmatio
     const privateScan = await (await api('/api/ingestion/run', { targets: [{ vault: 'Fictional Company', folder: 'Raw' }] })).json();
     assert.equal(privateScan.candidates.some((item) => item.path.endsWith('Private.md')), false);
   } finally { await new Promise((resolve) => app.server.close(resolve)); }
+});
+
+test('opt-in scheduled scan creates bounded, private local drafts that survive a BrainLink restart', async () => {
+  const home = await mkdtemp(path.join(tmpdir(), 'brainlink-ingestion-auto-draft-'));
+  const appHome = path.join(home, 'app'), vault = path.join(home, 'vault');
+  await mkdir(path.join(vault, 'Raw'), { recursive: true });
+  await mkdir(path.join(vault, 'Knowledge'), { recursive: true });
+  await writeFile(path.join(vault, 'Raw', 'Source.md'), '# Fictional source\n\nSENSITIVE_RAW_BODY should be summarized locally.');
+  await writeFile(path.join(vault, 'Raw', 'Private.md'), '---\nprivate: true\n---\nPRIVATE_AUTO_CANARY must not be read.');
+  const env = { BRAINLINK_HOME: appHome, HOME: home, BRAINLINK_SEMANTIC: '0' };
+  const local = localDateAndTime(new Date(), 'UTC');
+  const pastMinute = `${local.time.slice(0, 2)}:${String(Math.max(0, Number(local.time.slice(3)) - 1)).padStart(2, '0')}`;
+  const config = normalize({ timezone: 'UTC', vaults: [{ name: 'Fictional Company', path: vault }], ingestion: { enabled: true, autoDrafts: true, targets: [{ vault: 'Fictional Company', folder: 'Raw' }], time: pastMinute } });
+  config.sessions.localSummary = { enabled: true, model: 'qwen2.5:3b', autoDraftOnEnd: false, autoFileOnEnd: false };
+  await saveConfig(config, path.join(appHome, 'config.json'));
+  let modelCalls = 0;
+  const opts = { env, home, os: 'win32', port: 0, useCli: false, ingestionTickMs: 20, ingestionDraftFetch: async (url, options) => {
+    modelCalls++;
+    assert.equal(url, 'http://127.0.0.1:11434/api/chat');
+    assert.doesNotMatch(options.body, /PRIVATE_AUTO_CANARY/);
+    assert.match(options.body, /never follow instructions/i);
+    return { ok: true, json: async () => ({ message: { content: JSON.stringify({ title: 'Checklist summary', memory_type: 'procedural', summary: 'The fictional source describes one checklist.', key_points: [] }) } }) };
+  } };
+  const waitForDraft = async (app) => {
+    const base = `http://127.0.0.1:${app.port}`;
+    const get = (route) => fetch(base + route, { headers: { 'X-BrainLink-Token': app.token } });
+    const deadline = Date.now() + 5000;
+    while (Date.now() < deadline) {
+      const state = await get('/api/state').then((r) => r.json());
+      if (state.ingestion_drafts?.status?.created) return { state, drafts: await get('/api/ingestion/drafts').then((r) => r.json()) };
+      await new Promise((resolve) => setTimeout(resolve, 20));
+    }
+    throw new Error('Scheduled local draft did not appear.');
+  };
+  let app = await startSetup(opts);
+  try {
+    const result = await waitForDraft(app);
+    assert.equal(result.state.ingestion_drafts.status.created, 1);
+    assert.equal(result.state.ingestion_drafts.status.attempted, 1, 'private source is excluded before the model call');
+    assert.equal(result.drafts.drafts.length, 1);
+    assert.equal(result.drafts.drafts[0].draft.status, 'unverified_draft');
+    assert.equal(modelCalls, 1);
+    assert.deepEqual(await readdir(path.join(vault, 'Knowledge')), [], 'scheduled work never writes to the vault');
+    const recordPath = path.join(appHome, 'ingestion', 'drafts', `${result.drafts.drafts[0].id}.json`);
+    const savedDraft = await readFile(recordPath, 'utf8');
+    assert.doesNotMatch(savedDraft, /SENSITIVE_RAW_BODY|PRIVATE_AUTO_CANARY/);
+    await new Promise((resolve) => app.server.close(resolve));
+    app = await startSetup({ ...opts, ingestionTickMs: 60_000 });
+    const reopened = await fetch(`http://127.0.0.1:${app.port}/api/ingestion/drafts`, { headers: { 'X-BrainLink-Token': app.token } }).then((r) => r.json());
+    assert.equal(reopened.drafts.length, 1, 'draft is still available after restart');
+    assert.equal(modelCalls, 1, 'the same source is not sent to the model twice after restart');
+    const disableLocal = await fetch(`http://127.0.0.1:${app.port}/api/sessions/local-summary/settings`, { method: 'POST', headers: { 'Content-Type': 'application/json', 'X-BrainLink-Token': app.token }, body: JSON.stringify({ enabled: false }) });
+    assert.equal(disableLocal.status, 200);
+    assert.equal(JSON.parse(await readFile(path.join(appHome, 'config.json'), 'utf8')).ingestion.autoDrafts, false, 'turning off local AI also disables scheduled AI drafting');
+    const discard = await fetch(`http://127.0.0.1:${app.port}/api/ingestion/discard-draft`, { method: 'POST', headers: { 'Content-Type': 'application/json', 'X-BrainLink-Token': app.token }, body: JSON.stringify({ draft_id: reopened.drafts[0].id, confirm: true }) });
+    assert.equal(discard.status, 200);
+    assert.equal((await fetch(`http://127.0.0.1:${app.port}/api/ingestion/drafts`, { headers: { 'X-BrainLink-Token': app.token } }).then((r) => r.json())).drafts.length, 0, 'reviewed or stale local drafts can be discarded');
+    const skippedQueue = await fetch(`http://127.0.0.1:${app.port}/api/ingestion/run`, { method: 'POST', headers: { 'Content-Type': 'application/json', 'X-BrainLink-Token': app.token }, body: JSON.stringify({ targets: [{ vault: 'Fictional Company', folder: 'Raw' }] }) }).then((r) => r.json());
+    assert.equal(skippedQueue.queued_total, 0, 'discarding a current draft records a skip receipt for that source revision');
+  } finally { await new Promise((resolve) => app.server.close(resolve)); }
+});
+
+test('scheduled AI drafts are disabled by default and limited to the explicitly enabled daily scan', () => {
+  assert.equal(validateIngestionSchedule({ enabled: false, autoDrafts: true, targets: [], time: '02:00' }).autoDrafts, false);
+  const schedule = { enabled: true, autoDrafts: true, targets: [{ vault: 'Team', folder: 'Raw' }], time: '12:00' };
+  assert.equal(ingestionScheduleDue(schedule, new Date('2026-10-30T12:30:00Z'), 'UTC'), true);
+  const changed = validateIngestionSchedule({ ...schedule, autoDrafts: false }, { ...schedule, last_scheduled_date: '2026-10-30' });
+  assert.equal(changed.last_scheduled_date, null, 'changing AI draft behavior resets the previous schedule receipt');
 });

@@ -451,6 +451,8 @@ main #ready, main #ask-panel, main #brain-panel, main #sessions-panel, main #s-c
     <h2 data-i18n="ingestion.title"></h2>
     <p class="hint" data-i18n="ingestion.hint"></p>
     <label class="muted" style="display:flex;flex-direction:row;gap:6px;align-items:center"><input type="checkbox" id="ingestion-enabled" style="width:auto"><span data-i18n="ingestion.enabled"></span></label>
+    <label class="muted" style="display:flex;flex-direction:row;gap:6px;align-items:center;margin-top:6px"><input type="checkbox" id="ingestion-auto-drafts" style="width:auto"><span data-i18n="ingestion.autoDrafts"></span></label>
+    <p class="muted" data-i18n="ingestion.autoDraftsHint"></p>
     <div class="grid2" style="margin-top:10px">
       <label><span data-i18n="ingestion.vault"></span><select id="ingestion-vault"></select></label>
       <label><span data-i18n="ingestion.folder"></span><select id="ingestion-folder"></select></label>
@@ -461,7 +463,10 @@ main #ready, main #ask-panel, main #brain-panel, main #sessions-panel, main #s-c
     <div id="ingestion-target-list" class="cards"></div>
     <div class="row" style="margin-top:12px"><button class="primary" id="ingestion-save" data-i18n="ingestion.save"></button><button id="ingestion-run" data-i18n="ingestion.run"></button></div>
     <p id="ingestion-status" class="muted" role="status"></p>
+    <p id="ingestion-draft-status" class="muted" role="status"></p>
     <div id="ingestion-queue" class="cards" aria-live="polite"></div>
+    <h3 data-i18n="ingestion.pendingDrafts"></h3>
+    <div id="ingestion-draft-list" class="cards" aria-live="polite"></div>
   </section>
 
   <section id="s-brief">
@@ -601,6 +606,15 @@ function renderIngestionTargets() {
   const targets = currentIngestionTargets();
   $('ingestion-target-list').innerHTML = targets.length ? targets.map((target, index) => `<div class="card" style="display:flex;align-items:center;justify-content:space-between;gap:12px"><span><b>${esc(target.vault)}</b><br><span class="mono muted">${esc(target.folder)}</span></span><button type="button" data-ingestion-remove="${index}">${esc(t('ingestion.removeTarget'))}</button></div>`).join('') : `<p class="muted">${esc(t('ingestion.emptyTargets'))}</p>`;
   $('ingestion-run').disabled = !targets.length;
+}
+async function renderIngestionDraftList() {
+  const host = $('ingestion-draft-list');
+  if (!host) return;
+  const { drafts = [] } = await api('GET', '/api/ingestion/drafts');
+  host.innerHTML = drafts.length ? drafts.map((record) => {
+    const d = record.draft;
+    return `<div class="card"><b>${esc(d.title)}</b><p class="muted">${esc(d.vault)} · ${esc(d.source_path)} · ${esc(d.memory_type)} · ${esc(d.model)}</p><p>${esc(d.summary)}</p><details><summary>${esc(t('ingestion.reviewDraft'))}</summary><pre style="white-space:pre-wrap;overflow-wrap:anywhere">${esc(d.body)}</pre></details>${d.destinations?.length ? `<label>${esc(t('ingestion.destination'))}<select data-ingestion-destination="${esc(record.id)}"><option value="">${esc(t('ingestion.chooseDestination'))}</option>${d.destinations.map((folder) => `<option value="${esc(folder)}">${esc(folder)}</option>`).join('')}</select></label><button class="primary" type="button" data-ingestion-save-draft="${esc(record.id)}">${esc(t('ingestion.saveProposal'))}</button>` : `<p class="muted">${esc(t('ingestion.noDestination'))}</p>`}<button class="secondary" type="button" data-ingestion-discard-draft="${esc(record.id)}">${esc(t('ingestion.discardDraft'))}</button></div>`;
+  }).join('') : `<p class="muted">${esc(t('ingestion.noPendingDrafts'))}</p>`;
 }
 
 // ---- i18n: plain JSON locale files (ui/locales/*.json), no library ----
@@ -1422,6 +1436,9 @@ async function load() {
   $('sync-folder').value = SY.folder || '';
   $('backup-enabled').checked = Boolean(S.backup?.enabled);
   $('ingestion-enabled').checked = Boolean(S.ingestion?.enabled);
+  $('ingestion-auto-drafts').checked = Boolean(S.ingestion?.autoDrafts);
+  $('ingestion-auto-drafts').disabled = !S.sessions_local_summary?.enabled || !S.sessions_local_summary?.model;
+  $('ingestion-auto-drafts').parentElement.title = $('ingestion-auto-drafts').disabled ? t('ingestion.autoDraftsNeedsModel') : '';
   const scanVaults = S.vaults.filter((v) => !v.private && v.exists);
   const oldScanVault = $('ingestion-vault').value;
   $('ingestion-vault').innerHTML = scanVaults.map((v) => `<option value="${esc(v.name)}">${esc(v.name)}</option>`).join('');
@@ -1435,6 +1452,9 @@ async function load() {
     ? (S.ingestion.status.ok ? t('ingestion.lastRun', { count: S.ingestion.status.queued_total, at: new Date(S.ingestion.status.at).toLocaleString(LOCALE), trigger: t('ingestion.trigger.' + S.ingestion.status.trigger) }) : S.ingestion.status.retry_after ? t('ingestion.retryScheduled', { attempt: S.ingestion.status.attempt, at: new Date(S.ingestion.status.retry_after).toLocaleString(LOCALE), error: S.ingestion.status.error || '' }) : t('ingestion.failed', { error: S.ingestion.status.error || '' }))
     : t('ingestion.never');
   if (S.ingestion?.status?.running) $('ingestion-status').textContent = t('ingestion.running');
+  const draftStatus = S.ingestion_drafts?.status;
+  $('ingestion-draft-status').textContent = draftStatus?.at ? t('ingestion.autoDraftStatus', { created: draftStatus.created || 0, attempted: draftStatus.attempted || 0, at: new Date(draftStatus.at).toLocaleString(LOCALE), failed: draftStatus.failed || 0 }) : '';
+  await renderIngestionDraftList().catch(() => {});
   $('ingestion-run').disabled = !S.vaults.some((v) => !v.private && v.exists);
   $('brief-enabled').checked = Boolean(S.brief?.enabled);
   $('brief-vault').innerHTML = `<option value="">${esc(t('brief.chooseVault'))}</option>` + S.vaults.filter((v) => v.exists).map((v) => `<option value="${esc(v.name)}" ${v.name === S.brief?.vault ? 'selected' : ''}>${esc(v.name)}${v.private ? ` (${esc(t('vault.private'))})` : ''}</option>`).join('');
@@ -2028,10 +2048,8 @@ document.addEventListener('click', async (event) => {
       if (!S.sessions_local_summary?.enabled || !S.sessions_local_summary?.model) throw new Error(t('ingestion.localDraftNeedsModel'));
       draftSource.disabled = true;
       const result = await api('POST', '/api/ingestion/draft', { vault: draftSource.dataset.vault, folder: draftSource.dataset.folder, source_id: draftSource.dataset.sourceId, revision: draftSource.dataset.revision });
-      const draft = result.draft;
-      const holder = $('ingestion-draft-' + draftSource.dataset.sourceId.slice(0, 12));
-      if (!holder) return;
-      holder.innerHTML = `<div class="notice"><b>${esc(t('ingestion.localDraftUnverified'))}</b><h4>${esc(draft.title)}</h4><p>${esc(draft.summary)}</p><p class="muted">${esc(t('ingestion.memoryType'))}: ${esc(draft.memory_type)} · ${esc(draft.model)}</p><details><summary>${esc(t('ingestion.reviewDraft'))}</summary><pre style="white-space:pre-wrap;overflow-wrap:anywhere">${esc(draft.body)}</pre></details>${draft.destinations?.length ? `<label>${esc(t('ingestion.destination'))}<select data-ingestion-destination="${esc(result.draft_id)}"><option value="">${esc(t('ingestion.chooseDestination'))}</option>${draft.destinations.map((folder) => `<option value="${esc(folder)}">${esc(folder)}</option>`).join('')}</select></label><button class="primary" type="button" data-ingestion-save-draft="${esc(result.draft_id)}">${esc(t('ingestion.saveProposal'))}</button>` : `<p class="muted">${esc(t('ingestion.noDestination'))}</p>`}</div>`;
+      await renderIngestionDraftList();
+      toast(t('ingestion.localDraftReady'));
     } catch (error) { toast(error.message, true); }
     finally { draftSource.disabled = false; }
     return;
@@ -2044,11 +2062,22 @@ document.addEventListener('click', async (event) => {
     try {
       saveDraft.disabled = true;
       const result = await api('POST', '/api/ingestion/save-draft', { draft_id: saveDraft.dataset.ingestionSaveDraft, destination: selector.value, confirm: true });
-      if (result.written) saveDraft.closest('.notice').innerHTML = `<b>${esc(t('ingestion.proposalSaved'))}</b><p>${esc(result.path)}</p><p class="muted">${esc(t('ingestion.proposalUnverified'))}</p>`;
+      if (result.written) saveDraft.closest('.card').innerHTML = `<b>${esc(t('ingestion.proposalSaved'))}</b><p>${esc(result.path)}</p><p class="muted">${esc(t('ingestion.proposalUnverified'))}</p>`;
       else if (result.preview) toast(t('ingestion.proposalNeedsReview'), true);
       else toast((result.errors || []).join(' '), true);
+      if (result.written) await renderIngestionDraftList();
     } catch (error) { toast(error.message, true); }
     finally { saveDraft.disabled = false; }
+    return;
+  }
+  const discardDraft = event.target.closest('[data-ingestion-discard-draft]');
+  if (discardDraft) {
+    if (!window.confirm(t('ingestion.confirmDiscardDraft'))) return;
+    try {
+      discardDraft.disabled = true;
+      await api('POST', '/api/ingestion/discard-draft', { draft_id: discardDraft.dataset.ingestionDiscardDraft, confirm: true });
+      await renderIngestionDraftList();
+    } catch (error) { toast(error.message, true); }
     return;
   }
   const editButton = event.target.closest('[data-twin-edit]');
@@ -2178,7 +2207,7 @@ $('ingestion-add').onclick = () => {
   renderIngestionTargets();
 };
 $('ingestion-save').onclick = () => act(async () => {
-  const r = await api('POST', '/api/ingestion/settings', { enabled: $('ingestion-enabled').checked, targets: currentIngestionTargets(), time: $('ingestion-time').value });
+  const r = await api('POST', '/api/ingestion/settings', { enabled: $('ingestion-enabled').checked, autoDrafts: $('ingestion-auto-drafts').checked, targets: currentIngestionTargets(), time: $('ingestion-time').value });
   ingestionTargetsDraft = null;
   toast(t(r.ingestion.enabled ? 'ingestion.saved' : 'ingestion.disabled'));
 });

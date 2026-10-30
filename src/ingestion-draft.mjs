@@ -25,7 +25,7 @@ export function formatIngestionDraft(data, source) {
     `\nDrafted locally with ${source.model || 'Ollama'}. Check every claim and link before approval.`,
   ].join('\n\n');
   if (body.length > MAX_OUTPUT_CHARS) throw new Error('The local model returned a draft that is too long.');
-  return { title, memory_type: memoryType, body, source_id: source.source_id, revision: source.revision, source_path: source.rel, source_title: source.title, vault: source.vault, folder: source.folder, generated_at: new Date().toISOString(), model: source.model, confidence: 'reported', status: 'unverified_draft' };
+  return { title, summary, memory_type: memoryType, body, source_id: source.source_id, revision: source.revision, source_path: source.rel, source_title: source.title, vault: source.vault, folder: source.folder, generated_at: new Date().toISOString(), model: source.model, confidence: 'reported', status: 'unverified_draft' };
 }
 
 export async function generateLocalIngestionDraft(source, model, { fetchImpl = fetch, timeoutMs = 120_000 } = {}) {
