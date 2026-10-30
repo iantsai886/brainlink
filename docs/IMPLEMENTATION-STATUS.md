@@ -1613,6 +1613,10 @@ SHA-256 values for the temporary QA artifacts:
 
 These unsigned artifacts stayed in a detached QA worktree and were not published. ARM64 package architecture and checksums were verified, but they were not executed on ARM hardware. A real graphical Linux desktop session, macOS installation, and customer acceptance remain unverified.
 
+### Recheck saved Claude Desktop Anna access (2026-10-31; repository commit `0b49eaf`)
+
+Read the local BrainLink configuration without printing its token or note contents. The configured Organisation Twin contains the `Anna` role. Then loaded the exact BrainLink token from Claude Desktop's saved MCP entry into the current local server and called MCP `tools/list`: both `agent_connect_anna` and `agent_connect_brain` were present among 17 authorized tools. The oldest running Claude Desktop process still started before the saved config's modification time. This confirms BrainLink's saved server-side role and token scope; it does not confirm Claude Desktop has reloaded the tools or made a live Anna call. The remaining user-side step is to fully quit Claude Desktop, including its tray/background process, reopen it, and start a new chat.
+
 ### Refresh backup recovery and retrieval comparison on current branch (2026-10-31; source commit `57a301c`)
 
 `npm run smoke:backup-recovery` passed on Windows/Node.js 24.22.1 with fictional encrypted Personal, Organisation, and Client-A scopes: four files verified and restored to a clean folder; wrong-key refusal, artifact restore, and unchanged sources all passed.
