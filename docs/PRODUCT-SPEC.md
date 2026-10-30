@@ -155,9 +155,11 @@ Setup can install or update BrainLink's versioned Agent Skills in the user-level
 | Runtime | official Node 24.22.1 universal (arm64 + x64) inside the app bundle | official Node 24.22.1 x64 `node.exe` inside the install dir | official Node 24.22.1 x64 or arm64 inside the package |
 | Signing | Developer ID signing and notarisation are still release gates | Authenticode signing is still a release gate | Signed repository/package distribution is not yet designed |
 | Store | Direct download; Mac App Store sandbox needs separate design | Microsoft Store/MSIX needs separate design | Package repository and update policy need separate design |
-| Updates | A strict Ed25519 manifest verifier is implemented, but no update checker, downloader, or installer handoff is integrated | same | same |
+| Updates | Ed25519 release-manifest verification and a local signing tool are implemented; no in-app checker, downloader, or installer handoff is integrated | same | same |
 
 The verifier accepts only a pinned Ed25519 public key, a signed canonical manifest, a newer version for the requested channel, and a size-bounded package hosted at this repository's matching GitHub release path. The actual signing key is not provisioned or embedded, and no update endpoint, download flow, asset hash check, OS signature check, or user-approved installer launch exists yet. The verifier is a security foundation, not a user-facing updater or release capability.
+
+The repository also provides `npm run updates:sign-manifest -- --payload FILE --key PRIVATE_KEY_FILE --out ENVELOPE_FILE`. It validates a release payload through the shipped verifier, signs canonical JSON with an Ed25519 key, derives the key ID, refuses to overwrite an existing envelope, and never writes private key material to output. Unix key files must be owner-only. No production key is stored in the repository; the signer is release tooling and does not enable in-app updates.
 
 ## 7. Commercial model and legal terms
 
