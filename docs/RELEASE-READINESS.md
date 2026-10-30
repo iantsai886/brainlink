@@ -1,6 +1,6 @@
 # BrainLink implementation and release status
 
-Status checked: 2026-10-30 (Asia/Taipei)  
+Status checked: 2026-10-31 (Asia/Taipei)
 Repository: `iantsai886/brainlink`  
 Integration branch: `integration/brainlink-retrieval-evaluation`
 
@@ -12,12 +12,13 @@ BrainLink's main product pieces are implemented in the development branch: local
 
 ## What has been checked
 
-- **Local automated tests:** Windows/Node.js 24.22.1 passed `npm run test:all` on code commit `310f3d3`: 599 core tests (591 passed, 0 failed, 8 Windows platform/privilege skips) and UI 44/44. Linux x64/Node.js 24.22.2 in Docker passed on current source commit `c0835af`: 599 core tests (597 passed, 0 failed, 2 Windows-only skips) and UI 44/44. Focused session-import tests passed 24/24 on Windows. These are local runs; hosted Actions remains blocked before jobs start.
+- **Latest local automated tests:** code commit `441c3f0` passed Windows/Node.js 24.22.1 `npm run test:all`: core 600 total (592 passed, 0 failed, 8 platform/privilege skips), UI 44/44. Linux x64/Node.js 24 in Docker passed on the same application change: core 600 total (598 passed, 0 failed, 2 Windows-only skips), UI 44/44. The Linux full run used the patched parser; its date-sensitive fixture was then made timezone-independent and the affected Windows/Linux suites passed 36/36 on both platforms. These are local runs; hosted Actions remains blocked before jobs start.
 - **Weekly RSI control:** Setup offers a manual run and an optional schedule, off by default, for BrainLink's fixed fictional 20-question fixture. The user chooses a weekday and local time. It runs only while BrainLink is open, does not read connected vaults or call an AI model, and stores aggregate results with source revision details. Schedule and ISO-week records use the same configured timezone. It measures retrieval task success only; it is not generated-answer quality or proof of provider-billed token savings.
 - **Backup recovery:** `npm run smoke:backup-recovery` passed on source commit `310f3d3`: encrypted fictional Personal, Organisation and Client-A data; four files verified and restored to a clean folder; wrong-key refusal, artifact restore and unchanged sources all passed. This is local Windows evidence, not a second-device recovery test.
 - **Live AI check:** the signed-in Codex CLI completed one BrainLink handoff with temporary fictional vaults. The expected reply was saved and a planted private canary did not appear.
 - **Retrieval/context evidence:** the 30-case fictional comparison at source commit `64c12fa` kept task-success proxy at 17/30, source recall at 1.000, and privacy violations at zero; estimated result size fell 14.1% (497 to 427 tokens). This is recorded in `samples/evaluation/reports/retrieval-independent-windows-v4.json`. It is not proof of generated-answer quality or provider-billed token savings.
-- **Windows install and upgrade checks:** on source commit `4527349`, `npm run smoke:installed:win` passed bundled-runtime launch, desktop and Start Menu shortcuts, Setup health, temporary hook check, isolated uninstall, user-data preservation, and PATH restoration. `npm run smoke:upgrade:win` also passed an isolated 1.2.7-to-1.2.8 upgrade and cleanup. The installer is unsigned and local; it is not a published release.
+- **Windows install and upgrade checks:** on source commit `441c3f0`, `npm run smoke:installed:win` passed the bundled-runtime launch, both shortcuts, authenticated Setup health/UI, temporary Hermes-hook controls, isolated uninstall, user-data preservation, and PATH restoration. `npm run smoke:upgrade:win` also passed an isolated 1.2.7-to-1.2.8 upgrade and cleanup. The installer is unsigned and local; it is not a published release.
+- **Linux packages:** on source matching the `441c3f0` parser change, all four x64/ARM64 tar and Debian artifacts built and their SHA-256 sidecars verified. The x64 Debian package and portable archive passed install, version, fictional-vault initialization, uninstall, and settings-preservation checks in Debian Bookworm. ARM64 artifacts were checksum-verified but not executed on ARM hardware.
 - **Cross-client check:** not complete. Re-running `npm run smoke:live-cross-client-handoff` on the current branch stopped before creating any fixture because Claude Code is signed out on this computer. Claude Desktop's saved local BrainLink settings expose `Connect to Anna`; the currently running Claude Desktop process started before the saved configuration update, so a fresh in-app Anna call remains unverified until a full app exit and relaunch loads the current settings.
 
 ## Still needed before calling this ready to sell
