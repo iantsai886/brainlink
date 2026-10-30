@@ -842,14 +842,20 @@ test('MCP: initialize, tools, prompts, resources, errors', async () => {
   const call = (method, params, id = 1) => mcp.handle({ jsonrpc: '2.0', id, method, params });
   const init = await call('initialize', { protocolVersion: '2025-03-26' });
   assert.equal(init.result.protocolVersion, '2025-03-26');
-  assert.match(init.result.instructions, /"Connect to Chief of Staff" → agent_connect/);
+  assert.match(init.result.instructions, /"Connect to Chief of Staff" → agent_connect_chief_of_staff \(direct tool; preferred\) or agent_connect/);
   assert.match(init.result.instructions, /call BrainLink’s agent_connect tool directly/);
   assert.match(init.result.instructions, /do not search a connector directory/);
   const names = (await call('tools/list')).result.tools.map((t) => t.name);
-  for (const n of ['brainlink_guide', 'vault_search', 'agent_connect', 'agent_close_loop', 'propose_note', 'send_handoff', 'search', 'fetch']) assert.ok(names.includes(n), n);
+  for (const n of ['brainlink_guide', 'vault_search', 'agent_connect', 'agent_connect_chief_of_staff', 'agent_close_loop', 'propose_note', 'send_handoff', 'search', 'fetch']) assert.ok(names.includes(n), n);
   const activationTool = (await call('tools/list')).result.tools.find((t) => t.name === 'agent_connect');
   assert.match(activationTool.description, /Call this BrainLink tool directly/);
   assert.match(activationTool.description, /not a separate connector or app/);
+  const directActivation = (await call('tools/list')).result.tools.find((tool) => tool.name === 'agent_connect_chief_of_staff');
+  assert.equal(directActivation.title, 'Connect to Chief of Staff');
+  assert.match(directActivation.description, /Use this BrainLink tool when the user asks to connect to Chief of Staff/);
+  const directResult = await call('tools/call', { name: 'agent_connect_chief_of_staff', arguments: {} }, 5);
+  assert.equal(directResult.result.isError, false, JSON.stringify(directResult));
+  assert.equal(directResult.result.structuredContent.agent.name, 'Chief of Staff');
   const guide = await call('tools/call', { name: 'brainlink_guide', arguments: {} });
   const model = guide.result.structuredContent.memory_model;
   assert.deepEqual(Object.keys(model.types), ['working', 'semantic', 'procedural', 'episodic']);
@@ -882,6 +888,31 @@ test('MCP: initialize, tools, prompts, resources, errors', async () => {
   assert.equal(await mcp.handle({ jsonrpc: '2.0', method: 'notifications/initialized' }), null);
   const bad = await call('tools/call', { name: 'vault_read_note', arguments: { vault: 'Acme Studio', path: '../x.md' } });
   assert.equal(bad.result.isError, true);
+});
+
+test('named agent activation tools keep the same Twin procedural and vault gates', async () => {
+  const { cfg } = await fixture();
+  const ctx = ctxOf(cfg, { BRAINLINK_VAULTS: 'Acme Studio' });
+  ctx.twinScope = {
+    mode: 'scoped', profile_id: 'fictional-org', profile_name: 'Fictional Organisation Twin',
+    memory_policy: { working: false, semantic: true, procedural: true, episodic: false },
+    grants: [{ name: 'Acme Studio', operations: ['read_note'] }],
+  };
+  const mcp = createMcp(ctx);
+  const list = () => mcp.handle({ jsonrpc: '2.0', id: 1, method: 'tools/list' });
+  let listed = await list();
+  const directName = 'agent_connect_chief_of_staff';
+  assert.ok(listed.result.tools.some((tool) => tool.name === directName));
+  const allowed = await mcp.handle({ jsonrpc: '2.0', id: 2, method: 'tools/call', params: { name: directName, arguments: {} } });
+  assert.equal(allowed.result.isError, false, JSON.stringify(allowed));
+  assert.equal(allowed.result.structuredContent.agent.name, 'Chief of Staff');
+
+  ctx.twinScope.memory_policy.procedural = false;
+  listed = await list();
+  assert.ok(!listed.result.tools.some((tool) => tool.name === directName));
+  const denied = await mcp.handle({ jsonrpc: '2.0', id: 3, method: 'tools/call', params: { name: directName, arguments: {} } });
+  assert.equal(denied.result.isError, true);
+  assert.match(denied.result.content[0].text, /procedural memory access/);
 });
 
 test('connector search/fetch exclude private vaults', async () => {

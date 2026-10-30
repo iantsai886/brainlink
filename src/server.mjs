@@ -32,6 +32,14 @@ export function createMcp(ctx, { onCall = () => {} } = {}) {
   const { cfg } = ctx;
   const connectorVaults = ctx.enabled.filter((v) => !ctx.byName.get(v).private || ctx.connectorPrivate);
   const agents = twinMemoryAllowed(ctx, 'procedural') ? ctx.agents : [];
+  const agentSlug = (agent) => agent.name.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '') || 'agent';
+  const activationTools = new Map();
+  for (const agent of agents) {
+    const base = `agent_connect_${agentSlug(agent).replace(/-/g, '_')}`.slice(0, 60);
+    let name = base, suffix = 2;
+    while ([...activationTools.values()].includes(name)) name = `${base.slice(0, 56)}_${suffix++}`;
+    activationTools.set(agent.name, name);
+  }
   const hasHandoff = Boolean(cfg.handoff && ctx.enabled.includes(cfg.handoff.vault));
   const scopedSessionRead = ctx.twinScope?.mode === 'scoped' && twinToolListed(ctx, 'session_list');
   const scopedSessionReview = scopedSessionRead && twinToolListed(ctx, 'session_read');
@@ -71,7 +79,7 @@ export function createMcp(ctx, { onCall = () => {} } = {}) {
       ? `TWIN PROFILE SCOPE: session reads ${scopedSessionRead ? 'are limited to records explicitly owned by this profile' : 'are unavailable'}; session closeout ${scopedSessionClose ? 'is available only as a private, approval-gated summary in a granted vault' : 'is unavailable'}; handoff read/send each require a separate explicit grant.`
       : 'SESSIONS: session_list / session_read cover imported Claude Code, Codex, DeepSeek Harness, and ended Hermes CLI history plus anything logged with session_log (for clients with no readable local history). Hermes import reads only ended CLI sessions from the selected HERMES_HOME state.db; messaging, open sessions, archived messages, tools, and reasoning are excluded. When the user ends work, call session_close for preview. You may omit the vault only when project is the exact project identifier; BrainLink then uses the previously saved destination for that exact project. Otherwise pass an explicit enabled vault or ask the user to choose. If folder is omitted, BrainLink uses a saved choice for that exact project or a strong same-vault match when semantic search is permitted; otherwise it uses the configured intake folder. The preview reports the destination and any suggestion. Use session_filing_folders only if the user wants to choose a different folder. Never guess a vault or claim an unverified summary is fact. Whether private imported sessions are visible to you is the user\'s own choice in BrainLink Settings.',
     ...(ctx.twinScope?.mode === 'scoped' ? [`TWIN PROFILE SCOPE: you are ${ctx.twinScope.profile_name}; enabled vaults and tools are filtered to your grants. General memory writes are blocked. propose_note is available only in explicitly granted vaults and always requires preview plus user approval before saving. Handoff read/send each require a separate explicit grant. Session closeout, if listed, is a private summary plus approval-gated note proposal.`] : []),
-    agents.length ? `AGENTS: ${agents.map((a) => `${a.name} (${a.vault}) — "${a.activation[0]}" → agent_connect; "${a.close[0]}" → agent_close_loop`).join('; ')}.` : '',
+    agents.length ? `AGENTS: ${agents.map((a) => `${a.name} (${a.vault}) — "${a.activation[0]}" → ${activationTools.get(a.name)} (direct tool; preferred) or agent_connect; "${a.close[0]}" → agent_close_loop`).join('; ')}.` : '',
     guideHasHandoff ? `INTER-AI: ${ctx.twinScope?.mode === 'scoped' ? `${scopedHandoffWrite ? 'send_handoff' : ''}${scopedHandoffWrite && scopedHandoffRead ? ' / ' : ''}${scopedHandoffRead ? 'list_handoffs' : ''}` : 'send_handoff / list_handoffs'} use the ${cfg.handoff.vault}/${cfg.handoff.folder} mailbox.` : '',
   ].filter(Boolean).join('\n');
 
@@ -224,6 +232,12 @@ export function createMcp(ctx, { onCall = () => {} } = {}) {
         description: `Call this BrainLink tool directly when the user says an activation phrase (${agents.map((a) => `"${a.activation[0]}"`).join(', ')}). The agent name is a role inside BrainLink, not a separate connector or app; do not search a connector directory. Quickly loads the agent's role and configured notes allowed by this Twin's memory policy; disabled memory types are omitted. Does not scan the whole vault by default. Set include_vault_context=true only when the user explicitly asks for a full recent-activity and open-items summary.`,
         inputSchema: { type: 'object', properties: { agent: agentProp, ai_platform: idProps.ai_platform, include_vault_context: { type: 'boolean', description: 'Optional slower whole-vault recent-activity and open-items summary; leave false for normal activation.' } }, required: ['agent'] },
         run: (a) => connectAgent(ctx, a) },
+      ...agents.map((agent) => ({
+        name: activationTools.get(agent.name), title: agent.activation[0], annotations: RO,
+        description: `Use this BrainLink tool when the user asks to connect to ${agent.name}. ${agent.name} is a role inside BrainLink, not a separate app or connector. Loads only this role and its configured notes allowed by the active Twin permissions; does not scan the whole vault by default.`,
+        inputSchema: { type: 'object', properties: { ai_platform: idProps.ai_platform, include_vault_context: { type: 'boolean', description: 'Optional slower whole-vault recent-activity and open-items summary; leave false for normal activation.' } } },
+        run: (args) => connectAgent(ctx, { ...args, agent: agent.name }),
+      })),
       { name: 'agent_close_loop', title: 'Close the loop for an agent ("… close loop")', annotations: WR,
         description: `Use when the user says a close phrase (${agents.map((a) => `"${a.close[0]}"`).join(', ')}). Captures decisions, actions, corrections, unresolved questions, source, confidence, privacy boundary, links and smallest next actions in the agent's configured place. The user's close phrase authorises confirm=true.`,
         inputSchema: { type: 'object', properties: {
@@ -315,7 +329,7 @@ export function createMcp(ctx, { onCall = () => {} } = {}) {
     return { uri, mimeType: 'text/markdown', text: await readFile(safeJoin(vaultRoot(ctx, v), f), 'utf8') };
   };
 
-  const slugOf = (a) => a.name.toLowerCase().replace(/[^a-z0-9]+/g, '-');
+  const slugOf = (a) => agentSlug(a);
   const agentPrompts = () => agents.flatMap((a) => [
     { name: `connect-${slugOf(a)}`, title: a.activation[0], description: `Activate ${a.name} (${a.vault})` },
     { name: `close-loop-${slugOf(a)}`, title: a.close[0], description: `Close the loop as ${a.name}`, arguments: [{ name: 'focus', description: 'Optional: what this session was about', required: false }] },
