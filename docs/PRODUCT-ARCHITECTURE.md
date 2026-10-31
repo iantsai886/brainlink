@@ -2,7 +2,7 @@
 
 Status: product architecture baseline
 Date: 2026-10-23 Asia/Taipei
-Baseline: main at v1.2.6 merge; verify version/tag alignment before release
+Baseline: full-source `main` history; current development target is 1.2.8. `package.json` is canonical; v1.2.7 is a separate tagged release line and is not the source branch head.
 
 ## Product definition
 
@@ -46,21 +46,24 @@ The customer sees one natural vault experience; the four types are an internal r
 ## Product modules
 
 - Vault Manager: add, remove, scan, scope, and health status for many vaults.
-- Twin Profiles: Personal Twin and Organisation Twin configuration with separate policies.
+- Twin Profiles: Personal, Organisation and Client Twin configuration with separate policies.
 - Agent Connections: provider identity, capabilities, allowed vaults, tools, read/write scope, consent, and revocation.
 - Session Capture: supported end-of-session capture with explicit fallback export.
 - Memory Pipeline: extraction, classification, destination proposal, provenance, links, approval, and versioning.
-- Context Packets: compact citations-first packets with freshness, confidence, exclusions, and full-source fallback.
-- Graph and Navigation: clickable source-backed relationships with list/search/edit alternatives; 3D is optional.
-- Skills: portable Agent Skills in Git with registry metadata, tests, compatible clients, and rollback.
+- Context Packets: question-focused, size-bounded excerpts with exact vault/path citations, note date/status and validated confidence labels; full-source fallback uses the cited path. Packets reuse the authorized search pipeline and inherit its privacy and Twin memory filters.
+- Graph and Navigation: clickable source-backed links with list/search/edit alternatives; 3D is optional. Typed entity/workflow edges derive from Markdown. The graph can scan visible non-private vaults in bounded pages for deterministic, same-scope text candidates. Users can also manually propose a typed relationship from a selected note, with an exact source excerpt and a current compatible target from the same vault and Twin scope. Both paths require separate review before a proposal becomes a graph edge. Automatic arbitrary-language entity/relation extraction, a full entity editor, and workflow simulation remain future work. See `docs/GRAPH-KNOWLEDGE-MODEL.md`.
+- Skills: portable Agent Skills are versioned in Git with Iango registry metadata. Setup discovers skills from the repository and can install them into user-level Claude Code, Codex CLI, Gemini CLI, Antigravity App/IDE, Antigravity CLI, Hermes Agent, and DeepSeek Harness skill folders; it protects pre-existing files and user edits. Repository discovery copies are also kept for Claude Code and Codex. File install is locally tested, while live skill discovery and model behavior are not verified. See `skills/README.md`.
 - Backup and Restore: scheduled user-selected destination, integrity check, retention, restore preview, clean-folder drill, and rollback.
 - Improve / RSI: experiment proposals, frozen baseline, fresh cases, costs, failures, reviewer, promotion, and rollback.
+- RSI must continuously discover and assess ideas from privacy-safe product signals, user feedback, and dated external research. A local append-only proposal ledger now provides a first review surface, and opt-in discovery (`src/rsi-discovery.mjs`, fixed allowlisted arXiv, Crossref and GitHub public metadata sources, off by default, pausable) can add `discovered` proposals to it; always-on discovery, experiment execution, evaluation receipts, and promotion remain separate capabilities. The operating model and runtime boundary are in `docs/RSI-OPERATING-MODEL.md`.
 - Activity and Audit: privacy-safe event trail, exportable diagnostics, and clear data-flow display.
 - Desktop Shell: one-click launch, background service status, single instance, recovery, update, uninstall-with-data-preserved.
 
 ## Acceptance gates
 
 No capability is called complete until it is separately labelled design, implemented, locally tested, cross-client tested, and ready for use. Release requires clean install, upgrade, rollback, backup/restore drill, permission-leak tests, accessibility review, large-vault performance checks, and user task testing.
+
+RSI also has its own gates: source provenance and freshness; deduplication; a falsifiable user outcome; baseline and fresh cases; task-quality, privacy, reliability and cost guardrails; review; reversible promotion; and post-change monitoring. Claims of recursive gain require evidence that the improvement method itself improves downstream experiments.
 
 ## First complete validation fixture
 

@@ -1,4 +1,4 @@
-; BrainLink MCP - Windows installer (NSIS 3). Per-user install, no admin rights needed.
+; BrainLink - Windows installer (NSIS 3). Per-user install, no admin rights needed.
 ; Built by build-windows.sh (macOS/Linux) or build-windows.ps1 (Windows), which pass:
 ;   /DVERSION=1.1.0 /DSTAGE=<staged files> /DOUTFILE=<installer path> [/DSIGN=<sign command>]
 Unicode true
@@ -9,15 +9,15 @@ ManifestDPIAware true
 !include "MUI2.nsh"
 !include "LogicLib.nsh"
 
-Name "BrainLink MCP ${VERSION}"
+Name "BrainLink ${VERSION}"
 OutFile "${OUTFILE}"
 InstallDir "$LOCALAPPDATA\Programs\BrainLink"
 InstallDirRegKey HKCU "Software\BrainLink" "InstallDir"
-BrandingText "BrainLink MCP ${VERSION}"
+BrandingText "BrainLink ${VERSION}"
 VIProductVersion "${VERSION}.0"
-VIAddVersionKey "ProductName" "BrainLink MCP"
+VIAddVersionKey "ProductName" "BrainLink"
 VIAddVersionKey "CompanyName" "Iango"
-VIAddVersionKey "FileDescription" "BrainLink MCP installer"
+VIAddVersionKey "FileDescription" "BrainLink installer"
 VIAddVersionKey "FileVersion" "${VERSION}"
 VIAddVersionKey "LegalCopyright" "(c) Iango"
 
@@ -29,7 +29,7 @@ VIAddVersionKey "LegalCopyright" "(c) Iango"
 !define MUI_ICON "BrainLink.ico"
 !define MUI_UNICON "BrainLink.ico"
 !define MUI_ABORTWARNING
-!define MUI_WELCOMEPAGE_TITLE "Install BrainLink MCP"
+!define MUI_WELCOMEPAGE_TITLE "Install BrainLink"
 !define MUI_WELCOMEPAGE_TEXT "One Obsidian / Markdown second brain for every AI you use: Claude, ChatGPT Codex, Cursor, Gemini and more.$\r$\n$\r$\nYour notes never leave this computer. BrainLink only changes an AI app's settings when you press Connect, and keeps a backup each time.$\r$\n$\r$\nNo administrator rights are needed."
 !define MUI_FINISHPAGE_RUN
 !define MUI_FINISHPAGE_RUN_FUNCTION OpenSetup
@@ -61,6 +61,7 @@ Section "BrainLink" SecMain
 
   CreateDirectory "$SMPROGRAMS\BrainLink"
   CreateShortcut "$SMPROGRAMS\BrainLink\BrainLink.lnk" "$SYSDIR\wscript.exe" '"$INSTDIR\BrainLink.vbs"' "$INSTDIR\BrainLink.ico"
+  CreateShortcut "$DESKTOP\BrainLink.lnk" "$SYSDIR\wscript.exe" '"$INSTDIR\BrainLink.vbs"' "$INSTDIR\BrainLink.ico"
   CreateShortcut "$SMPROGRAMS\BrainLink\Uninstall BrainLink.lnk" "$INSTDIR\Uninstall BrainLink.exe"
 
   ; Put `brainlink` on the user's PATH (no admin; takes effect in new terminals).
@@ -68,7 +69,7 @@ Section "BrainLink" SecMain
   Pop $0
 
   WriteRegStr HKCU "Software\BrainLink" "InstallDir" "$INSTDIR"
-  WriteRegStr HKCU "${UNINSTALL_KEY}" "DisplayName" "BrainLink MCP"
+  WriteRegStr HKCU "${UNINSTALL_KEY}" "DisplayName" "BrainLink"
   WriteRegStr HKCU "${UNINSTALL_KEY}" "DisplayVersion" "${VERSION}"
   WriteRegStr HKCU "${UNINSTALL_KEY}" "Publisher" "Iango"
   WriteRegStr HKCU "${UNINSTALL_KEY}" "DisplayIcon" "$INSTDIR\BrainLink.ico"
@@ -79,6 +80,13 @@ Section "BrainLink" SecMain
 SectionEnd
 
 Section "Uninstall"
+  ; Remove only the exact BrainLink-managed per-user startup launcher; preserve any user-owned file.
+  IfFileExists "$APPDATA\Microsoft\Windows\Start Menu\Programs\Startup\BrainLink Background.vbs" 0 +5
+  FileOpen $0 "$APPDATA\Microsoft\Windows\Start Menu\Programs\Startup\BrainLink Background.vbs" r
+  FileRead $0 $1
+  FileClose $0
+  StrCmp $1 "' BrainLink managed startup launcher v1$\r$\n" 0 +2
+  Delete "$APPDATA\Microsoft\Windows\Start Menu\Programs\Startup\BrainLink Background.vbs"
   ; Remove BrainLink from connected AI apps first (keeps their other settings; backups are made).
   ${If} ${FileExists} "$INSTDIR\node\node.exe"
     nsExec::ExecToLog '"$INSTDIR\node\node.exe" "$INSTDIR\app\bin\brainlink.mjs" disconnect-all'
@@ -92,6 +100,7 @@ Section "Uninstall"
   Delete "$INSTDIR\BrainLink.vbs"
   Delete "$INSTDIR\BrainLink.ico"
   Delete "$INSTDIR\Uninstall BrainLink.exe"
+  Delete "$DESKTOP\BrainLink.lnk"
   RMDir "$INSTDIR"
   RMDir /r "$SMPROGRAMS\BrainLink"
   DeleteRegKey HKCU "${UNINSTALL_KEY}"

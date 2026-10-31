@@ -31,6 +31,55 @@ test('every supported locale ships a JSON file with the exact same keys as Engli
   }
 });
 
+test('Twin read-and-propose preset affects only chosen agents and vaults and does not save', async () => {
+  const html = await readFile(path.join(ROOT, 'ui', 'index.html'), 'utf8');
+  assert.match(html, /id="twin-read-propose-preset"/);
+  const start = html.indexOf("$('twin-read-propose-preset').addEventListener");
+  const end = html.indexOf("$('twin-create').onclick", start);
+  assert.ok(start >= 0 && end > start, 'preset handler is present');
+  const handler = html.slice(start, end);
+  assert.match(handler, /\[data-twin-vault\]:checked/);
+  assert.match(handler, /\[data-twin-agent\]:checked/);
+  assert.match(handler, /access\.value = 'propose'/);
+  assert.match(handler, /\['search', 'read_note', 'propose_note'\]/);
+  assert.match(handler, /data-twin-memory="semantic"/);
+  assert.doesNotMatch(handler, /api\(|\.click\(\)|connect/);
+});
+
+test('connection dialog offers read-and-propose only when the Twin grants it', async () => {
+  const html = await readFile(path.join(ROOT, 'ui', 'index.html'), 'utf8');
+  assert.match(html, /const canPropose = grant\.access === 'propose' && profile\.memory_policy\?\.semantic === true/);
+  assert.match(html, /data-preset-read-propose="\$\{esc\(grant\.name\)\}"/);
+  const start = html.indexOf("$('preset-vault-list').addEventListener('click'");
+  const end = html.indexOf("$('preset-vault-list').onchange", start);
+  assert.ok(start >= 0 && end > start, 'per-vault connection preset handler is present');
+  const handler = html.slice(start, end);
+  assert.match(handler, /\['search', 'read_note', 'propose_note'\]/);
+  assert.doesNotMatch(handler, /api\(|pendingPresetClient/);
+});
+
+test('connection wording distinguishes configured settings from an AI app that loaded them', async () => {
+  const catalogs = Object.fromEntries(await Promise.all(LOCALES.map(async (id) => [id, await loadLocale(id)])));
+  const en = catalogs.en;
+  assert.equal(en['connect.connected'], 'Configured');
+  assert.match(en['connect.hint'], /checks access locally/i);
+  assert.match(en['connect.hint'], /fully quit.*start a new chat/i);
+  assert.match(en['connect.hint'], /does not prove the app loaded the new tools/i);
+  assert.match(en['connect.connectedToast'], /added to/);
+  assert.match(en['connect.liveOk'], /BrainLink check passed/);
+  assert.doesNotMatch(en['connect.hint'], /live test call/i);
+  assert.equal(en['agents.statusConnected'], 'BrainLink reached');
+  assert.equal(en['agents.statusNotConnected'], 'Not checked yet');
+  assert.match(en['agents.testSucceeded'], /does not confirm an AI app loaded the connection/i);
+  for (const [id, catalog] of Object.entries(catalogs)) {
+    assert.match(catalog['connect.hint'], /BrainLink/i, `${id} explains the local BrainLink check`);
+    assert.match(catalog['agents.statusConnected'], /BrainLink/i, `${id} describes BrainLink reachability`);
+    assert.match(catalog['agents.testSucceeded'], /BrainLink/i, `${id} distinguishes BrainLink from client loading`);
+  }
+  const agentsUi = await readFile(path.join(ROOT, 'ui', 'agents.js'), 'utf8');
+  assert.match(agentsUi, /const succeeded = \/\^BrainLink access check passed/);
+});
+
 test('setup UI: /locales/<id>.json serves each catalog, /api/locale persists the choice', async () => {
   const { startSetup } = await import('../src/setup.mjs');
   const { mkdtemp } = await import('node:fs/promises');

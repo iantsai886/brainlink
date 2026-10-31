@@ -3,28 +3,36 @@
 // BM25 over stemmed terms, fused (reciprocal rank) across the query, its rephrasings and the
 // optional semantic ranking; capped graph boost from links, co-citations and shared tags;
 // title boost; demotion of superseded / archived notes; date, folder and tag filters.
-import { readdir, readFile, writeFile, stat } from 'node:fs/promises';
+import { readdir, readFile, writeFile, stat, lstat, realpath, open } from 'node:fs/promises';
 import { createHash } from 'node:crypto';
 import path from 'node:path';
 import { termFrequencies, terms, linkGraph, collection, suggestRelated, extractTags } from './graph.mjs';
+import { deriveTypedRelations } from './typed-graph.mjs';
 import { appHome } from './config.mjs';
 import { detectEmbedder, VectorStore, fillVectors, embedTexts, nearest } from './embed.mjs';
 import { findAgentByToken, publicAgent } from './mcp-agents.mjs';
+import { resolveTwinAgentScope, twinNoteMemoryAllowed } from './twin-profiles.mjs';
 
 const truthy = (v) => /^(1|true|yes|on)$/i.test(String(v || ''));
 
 // Every install unlocks every feature; there is no plan or licence gating.
 export const FEATURES = Object.freeze({ plan: 'full', writes: true, agents: true, http: true, maxVaults: Infinity, maxConnections: Infinity });
 
-export function createContext(cfg, { env = process.env } = {}) {
+export function createContext(cfg, { env = process.env, trustedLocal = false } = {}) {
   const byName = new Map(cfg.vaults.map((v) => [v.name, v]));
-  const enabled = env.BRAINLINK_VAULTS ? env.BRAINLINK_VAULTS.split(',').map((s) => s.trim()).filter((v) => byName.has(v)) : cfg.vaults.map((v) => v.name);
+  const configuredEnabled = env.BRAINLINK_VAULTS ? env.BRAINLINK_VAULTS.split(',').map((s) => s.trim()).filter((v) => byName.has(v)) : cfg.vaults.map((v) => v.name);
   const readOnly = truthy(env.BRAINLINK_READ_ONLY);
   // An AI agent the user added themselves (src/mcp-agents.mjs), identified by the token it was
   // launched with. Revoked or unknown tokens resolve to no agent — never a guess at identity.
   const matchedAgent = findAgentByToken(cfg, env.BRAINLINK_AGENT_TOKEN) || null;
+  const twinScope = trustedLocal
+    ? { mode: 'legacy', profile_id: null, grants: [] }
+    : resolveTwinAgentScope(cfg, matchedAgent, Boolean(env.BRAINLINK_AGENT_TOKEN));
+  const enabled = twinScope.mode === 'scoped'
+    ? configuredEnabled.filter((name) => twinScope.grants.some((grant) => grant.name === name))
+    : twinScope.mode === 'unassigned' ? [] : configuredEnabled;
   return {
-    cfg, features: FEATURES, byName, enabled, readOnly, env,
+    cfg, features: FEATURES, byName, enabled, readOnly, env, twinScope,
     platform: String(env.BRAINLINK_AI_PLATFORM || '').trim() || (matchedAgent ? matchedAgent.name : ''),
     agentRole: String(env.BRAINLINK_AGENT_ROLE || 'direct assistant').trim(),
     connectorPrivate: truthy(env.BRAINLINK_CONNECTOR_PRIVATE),
@@ -246,6 +254,52 @@ export async function isExcludedPath(root, rel) {
   return false;
 }
 
+// Inspect only a bounded frontmatter prefix before reading/indexing a note body. A malformed
+// or overlong frontmatter is hidden until the owner fixes it; never guess "public" when the
+// privacy marker might be beyond the bounded header.
+function inspectIndexableHeader(prefix, size, bytesRead = Buffer.byteLength(prefix, 'utf8')) {
+  prefix = String(prefix).replace(/^\uFEFF/, '');
+  const start = prefix.match(/^(?:[ \t]*\r?\n)*---[^\S\r\n]*\r?\n/);
+  if (!start) return { indexable: /\S/.test(prefix) || bytesRead >= size, meta: {} };
+  const tail = prefix.slice(start[0].length);
+  const end = tail.match(/^---[^\S\r\n]*(?:\r?\n|$)/m);
+  if (!end) return { indexable: false, meta: {} };
+  const header = tail.slice(0, end.index);
+  const { meta } = parseFrontmatter(prefix.slice(0, start[0].length + end.index + end[0].length));
+  return { indexable: !(isPrivateMeta(meta) || fmSaysPrivate(header)), meta };
+}
+
+export function indexableHeader(prefix, size, bytesRead = Buffer.byteLength(prefix, 'utf8')) {
+  return inspectIndexableHeader(prefix, size, bytesRead).indexable;
+}
+
+async function readIndexableHeader(full, size) {
+  const fd = await open(full, 'r');
+  const buffer = Buffer.alloc(Math.min(size, 65536));
+  let bytesRead;
+  try { ({ bytesRead } = await fd.read(buffer, 0, buffer.length, 0)); }
+  finally { await fd.close(); }
+  return inspectIndexableHeader(buffer.subarray(0, bytesRead).toString('utf8'), size, bytesRead);
+}
+
+// Setup needs a useful note count, but building the full search index just to display that
+// number reads every public Markdown body and can consume large amounts of memory on synced
+// vaults. Count from bounded frontmatter reads only; search still builds its normal index lazily.
+export async function countVisibleNotes(ctx, name) {
+  const root = vaultRoot(ctx, name);
+  let count = 0;
+  for (const full of await walk(root)) {
+    const rel = path.relative(root, full).split(path.sep).join('/');
+    if (!twinNoteMemoryAllowed(ctx, name, rel)) continue;
+    const st = await stat(full, { bigint: true });
+    const header = await readIndexableHeader(full, Number(st.size));
+    if (!header.indexable || !twinNoteMemoryAllowed(ctx, name, rel, header.meta)) continue;
+    if (header.meta.generated_by === 'brainlink' || /^BrainLink\/Commands\//i.test(rel)) continue;
+    count++;
+  }
+  return count;
+}
+
 // Hash-incremental: unchanged files are not re-chunked on the next call.
 export async function loadVault(ctx, name) {
   const root = vaultRoot(ctx, name);
@@ -256,28 +310,72 @@ export async function loadVault(ctx, name) {
     const rel = path.relative(root, full).split(path.sep).join('/');
     seen.add(rel);
     const prev = state.files.get(rel);
-    if (prev) { const st = await stat(full); if (st.mtimeMs === prev.mtime && st.size === prev.bytes) continue; }
+    // Use ctime at nanosecond precision as well as size/mtime. Sync tools can preserve
+    // mtime while replacing a note; without this check a cached public copy could survive
+    // a change to `private: true` and still appear in search until restart.
+    const stNow = await stat(full, { bigint: true });
+    const mtime = Number(stNow.mtimeNs) / 1e6;
+    const bytes = Number(stNow.size);
+    const ctime = String(stNow.ctimeNs);
+    // Configured paths such as the handoff mailbox and capture log have known types;
+    // exclude them before even opening their Markdown body.
+    if (!twinNoteMemoryAllowed(ctx, name, rel)) {
+      if (prev?.note) changed = true;
+      state.files.set(rel, { hash: null, mtime, bytes, ctime, note: null });
+      continue;
+    }
+    let header = null;
+    if (prev?.note && prev.mtime === mtime && prev.bytes === bytes && prev.ctime === ctime) {
+      // Scoped agents must not reuse a cached note based only on stat metadata: a sync tool or
+      // filesystem can preserve those values while changing the memory-type frontmatter.
+      // Check the bounded header before retaining the cached body for ranking or excerpts.
+      if (ctx.twinScope?.mode !== 'scoped') continue;
+      header = await readIndexableHeader(full, bytes);
+      if (!header.indexable || !twinNoteMemoryAllowed(ctx, name, rel, header.meta)) {
+        changed = true;
+        state.files.set(rel, { hash: null, mtime, bytes, ctime, note: null });
+        continue;
+      }
+      if (JSON.stringify(header.meta) === JSON.stringify(prev.note.meta)) continue;
+    }
+    header ||= await readIndexableHeader(full, bytes);
+    if (!header.indexable || !twinNoteMemoryAllowed(ctx, name, rel, header.meta)) {
+      if (prev?.note) changed = true;
+      state.files.set(rel, { hash: null, mtime, bytes, ctime, note: null });
+      continue;
+    }
     const raw = await readFile(full, 'utf8');
     const hash = createHash('sha1').update(raw).digest('hex');
-    const stNow = await stat(full);
-    if (prev?.hash === hash) { prev.mtime = stNow.mtimeMs; prev.bytes = stNow.size; continue; }
+    if (prev?.hash === hash) { prev.mtime = mtime; prev.bytes = bytes; prev.ctime = ctime; continue; }
     changed = true;
     const { meta, body, frontmatter } = parseFrontmatter(raw);
-    const mtime = stNow.mtimeMs;
     const title = path.posix.basename(rel).replace(/\.md$/i, '');
     const aliases = listValue(meta.aliases);
     const names = [title, ...aliases].join(' ');
     const chunks = chunkMarkdown(body).map((c, i) => ({ ...c, id: `${rel}#${i}`, tokens: termFrequencies(`${names} ${c.heading} ${c.text}`) }));
-    state.files.set(rel, { hash, mtime, bytes: stNow.size, note: { rel, title, aliases, raw, meta, body, chunks, mtime, minor: isMinor(rel, title), date: noteDate(rel, meta, mtime), tags: extractTags(body, meta), generated: meta.generated_by === 'brainlink' || /^BrainLink\/Commands\//i.test(rel), historical: isHistorical(rel, meta), private: isPrivateMeta(meta) || fmSaysPrivate(frontmatter) } });
+    // Recheck after the full read in case the file changed between the header and body reads.
+    if (isPrivateMeta(meta) || fmSaysPrivate(frontmatter) || !twinNoteMemoryAllowed(ctx, name, rel, meta)) {
+      state.files.set(rel, { hash: null, mtime, bytes, ctime, note: null });
+      continue;
+    }
+    state.files.set(rel, { hash, mtime, bytes, ctime, note: { rel, title, aliases, raw, meta, body, chunks, mtime, minor: isMinor(rel, title), date: noteDate(rel, meta, mtime), tags: extractTags(body, meta), generated: meta.generated_by === 'brainlink' || /^BrainLink\/Commands\//i.test(rel), historical: isHistorical(rel, meta), private: false } });
   }
   for (const rel of [...state.files.keys()]) if (!seen.has(rel)) { state.files.delete(rel); changed = true; }
-  if (changed) state.index = buildIndex([...state.files.values()].map((f) => f.note).sort((a, b) => a.rel.localeCompare(b.rel)));
+  if (changed) state.index = buildIndex([...state.files.values()].map((f) => f.note).filter(Boolean).sort((a, b) => a.rel.localeCompare(b.rel)));
   ctx.cache.set(name, state);
   return state.index;
 }
 
 export function buildIndex(notes) {
-  const { edges, broken } = linkGraph(notes);
+  notes = notes.filter((n) => n && !n.private); // defensive: even direct callers cannot rank private content
+  const { edges: noteEdges, broken } = linkGraph(notes);
+  const typedRelations = deriveTypedRelations(notes);
+  const edges = [...noteEdges];
+  const edgeKeys = new Set(edges.map(([source, target]) => `${source}>${target}`));
+  for (const edge of typedRelations) {
+    const key = `${edge.source}>${edge.target}`;
+    if (!edgeKeys.has(key)) { edges.push([edge.source, edge.target]); edgeKeys.add(key); }
+  }
   const backlinks = notes.map(() => new Set()), outlinks = notes.map(() => new Set());
   for (const [a, b] of edges) { backlinks[b].add(a); outlinks[a].add(b); }
   const chunks = notes.flatMap((n, noteIdx) => n.chunks.map((c) => ({ ...c, noteIdx, len: [...c.tokens.values()].reduce((s, x) => s + x, 0) })));
@@ -291,7 +389,7 @@ export function buildIndex(notes) {
   notes.forEach((n, i) => { for (const a of n.aliases || []) if (!byAlias.has(a.toLowerCase())) byAlias.set(a.toLowerCase(), i); });
   const byTag = new Map();
   notes.forEach((n, i) => { for (const t of n.tags) { if (!byTag.has(t)) byTag.set(t, []); byTag.get(t).push(i); } });
-  return { notes, chunks, df, avgLen, backlinks, outlinks, byRel, byTitle, byAlias, byTag, edges, broken, termSets: null };
+  return { notes, chunks, df, avgLen, backlinks, outlinks, byRel, byTitle, byAlias, byTag, edges, broken, typedRelations, termSets: null };
 }
 
 // Note-level term sets and document frequencies, built lazily (used by related and linking).
@@ -318,7 +416,9 @@ function bm25(index, qTerms, c, k1 = 1.2, b = 0.75) {
 
 export function summarize(index, i, extra = {}) {
   const n = index.notes[i];
-  return { path: n.rel, title: n.title, date: n.date, status: n.meta.status || '', collection: collection(n.rel), ...(n.tags.size ? { tags: [...n.tags] } : {}), historical: n.historical, ...(n.meta.superseded_by ? { superseded_by: n.meta.superseded_by } : {}), ...extra };
+  const confidence = ['verified', 'reported', 'inferred', 'unknown'].includes(String(n.meta.confidence || '').toLowerCase())
+    ? String(n.meta.confidence).toLowerCase() : undefined;
+  return { path: n.rel, title: n.title, date: n.date, status: n.meta.status || '', ...(confidence ? { confidence } : {}), collection: collection(n.rel), ...(n.tags.size ? { tags: [...n.tags] } : {}), historical: n.historical, ...(n.meta.superseded_by ? { superseded_by: n.meta.superseded_by } : {}), ...extra };
 }
 
 // Filter predicate from {folder, tag, since, until}.
@@ -557,23 +657,34 @@ export async function search(ctx, name, query, opts = {}) {
 
 const PRIVATE_NOTE_ERROR = 'This note is private.';
 
-export async function readNote(ctx, name, rel) {
+export async function readNote(ctx, name, rel, { readBody = readFile } = {}) {
   const root = vaultRoot(ctx, name);
   const full = safeJoin(root, rel);
   if (!full.toLowerCase().endsWith('.md')) throw new Error('Only Markdown notes can be read');
   const relNorm = path.relative(root, full).split(path.sep).join('/');
   if (await isExcludedPath(root, relNorm)) throw new Error(PRIVATE_NOTE_ERROR);
-  // safeJoin only resolves `..`/absolute-path tricks (path.resolve), not symlinks: a file or
-  // directory symlink that *looks* like it's inside the vault can still point at 00 Home or
-  // anywhere else on disk. walk() (the index builder) already skips symlinks entirely, so
-  // requiring the note to be indexed under this exact relative path closes that gap for free —
-  // a symlinked path is simply never in index.byRel, no matter what it resolves to on disk.
-  const index = await loadVault(ctx, name);
-  const i = index.byRel.get(relNorm);
-  if (i === undefined || index.notes[i].private) throw new Error(PRIVATE_NOTE_ERROR);
-  const raw = await readFile(full, 'utf8');
+  // Direct reads must not build the full vault index just to check one known path. Validate
+  // every path component, reject symlinks, and confirm the resolved target stays in this vault.
+  // This preserves walk()'s symlink boundary without scanning every Markdown file first.
+  let current = root;
+  const parts = relNorm.split('/');
+  for (let i = 0; i < parts.length; i++) {
+    current = path.join(current, parts[i]);
+    const entry = await lstat(current);
+    if (entry.isSymbolicLink() || (i < parts.length - 1 ? !entry.isDirectory() : !entry.isFile())) throw new Error(PRIVATE_NOTE_ERROR);
+  }
+  const [realRoot, realFull] = await Promise.all([realpath(root), realpath(full)]);
+  const realRel = path.relative(realRoot, realFull);
+  if (!realRel || realRel === '..' || realRel.startsWith(`..${path.sep}`) || path.isAbsolute(realRel)) throw new Error(PRIVATE_NOTE_ERROR);
+  // The index can be stale if a file changes while preserving size and timestamps. Re-read
+  // only the bounded frontmatter first so a changed memory type is denied before loading the
+  // note body. Keep the post-read check below as a second guard against edits during the read.
+  const before = await stat(full);
+  const header = await readIndexableHeader(full, before.size);
+  if (!header.indexable || !twinNoteMemoryAllowed(ctx, name, relNorm, header.meta)) throw new Error(PRIVATE_NOTE_ERROR);
+  const raw = await readBody(full, 'utf8');
   const { meta, body, frontmatter } = parseFrontmatter(raw);
-  if (isPrivateMeta(meta) || fmSaysPrivate(frontmatter)) throw new Error(PRIVATE_NOTE_ERROR);
+  if (isPrivateMeta(meta) || fmSaysPrivate(frontmatter) || !twinNoteMemoryAllowed(ctx, name, relNorm, meta)) throw new Error(PRIVATE_NOTE_ERROR);
   return { path: rel, meta, body, historical: isHistorical(rel, meta) };
 }
 
@@ -618,5 +729,15 @@ const SECRET_PATTERNS = [
 ];
 
 export function findSecrets(text) {
-  return SECRET_PATTERNS.filter(([re]) => re.test(text)).map(([, label]) => label);
+  // Experiment and source receipts include public cryptographic fingerprints. Mask only these
+  // exact, schema-shaped fields before the generic long-token detector runs; do not exempt hashes
+  // elsewhere in prose or permit arbitrary metadata fields to bypass secret scanning.
+  const scanText = String(text).replace(
+    /(["']?)(fixture_sha256|source_commit_sha|question_sha256)\1\s*:\s*(["']?)([a-f0-9]+)\3(?=\s*[,}\]\n]|$)/gi,
+    (match, keyQuote, key, _valueQuote, value) => {
+      const expectedLength = ['fixture_sha256', 'question_sha256'].includes(key.toLowerCase()) ? 64 : 40;
+      return value.length === expectedLength ? `${keyQuote}${key}${keyQuote}: "[public hash]"` : match;
+    },
+  );
+  return SECRET_PATTERNS.filter(([re]) => re.test(scanText)).map(([, label]) => label);
 }

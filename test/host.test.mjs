@@ -1,7 +1,7 @@
 // Host wiring: createApi({store, services, access}) shape, backed by a real folder + scratch config.
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdtempSync, rmSync, writeFileSync, mkdirSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { createFolderHost } from '../src/host.mjs';
@@ -32,7 +32,7 @@ test('createFolderHost: connectors.detect returns the UI-shaped array', async ()
 
 test('createFolderHost: services.sessions.list/read/setPrivate round-trip a logged session', async () => {
   const { dir, configFile, vaultDir } = scratch();
-  const env = { BRAINLINK_HOME: dir };
+  const env = { BRAINLINK_HOME: dir, HOME: dir };
   const host = await createFolderHost({ name: 'Demo', folder: vaultDir, configFile, env });
   const { openSessionStore } = await import('../src/sessions/index.mjs');
   const store = await openSessionStore(env);
@@ -52,6 +52,27 @@ test('createFolderHost: services.sessions.list/read/setPrivate round-trip a logg
   const toggled = await host.services.sessions.setPrivate(s.id, false);
   assert.equal(toggled.private, false);
   assert.deepEqual((await host.services.sessions.list({})).sessions.map((x) => x.id), [s.id], 'no longer private, now visible without include_private');
+  rmSync(dir, { recursive: true, force: true });
+});
+
+test('explicit session refresh imports a newly ended Codex session without restarting BrainLink', async () => {
+  const { dir, configFile, vaultDir } = scratch();
+  const env = { BRAINLINK_HOME: path.join(dir, 'brainlink-data'), HOME: dir };
+  const host = await createFolderHost({ name: 'Demo', folder: vaultDir, configFile, env, home: dir });
+  assert.deepEqual((await host.services.sessions.list({ include_private: true })).sessions, []);
+  const transcript = path.join(dir, '.codex', 'sessions', '2026', '10', '26', 'rollout-new-session.jsonl');
+  mkdirSync(path.dirname(transcript), { recursive: true });
+  writeFileSync(transcript, [
+    JSON.stringify({ type: 'session_meta', payload: { id: 'new-session', cwd: path.join(dir, 'project') } }),
+    JSON.stringify({ type: 'response_item', timestamp: '2026-10-26T01:00:00.000Z', payload: { type: 'message', role: 'user', content: [{ type: 'input_text', text: 'Review the synthetic release plan' }] } }),
+    JSON.stringify({ type: 'response_item', timestamp: '2026-10-26T01:01:00.000Z', payload: { type: 'message', role: 'assistant', content: [{ type: 'output_text', text: 'The plan is ready for review.' }] } }),
+  ].join('\n') + '\n');
+  await host.services.sessions.refresh();
+  const sessions = (await host.services.sessions.list({ include_private: true })).sessions;
+  assert.equal(sessions.length, 1);
+  assert.equal(sessions[0].client, 'codex');
+  assert.match(sessions[0].summary, /Review the synthetic release plan/);
+  assert.equal(sessions[0].private, true);
   rmSync(dir, { recursive: true, force: true });
 });
 

@@ -54,7 +54,7 @@ test('ui/index.html dispatches brainlink:state-updated; agents.js and share.js l
 // key they use exists, as a non-empty string, in every shipped locale: a key referenced here but
 // missing from a catalog would silently fall back to raw English (or the key itself) for that
 // language instead of erroring, so it would never be caught just by using the app once in English.
-test('every en key actually used by the Agents / Share cards (and sync provider labels) exists, non-empty, in every locale', async () => {
+test('every en key used by Agents, Share, GitHub preview, and sync provider labels exists in every locale', async () => {
   const html = await readFile(path.join(ROOT, 'ui', 'index.html'), 'utf8');
   const agentsJs = await readFile(path.join(ROOT, 'ui', 'agents.js'), 'utf8');
   const shareJs = await readFile(path.join(ROOT, 'ui', 'share.js'), 'utf8');
@@ -63,7 +63,10 @@ test('every en key actually used by the Agents / Share cards (and sync provider 
   const scanCalls = (src) => { for (const m of src.matchAll(/\bt\(\s*['"]([a-zA-Z0-9_.]+)['"]/g)) keys.add(m[1]); };
   scanCalls(agentsJs);
   scanCalls(shareJs);
-  for (const m of html.matchAll(/data-i18n(?:-placeholder)?="(agents\.[a-zA-Z0-9_.]+|share\.[a-zA-Z0-9_.]+)"/g)) keys.add(m[1]);
+  for (const m of html.matchAll(/data-i18n(?:-placeholder)?="(agents\.[a-zA-Z0-9_.]+|share\.[a-zA-Z0-9_.]+|github\.[a-zA-Z0-9_.]+)"/g)) keys.add(m[1]);
+  for (const m of html.matchAll(/t\(\s*['"](github\.[a-zA-Z0-9_.]+)['"]/g)) if (!m[1].endsWith('.')) keys.add(m[1]);
+  for (const action of ['add', 'update', 'unchanged', 'blocked_local_change']) keys.add(`github.action.${action}`);
+  for (const status of ['unassigned', 'stale', 'invalid']) keys.add(`github.assignment.${status}`);
   // The provider <select> options are built as t('sync.provider.' + p) for p in PROVIDERS
   // (src/sync/settings.mjs), not a literal key t() can be grepped for.
   if (/t\(\s*['"]sync\.provider\.['"]\s*\+\s*\w+\)/.test(html)) {

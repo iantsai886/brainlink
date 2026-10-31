@@ -1,0 +1,86 @@
+// Private, local-only persistence for unverified Raw-to-Wiki drafts. Original source text is not stored.
+import { createHash, randomUUID } from 'node:crypto';
+import { mkdir, readFile, readdir, rename, unlink, writeFile } from 'node:fs/promises';
+import path from 'node:path';
+
+const ID_RE = /^[a-f0-9]{64}$/;
+
+export function ingestionDraftId(draft) {
+  return createHash('sha256').update(`${draft.vault}\0${draft.source_id}\0${draft.revision}`).digest('hex');
+}
+
+function fileFor(dir, id) {
+  if (!ID_RE.test(id || '')) throw new Error('Invalid local draft reference.');
+  return path.join(dir, `${id}.json`);
+}
+
+function validRecord(record, id) {
+  const draft = record?.draft;
+  return record?.schema === 1 && record.id === id && record.status === 'pending'
+    && draft && draft.status === 'unverified_draft' && draft.source_id && ID_RE.test(draft.source_id)
+    && ID_RE.test(draft.revision) && record.id === ingestionDraftId(draft)
+    && typeof draft.vault === 'string' && draft.vault.length > 0 && draft.vault.length <= 200
+    && typeof draft.folder === 'string' && safeFolder(draft.folder)
+    && typeof draft.source_path === 'string' && safeNotePath(draft.source_path)
+    && typeof draft.title === 'string' && draft.title.length > 0 && draft.title.length <= 120
+    && typeof draft.summary === 'string' && draft.summary.length > 0 && draft.summary.length <= 2400
+    && typeof draft.body === 'string' && draft.body.length <= 12_000
+    && ['working', 'semantic', 'procedural', 'episodic'].includes(draft.memory_type)
+    && (draft.related_notes === undefined || (Array.isArray(draft.related_notes) && draft.related_notes.length <= 8 && draft.related_notes.every((item) => item
+      && safeNotePath(item.path) && !/[\[\]]/.test(item.path)
+      && typeof item.title === 'string' && item.title.length > 0 && item.title.length <= 160
+      && Array.isArray(item.shared_terms) && item.shared_terms.length <= 6 && item.shared_terms.every((term) => typeof term === 'string' && term.length <= 50)
+      && Number.isFinite(item.score) && item.score >= 0 && item.score <= 1)))
+    && Array.isArray(draft.destinations) && draft.destinations.length <= 500 && draft.destinations.every(safeFolder);
+}
+
+function safeFolder(value) {
+  return typeof value === 'string' && value.length > 0 && value.length <= 240 && !value.includes('\\')
+    && value.split('/').every((part) => part && part !== '.' && part !== '..' && !part.startsWith('.'));
+}
+
+function safeNotePath(value) { return safeFolder(value) && /\.md$/i.test(value); }
+
+export async function saveIngestionDraft(dir, draft) {
+  const id = ingestionDraftId(draft), file = fileFor(dir, id);
+  const record = { schema: 1, id, status: 'pending', created_at: draft.generated_at, draft };
+  if (!validRecord(record, id)) throw new Error('The local knowledge draft is invalid.');
+  await mkdir(dir, { recursive: true, mode: 0o700 });
+  const temp = `${file}.tmp-${process.pid}-${randomUUID()}`;
+  try {
+    await writeFile(temp, `${JSON.stringify(record, null, 2)}\n`, { flag: 'wx', mode: 0o600 });
+    try { await rename(temp, file); }
+    catch (error) {
+      if (error.code !== 'EEXIST') throw error;
+      await unlink(temp).catch(() => {});
+    }
+  } catch (error) {
+    await unlink(temp).catch(() => {});
+    throw error;
+  }
+  return record;
+}
+
+export async function readIngestionDraft(dir, id) {
+  const file = fileFor(dir, id);
+  try {
+    const record = JSON.parse(await readFile(file, 'utf8'));
+    return validRecord(record, id) ? record : null;
+  } catch (error) { if (error.code === 'ENOENT') return null; throw error; }
+}
+
+export async function listIngestionDrafts(dir, { limit = 100 } = {}) {
+  const cap = Math.max(1, Math.min(500, Number(limit) || 100));
+  const names = await readdir(dir).catch((error) => error.code === 'ENOENT' ? [] : Promise.reject(error));
+  const records = [];
+  for (const name of names.filter((item) => /^[a-f0-9]{64}\.json$/.test(item)).slice(0, 1000)) {
+    const id = name.slice(0, 64);
+    const record = await readIngestionDraft(dir, id).catch(() => null);
+    if (record) records.push(record);
+  }
+  return records.sort((a, b) => String(b.created_at).localeCompare(String(a.created_at))).slice(0, cap);
+}
+
+export async function removeIngestionDraft(dir, id) {
+  await unlink(fileFor(dir, id)).catch((error) => { if (error.code !== 'ENOENT') throw error; });
+}

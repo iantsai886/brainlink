@@ -3,6 +3,7 @@
 // a brief that combines them, for "what's going on?" and for agents when they connect.
 import { loadVault, summarize, zonedNow } from './core.mjs';
 import { linkTarget } from './links.mjs';
+import { typedGraphHealth } from './typed-graph.mjs';
 
 const daysAgo = (tz, n, now = new Date()) => zonedNow(tz, new Date(now.getTime() - n * 86400e3)).slice(0, 10);
 
@@ -21,7 +22,8 @@ export async function recentNotes(ctx, vaultName, { days = 7, since, until, limi
 // Field lines written by close-loop captures, e.g. "- **Smallest next actions:** …" (single or nested list).
 function captureFields(body, labels) {
   const out = [];
-  const lines = body.split('\n');
+  // Markdown vaults synced from Windows commonly use CRLF. Match fields on logical lines.
+  const lines = body.split(/\r?\n/);
   for (let k = 0; k < lines.length; k++) {
     const m = lines[k].match(/^- \*\*([^*]+):\*\*\s*(.*)$/);
     if (!m || !labels.some((re) => re.test(m[1]))) continue;
@@ -74,6 +76,8 @@ export async function vaultHealth(ctx, vaultName, { staleDays = 180 } = {}, now 
     notes: real.length, links, orphan_count: orphans.length,
     orphans: orphans.slice(0, 30).map((i) => summarize(index, i)),
     broken_links: broken.slice(0, 30).map((b) => ({ in: index.notes[b.from].rel, target: b.target })), broken_count: broken.length,
+    duplicate_title_count: dupes.length, stale_active_count: stale.length,
+    ...typedGraphHealth(index.notes),
     duplicate_titles: dupes.slice(0, 20),
     stale_active_notes: stale.slice(0, 20).map((i) => summarize(index, i)),
     tips: [

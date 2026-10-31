@@ -7,15 +7,8 @@
 // themselves — is unchanged) so it keeps catching the exact class of bug the original 153 tests
 // didn't.
 //
-// One row is EXPECTED to fail here and is carved out below, not silently dropped. Item 1's
-// regression fix changed session_read's private-and-not-allowed result from a thrown MCP error
-// to a normal, non-error {private:true, message} result (src/sessions/mcp.mjs) so an AI client
-// gets a clear "it's private" message instead of an exception. The probe's "refused" check
-// (`sr.every(r => r.isError)`) still assumes the old throw-based contract, so this one row fails
-// even though the session stays correctly hidden either way — the no-throw result still carries
-// no session content (see test/sessions-mcp.test.mjs for the dedicated regression coverage of
-// that no-throw contract, and of shareSummaries defaulting OFF as of v1.2.2 so S2's planted
-// claude-code-client session is hidden by default, same as everything else here).
+// Private session reads return a structured privacy notice instead of an MCP error. The probe
+// asserts that contract and still checks that no summary, excerpt, or transcript canary escapes.
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { mkdir, writeFile, symlink, readFile, readdir, rm } from 'node:fs/promises';
@@ -30,11 +23,7 @@ import * as snap from '../src/snapshot.mjs';
 import { startSetup } from '../src/setup.mjs';
 import { openSessionStore } from '../src/sessions/index.mjs';
 
-const EXPECTED_FAIL_IDS = new Set([
-  'S2 session_read private refused even with include_private/full',
-]);
-
-test('Technical Reviewer privacy probe: every row passes except the 1 known, documented item-1 exception', async () => {
+test('Technical Reviewer privacy probe: every adversarial row passes', async (t) => {
   const B = path.join(tmpdir(), `brainlink-tr-probe-${process.pid}-${Date.now()}`);
   await rm(B, { recursive: true, force: true }); await mkdir(B, { recursive: true });
 
@@ -60,7 +49,11 @@ test('Technical Reviewer privacy probe: every row passes except the 1 known, doc
   await w('Secret2.md', '---\nprivate: true\n---\n# Secret2\n\n- [ ] PRIVTASK_MARK call the bank\n\n## Open questions\n- PRIVQ_MARK should I sell?\n\n- **Smallest next actions:** PRIVNEXT_MARK move money\n');
   await w('Home.md', '# Home\n\nzebracorn hub. See [[Secret]], [[SecretYes]], [[money]], [[nested]], [[Visible]].');
   await w('Visible.md', '# Visible\n\nzebracorn VISIBLE_OK');
-  await symlink(path.join(V, '00 Home/money.md'), path.join(V, 'link-to-money.md'));
+  try { await symlink(path.join(V, '00 Home/money.md'), path.join(V, 'link-to-money.md')); }
+  catch (error) {
+    if (error.code === 'EPERM' && process.platform === 'win32') { t.skip('Windows symlink privilege unavailable; run privacy probe on a symlink-capable host'); return; }
+    throw error;
+  }
   await symlink(path.join(V, '00 Home'), path.join(V, 'HomeAlias'));
   await symlink(path.join(V, 'Secret.md'), path.join(V, 'link-to-secret.md'));
 
@@ -174,7 +167,10 @@ test('Technical Reviewer privacy probe: every row passes except the 1 known, doc
   const sl = [await call('session_list', {}), await call('session_list', { include_private: true }), await call('session_list', { include_private: 'true' }), await call('session_list', { q: 'PRIVSESSION', include_private: true, limit: 20 })];
   rec('S2 session_list: private session never listed (incl. include_private from client)', !sl.some((r) => PS.test(JSON.stringify(r))), `private visible per call=${sl.map((r) => PS.test(JSON.stringify(r)))} public visible (first 3 calls, no q)=${sl.slice(0, 3).map((r) => /PUBLIC_OK/.test(JSON.stringify(r)))}`);
   const sr = [await call('session_read', { id: ps.id }), await call('session_read', { id: ps.id, include_private: true }), await call('session_read', { id: ps.id, include_private: true, full: true }), await call('session_read', { id: ps.id, full: true, offset: 0 })];
-  rec('S2 session_read private refused even with include_private/full', sr.every((r) => r.isError) && !sr.some((r) => PS.test(JSON.stringify(r))), sr.map((r) => `${r.isError}:${JSON.stringify(r.content?.[0]?.text || r).slice(0, 60)}`).join(' | '));
+  rec('S2 session_read returns a private notice without summary or transcript content', sr.every((r) => {
+    const value = r.structuredContent || {};
+    return !r.isError && value.private === true && value.messages === undefined && value.key_turns === undefined && !PS.test(JSON.stringify(value));
+  }), sr.map((r) => `${r.isError}:${JSON.stringify(r.structuredContent || r).slice(0, 90)}`).join(' | '));
   const lg = await call('session_log', { session_id: ps.id, text: 'appended', private: false });
   const afterAppend = await call('session_list', { q: 'PRIVSESSION', limit: 20 });
   rec('S2 session_log(session_id, private:false) cannot unhide a private session', !PS.test(JSON.stringify(afterAppend)), `log isError=${lg.isError} listAfter has private=${PS.test(JSON.stringify(afterAppend))}`);
@@ -189,18 +185,9 @@ test('Technical Reviewer privacy probe: every row passes except the 1 known, doc
 
   await rm(B, { recursive: true, force: true });
 
-  const actualFails = results.filter((r) => !r.pass);
-  const unexpectedFails = actualFails.filter((r) => !EXPECTED_FAIL_IDS.has(r.id));
-  const expectedButPassed = [...EXPECTED_FAIL_IDS].filter((eid) => !actualFails.some((r) => r.id === eid));
-
   assert.deepEqual(
-    unexpectedFails.map((r) => `${r.id} :: ${r.evidence}`),
+    results.filter((r) => !r.pass).map((r) => `${r.id} :: ${r.evidence}`),
     [],
-    'every probe row must pass except the 1 documented item-1 exception',
-  );
-  assert.deepEqual(
-    expectedButPassed,
-    [],
-    'a previously-documented exception started passing — either session_read\'s no-throw contract changed (update this test) or something widened privacy again (investigate)',
+    'every adversarial privacy probe row must pass',
   );
 });

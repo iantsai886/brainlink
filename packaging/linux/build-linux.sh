@@ -6,30 +6,49 @@ set -euo pipefail
 HERE="$(cd "$(dirname "$0")" && pwd)"
 ROOT="$(cd "$HERE/../.." && pwd)"
 VERSION="$(node -p "require('$ROOT/package.json').version")"
-NODE_VERSION="$(cat "$ROOT/vendor/node/VERSION")"
+NODE_VERSION="$(tr -d '\r\n' < "$ROOT/vendor/node/VERSION")"
+if [[ ! "$NODE_VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+  echo "Invalid pinned Node.js version in vendor/node/VERSION" >&2
+  exit 1
+fi
+NODE_DIST="https://nodejs.org/dist/v$NODE_VERSION"
 WORK="$ROOT/build/linux"
 DIST="$ROOT/dist"
 rm -rf "$WORK" && mkdir -p "$WORK" "$DIST"
 TAR=tar; command -v gtar >/dev/null && TAR=gtar
+TAR_OPTS=(--no-xattrs)
+TAR_FORMAT=gnutar
+TAR_OWNERSHIP_OPTS=(--uid 0 --gid 0 --uname root --gname root)
+if "$TAR" --version 2>&1 | grep -q 'GNU tar'; then
+  TAR_FORMAT=gnu
+  TAR_OWNERSHIP_OPTS=(--owner=root:0 --group=root:0)
+fi
+"$TAR" --help 2>&1 | grep -q -- '--no-mac-metadata' && TAR_OPTS+=(--no-mac-metadata)
+[ -f "$ROOT/vendor/node/SHASUMS256.txt" ] || curl -fsS "$NODE_DIST/SHASUMS256.txt" -o "$ROOT/vendor/node/SHASUMS256.txt"
 sips -z 256 256 "$ROOT/packaging/macos/icon/icon-1024.png" --out "$WORK/brainlink.png" >/dev/null 2>&1 || cp "$ROOT/packaging/macos/icon/icon-1024.png" "$WORK/brainlink.png"
 
 for ARCH in x64 arm64; do
   NAME="brainlink-$VERSION-linux-$ARCH"
   S="$WORK/$NAME"
-  NT="$ROOT/vendor/node/node-$NODE_VERSION-linux-$ARCH.tar.xz"
-  [ -f "$NT" ] || curl -sfo "$NT" "https://nodejs.org/dist/$NODE_VERSION/$(basename "$NT")"
+  NT="$ROOT/vendor/node/node-v$NODE_VERSION-linux-$ARCH.tar.xz"
+  [ -f "$NT" ] || curl -fsS "$NODE_DIST/$(basename "$NT")" -o "$NT"
   (cd "$ROOT/vendor/node" && grep " $(basename "$NT")$" SHASUMS256.txt | shasum -a 256 -c --quiet)
   mkdir -p "$S/node/bin" "$S/app" "$S/bin"
-  tar -xJf "$NT" -C "$WORK" "node-$NODE_VERSION-linux-$ARCH/bin/node" "node-$NODE_VERSION-linux-$ARCH/LICENSE"
-  mv "$WORK/node-$NODE_VERSION-linux-$ARCH/bin/node" "$S/node/bin/node"
-  mv "$WORK/node-$NODE_VERSION-linux-$ARCH/LICENSE" "$S/node/LICENSE"
-  rm -rf "$WORK/node-$NODE_VERSION-linux-$ARCH"
-  cp -R "$ROOT/bin" "$ROOT/src" "$ROOT/ui" "$ROOT/samples" "$ROOT/package.json" "$ROOT/LICENSE.txt" "$ROOT/README.md" "$S/app/"
+  tar -xJf "$NT" -C "$WORK" "node-v$NODE_VERSION-linux-$ARCH/bin/node" "node-v$NODE_VERSION-linux-$ARCH/LICENSE"
+  mv "$WORK/node-v$NODE_VERSION-linux-$ARCH/bin/node" "$S/node/bin/node"
+  mv "$WORK/node-v$NODE_VERSION-linux-$ARCH/LICENSE" "$S/node/LICENSE"
+  rm -rf "$WORK/node-v$NODE_VERSION-linux-$ARCH"
+  cp -R "$ROOT/bin" "$ROOT/src" "$ROOT/ui" "$ROOT/samples" "$ROOT/skills" "$ROOT/package.json" "$ROOT/LICENSE.txt" "$ROOT/README.md" "$S/app/"
+  rm -rf "$S/app/ui/app/test"
+  mkdir -p "$S/app/node_modules/brainlink-store"
+  cp "$ROOT/vendor/brainlink-store/memory-store.mjs" "$ROOT/vendor/brainlink-store/errors.mjs" "$ROOT/vendor/brainlink-store/package.json" "$S/app/node_modules/brainlink-store/"
+  mkdir -p "$S/app/node_modules/yaml"
+  cp -R "$ROOT/node_modules/yaml/." "$S/app/node_modules/yaml/"
   cp "$HERE/brainlink.sh" "$S/bin/brainlink"
   cp "$HERE/install.sh" "$HERE/uninstall.sh" "$S/"
   cp "$WORK/brainlink.png" "$S/brainlink.png"
   chmod 755 "$S/bin/brainlink" "$S/install.sh" "$S/uninstall.sh" "$S/node/bin/node"
-  COPYFILE_DISABLE=1 tar --no-xattrs --no-mac-metadata -czf "$DIST/$NAME.tar.gz" -C "$WORK" "$NAME"
+  COPYFILE_DISABLE=1 "$TAR" "${TAR_OPTS[@]}" -czf "$DIST/$NAME.tar.gz" -C "$WORK" "$NAME"
 
   # .deb: files owned by root, installed to /opt/brainlink.
   DEBARCH=$([ "$ARCH" = x64 ] && echo amd64 || echo arm64)
@@ -43,8 +62,8 @@ for ARCH in x64 arm64; do
   printf 'Package: brainlink\nVersion: %s\nArchitecture: %s\nMaintainer: Iango <support@iango.ai>\nInstalled-Size: %s\nSection: utils\nPriority: optional\nHomepage: https://iango.ai/brainlink\nDescription: One Markdown second brain for every AI\n BrainLink connects an Obsidian or Markdown folder to Claude, ChatGPT Codex,\n Cursor, Gemini and other MCP clients, with safe, attributed writes.\n' "$VERSION" "$DEBARCH" "$SIZE" > "$D/control/control"
   printf '#!/bin/sh\n# Remove BrainLink from the invoking user'"'"'s AI apps is per-user; see brainlink disconnect-all.\nexit 0\n' > "$D/control/prerm"; chmod 755 "$D/control/prerm"
   (cd "$D" && echo "2.0" > debian-binary \
-    && COPYFILE_DISABLE=1 tar --format gnutar --no-xattrs --no-mac-metadata --uid 0 --gid 0 --uname root --gname root -czf control.tar.gz -C control . \
-    && COPYFILE_DISABLE=1 tar --format gnutar --no-xattrs --no-mac-metadata --uid 0 --gid 0 --uname root --gname root -czf data.tar.gz -C root . \
+    && COPYFILE_DISABLE=1 "$TAR" --format "$TAR_FORMAT" "${TAR_OPTS[@]}" "${TAR_OWNERSHIP_OPTS[@]}" -czf control.tar.gz -C control . \
+    && COPYFILE_DISABLE=1 "$TAR" --format "$TAR_FORMAT" "${TAR_OPTS[@]}" "${TAR_OWNERSHIP_OPTS[@]}" -czf data.tar.gz -C root . \
     && node "$HERE/ar.mjs" "$DIST/brainlink_${VERSION}_$DEBARCH.deb" debian-binary control.tar.gz data.tar.gz)
 done
 (cd "$DIST" && for f in brainlink-$VERSION-linux-*.tar.gz brainlink_${VERSION}_*.deb; do shasum -a 256 "$f" > "$f.sha256"; done)

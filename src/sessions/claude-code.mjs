@@ -3,10 +3,10 @@
 // Claude Code CLI's own public message shape (message.role, message.content as a string or content
 // blocks). Only user/assistant text blocks are kept — tool_use/tool_result blocks and anything outside
 // message content never reach the store. Incremental by file mtime + size (see import-util.mjs cursors).
-import { readFile } from 'node:fs/promises';
+import { readFile, stat } from 'node:fs/promises';
 import { homedir } from 'node:os';
 import path from 'node:path';
-import { walkFiles, loadCursors, saveCursors, changedSince, extractText, autoSummary, autoTitle, redactText } from './import-util.mjs';
+import { walkFiles, loadCursors, saveCursors, changedSince, readStableFile, sameFileVersion, cursorFor, extractText, autoSummary, autoTitle, redactText } from './import-util.mjs';
 
 export const CLIENT = 'claude-code';
 export const defaultRoot = (home = homedir()) => path.join(home, '.claude', 'projects');
@@ -35,16 +35,19 @@ function parseTranscript(raw) {
 }
 
 // opts: { store, root?, cursorsFile }. store = src/sessions/store.mjs createSessionStore().
-export async function importClaudeCode({ store, root = defaultRoot(), cursorsFile }) {
+export async function importClaudeCode({ store, root = defaultRoot(), cursorsFile, io = {} }) {
+  const readFileImpl = io.readFile || readFile, statImpl = io.stat || stat;
   const files = await walkFiles(root, '.jsonl');
   const cursors = await loadCursors(cursorsFile);
   const result = { imported: 0, unchanged: 0, empty: 0, errors: [] };
   for (const full of files) {
-    const st = await changedSince(full, cursors);
+    const st = await changedSince(full, cursors, statImpl);
     if (!st) { result.unchanged++; continue; }
     try {
-      const { project, messages, summaryLine } = parseTranscript(await readFile(full, 'utf8'));
-      if (!messages.length) { result.empty++; cursors[full] = { mtimeMs: st.mtimeMs, size: st.size }; continue; }
+      const snapshot = await readStableFile(full, st, { readFileImpl, statImpl, encoding: 'utf8' });
+      if (!snapshot) { result.deferred = (result.deferred || 0) + 1; continue; }
+      const { project, messages, summaryLine } = parseTranscript(snapshot.content);
+      if (!messages.length) { result.empty++; cursors[full] = cursorFor(snapshot.stat); continue; }
       const source_id = path.relative(root, full).split(path.sep).join('/');
       await store.putSession({
         client: CLIENT, source_id, project,
@@ -52,7 +55,9 @@ export async function importClaudeCode({ store, root = defaultRoot(), cursorsFil
         started_at: messages[0].at, note_refs: [], private: true, messages,
       });
       result.imported++;
-      cursors[full] = { mtimeMs: st.mtimeMs, size: st.size };
+      const after = await statImpl(full);
+      if (!sameFileVersion(snapshot.stat, after)) { result.deferred = (result.deferred || 0) + 1; continue; }
+      cursors[full] = cursorFor(after);
     } catch (e) { result.errors.push({ file: full, error: e.message || String(e) }); } // cursor NOT updated: retry next run
   }
   await saveCursors(cursorsFile, cursors);

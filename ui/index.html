@@ -9,7 +9,7 @@
   --bg: #f6f5f1; --panel: #ffffff; --ink: #1d1d1b; --muted: #6b6a64; --line: #e3e1da;
   --accent: #2f5d50; --accent-ink: #ffffff; --accent-soft: #e6efeb; --warn: #9a5b13; --warn-soft: #f8eedf; --bad: #a33a2b;
   --c1: #2f7d6a; --c2: #c2652a; --c3: #3d6fb6; --c4: #a8407a; --c5: #b08a1e; --c6: #6a5bb5; --c7: #2a8ea6; --c8: #7d8b2e;
-  --radius: 10px; --mono: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+  --radius: 10px; --mono: ui-monospace, "SF Mono", Menlo, Consolas, monospace; --content-width: 1180px;
   color-scheme: light;
 }
 @media (prefers-color-scheme: dark) {
@@ -17,10 +17,10 @@
 }
 * { box-sizing: border-box; }
 body { margin: 0; background: var(--bg); color: var(--ink); font: 15px/1.5 -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, sans-serif; }
-header { max-width: 860px; margin: 0 auto; padding: 32px 20px 8px; display: flex; align-items: baseline; gap: 14px; flex-wrap: wrap; }
+header { max-width: var(--content-width); margin: 0 auto; padding: 32px 20px 8px; display: flex; align-items: baseline; gap: 14px; flex-wrap: wrap; }
 header h1 { font-size: 22px; margin: 0; letter-spacing: -0.01em; }
 header #lang { width: auto; font-size: 13px; padding: 4px 8px; }
-main { max-width: 860px; margin: 0 auto; padding: 8px 20px 60px; display: grid; gap: 16px; }
+main { max-width: var(--content-width); margin: 0 auto; padding: 8px 20px 60px; display: grid; gap: 16px; }
 section { background: var(--panel); border: 1px solid var(--line); border-radius: var(--radius); padding: 20px 22px; }
 section h2 { margin: 0 0 4px; font-size: 16px; display: flex; gap: 10px; align-items: center; }
 .step { width: 24px; height: 24px; border-radius: 50%; background: var(--accent-soft); color: var(--accent); font-size: 13px; display: inline-grid; place-items: center; font-weight: 600; flex: none; }
@@ -104,16 +104,33 @@ ol.todo li { padding-left: 4px; }
 .modal-overlay[hidden] { display: none; }
 .modal { background: var(--panel); border: 1px solid var(--line); border-radius: var(--radius); padding: 20px 22px; max-width: 640px; width: 100%; max-height: 80vh; overflow: auto; }
 .modal .mono { white-space: pre-wrap; }
-#boot-loading, #boot-error { max-width: 860px; margin: 8px auto 0; padding: 10px 20px; font-size: 14px; color: var(--muted); }
+#boot-loading, #boot-error { max-width: var(--content-width); margin: 8px auto 0; padding: 10px 20px; font-size: 14px; color: var(--muted); }
 #boot-error { color: #fff; background: var(--bad); border-radius: 8px; margin: 8px 20px; }
 #boot-error button { background: transparent; border-color: rgba(255,255,255,.6); color: #fff; }
+#main-nav { position: sticky; top: 0; z-index: 40; max-width: var(--content-width); margin: 0 auto; padding: 8px 20px; display: flex; gap: 6px; overflow-x: auto; background: var(--bg); border-bottom: 1px solid var(--line); scrollbar-width: none; }
+#main-nav::-webkit-scrollbar { display: none; }
+#main-nav[hidden] { display: none; }
+#main-nav a { flex: none; border: 1px solid transparent; border-radius: 999px; padding: 5px 11px; color: var(--muted); font-size: 13px; text-decoration: none; white-space: nowrap; }
+#main-nav a:hover, #main-nav a:focus-visible { color: var(--accent); border-color: var(--line); background: var(--panel); }
+#main-nav a:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+main #ready, main #ask-panel, main #brain-panel, main #sessions-panel, main #s-connect, main #s-backup, main #rsi-panel { scroll-margin-top: 64px; }
+@media (prefers-reduced-motion: no-preference) { html { scroll-behavior: smooth; } }
 </style>
 <link rel="stylesheet" href="agents.css">
 <link rel="stylesheet" href="notes3d.css">
 <link rel="stylesheet" href="share.css">
 </head>
 <body>
-<header><h1>BrainLink</h1><select id="lang" aria-label="Language" style="margin-left:auto"></select><button class="link" id="done" data-i18n="header.done"></button></header>
+<header><h1>BrainLink</h1><span id="app-version" class="pill" aria-label="BrainLink version"></span><select id="lang" aria-label="Language" style="margin-left:auto"></select><button class="link" id="done" data-i18n="header.done"></button></header>
+<nav id="main-nav" aria-label="BrainLink sections" hidden>
+  <a href="#ready" data-main-nav="ready" data-i18n="nav.home"></a>
+  <a href="#ask-panel" data-main-nav="ask-panel" data-i18n="nav.ask"></a>
+  <a href="#brain-panel" data-main-nav="brain-panel" data-i18n="nav.notes"></a>
+  <a href="#sessions-panel" data-main-nav="sessions-panel" data-i18n="nav.sessions"></a>
+  <a href="#s-connect" data-main-nav="s-connect" data-i18n="nav.connect"></a>
+  <a href="#s-backup" data-main-nav="s-backup" data-i18n="nav.backup"></a>
+  <a href="#rsi-panel" data-main-nav="rsi-panel" data-i18n="nav.improve"></a>
+</nav>
 <div id="boot-loading" role="status" data-i18n="boot.loading"></div>
 <div id="boot-error" hidden role="alert"><b data-i18n="boot.errorTitle"></b> <span id="boot-error-msg"></span> <button id="boot-retry" data-i18n="boot.retry"></button></div>
 <main>
@@ -182,6 +199,34 @@ ol.todo li { padding-left: 4px; }
     </div>
   </section>
 
+  <details class="card" id="twin-profiles-panel" style="margin-top:12px" hidden>
+    <summary data-i18n="twinProfiles.title"></summary>
+    <p class="hint" data-i18n="twinProfiles.hint"></p>
+    <div class="card" id="twin-create-card">
+      <b data-i18n="twinProfiles.createTitle"></b>
+      <p class="muted" data-i18n="twinProfiles.createHint"></p>
+      <div class="grid2">
+        <label><span data-i18n="twinProfiles.name"></span><input id="twin-new-name" maxlength="120"></label>
+        <label><span data-i18n="twinProfiles.modeLabel"></span><select id="twin-new-mode"><option value="personal" data-i18n="twinProfiles.mode.personal"></option><option value="organisation" data-i18n="twinProfiles.mode.organisation"></option><option value="client" data-i18n="twinProfiles.mode.client"></option></select></label>
+      </div>
+      <label><span data-i18n="twinProfiles.ownerLabel"></span><input id="twin-new-owner" maxlength="160"></label>
+      <p class="muted" data-i18n="twinProfiles.identityHint"></p>
+      <p class="muted" data-i18n="twinProfiles.chooseVaults"></p>
+      <div id="twin-new-vaults" class="cards"></div>
+      <p class="muted" data-i18n="twinProfiles.chooseAgents"></p>
+      <div id="twin-new-agents" class="cards"></div>
+      <button type="button" id="twin-read-propose-preset" data-i18n="twinProfiles.readProposePreset"></button>
+      <span class="muted" data-i18n="twinProfiles.readProposePresetHint"></span>
+      <p class="muted" data-i18n="twinProfiles.chooseMemory"></p>
+      <p class="muted" data-i18n="twinProfiles.memoryCeilingHint"></p>
+      <div class="grid2" id="twin-new-memory"></div>
+      <div class="row" style="margin-top:8px"><button type="button" id="twin-apply-memory-to-agents" data-i18n="twinProfiles.applyMemoryToAgents"></button><span class="muted" data-i18n="twinProfiles.applyMemoryToAgentsHint"></span></div>
+      <div class="notice" data-i18n="twinProfiles.privacyHint"></div>
+        <div class="row" style="margin-top:10px"><button class="primary" id="twin-create" data-i18n="twinProfiles.createButton"></button><button id="twin-edit-cancel" hidden data-i18n="twinProfiles.cancelEdit"></button><span id="twin-create-status" class="muted" role="status"></span></div>
+    </div>
+    <div id="twin-profiles" class="cards" aria-live="polite"></div>
+  </details>
+
   <section id="agents-panel" hidden>
     <h2 data-i18n="agents.title"></h2>
     <p class="hint" data-i18n="agents.hint"></p>
@@ -200,7 +245,31 @@ ol.todo li { padding-left: 4px; }
       <label class="muted" style="display:flex;flex-direction:row;gap:6px;align-items:center;margin-top:6px"><input type="checkbox" id="sess-share-summaries" style="width:auto"><span data-i18n="sessions.shareSummariesLabel"></span></label>
       <label class="muted" style="display:flex;flex-direction:row;gap:6px;align-items:center;margin-top:6px"><input type="checkbox" id="sess-share-full" style="width:auto"><span data-i18n="sessions.shareFullTextLabel"></span></label>
     </div>
+    <div class="card" style="margin-bottom:10px">
+      <b data-i18n="sessions.hermesProfileTitle"></b>
+      <p class="muted" data-i18n="sessions.hermesProfileHint"></p>
+      <p class="mono muted" id="sessions-hermes-profile-path"></p>
+      <div class="row"><button class="secondary" id="sessions-hermes-profile-choose" data-i18n="sessions.hermesProfileChoose"></button><button class="link" id="sessions-hermes-profile-default" data-i18n="sessions.hermesProfileDefault"></button></div>
+      <p class="muted" data-i18n="sessions.hermesProfileHistoryNote"></p>
+    </div>
+    <div class="card" style="margin-bottom:10px">
+      <b data-i18n="sessions.localSummaryTitle"></b>
+      <p class="muted" data-i18n="sessions.localSummaryHint"></p>
+      <label class="muted" style="display:flex;flex-direction:row;gap:6px;align-items:center;margin-top:6px"><input type="checkbox" id="sess-local-summary-enabled" style="width:auto"><span data-i18n="sessions.localSummaryEnable"></span></label>
+      <label class="muted" style="display:flex;flex-direction:row;gap:6px;align-items:center;margin-top:6px"><input type="checkbox" id="sess-local-summary-auto" style="width:auto"><span data-i18n="sessions.localSummaryAuto"></span></label>
+      <label class="muted" style="display:flex;flex-direction:row;gap:6px;align-items:center;margin-top:6px"><input type="checkbox" id="sess-local-summary-auto-file" style="width:auto"><span data-i18n="sessions.localSummaryAutoFile"></span></label>
+      <p class="muted" data-i18n="sessions.localSummaryAutoFileHint"></p>
+      <div class="row" style="margin-top:6px"><label><span data-i18n="sessions.localSummaryModel"></span><input id="sess-local-summary-model" list="sess-local-summary-model-options" maxlength="160" placeholder="qwen2.5:3b"><datalist id="sess-local-summary-model-options"></datalist></label><button class="secondary" id="sess-local-summary-find" data-i18n="sessions.localSummaryFind"></button><button class="secondary" id="sess-local-summary-save" data-i18n="sessions.localSummarySave"></button></div>
+    </div>
     <div class="row" style="margin-bottom:10px"><label class="muted" style="display:flex;flex-direction:row;gap:6px;align-items:center"><input type="checkbox" id="sess-private" style="width:auto"><span data-i18n="sessions.showPrivate"></span></label></div>
+    <div id="session-hook-settings" class="cards"></div>
+    <div id="session-end-cues" class="cards" aria-live="polite"></div>
+    <details class="card" style="margin-bottom:10px"><summary data-i18n="sessions.findFiled"></summary>
+      <p class="muted" data-i18n="sessions.findFiledHint"></p>
+      <div class="row"><label><span data-i18n="sessions.destination"></span><select id="filed-summary-vault"></select></label><button class="secondary" data-filed-list="1" data-i18n="sessions.searchFiled"></button></div>
+      <div id="filed-summaries-list" class="cards" aria-live="polite"></div>
+    </details>
+    <div id="filed-summary-editor" class="cards" style="margin-bottom:10px"></div>
     <div id="sessions-list" class="cards"></div>
     <div id="session-detail" style="margin-top:12px"></div>
   </section>
@@ -211,7 +280,82 @@ ol.todo li { padding-left: 4px; }
     <div id="handoffs-list" class="cards"></div>
   </section>
 
+  <section id="rsi-panel" hidden>
+    <h2 data-i18n="rsi.title">Improve BrainLink</h2>
+    <p class="hint" data-i18n="rsi.hint">Capture ideas, evidence and experiments. Saving a proposal never changes live behavior.</p>
+    <details class="card" style="margin-bottom:10px"><summary data-i18n="rsi.newIdea">Add an improvement idea</summary>
+      <form id="rsi-idea-form" style="margin-top:10px">
+        <label><span data-i18n="rsi.ideaTitle">Idea</span><input name="title" maxlength="120" required></label>
+        <label><span data-i18n="rsi.problem">User problem</span><textarea name="user_problem" maxlength="1200" required></textarea></label>
+        <label><span data-i18n="rsi.hypothesis">Testable hypothesis (optional)</span><textarea name="hypothesis" maxlength="1200"></textarea></label>
+        <div class="grid2"><label><span data-i18n="rsi.memory">Memory types</span><select name="memory_types" multiple size="4"><option value="working">Working</option><option value="semantic">Semantic</option><option value="procedural">Procedural</option><option value="episodic">Episodic</option></select></label>
+          <label><span data-i18n="rsi.source">Public source URL (optional, HTTPS)</span><input name="source_url" type="url" maxlength="1200" placeholder="https://..."></label></div>
+        <div class="grid2"><label><span data-i18n="rsi.sourceTitle">Source title</span><input name="source_title" maxlength="240"></label><label><span data-i18n="rsi.published">Published date (if known)</span><input name="source_published" type="date"></label></div>
+        <label><span data-i18n="rsi.sourceClaim">What does the source support? (optional)</span><input name="source_claim" maxlength="500"></label>
+        <div class="grid2"><label><span data-i18n="rsi.confidence">Confidence</span><select name="source_confidence"><option value="">Not assessed</option><option>high</option><option>medium</option><option>low</option></select></label><label><span data-i18n="rsi.limitations">Source limitations</span><input name="source_limitations" maxlength="500"></label></div>
+        <p class="muted" data-i18n="rsi.localPrivacy">Stored locally in BrainLink app data. Do not enter customer details, private notes, or secrets.</p>
+        <button class="primary" type="submit" data-i18n="rsi.save">Save idea</button>
+      </form>
+    </details>
+    <div class="card" id="rsi-weekly-benchmark" style="margin-bottom:10px">
+      <b data-i18n="rsi.weekly.title">Weekly retrieval benchmark</b>
+      <p class="muted" data-i18n="rsi.weekly.hint">Run the same 20 fictional questions against BrainLink's built-in sample vault. It reads no connected vault and never changes live search behavior.</p>
+      <button type="button" id="rsi-weekly-run" data-i18n="rsi.weekly.run">Run benchmark</button>
+      <form id="rsi-weekly-schedule-form" class="grid2" style="margin-top:10px">
+        <label class="muted" style="display:flex;flex-direction:row;gap:6px;align-items:center"><input type="checkbox" name="enabled" style="width:auto"><span data-i18n="rsi.weekly.scheduleEnabled">Run automatically each week</span></label>
+        <label><span data-i18n="rsi.weekly.day">Day</span><select name="weekday"><option value="0" data-i18n="rsi.weekly.sunday">Sunday</option><option value="1" data-i18n="rsi.weekly.monday">Monday</option><option value="2" data-i18n="rsi.weekly.tuesday">Tuesday</option><option value="3" data-i18n="rsi.weekly.wednesday">Wednesday</option><option value="4" data-i18n="rsi.weekly.thursday">Thursday</option><option value="5" data-i18n="rsi.weekly.friday">Friday</option><option value="6" data-i18n="rsi.weekly.saturday">Saturday</option></select></label>
+        <label><span data-i18n="rsi.weekly.time">Time</span><input name="time" type="time" required></label>
+        <div><button type="submit" data-i18n="rsi.weekly.saveSchedule">Save schedule</button><p id="rsi-weekly-schedule-status" class="muted" role="status" aria-live="polite"></p></div>
+      </form>
+      <p id="rsi-weekly-status" class="muted" role="status" aria-live="polite"></p>
+      <div id="rsi-weekly-history" aria-live="polite"></div>
+    </div>
+    <div class="card" id="rsi-observations" style="margin-bottom:10px">
+      <b data-i18n="rsi.observe.title">Review local usage signals</b>
+      <p class="muted" data-i18n="rsi.observe.hint">BrainLink checks local tool outcomes, graph review choices, and rough response-size estimates. Optional link-health checks read one selected vault locally and save counts only.</p>
+      <form id="rsi-observe-settings" class="grid2" style="margin:8px 0">
+        <label class="muted" style="display:flex;flex-direction:row;gap:6px;align-items:center"><input type="checkbox" name="enabled" style="width:auto"><span data-i18n="rsi.observe.scheduleEnabled">Review signals automatically</span></label>
+        <label><span data-i18n="rsi.observe.interval">Review every</span><select name="interval_hours"><option value="24" data-i18n="rsi.observe.daily">Day</option><option value="168" data-i18n="rsi.observe.weekly">Week</option><option value="336" data-i18n="rsi.observe.fortnightly">Two weeks</option><option value="720" data-i18n="rsi.observe.monthly">30 days</option></select></label>
+        <label class="muted" style="display:flex;flex-direction:row;gap:6px;align-items:center"><input type="checkbox" name="vault_health_enabled" style="width:auto"><span data-i18n="rsi.observe.vaultHealthEnabled">Also compare link health in one vault</span></label>
+        <label><span data-i18n="rsi.observe.vaultHealthVault">Choose one vault</span><select name="vault_health_vault"><option value="" data-i18n="rsi.observe.vaultHealthNone">Choose a vault</option></select></label>
+        <p class="muted" data-i18n="rsi.observe.vaultHealthHint"></p>
+        <div class="row"><button type="submit" data-i18n="rsi.observe.saveSchedule">Save schedule</button><button type="button" id="rsi-observe-run" data-i18n="rsi.observe.run">Analyze local signals</button></div>
+      </form>
+      <p id="rsi-observe-status" class="muted" role="status" aria-live="polite"></p>
+      <div id="rsi-observe-report" aria-live="polite"></div>
+    </div>
+    <details class="card" id="rsi-discovery" style="margin-bottom:10px"><summary data-i18n="rsi.discovery.title">Research discovery (opt-in)</summary>
+      <p class="hint" data-i18n="rsi.discovery.hint"></p>
+      <p id="rsi-discovery-status" class="muted" aria-live="polite"></p>
+      <form id="rsi-discovery-form" style="margin-top:10px">
+        <div class="row"><button type="button" id="rsi-discovery-starter" data-i18n="rsi.discovery.starter">Fill BrainLink starter settings</button><span class="muted" data-i18n="rsi.discovery.starterHint"></span></div>
+        <label class="muted" style="display:flex;flex-direction:row;gap:6px;align-items:center"><input type="checkbox" name="enabled" style="width:auto"><span data-i18n="rsi.discovery.enabled">Turn on discovery</span></label>
+        <fieldset><legend data-i18n="rsi.discovery.sourceLabel">Public research sources</legend><div id="rsi-discovery-sources" class="row"></div></fieldset>
+        <label><span data-i18n="rsi.discovery.topics">Search topics (one per line, up to 5)</span><textarea name="topics" rows="3" maxlength="320"></textarea></label>
+        <label><span data-i18n="rsi.discovery.signals">Problems you want solved (one per line, up to 8)</span><textarea name="signals" rows="4" maxlength="1700"></textarea></label>
+        <div class="grid2"><label><span data-i18n="rsi.discovery.interval">Check every</span><select name="interval_hours"><option value="24" data-i18n="rsi.discovery.daily">Day</option><option value="168" data-i18n="rsi.discovery.weekly">Week</option><option value="336" data-i18n="rsi.discovery.fortnightly">Two weeks</option><option value="720" data-i18n="rsi.discovery.monthly">30 days</option></select></label>
+          <label><span data-i18n="rsi.discovery.maxNew">New proposals per run (1-10)</span><input name="max_new_per_run" type="number" min="1" max="10" value="5"></label></div>
+        <label class="muted" style="display:flex;flex-direction:row;gap:6px;align-items:center"><input type="checkbox" name="refresh_existing" style="width:auto"><span data-i18n="rsi.discovery.refreshExisting">Also recheck old saved sources (up to 3 each run)</span></label>
+        <p class="muted" data-i18n="rsi.discovery.privacy"></p>
+        <p id="rsi-discovery-background-status" class="muted" aria-live="polite"></p>
+        <div class="row"><button class="primary" type="submit" data-i18n="rsi.discovery.save">Save discovery settings</button>
+          <button type="button" id="rsi-discovery-run" data-i18n="rsi.discovery.runNow">Run now</button>
+          <button type="button" id="rsi-discovery-background" data-i18n="rsi.discovery.backgroundStart" hidden>Start BrainLink quietly at sign-in</button>
+          <button type="button" id="rsi-discovery-pause" data-i18n="rsi.discovery.pause">Pause</button>
+          <button type="button" id="rsi-discovery-resume" data-i18n="rsi.discovery.resume" hidden>Resume</button></div>
+      </form>
+      <ol id="rsi-discovery-runs" class="muted" style="font-size:13px"></ol>
+    </details>
+    <div class="row" style="margin-bottom:10px"><button type="button" id="rsi-export" data-i18n="rsi.export">Download review record</button></div>
+    <div id="rsi-ideas" class="cards" aria-live="polite"></div>
+  </section>
+
   <details class="settings" id="settings"><summary data-i18n="settings.summary"></summary><div>
+  <section id="s-updates">
+    <h2 data-i18n="updates.title">Updates</h2>
+    <p class="hint" data-i18n="updates.hint">Check for a signed BrainLink release. Checking does not download or install anything.</p>
+    <div class="row"><button type="button" id="updates-check" data-i18n="updates.check">Check for updates</button><div id="updates-result" class="muted" role="status" aria-live="polite"></div></div>
+  </section>
   <section id="s-vault">
     <h2><span class="step" id="n1">1</span> <span data-i18n="vault.step1Title"></span></h2>
     <p class="hint" data-i18n="vault.hint"></p>
@@ -263,6 +407,12 @@ ol.todo li { padding-left: 4px; }
     <div id="test-out" style="margin-top:10px"></div>
   </section>
 
+  <section id="s-background">
+    <h2 data-i18n="startup.title"></h2>
+    <p class="hint" data-i18n="startup.hint"></p>
+    <label class="muted" style="display:flex;flex-direction:row;gap:6px;align-items:center"><input type="checkbox" id="startup-at-login" style="width:auto"><span data-i18n="startup.enabled"></span></label>
+  </section>
+
   <section id="s-sync">
     <h2 data-i18n="sync.title"></h2>
     <p class="hint" data-i18n="sync.hint"></p>
@@ -270,11 +420,114 @@ ol.todo li { padding-left: 4px; }
       <label><span data-i18n="sync.where"></span><select id="sync-provider"></select></label>
       <label><span data-i18n="sync.device"></span><input id="sync-device" data-i18n-placeholder="sync.devicePlaceholder"></label>
     </div>
+    <div id="sync-vault-row" style="margin-top:10px" hidden><label><span data-i18n="sync.vault"></span><select id="sync-vault"></select></label></div>
     <div id="sync-folder-row" class="grid2" style="margin-top:10px" hidden>
       <label><span data-i18n="sync.syncedFolder"></span><input id="sync-folder" class="mono" data-i18n-placeholder="sync.folderPlaceholder"></label>
       <div id="sync-suggestions" class="muted" style="font-size:13px;align-self:end"></div>
     </div>
-    <div class="row" style="margin-top:12px"><button class="primary" id="sync-save" data-i18n="sync.saveBtn"></button></div>
+    <div id="sync-schedule-row" class="grid2" style="margin-top:10px" hidden>
+      <label><span data-i18n="sync.automatic"></span><span><input id="sync-scheduled" type="checkbox" style="width:auto"> <span data-i18n="sync.enableSchedule"></span></span></label>
+      <label id="sync-interval-row"><span data-i18n="sync.interval"></span><select id="sync-interval"><option value="1" data-i18n="sync.hour1"></option><option value="6" data-i18n="sync.hour6"></option><option value="12" data-i18n="sync.hour12"></option><option value="24" data-i18n="sync.hour24"></option><option value="168" data-i18n="sync.hour168"></option></select></label>
+    </div>
+    <p id="sync-status" class="muted" role="status" style="margin-top:8px"></p>
+    <div class="row" style="margin-top:12px"><button class="primary" id="sync-save" data-i18n="sync.saveBtn"></button><button id="sync-run" data-i18n="sync.runBtn"></button></div>
+    <details style="margin-top:16px">
+      <summary data-i18n="github.title"></summary>
+      <p class="hint" data-i18n="github.hint"></p>
+      <p class="notice" data-i18n="github.accessWarning"></p>
+      <p id="github-no-profiles" class="notice" data-i18n="github.noProfiles" hidden></p>
+      <label id="github-profile-row" hidden><span data-i18n="github.profile"></span><select id="github-profile"></select></label>
+      <div id="github-assignment" hidden>
+        <p id="github-assignment-text" class="muted" role="status"></p>
+        <p class="hint" data-i18n="github.autoHint"></p>
+        <div class="grid2">
+          <label><span data-i18n="github.autoInterval"></span><select id="github-auto-interval"><option value="1">1</option><option value="6">6</option><option value="12">12</option><option value="24">24</option></select></label>
+          <label><span><input type="checkbox" id="github-auto-enabled" style="width:auto"> <span data-i18n="github.autoEnabled"></span></span></label>
+        </div>
+        <div class="row"><button id="github-auto-save" data-i18n="github.autoSave"></button><button id="github-auto-run" data-i18n="github.autoRun"></button></div>
+        <p id="github-auto-status" class="muted" role="status"></p>
+        <div class="row"><button id="github-assign-clear" data-i18n="github.assignClear" hidden></button></div>
+      </div>
+      <div class="grid2">
+        <label><span data-i18n="github.vault"></span><select id="github-vault"></select></label>
+        <label id="github-repository-row"><span data-i18n="github.repository"></span><div class="row"><input id="github-repository" class="mono" style="flex:1;min-width:0" data-i18n-placeholder="github.repositoryPlaceholder"><button type="button" id="github-repository-pick" data-i18n="github.repositoryBrowse"></button></div></label>
+      </div>
+      <div id="github-assign-form" hidden>
+        <label><span data-i18n="github.folders"></span><textarea id="github-assign-folders" rows="2" class="mono" data-i18n-placeholder="github.foldersPlaceholder"></textarea></label>
+        <label class="muted"><span><input type="checkbox" id="github-assign-whole-vault" style="width:auto"> <span data-i18n="github.wholeVaultConfirm"></span></span></label>
+        <div class="row" style="margin-top:10px"><button id="github-assign-inspect" data-i18n="github.assignInspect"></button><button class="primary" id="github-assign-confirm" data-i18n="github.assignConfirm" disabled></button></div>
+        <div id="github-assign-review" class="notice" hidden></div>
+      </div>
+      <div class="row" style="margin-top:10px"><button id="github-load" data-i18n="github.load"></button><button class="primary" id="github-preview" data-i18n="github.preview" disabled></button><button id="github-commit" data-i18n="github.commit" disabled></button><button id="github-push" data-i18n="github.push" disabled hidden></button></div>
+      <div id="github-candidates" style="margin-top:10px"></div>
+      <div class="row" style="margin-top:12px"><button id="github-pull-check" data-i18n="github.pullCheck"></button><button class="primary" id="github-pull-import" data-i18n="github.pullImport" disabled></button><button id="github-pull-conflict-copy" data-i18n="github.pullConflictCopy" disabled></button></div>
+      <div id="github-pull-candidates" style="margin-top:10px"></div>
+      <p id="github-status" class="muted" role="status"></p>
+      <div id="github-result" class="notice" hidden></div>
+    </details>
+  </section>
+
+  <section id="s-ingestion">
+    <h2 data-i18n="ingestion.title"></h2>
+    <p class="hint" data-i18n="ingestion.hint"></p>
+    <label class="muted" style="display:flex;flex-direction:row;gap:6px;align-items:center"><input type="checkbox" id="ingestion-enabled" style="width:auto"><span data-i18n="ingestion.enabled"></span></label>
+    <label class="muted" style="display:flex;flex-direction:row;gap:6px;align-items:center;margin-top:6px"><input type="checkbox" id="ingestion-auto-drafts" style="width:auto"><span data-i18n="ingestion.autoDrafts"></span></label>
+    <p class="muted" data-i18n="ingestion.autoDraftsHint"></p>
+    <div class="grid2" style="margin-top:10px">
+      <label><span data-i18n="ingestion.vault"></span><select id="ingestion-vault"></select></label>
+      <label><span data-i18n="ingestion.folder"></span><select id="ingestion-folder"></select></label>
+      <label><span data-i18n="ingestion.time"></span><input id="ingestion-time" type="time" value="02:00"></label>
+    </div>
+    <div class="row" style="margin-top:8px"><button type="button" id="ingestion-add" data-i18n="ingestion.addTarget"></button></div>
+    <h3 data-i18n="ingestion.targets"></h3>
+    <div id="ingestion-target-list" class="cards"></div>
+    <div class="row" style="margin-top:12px"><button class="primary" id="ingestion-save" data-i18n="ingestion.save"></button><button id="ingestion-run" data-i18n="ingestion.run"></button></div>
+    <p id="ingestion-status" class="muted" role="status"></p>
+    <p id="ingestion-draft-status" class="muted" role="status"></p>
+    <div id="ingestion-queue" class="cards" aria-live="polite"></div>
+    <h3 data-i18n="ingestion.pendingDrafts"></h3>
+    <div id="ingestion-draft-list" class="cards" aria-live="polite"></div>
+  </section>
+
+  <section id="s-brief">
+    <h2 data-i18n="brief.title"></h2>
+    <p class="hint" data-i18n="brief.hint"></p>
+    <label class="muted" style="display:flex;flex-direction:row;gap:6px;align-items:center"><input type="checkbox" id="brief-enabled" style="width:auto"><span data-i18n="brief.enabled"></span></label>
+    <div class="grid2" style="margin-top:10px">
+      <label><span data-i18n="brief.vault"></span><select id="brief-vault"></select></label>
+      <label><span data-i18n="brief.time"></span><input id="brief-time" type="time" value="08:00"></label>
+    </div>
+    <div class="row" style="margin-top:12px"><button class="primary" id="brief-save" data-i18n="brief.save"></button><button id="brief-run" data-i18n="brief.run"></button></div>
+    <p id="brief-status" class="muted" role="status"></p>
+    <div id="brief-output" class="cards" aria-live="polite"></div>
+  </section>
+
+  <section id="s-backup">
+    <h2 data-i18n="backup.title"></h2>
+    <p class="hint" data-i18n="backup.hint"></p>
+    <label class="muted" style="display:flex;flex-direction:row;gap:6px;align-items:center"><input type="checkbox" id="backup-enabled" style="width:auto"><span data-i18n="backup.enabled"></span></label>
+    <div class="grid2" style="margin-top:10px">
+      <label><span data-i18n="backup.folder"></span><input id="backup-folder" class="mono"></label>
+      <label><span data-i18n="backup.scheduleMode"></span><select id="backup-schedule-mode"><option value="interval" data-i18n="backup.scheduleInterval"></option><option value="daily" data-i18n="backup.scheduleDaily"></option></select></label>
+      <label id="backup-interval-wrap"><span data-i18n="backup.interval"></span><select id="backup-hours"><option value="6">6</option><option value="12">12</option><option value="24">24</option><option value="48">48</option><option value="168">168</option></select></label>
+      <label id="backup-time-wrap" hidden><span data-i18n="backup.time"></span><input id="backup-time" type="time" value="02:00"></label>
+      <label><span data-i18n="backup.retention"></span><select id="backup-keep"><option value="0" data-i18n="backup.keepUnlimited"></option><option value="5">5</option><option value="10">10</option><option value="30">30</option><option value="90">90</option></select><small class="hint" data-i18n="backup.retentionHint"></small></label>
+    </div>
+    <label class="muted" style="display:flex;flex-direction:row;gap:6px;align-items:center;margin-top:10px"><input type="checkbox" id="backup-encrypted" style="width:auto"><span data-i18n="backup.encrypt"></span></label>
+    <p class="hint" data-i18n="backup.encryptHint"></p>
+    <label id="backup-key-confirm-wrap" hidden><span data-i18n="backup.confirmRecoveryKey"></span><input id="backup-key-confirm" type="password" autocomplete="off" spellcheck="false" data-i18n-placeholder="backup.confirmRecoveryKeyPlaceholder"></label>
+    <div class="row"><button id="backup-key" data-i18n="backup.showKey"></button><button id="backup-key-copy" data-i18n="backup.copyKey"></button><input id="backup-key-value" class="mono" type="password" readonly autocomplete="off" data-i18n-placeholder="backup.keyPlaceholder" style="flex:1"></div>
+    <div class="row" style="margin-top:12px"><button id="backup-pick" data-i18n="backup.choose"></button><button class="primary" id="backup-save" data-i18n="backup.save"></button><button id="backup-run" data-i18n="backup.run"></button></div>
+    <p id="backup-status" class="muted" role="status"></p>
+    <details><summary data-i18n="backup.restoreTitle"></summary>
+      <p class="hint" data-i18n="backup.restoreHint"></p>
+      <div class="row"><button id="backup-history-refresh" data-i18n="backup.historyRefresh"></button><label style="flex:1"><span data-i18n="backup.historyLabel"></span><select id="backup-history" style="width:100%"><option value="" data-i18n="backup.historyEmpty"></option></select></label></div>
+      <p id="backup-history-status" class="muted" role="status"></p>
+      <div class="grid2"><div><label><span data-i18n="backup.restoreSource"></span><input id="backup-restore-source" class="mono"></label><button id="backup-restore-pick-source" data-i18n="backup.restorePickSource"></button></div>
+      <div><label><span data-i18n="backup.restoreDestination"></span><input id="backup-restore-destination" class="mono"></label><button id="backup-restore-pick-destination" data-i18n="backup.restorePickDestination"></button></div></div>
+      <label><span data-i18n="backup.recoveryKey"></span><input id="backup-restore-key" type="password" autocomplete="off" data-i18n-placeholder="backup.keyOptional"></label>
+      <div class="row" style="margin-top:10px"><button id="backup-restore" data-i18n="backup.restoreBtn"></button></div>
+    </details>
   </section>
 
   <section id="s-share"><div id="share-root"></div></section>
@@ -301,15 +554,54 @@ ol.todo li { padding-left: 4px; }
     </div>
   </div>
 </div>
+<div id="preset-connect-modal" class="modal-overlay" hidden>
+  <div class="modal" role="dialog" aria-modal="true" aria-labelledby="preset-connect-title">
+    <b id="preset-connect-title"></b>
+    <p class="hint" style="margin-top:6px" data-i18n="connect.profileHint"></p>
+    <label><span data-i18n="connect.profileLabel"></span><select id="preset-profile"></select></label>
+    <p class="muted" style="margin-top:10px" data-i18n="connect.memoryHint"></p>
+    <div id="preset-memory-list" class="grid2"></div>
+    <div id="preset-vault-list" class="cards" style="margin-top:10px"></div>
+    <p id="preset-connect-summary" class="notice" style="margin-top:10px"></p>
+    <div id="preset-connect-review" class="card" role="status" aria-live="polite" style="margin-top:8px"></div>
+    <div class="row" style="margin-top:14px;justify-content:flex-end">
+      <button class="link" id="preset-connect-cancel" data-i18n="connect.cancel"></button>
+      <button class="primary" id="preset-connect-submit" data-i18n="connect.connectBtn"></button>
+    </div>
+  </div>
+</div>
 <div id="toast" role="status" aria-live="polite"></div>
 <script>
 const T = new URLSearchParams(location.search).get('t') || '';
+const vaultEvents = new EventSource('/api/events?t=' + encodeURIComponent(T));
+vaultEvents.addEventListener('vault-changed', () => window.dispatchEvent(new Event('brainlink:vault-changed')));
+vaultEvents.addEventListener('vault-counts-updated', (event) => {
+  try {
+    const result = JSON.parse(event.data);
+    const label = result.status === 'ready' ? t('vault.notesCount', { n: result.notes }) : t('vault.countUnavailable');
+    for (const el of document.querySelectorAll('[data-vault-note-count]')) if (el.dataset.vaultNoteCount === result.vault) el.textContent = label;
+    const vault = S?.vaults?.find((v) => v.name === result.vault);
+    if (vault) {
+      vault.notes = result.status === 'ready' ? result.notes : null;
+      vault.notes_status = result.status;
+      if ($('ready-sub') && S.vaults.at(-1)?.name === vault.name) {
+        const apps = Object.values(S.clients).filter((c) => c.connected).map((c) => c.title);
+        const count = vault.notes == null ? t('vault.counting') : `${vault.notes} ${t('brain.notes')}`;
+        $('ready-sub').textContent = `${vault.name} · ${count}${apps.length ? ' · ' + apps.join(', ') : ''}`;
+      }
+    }
+  } catch {}
+});
 const $ = (id) => document.getElementById(id);
 const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
-let S = null, pack = 'founder-os';
+let S = null, pack = 'founder-os', editingTwinId = null, ingestionTargetsDraft = null;
+const fileLocalDraftIds = new Set();
+let activeFiledSummary = null;
+let filedSummaryRefs = [];
 let pendingSyncOnboarding = false; // set when a first-run vault pick just succeeded; cleared once the sync choice is saved
 let healthByClient = {}; // client id -> last /api/client-health (or /api/connect's health) result, kept across re-renders
-const CLIENT_LABEL = { 'claude-code': 'Claude Code', 'claude-desktop': 'Claude Desktop', cursor: 'Cursor', codex: 'ChatGPT Codex', gemini: 'Gemini CLI', windsurf: 'Windsurf' };
+let pendingPresetClient = null;
+const CLIENT_LABEL = { 'claude-code': 'Claude Code', 'claude-desktop': 'Claude Desktop', cursor: 'Cursor', codex: 'ChatGPT Codex', gemini: 'Gemini CLI', antigravity: 'Google Antigravity', hermes: 'Hermes Agent', 'deepseek-harness': 'DeepSeek Harness', windsurf: 'Windsurf' };
 const clientLabel = (id) => CLIENT_LABEL[id] || (id ? id[0].toUpperCase() + id.slice(1) : 'Other');
 const CLIENT_COLOR_VARS = ['c1', 'c2', 'c3', 'c4', 'c5', 'c6', 'c7', 'c8'];
 function clientColor(id) { let h = 0; for (const c of String(id)) h = (h * 31 + c.charCodeAt(0)) >>> 0; return `var(--${CLIENT_COLOR_VARS[h % CLIENT_COLOR_VARS.length]})`; }
@@ -320,8 +612,118 @@ async function api(method, url, body) {
   if (!r.ok) throw new Error(j.error || r.statusText);
   return j;
 }
+document.getElementById('updates-check')?.addEventListener('click', async (event) => {
+  const button = event.currentTarget;
+  const result = $('updates-result');
+  button.disabled = true;
+  result.textContent = t('updates.checking');
+  try {
+    const update = await api('GET', '/api/updates/check');
+    result.replaceChildren();
+    if (update.status === 'unavailable') result.textContent = t('updates.unavailable');
+    else {
+      result.append(document.createTextNode(t('updates.available', { version: update.version })));
+      const prepare = document.createElement('button');
+      prepare.type = 'button';
+      prepare.dataset.updatePrepare = '1';
+      prepare.textContent = t('updates.download');
+      result.append(prepare);
+    }
+  } catch { result.textContent = t('updates.failed'); }
+  finally { button.disabled = false; }
+});
+document.addEventListener('click', async (event) => {
+  const button = event.target.closest('[data-update-prepare]');
+  if (!button) return;
+  const result = $('updates-result');
+  button.disabled = true;
+  button.textContent = t('updates.preparing');
+  try {
+    const download = await api('POST', '/api/updates/download', {});
+    result.replaceChildren(document.createTextNode(t('updates.downloadReady') + ' '));
+    const link = document.createElement('a');
+    link.href = download.download_url;
+    link.textContent = download.filename;
+    link.download = download.filename;
+    result.append(link);
+    const open = document.createElement('button');
+    open.type = 'button';
+    open.dataset.updateOpen = download.ticket;
+    open.dataset.updateLabel = download.format === 'tar.gz' ? 'updates.openPackage' : 'updates.openInstaller';
+    open.textContent = t(open.dataset.updateLabel);
+    result.append(open);
+  } catch {
+    result.replaceChildren(document.createTextNode(t('updates.downloadFailed') + ' '));
+    const retry = document.createElement('button');
+    retry.type = 'button';
+    retry.dataset.updatePrepare = '1';
+    retry.textContent = t('updates.retryDownload');
+    result.append(retry);
+  }
+});
+document.addEventListener('click', async (event) => {
+  const button = event.target.closest('[data-update-open]');
+  if (!button) return;
+  button.disabled = true;
+  button.textContent = t('updates.opening');
+  try {
+    const opened = await api('POST', '/api/updates/open', { ticket: button.dataset.updateOpen });
+    button.remove();
+    const result = $('updates-result');
+    result.querySelector('a')?.remove();
+    result.append(document.createTextNode(` ${t('updates.opened', { version: opened.version })}`));
+  } catch {
+    button.disabled = false;
+    button.textContent = t(button.dataset.updateLabel || 'updates.openInstaller');
+    $('updates-result').append(document.createTextNode(` ${t('updates.openFailed')}`));
+  }
+});
 function toast(msg, bad) { const t = $('toast'); t.textContent = msg; t.className = 'show' + (bad ? ' bad' : ''); clearTimeout(t._h); t._h = setTimeout(() => (t.className = ''), bad ? 6000 : 3500); }
 async function act(fn) { try { await fn(); await load(); } catch (e) { toast(e.message, true); } }
+function currentIngestionTargets() {
+  if (ingestionTargetsDraft === null) {
+    const saved = S?.ingestion?.targets;
+    ingestionTargetsDraft = Array.isArray(saved) && saved.length ? saved.map((target) => ({ vault: target.vault, folder: target.folder }))
+      : S?.ingestion?.vault && S?.ingestion?.folder ? [{ vault: S.ingestion.vault, folder: S.ingestion.folder }] : [];
+  }
+  return ingestionTargetsDraft;
+}
+let ingestionFolderRequest = 0;
+async function refreshIngestionFolders(preferred = '') {
+  const select = $('ingestion-folder');
+  const request = ++ingestionFolderRequest;
+  const vault = $('ingestion-vault').value;
+  select.disabled = true;
+  select.innerHTML = `<option value="">${esc(t('ingestion.chooseFolder'))}</option>`;
+  if (!vault) return;
+  try {
+    const result = await api('POST', '/api/ingestion/folders', { vault });
+    if (request !== ingestionFolderRequest || vault !== $('ingestion-vault').value) return;
+    const folders = Array.isArray(result.folders) ? result.folders : [];
+    select.innerHTML = `<option value="">${esc(t('ingestion.chooseFolder'))}</option>` + folders.map((folder) => `<option value="${esc(folder)}">${esc(folder)}</option>`).join('');
+    if (folders.includes(preferred)) select.value = preferred;
+    select.disabled = folders.length === 0;
+  } catch {
+    if (request === ingestionFolderRequest) select.disabled = true;
+  }
+}
+function renderIngestionTargets() {
+  if (!$('ingestion-target-list') || !S) return;
+  const targets = currentIngestionTargets();
+  $('ingestion-target-list').innerHTML = targets.length ? targets.map((target, index) => `<div class="card" style="display:flex;align-items:center;justify-content:space-between;gap:12px"><span><b>${esc(target.vault)}</b><br><span class="mono muted">${esc(target.folder)}</span></span><button type="button" data-ingestion-remove="${index}">${esc(t('ingestion.removeTarget'))}</button></div>`).join('') : `<p class="muted">${esc(t('ingestion.emptyTargets'))}</p>`;
+  $('ingestion-run').disabled = !targets.length;
+}
+async function renderIngestionDraftList() {
+  const host = $('ingestion-draft-list');
+  if (!host) return;
+  const { drafts = [] } = await api('GET', '/api/ingestion/drafts');
+  host.innerHTML = drafts.length ? drafts.map((record) => {
+    const d = record.draft;
+    const links = (d.related_notes || []).map((item) => `<label class="muted" style="display:flex;flex-direction:row;gap:8px;align-items:flex-start"><input type="checkbox" data-ingestion-related="${esc(record.id)}" value="${esc(item.path)}" style="width:auto;margin-top:3px"><span><b>${esc(item.title)}</b><br><span>${esc(t('ingestion.sharedTerms', { terms: item.shared_terms.join(', ') }))}</span></span></label>`).join('');
+    const relatedChoices = links ? `<fieldset style="margin:10px 0"><legend>${esc(t('ingestion.relatedTitle'))}</legend><p class="muted">${esc(t('ingestion.relatedHint'))}</p>${links}</fieldset>` : '';
+    return `<div class="card"><b>${esc(d.title)}</b><p class="muted">${esc(d.vault)} · ${esc(d.source_path)} · ${esc(d.memory_type)} · ${esc(d.model)}</p><p>${esc(d.summary)}</p><details><summary>${esc(t('ingestion.reviewDraft'))}</summary><pre style="white-space:pre-wrap;overflow-wrap:anywhere">${esc(d.body)}</pre></details>${relatedChoices}${d.destinations?.length ? `<label>${esc(t('ingestion.destination'))}<select data-ingestion-destination="${esc(record.id)}"><option value="">${esc(t('ingestion.chooseDestination'))}</option>${d.destinations.map((folder) => `<option value="${esc(folder)}">${esc(folder)}</option>`).join('')}</select></label><button class="primary" type="button" data-ingestion-save-draft="${esc(record.id)}">${esc(t('ingestion.saveProposal'))}</button>` : `<p class="muted">${esc(t('ingestion.noDestination'))}</p>`}<button class="secondary" type="button" data-ingestion-discard-draft="${esc(record.id)}">${esc(t('ingestion.discardDraft'))}</button></div>`;
+  }).join('') : `<p class="muted">${esc(t('ingestion.noPendingDrafts'))}</p>`;
+}
 
 // ---- i18n: plain JSON locale files (ui/locales/*.json), no library ----
 const SUPPORTED_LOCALES = ['en', 'zh-TW', 'pt'];
@@ -349,6 +751,7 @@ function t(key, vars) {
   if (vars) for (const k in vars) s = s.split(`{${k}}`).join(vars[k]);
   return s;
 }
+window.brainlinkT = t;
 function applyI18n() {
   document.documentElement.lang = LOCALE;
   document.querySelectorAll('[data-i18n]').forEach((el) => { el.innerHTML = t(el.dataset.i18n); });
@@ -360,6 +763,7 @@ async function setLocale(locale, { persist = true } = {}) {
   STR = LOCALE === 'en' ? FALLBACK : await fetchLocale(LOCALE).catch(() => FALLBACK);
   $('lang').value = LOCALE;
   applyI18n();
+  window.dispatchEvent(new Event('brainlink:locale-changed'));
   if (persist) api('POST', '/api/locale', { locale: LOCALE }).catch(() => {});
 }
 async function ensureLocale(saved) {
@@ -370,6 +774,14 @@ async function ensureLocale(saved) {
   await setLocale(SUPPORTED_LOCALES.includes(saved) ? saved : detectLocale(), { persist: !saved });
   resolveLocaleBooted();
 }
+$('main-nav').addEventListener('click', (event) => {
+  const link = event.target.closest('a[data-main-nav]');
+  if (!link) return;
+  const target = $(link.dataset.mainNav);
+  if (!target || target.hidden) { event.preventDefault(); return; }
+  const settings = target.closest('details.settings');
+  if (settings) settings.open = true;
+});
 $('lang').onchange = () => act(() => setLocale($('lang').value));
 
 function choiceHtml(cls, title, sub, go, attrs) { return `<button class="choice ${cls}" ${attrs}><span><b>${esc(title)}</b>${sub ? `<small>${esc(sub)}</small>` : ''}</span><span class="go">${esc(go)}</span></button>`; }
@@ -393,22 +805,65 @@ function renderReady(r) {
   const apps = Object.values(S.clients).filter((c) => c.connected).map((c) => c.title);
   const fresh = r?.connected?.length ? r.connected : apps;
   $('ready-title').textContent = apps.length ? t('ready.set') : t('ready.almost');
-  $('ready-sub').textContent = `${v.name} · ${v.notes} ${t('brain.notes')}${apps.length ? ' · ' + apps.join(', ') : ''}`;
+  const count = v.notes == null ? t('vault.counting') : `${v.notes} ${t('brain.notes')}`;
+  $('ready-sub').textContent = `${v.name} · ${count}${apps.length ? ' · ' + apps.join(', ') : ''}`;
   const missing = Object.values(S.clients).filter((c) => c.present && !c.connected);
   $('todo-restart').innerHTML = fresh.length ? t('ready.restartQuit', { apps: `<b>${esc(fresh.join(', '))}</b>` })
+    : missing.length && S.twin_profiles?.profiles?.length ? t('ready.assignAccess')
     : missing.length ? t('ready.restartPress', { button: `<b>${esc(t('ready.connectAllShort'))}</b>` })
     : t('ready.restartNoApps');
   $('say-connect').textContent = agent ? `${agent.activation.includes('Connect to my brain') ? 'Connect to my brain' : agent.activation[0]}` : t('test.defaultPhrase');
   $('say-close').textContent = agent ? (agent.close.includes('Close loop') ? 'Close loop' : agent.close[0]) : 'Close loop';
-  $('more-apps').innerHTML = missing.length ? `<button class="primary" id="connect-all">${esc(t('ready.connectAllBtn', { apps: missing.map((c) => c.title).join(', ') }))}</button>` : '';
-  if (missing.length) $('connect-all').onclick = () => act(async () => { const x = await api('POST', '/api/connect-all'); toast(x.connected.length ? t('ready.connectedToast', { apps: x.connected.join(', ') }) : t('ready.nothingToast')); });
+  $('more-apps').innerHTML = missing.length && !S.twin_profiles?.profiles?.length ? `<button class="primary" id="connect-all">${esc(t('ready.connectAllBtn', { apps: missing.map((c) => c.title).join(', ') }))}</button>` : '';
+  if (missing.length && !S.twin_profiles?.profiles?.length) $('connect-all').onclick = () => act(async () => { const x = await api('POST', '/api/connect-all'); toast(x.connected.length ? t('ready.connectedToast', { apps: x.connected.join(', ') }) : t('ready.nothingToast')); });
   if (r?.skipped?.length) toast(t('ready.skippedToast', { apps: r.skipped.join(', ') }), true);
 }
 
 async function loadSessions() {
+  loadSessionEndCues();
+  loadSessionHookSettings();
+  $('filed-summary-vault').innerHTML = (S.vaults || []).filter((v) => v.exists).map((v) => `<option value="${esc(v.name)}">${esc(v.name)}${v.private ? ` (${esc(t('vault.private'))})` : ''}</option>`).join('');
   $('sessions-list').innerHTML = `<p class="skeleton">${esc(t('sessions.loading'))}</p>`;
   try { renderSessions((await api('POST', '/api/sessions', { include_private: $('sess-private').checked, limit: 20 })).sessions); }
   catch (e) { $('sessions-list').innerHTML = `<p class="error-box">${esc(t('sessions.loadError', { msg: e.message }))}</p>`; }
+}
+async function listFiledSummaries() {
+  const vault = $('filed-summary-vault').value;
+  if (!vault) { $('filed-summaries-list').innerHTML = `<p class="muted">${esc(t('sessions.noDestination'))}</p>`; return; }
+  $('filed-summaries-list').innerHTML = `<p class="skeleton">${esc(t('sessions.loading'))}</p>`;
+  try {
+    const result = await api('POST', '/api/sessions/filed-summaries', { vault });
+    filedSummaryRefs = result.summaries || [];
+    const rows = filedSummaryRefs.map((item, index) => `<div class="card"><b>${esc(item.title)}</b><span class="pill">${esc(t('sessions.proposed'))}</span><div class="muted">${esc(item.vault)} · ${esc(item.path)}</div><button class="link" data-filed-open="${index}">${esc(t('sessions.openFiled'))}</button></div>`).join('');
+    $('filed-summaries-list').innerHTML = `${rows || `<p class="muted">${esc(t('sessions.noFiledSummaries'))}</p>`}${result.truncated ? `<p class="muted">${esc(t('sessions.filedListLimit'))}</p>` : ''}`;
+  } catch (error) { $('filed-summaries-list').innerHTML = `<p class="error-box">${esc(error.message)}</p>`; }
+}
+async function showFiledSummaryEditor() {
+  if (!activeFiledSummary) throw new Error('Open a filed note first.');
+  const note = await api('POST', '/api/sessions/filed-summary', { ...activeFiledSummary, action: 'read' });
+  activeFiledSummary = { ...activeFiledSummary, etag: note.etag, status: 'proposed' };
+  $('filed-summary-editor').innerHTML = `<div class="card"><b>${esc(note.vault)} · ${esc(note.path)}</b><label>${esc(t('sessions.correctSummary'))}<textarea id="filed-summary-text" rows="8" maxlength="20000">${esc(note.summary)}</textarea></label><div class="row"><button class="primary" data-filed-save="1">${esc(t('sessions.saveCorrection'))}</button><button class="secondary" data-filed-withdraw="1">${esc(t('sessions.withdrawProposal'))}</button></div></div>`;
+  $('filed-summary-editor').scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+}
+async function loadSessionEndCues() {
+  try {
+    const { cues } = await api('POST', '/api/sessions/end-cues', {});
+    const rows = cues.map((cue) => {
+      const draftStatus = cue.summary_ready ? `<span class="pill on">${esc(t('sessions.localSummaryDraftReady'))}</span>` : cue.summary_failed ? `<span class="muted">${esc(t('sessions.localSummaryDraftFailed'))}</span>` : '';
+      const autoFileStatus = cue.auto_file_status === 'needs_destination' ? `<span class="muted">${esc(t('sessions.localSummaryAutoFileNeedsDestination'))}</span>` : cue.auto_file_status === 'failed' ? `<span class="muted">${esc(t('sessions.localSummaryAutoFileFailed'))}</span>` : '';
+      const actions = cue.session_ref ? `${S.sessions_local_summary?.enabled ? `<button class="secondary" data-sess-summarize="${esc(cue.session_ref)}">${esc(t(cue.summary_ready ? 'sessions.localSummaryReview' : 'sessions.localSummaryRun'))}</button>` : ''}${cue.summary_filed ? `<span class="pill on">${esc(t('sessions.localSummaryAutoFiled'))}</span>` : `<button class="primary" data-sess-file="${esc(cue.session_ref)}">${esc(t('sessions.fileSummary'))}</button>`}${autoFileStatus}<button class="link" data-cue-review-request="${esc(cue.session_ref)}">${esc(t('sessions.copyReviewRequest'))}</button>` : `<span class="muted">${esc(t('sessions.endedSessionNotImported'))}</span>`;
+      const cueKind = cue.reason === 'turn-completed' ? `<span class="pill">${esc(t('sessions.harnessTurnComplete'))}</span>` : '';
+      return `<div class="row"><span>${esc(clientLabel(cue.client))} · ${esc(new Date(cue.ended_at).toLocaleString(LOCALE))} ${cueKind} ${draftStatus}</span>${actions}<button class="link" data-cue-dismiss="${esc(cue.id)}">${esc(t('sessions.dismissCue'))}</button></div>`;
+    }).join('');
+    const html = cues.length ? `<div class="card"><b>${esc(t('sessions.pendingCloseout'))}</b><p class="muted">${esc(t('sessions.pendingCloseoutHint'))}</p>${rows}</div>` : '';
+    if ($('session-end-cues').innerHTML !== html) $('session-end-cues').innerHTML = html;
+  } catch (e) { $('session-end-cues').innerHTML = `<p class="error-box">${esc(e.message)}</p>`; }
+}
+async function loadSessionHookSettings() {
+  try {
+    const { clients } = await api('POST', '/api/sessions/hooks', {});
+    $('session-hook-settings').innerHTML = `<div class="card"><b>${esc(t('sessions.hooksTitle'))}</b><p class="muted">${esc(t('sessions.hooksHint'))}</p>${clients.map((c) => `<div class="row"><span>${esc(c.title || clientLabel(c.client))}</span>${c.error ? `<span class="error-box">${esc(c.error)}</span>` : `<span class="pill ${c.configured ? 'on' : ''}">${esc(t(c.configured ? 'sessions.hookConfigured' : 'sessions.hookOff'))}</span><button class="secondary" data-hook-client="${esc(c.client)}" data-hook-enable="${c.configured ? '0' : '1'}">${esc(t(c.configured ? 'sessions.hookDisable' : 'sessions.hookEnable'))}</button>`}</div>${c.same_process_authority ? `<p class="muted">${esc(t('sessions.hookHarnessRisk'))}</p>` : ''}${c.privileged_shell_hook ? `<p class="muted">${esc(t('sessions.hookHermesRisk'))}</p>` : ''}${c.configured ? `<p class="muted">${esc(t(c.same_process_authority ? 'sessions.hookHarnessRestart' : c.privileged_shell_hook ? 'sessions.hookHermesRestart' : c.trust_required ? 'sessions.hookTrust' : 'sessions.hookRestart'))}</p>` : ''}`).join('')}</div>`;
+  } catch (e) { $('session-hook-settings').innerHTML = `<p class="error-box">${esc(e.message)}</p>`; }
 }
 function dayLabel(iso) {
   const d = new Date(iso), days = Math.floor((new Date(new Date().toDateString()) - new Date(d.toDateString())) / 86400000);
@@ -418,6 +873,7 @@ function dayLabel(iso) {
 }
 function renderSessions(list) {
   if (!list.length) { $('sessions-list').innerHTML = `<p class="muted">${esc(t('sessions.empty'))}</p>`; return; }
+  const assignableProfiles = (S.twin_profiles?.profiles || []).filter((p) => (p.allowed_actions || []).includes('read_session') && (p.agents || []).some((a) => (a.vaults || []).some((v) => (v.operations || []).includes('read_session'))));
   let lastDay = null, html = '';
   for (const s of list) {
     const day = dayLabel(s.started_at);
@@ -429,11 +885,24 @@ function renderSessions(list) {
       </div>
       <div class="muted" style="font-size:14px">${esc(s.summary || t('sessions.noSummary'))}</div>
       <div class="row muted" style="font-size:13px">${esc(new Date(s.started_at).toLocaleString(LOCALE))} · ${s.turns} ${s.turns === 1 ? esc(t('sessions.messageOne')) : esc(t('sessions.messageMany'))}
+        ${S.sessions_local_summary?.enabled ? `<button class="secondary" data-sess-summarize="${esc(s.id)}">${esc(t('sessions.localSummaryRun'))}</button>` : ''}
+        ${s.profile_id ? `<span class="pill">${esc(S.twin_profiles?.profiles?.find((p) => p.id === s.profile_id)?.name || s.profile_id)}</span>` : (assignableProfiles.length ? `<label><select aria-label="${esc(t('sessions.chooseTwin'))}" data-sess-profile="${esc(s.id)}"><option value="">${esc(t('sessions.chooseTwin'))}</option>${assignableProfiles.map((p) => `<option value="${esc(p.id)}">${esc(p.name)}</option>`).join('')}</select></label><button class="link" data-sess-assign="${esc(s.id)}">${esc(t('sessions.assignTwin'))}</button>` : `<span class="muted">${esc(t('sessions.noAuthorizedTwin'))}</span>`)}
         <button class="link" data-sess-read="${esc(s.id)}">${esc(t('sessions.open'))}</button>
-        <button class="link" data-sess-toggle="${esc(s.id)}" data-sess-private="${s.private ? '1' : ''}">${s.private ? esc(t('sessions.makeShared')) : esc(t('sessions.makePrivate'))}</button>
+        ${s.summary ? `<button class="link" data-sess-file="${esc(s.id)}">${esc(t('sessions.fileSummary'))}</button>` : ''}
+        ${s.profile_id ? `<span class="muted">${esc(t('sessions.twinPrivate'))}</span>` : `<button class="link" data-sess-toggle="${esc(s.id)}" data-sess-private="${s.private ? '1' : ''}">${s.private ? esc(t('sessions.makeShared')) : esc(t('sessions.makePrivate'))}</button>`}
       </div></div>`;
   }
   $('sessions-list').innerHTML = html;
+}
+async function previewSessionFile(id) {
+  const vault = $('session-file-vault').value;
+  const folder = $('session-file-folder').value;
+  const result = await api('POST', '/api/sessions/file', { id, vault, folder, confirm: false, useLocalDraft: fileLocalDraftIds.has(id) });
+  if (!result.ok) throw new Error((result.errors || []).join('; ') || t('sessions.previewFirst'));
+  $('session-file-preview').textContent = result.preview || '';
+  $('session-file-preview').dataset.vault = vault;
+  $('session-file-preview').dataset.folder = folder;
+  document.querySelector('[data-file-confirm]').hidden = false;
 }
 
 // P0: two-AI handoff receipt. /api/handoffs already drops anything private or under an
@@ -447,15 +916,314 @@ async function loadHandoffs() {
     if (r.enabled) renderHandoffs(r.receipts);
   } catch (e) { $('handoffs-list').innerHTML = `<p class="error-box">${esc(t('handoffs.loadError', { msg: e.message }))}</p>`; }
 }
+
+async function loadRsi() {
+  const [response, discoveryResponse] = await Promise.all([api('GET', '/api/rsi'), api('GET', '/api/rsi/discovery')]);
+  const ideas = response.ideas || [], discovery = discoveryResponse.discovery;
+  const lastCheck = new Map();
+  for (const check of discovery.checks || []) if (!lastCheck.has(check.idea_id)) lastCheck.set(check.idea_id, check);
+  const transitions = { discovered: ['triaged', 'rejected', 'deferred'], triaged: ['researching', 'proposed', 'rejected', 'deferred'], researching: ['proposed', 'rejected', 'deferred'], proposed: ['testing', 'rejected', 'deferred'], testing: ['review', 'rejected', 'deferred'], review: ['accepted', 'rejected', 'testing', 'deferred'], accepted: [], rejected: [], deferred: ['triaged', 'rejected'], rolled_back: ['testing', 'rejected'] };
+  if (!ideas.length) { $('rsi-ideas').innerHTML = '<p class="muted">' + esc(t('rsi.empty')) + '</p>'; return; }
+  $('rsi-ideas').innerHTML = ideas.map((idea) => {
+    const f = idea.fields, sources = (f.sources || []).map(s => '<b>' + esc(s.title || s.url) + '</b> <a href="' + esc(s.url) + '" target="_blank" rel="noopener noreferrer">' + esc(t('rsi.openSource')) + '</a>' + (s.published_at ? ' · ' + esc(t('rsi.publishedShort')) + ' ' + esc(s.published_at) : '') + (s.accessed_at ? ' · ' + esc(t('rsi.accessed')) + ' ' + esc(s.accessed_at) : '') + (s.confidence ? ' · ' + esc(s.confidence) + ' ' + esc(t('rsi.confidenceShort')) : '') + (s.claim ? '<br>' + esc(s.claim) : '') + (s.limitations ? '<br>' + esc(t('rsi.limitations')) + ': ' + esc(s.limitations) : '')).join('<br>');
+    const history = idea.history.map((h, i) => '<li>' + esc(h.status) + ' · ' + esc(new Date(h.at).toLocaleString(LOCALE)) + (i === 0 && idea.origin === 'discovery' ? ' — ' + esc(t('rsi.discovery.historyNote')) : i === 0 && idea.origin === 'observation' ? ' — ' + esc(t('rsi.observe.proposalHistory')) : h.note ? ' — ' + esc(h.note) : '') + '</li>').join('');
+    const d = idea.origin === 'discovery' ? idea.discovery : null;
+    const o = idea.origin === 'observation' ? idea.observation : null;
+    const why = d ? '<p class="muted"><span class="pill">' + esc(t('rsi.discovery.badge')) + '</span> ' + esc(t('rsi.discovery.why', { topicEvidence: Array.isArray(d.topic_matched_terms) && d.topic_matched_terms.length ? t('rsi.discovery.topicMatch', { terms: d.topic_matched_terms.join(', ') }) : t('rsi.discovery.topicMatchLegacy'), signal: d.signal, terms: d.matched_terms.join(', '), workflow: d.workflow_terms.join(', '), score: d.score })) + '</p>' : o ? '<p class="muted"><span class="pill">' + esc(t('rsi.observe.proposalBadge')) + '</span> ' + esc(t('rsi.observe.proposalEvidence', { category: t('rsi.observe.group.' + o.category), calls: o.calls, failures: o.failures, rate: Math.round(o.failure_rate * 100) })) + '</p>' : '';
+    const check = d ? lastCheck.get(idea.id) : null;
+    const freshness = d ? '<div class="row muted" style="font-size:13px"><span>' + esc(t('rsi.discovery.freshness.label')) + ': ' + esc(check ? t('rsi.discovery.freshness.' + check.status) : t('rsi.discovery.freshness.never')) + (check ? ' · ' + esc(new Date(check.checked_at).toLocaleString(LOCALE)) : '') + '</span><button data-rsi-refresh="' + esc(idea.id) + '" ' + (!discovery.settings.enabled || discovery.settings.paused || discovery.running ? 'disabled' : '') + '>' + esc(t('rsi.discovery.freshness.check')) + '</button></div>' : '';
+    const options = (transitions[idea.status] || []).map(s => '<option value="' + esc(s) + '">' + esc(t('rsi.status.' + s)) + '</option>').join('');
+    const evidence = '<div class="grid2"><label>' + esc(t('rsi.baselineVersion')) + '<input data-rsi-field="baseline_version" value="' + esc(f.baseline_version || '') + '"></label><label>' + esc(t('rsi.candidateVersion')) + '<input data-rsi-field="candidate_version" value="' + esc(f.candidate_version || '') + '"></label><label>' + esc(t('rsi.promotionCommit')) + '<input data-rsi-field="promotion_commit_sha" maxlength="40" pattern="[a-fA-F0-9]{40}" value="' + esc(f.promotion_commit_sha || '') + '"><small class="muted">' + esc(t('rsi.promotionCommitHint')) + '</small></label><label>' + esc(t('rsi.experimentRunId')) + '<input data-rsi-field="experiment_run_id" maxlength="120" value="' + esc(f.experiment_run_id || '') + '"></label><label>' + esc(t('rsi.testSetVersion')) + '<input data-rsi-field="test_set_version" value="' + esc(f.test_set_version || '') + '"><small class="muted">' + esc(t('rsi.testSetHashHint')) + '</small></label><label>' + esc(t('rsi.reviewer')) + '<input data-rsi-field="reviewer" value="' + esc(f.reviewer || '') + '"></label></div><label>' + esc(t('rsi.results')) + '<textarea data-rsi-field="results">' + esc(f.results || '') + '</textarea></label><label>' + esc(t('rsi.metrics')) + '<textarea data-rsi-field="metrics">' + esc((f.metrics || []).join('\n')) + '</textarea></label><label>' + esc(t('rsi.guardrails')) + '<textarea data-rsi-field="guardrails">' + esc((f.guardrails || []).join('\n')) + '</textarea></label><label>' + esc(t('rsi.rationale')) + '<textarea data-rsi-field="decision_and_reason">' + esc(f.decision_and_reason || '') + '</textarea></label><label>' + esc(t('rsi.rollback')) + '<textarea data-rsi-field="rollback">' + esc(f.rollback || '') + '</textarea></label>';
+    const experimentRuns = (idea.experiments || []).map(run => '<li><b>' + esc(run.candidate_version) + '</b> · ' + esc(t('rsi.experiment.decision.' + run.decision)) + '<br>' + esc(t('rsi.experiment.metric.' + run.primary_metric.name)) + ': ' + Math.round(run.primary_metric.baseline * 100) + '% → ' + Math.round(run.primary_metric.candidate * 100) + '% · ' + esc(t('rsi.experiment.tokens', { baseline: run.estimated_context_tokens.baseline, candidate: run.estimated_context_tokens.candidate })) + '<br><span class="muted">' + esc(run.run_id) + ' · ' + esc(run.source_commit_sha || t('rsi.experiment.source.unbound')) + (run.source_stable ? ' · ' + esc(t('rsi.experiment.source.clean')) : ' · ' + esc(t('rsi.experiment.source.changed'))) + '<br>' + esc(new Date(run.completed_at).toLocaleString(LOCALE)) + '</span>' + (run.decision === 'eligible_for_review' && run.source_stable ? ' <button type="button" data-rsi-use-experiment="' + esc(run.run_id) + '" data-rsi-source-commit="' + esc(run.source_commit_sha) + '" data-rsi-fixture="' + esc(run.fixture_sha256) + '" data-rsi-candidate="' + esc(run.candidate_version) + '">' + esc(t('rsi.experiment.useForReview')) + '</button>' : '') + '</li>').join('');
+    const monitoringRuns = (idea.monitoring || []).map(run => '<li><b>' + esc(t('rsi.monitor.decision.' + run.decision)) + '</b> · ' + esc(run.window_start) + ' – ' + esc(run.window_end) + '<br>' + esc(run.primary_metric.name) + ': ' + esc(String(run.primary_metric.baseline)) + ' → ' + esc(String(run.primary_metric.observed)) + ' · ' + esc(t('rsi.monitor.guardrail.' + run.guardrail_status)) + '<br>' + esc(run.results) + '<br><span class="muted">' + esc(run.reviewer) + ' · ' + esc(run.monitored_commit_sha.slice(0, 12)) + (run.evidence_ref ? ' · ' + esc(run.evidence_ref) : '') + '</span></li>').join('');
+    const rollbackRuns = (idea.rollbacks || []).map(run => '<li><b>' + esc(t('rsi.rollback.restoredVersion')) + ': ' + esc(run.restored_version) + '</b><br>' + esc(run.reason) + '<br><span class="muted">' + esc(run.reviewer) + ' · ' + esc(run.promoted_commit_sha.slice(0, 12)) + ' → ' + esc(run.restored_commit_sha.slice(0, 12)) + (run.evidence_ref ? ' · ' + esc(run.evidence_ref) : '') + '</span></li>').join('');
+    const rollbackForm = idea.status === 'accepted' ? '<div class="card"><h4>' + esc(t('rsi.rollback.title')) + '</h4><p class="muted">' + esc(t('rsi.rollback.hint')) + '</p><div class="grid2"><label>' + esc(t('rsi.rollback.restoredVersion')) + '<input data-rsi-rollback="restored_version" maxlength="160" required></label><label>' + esc(t('rsi.rollback.commit')) + '<input data-rsi-rollback="restored_commit_sha" maxlength="40" pattern="[a-fA-F0-9]{40}" required></label><label>' + esc(t('rsi.rollback.reviewer')) + '<input data-rsi-rollback="reviewer" maxlength="160" required></label><label>' + esc(t('rsi.rollback.evidence')) + '<input data-rsi-rollback="evidence_ref" maxlength="500"></label></div><label>' + esc(t('rsi.rollback.reason')) + '<textarea data-rsi-rollback="reason" maxlength="500" required></textarea></label><button type="button" data-rsi-rollback-submit>' + esc(t('rsi.rollback.record')) + '</button></div>' : '';
+    const monitorForm = idea.status === 'accepted' ? '<div class="card"><h4>' + esc(t('rsi.monitor.title')) + '</h4><p class="muted">' + esc(t('rsi.monitor.hint')) + '</p><div class="grid2"><label>' + esc(t('rsi.monitor.start')) + '<input type="date" data-rsi-monitor="window_start" required></label><label>' + esc(t('rsi.monitor.end')) + '<input type="date" data-rsi-monitor="window_end" required></label><label>' + esc(t('rsi.monitor.testSet')) + '<input data-rsi-monitor="test_set_version" required maxlength="160"></label><label>' + esc(t('rsi.monitor.samples')) + '<input type="number" data-rsi-monitor="sample_count" min="1" max="100000" value="1" required></label><label>' + esc(t('rsi.monitor.decision')) + '<select data-rsi-monitor="decision"><option value="stable">' + esc(t('rsi.monitor.decision.stable')) + '</option><option value="regression">' + esc(t('rsi.monitor.decision.regression')) + '</option><option value="inconclusive">' + esc(t('rsi.monitor.decision.inconclusive')) + '</option></select></label><label>' + esc(t('rsi.monitor.guardrailStatus')) + '<select data-rsi-monitor="guardrail_status"><option value="pass">' + esc(t('rsi.monitor.guardrail.pass')) + '</option><option value="fail">' + esc(t('rsi.monitor.guardrail.fail')) + '</option><option value="unknown">' + esc(t('rsi.monitor.guardrail.unknown')) + '</option></select></label><label>' + esc(t('rsi.monitor.metricName')) + '<input data-rsi-monitor="metric_name" maxlength="80" required></label><label>' + esc(t('rsi.monitor.baseline')) + '<input type="number" step="any" data-rsi-monitor="metric_baseline" required></label><label>' + esc(t('rsi.monitor.observed')) + '<input type="number" step="any" data-rsi-monitor="metric_observed" required></label><label>' + esc(t('rsi.monitor.reviewer')) + '<input data-rsi-monitor="reviewer" maxlength="160" required></label></div><label>' + esc(t('rsi.monitor.guardrails')) + '<textarea data-rsi-monitor="guardrails" maxlength="1920" required></textarea></label><label>' + esc(t('rsi.monitor.results')) + '<textarea data-rsi-monitor="results" maxlength="1000" required></textarea></label><label>' + esc(t('rsi.monitor.evidenceRef')) + '<input data-rsi-monitor="evidence_ref" maxlength="500"></label><button type="button" data-rsi-monitor-submit>' + esc(t('rsi.monitor.save')) + '</button></div>' : '';
+    const experiment = idea.status === 'testing' ? '<div class="row"><select data-rsi-suite><option value="retrieval-rsi-v1">' + esc(t('rsi.experiment.suite1')) + ' (per-case-rephrasing-v1)</option><option value="retrieval-independent-v1">' + esc(t('rsi.experiment.suite2')) + ' (compact-coverage-v1)</option></select><button data-rsi-experiment>' + esc(t('rsi.experiment.run')) + '</button></div><p class="muted">' + esc(t('rsi.experiment.note')) + '</p>' : '';
+    return '<article class="card" data-rsi-id="' + esc(idea.id) + '" data-rsi-revision="' + idea.revision + '"><div class="row" style="justify-content:space-between"><b>' + esc(f.title) + '</b><span class="pill">' + esc(t('rsi.status.' + idea.status)) + '</span></div>' + why + '<p>' + esc(f.user_problem) + '</p>' + (f.hypothesis ? '<p><b>' + esc(t('rsi.hypothesisShort')) + ':</b> ' + esc(f.hypothesis) + '</p>' : '') + (sources ? '<p class="muted">' + sources + '</p>' : '') + freshness + '<div class="row muted" style="font-size:13px">' + esc((f.memory_types || []).map(x => t('twinProfiles.memory.' + x)).join(', ') || '—') + ' · ' + esc(t('rsi.updated')) + ' ' + esc(new Date(idea.updated_at).toLocaleString(LOCALE)) + '</div><details style="margin-top:8px"><summary>' + esc(t('rsi.evidenceHistory')) + '</summary>' + evidence + '<ol>' + history + '</ol>' + (experimentRuns ? '<h4>' + esc(t('rsi.experiment.history')) + '</h4><ol>' + experimentRuns + '</ol>' : '') + (idea.monitoring?.length ? '<h4>' + esc(t('rsi.monitor.history')) + '</h4><ol>' + monitoringRuns + '</ol>' : '') + (idea.rollbacks?.length ? '<h4>' + esc(t('rsi.rollback.history')) + '</h4><ol>' + rollbackRuns + '</ol>' : '') + monitorForm + rollbackForm + experiment + (options ? '<div class="row"><select data-rsi-next>' + options + '</select><input data-rsi-note maxlength="500" placeholder="' + esc(t('rsi.statusNote')) + '"><button data-rsi-update>' + esc(t('rsi.update')) + '</button></div>' : '') + '</details></article>';
+  }).join('');
+}
+
+$('rsi-idea-form').addEventListener('submit', (e) => act(async () => {
+  e.preventDefault();
+  const form = e.currentTarget, data = new FormData(form), sourceUrl = String(data.get('source_url') || '').trim();
+  const sources = sourceUrl ? [{ url: sourceUrl, title: String(data.get('source_title') || ''), published_at: String(data.get('source_published') || ''), accessed_at: new Date().toISOString(), claim: String(data.get('source_claim') || ''), confidence: String(data.get('source_confidence') || ''), limitations: String(data.get('source_limitations') || '') }] : [];
+  const proposal = { title: String(data.get('title')), user_problem: String(data.get('user_problem')), hypothesis: String(data.get('hypothesis') || ''), memory_types: [...form.querySelector('[name="memory_types"]').selectedOptions].map(x => x.value), sources };
+  const { similar } = await api('POST', '/api/rsi/ideas/check', proposal);
+  if (similar.length && !window.confirm(t('rsi.duplicates') + '\n\n' + similar.map(x => x.title + ' (' + x.score + '%)').join('\n'))) return;
+  await api('POST', '/api/rsi/ideas', proposal);
+  form.reset(); await loadRsi(); toast(t('rsi.saved'));
+}));
+document.addEventListener('click', (e) => {
+  const rollbackButton = e.target.closest('[data-rsi-rollback-submit]');
+  if (rollbackButton) {
+    act(async () => {
+      const card = rollbackButton.closest('[data-rsi-id]');
+      const invalid = [...card.querySelectorAll('[data-rsi-rollback]')].find(input => !input.checkValidity());
+      if (invalid) { invalid.reportValidity(); return; }
+      if (!window.confirm(t('rsi.rollback.confirm'))) return;
+      const rollback = Object.fromEntries([...card.querySelectorAll('[data-rsi-rollback]')].map(input => [input.dataset.rsiRollback, input.value.trim()]));
+      await api('POST', '/api/rsi/ideas/rollback', { id: card.dataset.rsiId, expected_revision: Number(card.dataset.rsiRevision), rollback });
+      await loadRsi(); toast(t('rsi.rollback.saved'));
+    });
+    return;
+  }
+  const monitorButton = e.target.closest('[data-rsi-monitor-submit]');
+  if (monitorButton) {
+    act(async () => {
+      const card = monitorButton.closest('[data-rsi-id]');
+      const requiredInvalid = [...card.querySelectorAll('[data-rsi-monitor]')].find(input => !input.checkValidity());
+      if (requiredInvalid) { requiredInvalid.reportValidity(); return; }
+      const field = (name) => card.querySelector(`[data-rsi-monitor="${name}"]`);
+      const monitoring = {
+        monitored_commit_sha: card.querySelector('[data-rsi-field="promotion_commit_sha"]').value,
+        window_start: field('window_start').value, window_end: field('window_end').value,
+        test_set_version: field('test_set_version').value, sample_count: Number(field('sample_count').value),
+        decision: field('decision').value,
+        primary_metric: { name: field('metric_name').value, baseline: Number(field('metric_baseline').value), observed: Number(field('metric_observed').value) },
+        guardrail_status: field('guardrail_status').value,
+        guardrails: field('guardrails').value.split(/\r?\n/).map(value => value.trim()).filter(Boolean),
+        results: field('results').value, reviewer: field('reviewer').value, evidence_ref: field('evidence_ref').value,
+      };
+      await api('POST', '/api/rsi/ideas/monitor', { id: card.dataset.rsiId, expected_revision: Number(card.dataset.rsiRevision), monitoring });
+      await loadRsi(); toast(t('rsi.monitor.saved'));
+    });
+    return;
+  }
+  const experimentButton = e.target.closest('[data-rsi-experiment]');
+  if (experimentButton) {
+    act(async () => {
+      const card = experimentButton.closest('[data-rsi-id]'); experimentButton.disabled = true;
+      await api('POST', '/api/rsi/experiments/run', { idea_id: card.dataset.rsiId, suite: card.querySelector('[data-rsi-suite]').value });
+      await loadRsi(); toast(t('rsi.experiment.done'));
+    });
+    return;
+  }
+  const useExperimentButton = e.target.closest('[data-rsi-use-experiment]');
+  if (useExperimentButton) {
+    const card = useExperimentButton.closest('[data-rsi-id]');
+    card.querySelector('[data-rsi-field="experiment_run_id"]').value = useExperimentButton.dataset.rsiUseExperiment;
+    card.querySelector('[data-rsi-field="promotion_commit_sha"]').value = useExperimentButton.dataset.rsiSourceCommit;
+    card.querySelector('[data-rsi-field="test_set_version"]').value = useExperimentButton.dataset.rsiFixture;
+    card.querySelector('[data-rsi-field="candidate_version"]').value = useExperimentButton.dataset.rsiCandidate;
+    toast(t('rsi.experiment.evidencePrefilled'));
+    return;
+  }
+  const refreshButton = e.target.closest('[data-rsi-refresh]');
+  if (refreshButton) {
+    act(async () => {
+      refreshButton.disabled = true;
+      const { check } = await api('POST', '/api/rsi/discovery/refresh-source', { idea_id: refreshButton.dataset.rsiRefresh });
+      await loadRsi(); toast(t('rsi.discovery.freshness.checked', { result: t('rsi.discovery.freshness.' + check.status) }));
+    });
+    return;
+  }
+  const button = e.target.closest('[data-rsi-update]'); if (!button) return;
+  act(async () => {
+    const card = button.closest('[data-rsi-id]');
+    const fields = {};
+    for (const input of card.querySelectorAll('[data-rsi-field]')) {
+      const key = input.dataset.rsiField;
+      if (key === 'metrics' || key === 'guardrails') fields[key] = input.value.split(/\r?\n/).map(s => s.trim()).filter(Boolean);
+      else if (input.value.trim()) fields[key] = input.value.trim();
+    }
+    await api('POST', '/api/rsi/ideas/update', { id: card.dataset.rsiId, expected_revision: Number(card.dataset.rsiRevision), status: card.querySelector('[data-rsi-next]').value, note: card.querySelector('[data-rsi-note]').value, fields });
+    await loadRsi(); toast(t('rsi.updatedToast'));
+  });
+});
+
+function renderDiscovery(d) {
+  const s = d.settings, form = $('rsi-discovery-form');
+  form.elements.enabled.checked = s.enabled;
+  $('rsi-discovery-sources').innerHTML = d.sources.map(source => `<label style="display:flex;gap:6px;align-items:center"><input type="checkbox" name="sources" value="${esc(source.id)}" ${s.sources.includes(source.id) ? 'checked' : ''}>${esc(source.label)} <span class="muted">(${esc(source.host)})</span></label>`).join('');
+  form.elements.topics.value = s.topics.join('\n');
+  form.elements.signals.value = s.signals.join('\n');
+  form.elements.interval_hours.value = String(s.interval_hours);
+  form.elements.max_new_per_run.value = String(s.max_new_per_run);
+  form.elements.refresh_existing.checked = Boolean(s.refresh_existing);
+  $('rsi-discovery-pause').hidden = s.paused || !s.enabled;
+  $('rsi-discovery-resume').hidden = !s.paused;
+  $('rsi-discovery-run').disabled = !s.enabled || s.paused || d.running;
+  const backgroundReady = s.enabled && !s.paused;
+  $('rsi-discovery-background').hidden = !backgroundReady || Boolean(S?.startup_at_login);
+  $('rsi-discovery-background-status').textContent = !backgroundReady ? '' : S?.startup_at_login ? t('rsi.discovery.backgroundOn') : t('rsi.discovery.backgroundHint');
+  const state = !s.enabled ? 'off' : s.paused ? 'paused' : d.running ? 'running' : 'on';
+  $('rsi-discovery-status').textContent = t('rsi.discovery.state.' + state) + ' · ' + t('rsi.discovery.sources', { sources: d.sources.filter(x => s.sources.includes(x.id)).map(x => x.label + ' (' + x.host + ')').join(', ') });
+  $('rsi-discovery-runs').innerHTML = d.runs.map(r => '<li>' + esc(new Date(r.started_at).toLocaleString(LOCALE)) + ' · ' + esc(t('rsi.discovery.trigger.' + r.trigger)) + ' · ' + esc(t('rsi.discovery.run.' + r.status)) + ' · ' + esc(t('rsi.discovery.counts', { fetched: r.fetched, entries: r.entries, created: r.created.length, duplicates: r.duplicates, irrelevant: r.dropped.irrelevant, hostile: r.dropped.secret + r.dropped.instruction_like, invalid: r.dropped.invalid, over: r.dropped.over_limit })) + (r.source_refresh ? ' · ' + esc(t('rsi.discovery.refreshSummary', { checked: r.source_refresh.checked, deferred: r.source_refresh.deferred })) : '') + (r.errors.length ? '<br>' + r.errors.map(esc).join('<br>') : '') + '</li>').join('') || '<li>' + esc(t('rsi.discovery.noRuns')) + '</li>';
+}
+function renderObservationReport(report) {
+  const percent = value => Number.isFinite(value) ? Math.round(value * 100) + '%' : t('rsi.observe.noRate');
+  const tokenMean = bucket => bucket.samples ? bucket.mean_estimate.toLocaleString(LOCALE) : t('rsi.observe.noRate');
+  const health = report.vault_health;
+  const healthSummary = health ? `<p class="muted">${esc(t('rsi.observe.vaultHealthSummary', { vault: health.vault, broken: health.counts.broken_count, orphans: health.counts.orphan_count, duplicates: health.counts.duplicate_title_count, unresolvedRelations: health.counts.unresolved_typed_relation_count, duplicateIds: health.counts.duplicate_typed_id_count, state: t('rsi.observe.vaultHealthSignal.' + health.comparison.signal) }))}</p>` : '';
+  const proposalIntake = report.proposal_intake ? `<p class="muted">${esc(t('rsi.observe.proposalIntake', { created: report.proposal_intake.created_count, duplicates: report.proposal_intake.duplicate_count }))}</p>` : '';
+  $('rsi-observe-report').innerHTML = `<p class="muted">${esc(t('rsi.observe.window', { days: report.current_window_days, events: report.events_analyzed }))}</p>${healthSummary}${report.categories.map(item => `<div class="row muted" style="font-size:13px;justify-content:space-between;flex-wrap:wrap"><b>${esc(t('rsi.observe.group.' + item.id))}</b><span>${esc(t('rsi.observe.stats', { calls: item.current.calls, failures: item.current.failures, rate: percent(item.current.failure_rate) }))}</span>${item.id === 'graph_review' ? `<span>${esc(t('rsi.observe.graphActions', { approved: item.current_review_actions.approved, rejected: item.current_review_actions.rejected, reopened: item.current_review_actions.reopened, previousApproved: item.previous_review_actions.approved, previousRejected: item.previous_review_actions.rejected, previousReopened: item.previous_review_actions.reopened }))}</span>` : ''}${item.current_result_tokens.samples || item.previous_result_tokens.samples ? `<span>${esc(t('rsi.observe.resultSize', { current: tokenMean(item.current_result_tokens), previous: tokenMean(item.previous_result_tokens) }))}</span>` : ''}<span class="pill">${esc(t('rsi.observe.signal.' + item.signal))}</span>${item.signal.startsWith('review_') ? `<button type="button" class="secondary" data-rsi-observe-draft="${esc(item.id)}">${esc(t('rsi.observe.draft'))}</button>` : ''}</div>`).join('')}${report.findings.length ? `<p>${esc(t('rsi.observe.findings', { count: report.findings.length }))}</p>` : `<p class="muted">${esc(t('rsi.observe.noFindings'))}</p>`}${proposalIntake}<p class="muted" style="font-size:12px">${esc(t('rsi.observe.generated', { when: new Date(report.generated_at).toLocaleString(LOCALE) }))}</p>`;
+  $('rsi-observe-report').querySelectorAll('[data-rsi-observe-draft]').forEach(button => button.addEventListener('click', () => {
+    const item = report.categories.find(category => category.id === button.dataset.rsiObserveDraft);
+    if (!item || !item.signal.startsWith('review_')) return;
+    const form = $('rsi-idea-form'), area = t('rsi.observe.group.' + item.id);
+    form.elements.namedItem('title').value = t('rsi.observe.draft.title', { area });
+    form.elements.namedItem('user_problem').value = t('rsi.observe.draft.problem', { area, failures: item.current.failures, calls: item.current.calls });
+    form.elements.namedItem('hypothesis').value = t('rsi.observe.draft.hypothesis', { area });
+    const memoryType = ({ retrieval: ['semantic'], sessions: ['working', 'episodic'], filing: ['semantic', 'procedural'], handoff: ['working', 'episodic'] })[item.id] || [];
+    for (const option of form.querySelector('[name="memory_types"]').options) option.selected = memoryType.includes(option.value);
+    form.closest('details').open = true;
+    form.elements.namedItem('title').focus();
+  }));
+}
+function renderWeeklyBenchmark(runs) {
+  const latest = [...(runs || [])].reverse();
+  $('rsi-weekly-history').innerHTML = latest.length
+    ? '<ol>' + latest.map(run => {
+      const source = run.source_commit_sha ? `${run.source_commit_sha.slice(0, 8)} · ${t(run.source_tree_clean ? 'rsi.weekly.sourceClean' : 'rsi.weekly.sourceWorking')}` : t('rsi.weekly.sourceUnknown');
+      return '<li>' + esc(t('rsi.weekly.result', { week: run.week, correct: run.first_try_correct.count, total: run.first_try_correct.total, percent: run.first_try_correct.percent, failures: run.failed_case_count, privacy: run.privacy_violations })) + ' · ' + esc(run.evaluator_version) + ' · ' + esc(run.software_version || '—') + ' · ' + esc(source) + '</li>';
+    }).join('') + '</ol>'
+    : '<p class="muted">' + esc(t('rsi.weekly.empty')) + '</p>';
+}
+function renderWeeklyBenchmarkSchedule(schedule) {
+  const form = $('rsi-weekly-schedule-form');
+  if (!schedule) return;
+  form.elements.namedItem('enabled').checked = schedule.enabled === true;
+  form.elements.namedItem('weekday').value = String(schedule.weekday ?? 1);
+  form.elements.namedItem('time').value = schedule.time || '09:00';
+  const days = ['sunday', 'monday', 'tuesday', 'wednesday', 'thursday', 'friday', 'saturday'];
+  const day = t(`rsi.weekly.${days[schedule.weekday] || 'monday'}`);
+  const at = schedule.last_run_at && Number.isFinite(Date.parse(schedule.last_run_at)) ? new Date(schedule.last_run_at).toLocaleString() : '';
+  $('rsi-weekly-schedule-status').textContent = schedule.enabled
+    ? t(schedule.last_run_ok === false ? 'rsi.weekly.scheduleFailed' : schedule.last_run_ok === true ? 'rsi.weekly.scheduleDone' : 'rsi.weekly.scheduleOn', { at, day, time: schedule.time })
+    : t('rsi.weekly.scheduleOff');
+}
+async function loadWeeklyBenchmark() {
+  const result = await api('GET', '/api/rsi/weekly-benchmark');
+  renderWeeklyBenchmark(result.runs);
+  renderWeeklyBenchmarkSchedule(result.schedule);
+}
+document.getElementById('rsi-weekly-schedule-form').addEventListener('submit', event => {
+  event.preventDefault();
+  const form = event.currentTarget;
+  act(async () => {
+    const schedule = await api('POST', '/api/rsi/weekly-benchmark/settings', {
+      enabled: form.elements.namedItem('enabled').checked,
+      weekday: Number(form.elements.namedItem('weekday').value),
+      time: form.elements.namedItem('time').value,
+    });
+    renderWeeklyBenchmarkSchedule(schedule.schedule);
+  });
+});
+document.getElementById('rsi-weekly-run').addEventListener('click', () => act(async () => {
+  const button = $('rsi-weekly-run');
+  button.disabled = true;
+  $('rsi-weekly-status').textContent = t('rsi.weekly.running');
+  try {
+    const result = await api('POST', '/api/rsi/weekly-benchmark/run');
+    renderWeeklyBenchmark(result.runs);
+    renderWeeklyBenchmarkSchedule(result.schedule);
+    $('rsi-weekly-status').textContent = t('rsi.weekly.saved');
+  } finally { button.disabled = false; }
+}));
+document.getElementById('rsi-observe-run').addEventListener('click', () => act(async () => {
+  const button = $('rsi-observe-run'); button.disabled = true;
+  try {
+    const result = await api('POST', '/api/rsi/observations/run');
+    if (result.run.ok) renderObservationReport(result.run.report);
+    await loadObservations();
+  }
+  finally { button.disabled = false; }
+}));
+async function loadDiscovery() { renderDiscovery((await api('GET', '/api/rsi/discovery')).discovery); }
+async function loadObservations() {
+  const data = (await api('GET', '/api/rsi/observations')).observations;
+  const form = $('rsi-observe-settings');
+  form.elements.enabled.checked = data.settings.enabled;
+  form.elements.interval_hours.value = String(data.settings.interval_hours);
+  form.elements.vault_health_enabled.checked = data.settings.vault_health_enabled;
+  const vaultSelect = form.elements.vault_health_vault;
+  vaultSelect.innerHTML = `<option value="">${esc(t('rsi.observe.vaultHealthNone'))}</option>` + (S?.vaults || []).filter(vault => vault.exists).map(vault => `<option value="${esc(vault.name)}">${esc(vault.name)}${vault.private ? ` · ${esc(t('rsi.observe.vaultHealthPrivate'))}` : ''}</option>`).join('');
+  vaultSelect.value = data.settings.vault_health_vault || '';
+  $('rsi-observe-status').textContent = data.last_run
+    ? `${t(data.last_run.ok ? 'rsi.observe.lastRun' : 'rsi.observe.lastFailed', { when: new Date(data.last_run.at).toLocaleString(LOCALE) })}${data.next_run_at ? ' · ' + t('rsi.observe.nextRun', { when: new Date(data.next_run_at).toLocaleString(LOCALE) }) : ''}`
+    : (data.settings.enabled ? t('rsi.observe.firstRunDue') : t('rsi.observe.scheduleOff'));
+  if (data.report) renderObservationReport(data.report);
+}
+document.getElementById('rsi-observe-settings').addEventListener('submit', event => {
+  event.preventDefault();
+  act(async () => {
+    const form = event.currentTarget;
+    const data = await api('POST', '/api/rsi/observations/settings', { enabled: form.elements.enabled.checked, interval_hours: Number(form.elements.interval_hours.value), vault_health_enabled: form.elements.vault_health_enabled.checked, vault_health_vault: form.elements.vault_health_vault.value });
+    await loadObservations();
+    toast(t('rsi.observe.scheduleSaved'));
+  });
+});
+$('rsi-export').addEventListener('click', () => act(async () => {
+  const record = await api('GET', '/api/rsi/export');
+  const blob = new Blob([JSON.stringify(record, null, 2) + '\n'], { type: 'application/json' });
+  const link = document.createElement('a');
+  link.href = URL.createObjectURL(blob);
+  link.download = `brainlink-rsi-review-${new Date().toISOString().slice(0, 10)}.json`;
+  link.click();
+  setTimeout(() => URL.revokeObjectURL(link.href), 1000);
+  toast(t('rsi.exported'));
+}));
+const rsiLines = (value) => String(value || '').split(/\r?\n/).map(x => x.trim()).filter(Boolean);
+$('rsi-discovery-form').addEventListener('submit', (e) => act(async () => {
+  e.preventDefault();
+  const f = e.currentTarget.elements;
+  renderDiscovery((await api('POST', '/api/rsi/discovery/settings', { enabled: f.enabled.checked, refresh_existing: f.refresh_existing.checked, sources: [...f.querySelectorAll('input[name="sources"]:checked')].map(x => x.value), topics: rsiLines(f.topics.value), signals: rsiLines(f.signals.value), interval_hours: Number(f.interval_hours.value), max_new_per_run: Number(f.max_new_per_run.value) })).discovery);
+  toast(t('rsi.discovery.saved'));
+}));
+$('rsi-discovery-starter').addEventListener('click', () => {
+  const form = $('rsi-discovery-form');
+  const topics = [
+    'AI agent memory retrieval',
+    'cross AI agent handoff',
+    'permission aware knowledge graph',
+    'token efficient context retrieval',
+    'recursive self improvement',
+  ];
+  const signals = [
+    'Reduce repeated reading and searching by giving AI agents short, cited, permission filtered context.',
+    'Let different AI agents continue the same task with decisions, source links, progress, and next steps.',
+    'Separate personal, company, and client knowledge while preventing cross-scope access.',
+    'Connect people, teams, projects, notes, and workflows with evidence-backed, reviewable graph links.',
+    'Save tokens without lowering answer quality by retrieving only the most useful sourced information.',
+    'File session outcomes into the correct vault and link related notes with clear provenance.',
+    'Improve BrainLink through measured experiments, held-out cases, privacy checks, human review, and rollback.',
+    'Manage versioned portable agent skills that work across AI clients.',
+  ];
+  form.elements.enabled.checked = false;
+  form.querySelectorAll('input[name="sources"]').forEach(input => { input.checked = true; });
+  form.elements.topics.value = topics.join('\n');
+  form.elements.signals.value = signals.join('\n');
+  form.elements.interval_hours.value = '24';
+  form.elements.max_new_per_run.value = '5';
+  form.elements.refresh_existing.checked = false;
+  toast(t('rsi.discovery.starterLoaded'));
+});
+$('rsi-discovery-pause').addEventListener('click', () => act(async () => { renderDiscovery((await api('POST', '/api/rsi/discovery/pause')).discovery); toast(t('rsi.discovery.pausedToast')); }));
+$('rsi-discovery-resume').addEventListener('click', () => act(async () => { renderDiscovery((await api('POST', '/api/rsi/discovery/resume')).discovery); toast(t('rsi.discovery.resumedToast')); }));
+$('rsi-discovery-background').addEventListener('click', () => act(async () => {
+  const result = await api('POST', '/api/startup', { enabled: true });
+  if (!result.enabled) throw new Error(t('rsi.discovery.backgroundUnsupported'));
+  await load();
+  toast(t('rsi.discovery.backgroundOn'));
+}));
+$('rsi-discovery-run').addEventListener('click', () => act(async () => {
+  $('rsi-discovery-run').disabled = true;
+  const { run, discovery } = await api('POST', '/api/rsi/discovery/run');
+  renderDiscovery(discovery); await loadRsi();
+  toast(t('rsi.discovery.ranToast', { created: run.created.length }), run.status === 'failed');
+}));
+
 function renderHandoffs(list) {
   if (!list.length) { $('handoffs-list').innerHTML = `<p class="muted">${esc(t('handoffs.empty'))}</p>`; return; }
   $('handoffs-list').innerHTML = list.map((h) => `<div class="card">
       <div class="row" style="justify-content:space-between">
         <b><span class="badge" style="background:${clientColor(h.from)}">${esc(clientLabel(h.from))}</span> → <span class="badge" style="background:${clientColor(h.to)}">${esc(clientLabel(h.to))}</span></b>
-        <span class="pill ${h.picked_up ? 'on' : ''}">${h.picked_up ? esc(t('handoffs.pickedUp')) : esc(t('handoffs.notPickedUp'))}</span>
+        <span class="pill ${h.picked_up ? 'on' : ''}">${h.picked_up ? esc(t(`handoffs.status.${h.update_status}`) || t('handoffs.pickedUp')) : esc(t('handoffs.notPickedUp'))}</span>
       </div>
       <div style="font-size:14px">${esc(h.subject)}</div>
-      <div class="muted" style="font-size:13px">${esc(t('handoffs.sentAt', { when: h.sent_at ? new Date(h.sent_at).toLocaleString(LOCALE) : '' }))}${h.picked_up ? ' · ' + esc(t('handoffs.pickedUpBy', { who: clientLabel(h.picked_up_by), when: h.picked_up_at ? new Date(h.picked_up_at).toLocaleString(LOCALE) : '' })) : ''}</div>
+      ${h.update_subject ? `<div class="muted" style="font-size:13px">${esc(h.update_subject)}</div>` : ''}
+      <div class="muted" style="font-size:13px">${esc(t('handoffs.sentAt', { when: h.sent_at ? new Date(h.sent_at).toLocaleString(LOCALE) : '' }))}${h.update_conflict ? ` · ${esc(t('handoffs.conflictHint'))}` : h.picked_up ? ' · ' + esc(t('handoffs.pickedUpBy', { who: clientLabel(h.picked_up_by), when: h.picked_up_at ? new Date(h.picked_up_at).toLocaleString(LOCALE) : '' })) : ''}</div>
     </div>`).join('');
 }
 function renderSyncSuggestions(provider, suggested) {
@@ -694,13 +1462,16 @@ document.addEventListener('click', (e) => {
 async function load() {
   S = await api('GET', '/api/state');
   await ensureLocale(S.locale);
+  $('app-version').textContent = t('header.version', { version: S.version });
   const hasVault = S.vaults.length > 0;
   const onboardingSync = hasVault && pendingSyncOnboarding;
+  $('main-nav').hidden = !hasVault || onboardingSync;
   $('start').hidden = hasVault;
   $('sync-onboarding').hidden = !onboardingSync;
   if (onboardingSync) renderSyncOnboarding();
   $('ready').hidden = !hasVault || onboardingSync;
   $('brain-panel').hidden = !hasVault || onboardingSync;
+  $('twin-profiles-panel').hidden = !hasVault || onboardingSync;
   $('ask-panel').hidden = !hasVault || onboardingSync;
   $('smart').textContent = S.semantic?.available ? t('brain.smartOn', { model: S.semantic.model }) : t('brain.smartOff');
   if (!hasVault) renderStart(); else if (!onboardingSync) { renderReady(last); drawGraph().catch(() => {}); }
@@ -708,6 +1479,16 @@ async function load() {
   $('sessions-hint').innerHTML = t('sessions.hint', { call: '<span class="mono">session_read</span>' });
   $('sess-share-summaries').checked = Boolean(S.sessions_sharing?.shareSummaries);
   $('sess-share-full').checked = Boolean(S.sessions_sharing?.shareFullText);
+  const hermesProfile = S.sessions_hermes_profile || {};
+  $('sessions-hermes-profile-path').textContent = hermesProfile.home || t('sessions.hermesProfileDetected', { path: hermesProfile.defaultHome || '' });
+  $('sessions-hermes-profile-default').hidden = !hermesProfile.home;
+  $('sess-local-summary-enabled').checked = Boolean(S.sessions_local_summary?.enabled);
+  $('sess-local-summary-auto').checked = Boolean(S.sessions_local_summary?.autoDraftOnEnd);
+  $('sess-local-summary-auto-file').checked = Boolean(S.sessions_local_summary?.autoFileOnEnd);
+  $('sess-local-summary-model').value = S.sessions_local_summary?.model || '';
+  $('sess-local-summary-model').disabled = !$('sess-local-summary-enabled').checked;
+  $('sess-local-summary-auto').disabled = !$('sess-local-summary-enabled').checked;
+  $('sess-local-summary-auto-file').disabled = !$('sess-local-summary-enabled').checked || !$('sess-local-summary-auto').checked;
   $('sess-share-full').disabled = !$('sess-share-summaries').checked;
   // P1a: sessions were imported (or logged) but stay invisible to every connected AI because
   // sharing is off -- say so plainly, with one button that turns the existing switch on, instead
@@ -716,9 +1497,14 @@ async function load() {
   if (hasVault && !onboardingSync) loadSessions().catch(() => {});
   $('handoffs-panel').hidden = !hasVault || onboardingSync;
   if (hasVault && !onboardingSync) loadHandoffs().catch(() => {});
+  $('rsi-panel').hidden = !hasVault || onboardingSync;
+  if (hasVault && !onboardingSync) loadRsi().catch(e => { $('rsi-ideas').innerHTML = '<p class="error-box">' + esc(e.message) + '</p>'; });
+  if (hasVault && !onboardingSync) loadWeeklyBenchmark().catch(e => { $('rsi-weekly-status').textContent = e.message; });
+  if (hasVault && !onboardingSync) loadDiscovery().catch(e => { $('rsi-discovery-status').textContent = e.message; });
+  if (hasVault && !onboardingSync) loadObservations().catch(e => { $('rsi-observe-status').textContent = e.message; });
   $('cfgpath').textContent = S.config_path;
   $('n1').className = 'step' + (S.vaults.length ? ' done' : '');
-  $('vaults').innerHTML = S.vaults.length ? S.vaults.map((v, i) => `<div class="card"><div class="row" style="justify-content:space-between"><b>${esc(v.name)}</b><span class="pill ${v.exists ? 'on' : ''}">${v.exists ? esc(t('vault.notesCount', { n: v.notes })) : esc(t('vault.missing'))}</span></div><div class="mono muted">${esc(v.path)}</div><div class="row muted" style="font-size:13px">${v.private ? esc(t('vault.privateShort')) + ' · ' : ''}${esc(t('vault.writes'))}: ${esc(v.writes)} · ${esc(t('vault.intake'))}: ${esc(v.flat ? 'root' : v.intake_folder)}${v.decisions.length ? ' · ' + esc(t('vault.decisions')) + ' ' + esc(v.decisions.join('/')) : ''}<button class="link" data-remove="${esc(v.name)}">${esc(t('vault.removeBtn'))}</button></div>
+  $('vaults').innerHTML = S.vaults.length ? S.vaults.map((v, i) => `<div class="card"><div class="row" style="justify-content:space-between"><b>${esc(v.name)}</b><span class="pill ${v.exists ? 'on' : ''}" data-vault-note-count="${esc(v.name)}">${v.exists ? esc(v.notes == null ? (v.notes_status === 'unavailable' ? t('vault.countUnavailable') : t('vault.counting')) : t('vault.notesCount', { n: v.notes })) : esc(t('vault.missing'))}</span></div><div class="mono muted">${esc(v.path)}</div><div class="row muted" style="font-size:13px">${v.private ? esc(t('vault.privateShort')) + ' · ' : ''}${esc(t('vault.writes'))}: ${esc(v.writes)} · ${esc(t('vault.intake'))}: ${esc(v.flat ? 'root' : v.intake_folder)}${v.decisions.length ? ' · ' + esc(t('vault.decisions')) + ' ' + esc(v.decisions.join('/')) : ''}<button class="link" data-remove="${esc(v.name)}">${esc(t('vault.removeBtn'))}</button></div>
     <label class="muted" style="display:flex;flex-direction:row;gap:6px;align-items:center;margin-top:8px"><input type="checkbox" data-vault-private="${i}" ${v.private ? 'checked' : ''} style="width:auto"> ${esc(t('vault.privateLabel'))}</label>
     <label style="margin-top:6px">${esc(t('vault.excludedLabel'))}<textarea data-vault-excluded="${i}" class="mono" rows="3">${esc((v.excluded_folders || []).join('\n'))}</textarea></label>
     ${v.excluded_suggestions && v.excluded_suggestions.length ? `<div class="muted" style="font-size:12px;margin-top:4px">${esc(t('vault.suggestions', { list: v.excluded_suggestions.join(', ') }))}</div>` : ''}
@@ -731,26 +1517,160 @@ async function load() {
     <label>${esc(t('rolePack.closeLabel'))}<textarea data-a="${i}" data-f="close">${esc(a.close.join('\n'))}</textarea></label></div>
     ${a.close_target.mode === 'proposal-only' ? `<label class="muted"><span><input type="checkbox" data-a="${i}" data-f="capture_approved" style="width:auto" ${a.capture_approved ? 'checked' : ''}> ${esc(t('rolePack.allowCaptures', { name: a.name }))}</span></label>` : ''}
     <div class="row"><button data-save-agent="${i}">${esc(t('rolePack.saveBtn', { name: a.name }))}</button></div></div>`).join('') : `<p class="muted">${esc(t('rolePack.none'))}</p>`;
+  const twin = S.twin_profiles;
+  const twinVaults = S.vaults.filter((v) => !v.private && v.exists);
+  $('twin-new-vaults').innerHTML = twinVaults.length ? twinVaults.map((v) => `<div class="card"><label style="display:flex;flex-direction:row;align-items:center;gap:8px"><input type="checkbox" data-twin-vault="${esc(v.name)}" style="width:auto"><span>${esc(v.name)}</span><select data-twin-vault-access="${esc(v.name)}" aria-label="${esc(t('twinProfiles.accessFor', { name: v.name }))}" style="margin-left:auto;width:auto"><option value="read">${esc(t('twinProfiles.access.read'))}</option><option value="propose">${esc(t('twinProfiles.access.propose'))}</option></select></label></div>`).join('') : `<p class="muted">${esc(t('twinProfiles.noVaults'))}</p>`;
+  const editableProfile = twin?.profiles?.find((item) => item.id === editingTwinId);
+  const twinAgentVaults = S.ai_agents.filter((a) => !a.revoked && !(twin?.profiles || []).some((p) => p.id !== editingTwinId && p.agents.some((assigned) => assigned.id === a.id)));
+  $('twin-new-agents').innerHTML = twinAgentVaults.map((a) => `<div class="card">
+    <label style="display:flex;flex-direction:row;align-items:center;gap:8px"><input type="checkbox" data-twin-agent="${esc(a.id)}" style="width:auto"><b>${esc(a.name)}</b> <span class="muted">· ${esc(a.kind)}</span></label>
+    <div data-twin-agent-options="${esc(a.id)}" hidden>
+    <div class="muted" style="margin-top:8px" data-i18n="twinProfiles.agentMemory"></div>
+    <div class="row" data-twin-agent-memories="${esc(a.id)}">${['working','semantic','procedural','episodic'].map((key) => `<label class="muted" style="display:flex;flex-direction:row;align-items:center;gap:5px"><input type="checkbox" data-twin-agent-memory="${esc(a.id)}" data-memory-type="${key}" ${key === 'semantic' ? 'checked' : ''} style="width:auto">${esc(t('twinProfiles.memory.' + key))}</label>`).join('')}</div>
+    <div class="cards" data-twin-agent-scopes="${esc(a.id)}" style="margin-top:8px">${twinVaults.map((vault) => `<div class="card" data-twin-agent-scope="${esc(a.id)}" data-vault-scope="${esc(vault.name)}" hidden><label style="display:flex;flex-direction:row;align-items:center;gap:6px"><input type="checkbox" data-twin-agent-vault="${esc(a.id)}" data-vault-name="${esc(vault.name)}" style="width:auto"><b>${esc(vault.name)}</b></label><div class="row" style="margin-top:5px">${[['search','search'],['read_note','read_note'],['read_session','read_session'],['log_session','log_session'],['propose_note','propose_note'],['handoff_read','handoff_read'],['write_handoff','write_handoff']].filter(([op]) => !['handoff_read','write_handoff'].includes(op) || S.handoff?.vault === vault.name).map(([op,key]) => `<label class="muted" style="display:flex;flex-direction:row;align-items:center;gap:5px"><input type="checkbox" data-twin-operation="${esc(a.id)}" data-vault-name="${esc(vault.name)}" value="${op}" ${['search','read_note'].includes(op) ? 'checked' : ''} style="width:auto">${esc(t('twinProfiles.operation.' + key))}</label>`).join('')}</div></div>`).join('')}</div>
+    </div>
+  </div>`).join('') || `<p class="muted">${esc(t('twinProfiles.noAgents'))}</p>`;
+  $('twin-new-memory').innerHTML = ['working','semantic','procedural','episodic'].map((key) => `<label class="card" style="display:flex;flex-direction:column;gap:6px;margin:0"><span style="display:flex;align-items:center;gap:7px"><input type="checkbox" data-twin-memory="${key}" checked style="width:auto"><b>${esc(t('twinProfiles.memory.' + key))}</b></span><small class="muted">${esc(t('twinProfiles.memoryDescription.' + key))}</small></label>`).join('');
+  $('twin-profiles').innerHTML = twin?.profiles?.length ? `<div class="notice" role="status">${esc(t('twinProfiles.limits'))}</div>${twin.profiles.map((p) => `<div class="card"><div class="row"><b>${esc(p.name)} <span class="muted" style="font-weight:400">· ${esc(t('twinProfiles.mode.' + p.mode))}</span></b>${p.editable_scope ? `<button data-twin-edit="${esc(p.id)}">${esc(t('twinProfiles.edit'))}</button>` : `<span class="muted" role="note">${esc(t('twinProfiles.editUnavailable'))}</span>`}</div><div class="muted" style="font-size:13px;margin-top:5px">${esc(t('twinProfiles.owner', { owner: p.owner }))}</div><div style="margin-top:8px"><b>${esc(t('twinProfiles.vaults'))}</b> ${p.vaults.map((v) => `${esc(v.name)} (${esc(v.access)})`).join(' · ') || '—'}</div><div style="margin-top:5px"><b>${esc(t('twinProfiles.agents'))}</b> ${p.agents.map((a) => `${esc(a.name)}: ${a.vaults.map((v) => `${esc(v.name)} (${esc(v.access)}: ${esc(v.operations.join(', '))})`).join(' · ')} · ${esc(t('twinProfiles.memory'))}: ${Object.entries(a.memory_policy || {}).filter(([, enabled]) => enabled).map(([key]) => esc(t('twinProfiles.memory.' + key))).join(', ') || '—'}`).join(' · ') || '—'}</div><div style="margin-top:5px"><b>${esc(t('twinProfiles.memoryCeiling'))}</b> ${Object.entries(p.memory_policy).filter(([, enabled]) => enabled).map(([key]) => esc(t('twinProfiles.memory.' + key))).join(' · ') || '—'}</div><div class="muted" style="font-size:12px;margin-top:5px">${esc(t('twinProfiles.actions'))}: ${esc(p.allowed_actions.join(', ') || '—')} · ${esc(t('twinProfiles.capture'))}: ${esc(p.source_policy.session_capture)} · ${esc(t('twinProfiles.privateDefault'))}: ${p.source_policy.private_default ? esc(t('twinProfiles.yes')) : esc(t('twinProfiles.no'))} · ${esc(t('twinProfiles.provenance'))}: ${p.source_policy.provenance_required ? esc(t('twinProfiles.yes')) : esc(t('twinProfiles.no'))}</div></div>`).join('')}` : `<div class="notice" role="status">${esc(t('twinProfiles.empty'))}</div>`;
+  const editingProfile = twin?.profiles?.find((item) => item.id === editingTwinId);
+  if (editingProfile) {
+    $('twin-new-name').value = editingProfile.name;
+    $('twin-new-owner').value = editingProfile.owner;
+    $('twin-new-mode').value = editingProfile.mode;
+    $('twin-new-owner').readOnly = true;
+    $('twin-new-mode').disabled = true;
+    const grantsByAgent = new Map(editingProfile.agents.map((agent) => [agent.id, new Map(agent.vaults.map((vault) => [vault.name, new Set(vault.operations)]))]));
+    const memoryByAgent = new Map(editingProfile.agents.map((agent) => [agent.id, agent.memory_policy || editingProfile.memory_policy]));
+    document.querySelectorAll('[data-twin-vault]').forEach((input) => {
+      const grant = editingProfile.vaults.find((item) => item.name === input.dataset.twinVault);
+      input.checked = Boolean(grant);
+      const access = document.querySelector(`[data-twin-vault-access="${CSS.escape(input.dataset.twinVault)}"]`);
+      if (access && grant) access.value = grant.access;
+    });
+    document.querySelectorAll('[data-twin-agent]').forEach((input) => { input.checked = grantsByAgent.has(input.dataset.twinAgent); });
+    document.querySelectorAll('[data-twin-agent-options]').forEach((panel) => { panel.hidden = !grantsByAgent.has(panel.dataset.twinAgentOptions); });
+    document.querySelectorAll('[data-twin-agent-vault]').forEach((input) => {
+      input.checked = grantsByAgent.get(input.dataset.twinAgentVault)?.has(input.dataset.vaultName) || false;
+      const scope = document.querySelector(`[data-twin-agent-scope="${CSS.escape(input.dataset.twinAgentVault)}"][data-vault-scope="${CSS.escape(input.dataset.vaultName)}"]`);
+      if (scope) scope.hidden = !input.checked;
+    });
+    document.querySelectorAll('[data-twin-operation]').forEach((input) => { input.checked = grantsByAgent.get(input.dataset.twinOperation)?.get(input.dataset.vaultName)?.has(input.value) || false; });
+    document.querySelectorAll('[data-twin-memory]').forEach((input) => { input.checked = editingProfile.memory_policy[input.dataset.twinMemory] === true; });
+    document.querySelectorAll('[data-twin-agent-memory]').forEach((input) => {
+      const memory = memoryByAgent.get(input.dataset.twinAgentMemory);
+      if (memory) input.checked = memory[input.dataset.memoryType] === true;
+    });
+    updateTwinPermissionControls();
+    $('twin-create').textContent = t('twinProfiles.saveChanges');
+    $('twin-edit-cancel').hidden = false;
+  } else {
+    editingTwinId = null;
+    $('twin-new-owner').readOnly = false;
+    $('twin-new-mode').disabled = false;
+    $('twin-create').textContent = t('twinProfiles.createButton');
+    $('twin-edit-cancel').hidden = true;
+  }
+  updateTwinPermissionControls();
   const first = S.agents[0];
   $('connect-http-hint').innerHTML = t('connect.httpHint', { cmd: '<span class="mono">brainlink serve --http</span>' });
   $('test-hint').innerHTML = t('test.hint', { phrase: `<b>"${esc(first ? first.activation[0] : t('test.defaultPhrase'))}"</b>` });
   const cs = Object.entries(S.clients);
   $('n3').className = 'step' + (cs.some(([, c]) => c.connected) ? ' done' : '');
-  $('clients').innerHTML = cs.length ? cs.map(([id, c]) => { const h = healthByClient[id]; return `<div class="client"><div><div class="name">${esc(c.title)}</div><span class="pill ${c.connected ? 'on' : ''}">${c.connected ? esc(t('connect.connected')) : c.present ? esc(t('connect.found')) : esc(t('connect.notFound'))}</span></div>
-    <div class="row">${c.connected ? `<button data-disconnect="${id}">${esc(t('connect.disconnectBtn'))}</button><button data-health="${id}">${esc(t('connect.testBtn'))}</button>` : c.present ? `<button class="primary" data-connect="${id}" ${S.vaults.length ? '' : `disabled title="${esc(t('connect.addVaultFirst'))}"`}>${esc(t('connect.connectBtn'))}</button>` : `<button class="primary" disabled title="${esc(t('connect.installFirst', { title: c.title }))}">${esc(t('connect.connectBtn'))}</button>`}</div>${c.connected ? `<small class="muted">${esc(c.note)}</small>` : !c.present ? `<small class="muted">${esc(t('connect.notFoundHint'))}</small>` : ''}${h ? `<span class="pill ${h.ok ? 'on' : ''}" style="width:fit-content">${h.ok ? esc(t('connect.liveOk')) : esc(t('connect.liveFailed'))} · ${esc(h.message)}</span>` : ''}</div>`; }).join('') : `<p class="muted">${esc(t('connect.none'))}</p>`;
+  const scopedConnectors = Boolean(S.twin_profiles?.profiles?.length);
+  $('clients').innerHTML = cs.length ? cs.map(([id, c]) => { const h = healthByClient[id]; const skillId = id.startsWith('deepseek-harness@') ? 'deepseek-harness' : id; const skillTargets = id === 'antigravity' ? [['antigravity', 'skills.surface.appIde'], ['antigravity-cli', 'skills.surface.cli']] : [[skillId, '']];
+  const skillControls = skillTargets.map(([targetId, surfaceKey]) => {
+    const skill = S.agent_skills?.[targetId];
+    if (!skill?.supported) return '';
+    const skillRows = skill.skills?.map((item) => `<span class="pill">${esc(item.name)} · ${esc(t('skills.state.' + item.state))}</span>`).join(' ') || '';
+    return `<div class="card" style="margin-top:8px"><b>${esc(t('skills.title'))}${surfaceKey ? ` · ${esc(t(surfaceKey))}` : ''}</b><div class="muted" style="margin:4px 0 8px">${esc(t('skills.description'))}</div><div class="row">${skillRows}${skill.error ? `<span class="error-box">${esc(skill.error)}</span>` : ''}</div><div class="row" style="margin-top:8px"><button data-skill-install="${esc(targetId)}" ${c.connected ? '' : `disabled title="${esc(t('skills.connectFirst'))}"`}>${esc(t('skills.install'))}</button>${skill.skills?.some((item) => ['managed','update-available','current'].includes(item.state)) ? `<button class="link" data-skill-remove="${esc(targetId)}">${esc(t('skills.remove'))}</button>` : ''}</div></div>`;
+  }).join(''); return `<div class="client"><div><div class="name">${esc(c.title)}</div><span class="pill ${c.connected ? 'on' : ''}">${c.connected ? esc(t('connect.connected')) : c.present ? esc(t('connect.found')) : c.manual ? esc(t('connect.manualReady')) : esc(t('connect.notFound'))}</span></div>
+    <div class="row">${scopedConnectors ? `${c.connected ? `<button data-disconnect="${id}">${esc(t('connect.disconnectBtn'))}</button>` : ''}<button class="primary" data-connect-scope="${id}" ${c.canConnect && S.vaults.length ? '' : `disabled title="${esc(c.canConnect ? t('connect.addVaultFirst') : t('connect.installFirst', { title: c.title }))}"`}>${esc(t('connect.permissionsBtn'))}</button>${c.connected ? `<button data-health="${id}">${esc(t('connect.testBtn'))}</button>` : ''}` : c.connected ? `<button data-disconnect="${id}">${esc(t('connect.disconnectBtn'))}</button><button data-health="${id}">${esc(t('connect.testBtn'))}</button>` : c.canConnect ? `<button class="primary" data-connect="${id}" ${S.vaults.length ? '' : `disabled title="${esc(t('connect.addVaultFirst'))}"`}>${esc(t('connect.connectBtn'))}</button>` : `<button class="primary" disabled title="${esc(t('connect.installFirst', { title: c.title }))}">${esc(t('connect.connectBtn'))}</button>`}</div>${c.connected ? `<small class="muted">${esc(c.note)}</small>` : c.manual ? `<small class="muted">${esc(id.startsWith('deepseek-harness') ? t('connect.deepseekHint') : t('connect.manualHint'))}</small>` : !c.present ? `<small class="muted">${esc(t('connect.notFoundHint'))}</small>` : ''}${h ? `<span class="pill ${h.ok ? 'on' : ''}" style="width:fit-content">${h.ok ? esc(t('connect.liveOk')) : esc(t('connect.liveFailed'))} · ${esc(h.message)}</span>` : ''}${skillControls}</div>`; }).join('') : `<p class="muted">${esc(t('connect.none'))}</p>`;
   $('n4').className = 'step' + (S.activity.length ? ' done' : '');
   $('activity').innerHTML = S.activity.length ? S.activity.map((e) => `<tr><td>${esc(new Date(e.at).toLocaleString(LOCALE))}</td><td>${esc(e.platform)}</td><td class="mono">${esc(e.tool)}</td><td>${e.ok ? (e.written ? esc(t('test.written')) : esc(t('test.ok'))) : esc(t('test.refused'))}</td></tr>`).join('') : `<tr><td colspan="4" class="muted">${esc(t('ready.noCalls'))}</td></tr>`;
   $('packs').innerHTML = S.packs.map((p) => `<label class="pack ${p.id === pack ? 'sel' : ''}"><span><input type="radio" name="pack" value="${p.id}" ${p.id === pack ? 'checked' : ''}><b>${esc(p.title)}</b></span><small>${esc(p.description)}</small></label>`).join('');
   const SY = S.sync;
   $('sync-provider').innerHTML = SY.providers.map((p) => `<option value="${esc(p)}" ${p === SY.provider ? 'selected' : ''}>${esc(t('sync.provider.' + p))}</option>`).join('');
+  const syncVaults = S.vaults.filter((v) => !v.private && v.exists);
+  const syncVaultChoice = SY.vault || (syncVaults.some((v) => v.name === 'brain') ? 'brain' : syncVaults.length === 1 ? syncVaults[0].name : '');
+  $('sync-vault').innerHTML = `<option value="">${esc(t('sync.chooseVault'))}</option>` + syncVaults.map((v) => `<option value="${esc(v.name)}" ${v.name === syncVaultChoice ? 'selected' : ''}>${esc(v.name)}</option>`).join('');
+  $('sync-vault-row').hidden = SY.provider === 'local';
+  $('sync-schedule-row').hidden = SY.provider === 'local';
+  $('sync-scheduled').checked = Boolean(SY.scheduled);
+  $('sync-interval').value = String(SY.intervalHours || 6);
+  $('sync-interval-row').hidden = !SY.scheduled;
+  $('sync-status').textContent = SY.running ? t('sync.running') : SY.status?.at
+    ? t('sync.lastRun', { status: t('sync.status.' + SY.status.status), at: new Date(SY.status.at).toLocaleString(LOCALE) }) : t('sync.never');
+  const shareableVaults = S.vaults.filter((v) => !v.private && v.exists);
+  $('github-vault').innerHTML = shareableVaults.map((v) => `<option value="${esc(v.name)}">${esc(v.name)}</option>`).join('');
+  $('github-load').disabled = !shareableVaults.length;
+  if (!shareableVaults.length) $('github-status').textContent = t('github.noVault');
+  renderGitHubProfile(shareableVaults);
   $('sync-device').value = SY.device || '';
   $('sync-folder').value = SY.folder || '';
+  $('backup-enabled').checked = Boolean(S.backup?.enabled);
+  $('ingestion-enabled').checked = Boolean(S.ingestion?.enabled);
+  $('ingestion-auto-drafts').checked = Boolean(S.ingestion?.autoDrafts);
+  $('ingestion-auto-drafts').disabled = !S.sessions_local_summary?.enabled || !S.sessions_local_summary?.model;
+  $('ingestion-auto-drafts').parentElement.title = $('ingestion-auto-drafts').disabled ? t('ingestion.autoDraftsNeedsModel') : '';
+  const scanVaults = S.vaults.filter((v) => !v.private && v.exists);
+  const oldScanVault = $('ingestion-vault').value;
+  $('ingestion-vault').innerHTML = scanVaults.map((v) => `<option value="${esc(v.name)}">${esc(v.name)}</option>`).join('');
+  $('ingestion-vault').value = scanVaults.some((v) => v.name === oldScanVault) ? oldScanVault
+    : scanVaults.some((v) => v.name === S.ingestion?.vault) ? S.ingestion.vault : (scanVaults[0]?.name || '');
+  const selectedTarget = currentIngestionTargets().find((target) => target.vault === $('ingestion-vault').value);
+  await refreshIngestionFolders(selectedTarget?.folder || (S.ingestion?.vault === $('ingestion-vault').value ? S.ingestion?.folder : '') || '');
+  renderIngestionTargets();
+  $('ingestion-time').value = S.ingestion?.time || '02:00';
+  $('ingestion-status').textContent = S.ingestion?.status?.at
+    ? (S.ingestion.status.ok ? t('ingestion.lastRun', { count: S.ingestion.status.queued_total, at: new Date(S.ingestion.status.at).toLocaleString(LOCALE), trigger: t('ingestion.trigger.' + S.ingestion.status.trigger) }) : S.ingestion.status.retry_after ? t('ingestion.retryScheduled', { attempt: S.ingestion.status.attempt, at: new Date(S.ingestion.status.retry_after).toLocaleString(LOCALE), error: S.ingestion.status.error || '' }) : t('ingestion.failed', { error: S.ingestion.status.error || '' }))
+    : t('ingestion.never');
+  if (S.ingestion?.status?.running) $('ingestion-status').textContent = t('ingestion.running');
+  const draftStatus = S.ingestion_drafts?.status;
+  $('ingestion-draft-status').textContent = draftStatus?.at ? t('ingestion.autoDraftStatus', { created: draftStatus.created || 0, attempted: draftStatus.attempted || 0, at: new Date(draftStatus.at).toLocaleString(LOCALE), failed: draftStatus.failed || 0 }) : '';
+  await renderIngestionDraftList().catch(() => {});
+  $('ingestion-run').disabled = !S.vaults.some((v) => !v.private && v.exists);
+  $('brief-enabled').checked = Boolean(S.brief?.enabled);
+  $('brief-vault').innerHTML = `<option value="">${esc(t('brief.chooseVault'))}</option>` + S.vaults.filter((v) => v.exists).map((v) => `<option value="${esc(v.name)}" ${v.name === S.brief?.vault ? 'selected' : ''}>${esc(v.name)}${v.private ? ` (${esc(t('vault.private'))})` : ''}</option>`).join('');
+  $('brief-time').value = S.brief?.time || '08:00';
+  $('brief-status').textContent = S.brief?.running ? t('brief.running') : S.brief?.status?.at
+    ? (S.brief.status.ok ? t('brief.lastRun', { vault: S.brief.status.vault || '', at: new Date(S.brief.status.at).toLocaleString(LOCALE), trigger: t('brief.trigger.' + S.brief.status.trigger) }) : t('brief.failed', { error: S.brief.status.error || '' }))
+    : t('brief.never');
+  const br = S.brief?.status?.result;
+  if (!br) $('brief-output').innerHTML = '';
+  else {
+    const list = (label, items, field) => items?.length ? `<div class="card"><b>${esc(label)}</b><ul>${items.slice(0, 8).map((item) => `<li>${esc(typeof item === 'string' ? item : item[field] || item.title || item.path || '')}</li>`).join('')}</ul></div>` : '';
+    $('brief-output').innerHTML = `<div class="card"><b>${esc(t('brief.health'))}</b><p>${esc(t('brief.healthCounts', { notes: br.health.notes, links: br.health.links, unlinked: br.health.not_linked, broken: br.health.broken_links }))}</p></div>${list(t('brief.changed'), br.changed, 'title')}${list(t('brief.tasks'), br.open_loops.tasks, 'task')}${list(t('brief.next'), br.open_loops.next_actions, 'action')}${list(t('brief.decisions'), br.open_loops.decisions_waiting, 'decision')}${list(t('brief.questions'), br.open_loops.unresolved_questions, 'question')}`;
+  }
+  $('brief-run').disabled = !S.vaults.some((v) => v.exists);
+  $('startup-at-login').checked = Boolean(S.startup_at_login);
+  $('backup-folder').value = S.backup?.folder || '';
+  $('backup-hours').value = String(S.backup?.intervalHours || 24);
+  $('backup-schedule-mode').value = S.backup?.scheduleMode || 'interval';
+  $('backup-time').value = S.backup?.time || '02:00';
+  renderBackupSchedule();
+  $('backup-keep').value = String(S.backup?.keepCount ?? 0);
+  $('backup-encrypted').checked = Boolean(S.backup?.encrypted);
+  $('backup-key-confirm-wrap').hidden = Boolean(S.backup?.encrypted) || !$('backup-encrypted').checked;
+  const backupTrigger = S.backup?.status && ['manual', 'schedule', 'setup'].includes(S.backup.status.trigger) ? S.backup.status.trigger : 'unknown';
+  const backupAt = Date.parse(S.backup?.status?.at || '');
+  const backupWhen = Number.isFinite(backupAt) ? new Date(backupAt).toLocaleString(LOCALE) : t('backup.unknownTime');
+  $('backup-status').textContent = S.backup?.status ? (S.backup.status.ok
+    ? `${t('backup.lastVerified', { when: backupWhen, trigger: t('backup.trigger.' + backupTrigger), count: S.backup.status.file_count, folder: S.backup.status.folder })}${S.backup.status.removed_count ? ` ${t('backup.pruned', { count: S.backup.status.removed_count })}` : ''}${S.backup.status.warning ? ` ${S.backup.status.warning}` : ''}`
+    : t('backup.failed', { when: backupWhen, trigger: t('backup.trigger.' + backupTrigger), error: S.backup.status.error })) : t('backup.notRun');
+  if (S.backup?.status?.ok && !$('backup-restore-source').value) $('backup-restore-source').value = S.backup.status.folder;
   $('sync-folder-row').hidden = SY.provider === 'local';
   renderSyncSuggestions(SY.provider, SY.suggested_folders);
   // Lets self-contained panels (agents.js, share.js) that keep their own hasVault copy drop their
   // stale "Add a vault first" state the moment a vault is picked/created here, with no reload.
   window.dispatchEvent(new CustomEvent('brainlink:state-updated', { detail: S }));
 }
+
+function renderBackupSchedule() {
+  const daily = $('backup-schedule-mode').value === 'daily';
+  $('backup-interval-wrap').hidden = daily;
+  $('backup-time-wrap').hidden = !daily;
+}
+$('backup-schedule-mode').onchange = renderBackupSchedule;
 
 function openForm(p) {
   $('vault-form').hidden = false;
@@ -772,13 +1692,25 @@ $('save-vault').onclick = () => act(async () => {
 });
 document.addEventListener('click', (e) => {
   const d = e.target.dataset;
+  if (d.skillInstall) act(async () => {
+    const result = await api('POST', '/api/skills/install', { client: d.skillInstall });
+    const changed = [...result.installed, ...result.updated].length;
+    toast(t('skills.installedToast', { count: changed, unchanged: result.unchanged.length }));
+    await load();
+  });
+  if (d.skillRemove && confirm(t('skills.confirmRemove'))) act(async () => {
+    const result = await api('POST', '/api/skills/remove', { client: d.skillRemove });
+    toast(result.changed.length ? t('skills.removedChangedToast', { removed: result.removed.length, names: result.changed.join(', ') }) : t('skills.removedToast', { count: result.removed.length }));
+    await load();
+  });
   if (d.connect) act(async () => {
-    // /api/connect only returns once the live handshake verified the connection; an unverified
-    // write is rolled back server-side and surfaces as a rejected promise (toast via `act`).
+    // /api/connect only returns after BrainLink locally accepts the configured token and scope.
+    // The user still needs to restart the external app and test from inside it.
     const r = await api('POST', '/api/connect', { client: d.connect });
     healthByClient[d.connect] = r.health;
     toast(t('connect.connectedToast', { title: r.title, msg: r.health.message }));
   });
+  if (d.connectScope) openPresetConnect(d.connectScope);
   if (d.disconnect) act(async () => { await api('POST', '/api/disconnect', { client: d.disconnect }); delete healthByClient[d.disconnect]; toast(t('connect.disconnectedToast')); });
   if (d.health) act(async () => { const r = await api('POST', '/api/client-health', { client: d.health }); healthByClient[d.health] = r; toast(r.message, !r.ok); });
   if (d.remove && confirm(t('vault.removeConfirm', { name: d.remove }))) act(() => api('POST', '/api/vault/remove', { name: d.remove }));
@@ -798,19 +1730,237 @@ document.addEventListener('click', (e) => {
     await api('POST', '/api/agent', { name: a.name, role: get('role').value, activation: get('activation').value, close: get('close').value, ...(get('capture_approved') ? { capture_approved: get('capture_approved').checked } : {}) });
     toast(t('rolePack.savedToast', { name: a.name }));
   });
+  if (d.hookClient) act(async () => {
+    if (d.hookClient === 'hermes' && d.hookEnable === '1' && !confirm(t('sessions.hookHermesConfirm'))) return;
+    await api('POST', '/api/sessions/hooks/set', { client: d.hookClient, enabled: d.hookEnable === '1' });
+    await loadSessionHookSettings();
+  });
+  if (d.cueDismiss) act(async () => {
+    await api('POST', '/api/sessions/end-cues/dismiss', { id: d.cueDismiss });
+    await loadSessionEndCues();
+  });
+  if (d.cueReviewRequest) act(async () => {
+    const id = String(d.cueReviewRequest || '').trim();
+    if (!id || id.length > 200) throw new Error(t('sessions.copyRequestFailed'));
+    const request = `Use BrainLink to review this exact imported session ID ${JSON.stringify(id)}. Read only what my current BrainLink permissions allow. Prepare a concise private closeout with the outcome, decisions, corrections, open questions, next action, source, and confidence. Suggest the correct authorized vault and folder. Show me the exact preview, and do not save until I approve. If you cannot access this session through BrainLink, stop and tell me.`;
+    try { await navigator.clipboard.writeText(request); }
+    catch {
+      const field = document.createElement('textarea');
+      field.value = request; field.setAttribute('readonly', '');
+      field.style.position = 'fixed'; field.style.opacity = '0';
+      document.body.appendChild(field); field.select();
+      const copied = document.execCommand('copy'); field.remove();
+      if (!copied) throw new Error(t('sessions.copyRequestFailed'));
+    }
+    toast(t('sessions.copyRequestCopied'));
+  });
   if (d.sessRead) (async (id) => {
     // Independent of whatever session is currently shown: proves any session can read any other.
     $('session-detail').innerHTML = `<p class="skeleton">${esc(t('sessions.detailLoading'))}</p>`;
     try {
-      const s = await api('POST', '/api/sessions/read', { id, include_private: $('sess-private').checked });
+      const s = await api('POST', '/api/sessions/read', { id, include_private: d.sessPrivateRead === '1' || $('sess-private').checked });
       $('session-detail').innerHTML = `<div class="card"><b><span class="badge" style="background:${clientColor(s.client)}">${esc(clientLabel(s.client))}</span> ${esc(s.title || t('sessions.untitled'))}</b>
         <div class="muted" style="font-size:14px">${esc(s.summary || t('sessions.noSummary'))}</div>
-        <div class="muted" style="font-size:13px">${s.project ? esc(s.project) + ' · ' : ''}${s.message_count} ${s.message_count === 1 ? esc(t('sessions.messageOne')) : esc(t('sessions.messageMany'))} · ${esc(new Date(s.started_at).toLocaleString(LOCALE))}${s.note_refs?.length ? ' · ' + esc(t('sessions.refs', { list: s.note_refs.join(', ') })) : ''}</div></div>`;
+        <div class="muted" style="font-size:13px">${s.project ? esc(s.project) + ' · ' : ''}${s.message_count} ${s.message_count === 1 ? esc(t('sessions.messageOne')) : esc(t('sessions.messageMany'))} · ${esc(new Date(s.started_at).toLocaleString(LOCALE))}${s.note_refs?.length ? ' · ' + esc(t('sessions.refs', { list: s.note_refs.join(', ') })) : ''}</div>${s.summary ? `<button class="link" data-sess-file="${esc(s.id)}">${esc(t('sessions.fileSummary'))}</button>` : ''}</div>`;
     } catch (e) { $('session-detail').innerHTML = `<p class="error-box">${esc(t('sessions.detailError', { msg: e.message }))}</p>`; }
   })(d.sessRead);
+  if (d.sessSummarize) act(async () => {
+    if (!S.sessions_local_summary?.enabled) throw new Error(t('sessions.localSummaryEnableFirst'));
+    const result = await api('POST', '/api/sessions/local-summary/generate', { id: d.sessSummarize });
+    fileLocalDraftIds.add(d.sessSummarize);
+    toast(t('sessions.localSummaryReady', { model: result.draft.model }));
+    const openButton = [...document.querySelectorAll('[data-sess-file]')].find((button) => button.dataset.sessFile === d.sessSummarize);
+    if (openButton) openButton.click();
+    else $('session-detail').innerHTML = `<div class="card"><b>${esc(t('sessions.localSummaryReadyTitle'))}</b><p class="muted">${esc(result.draft.model)} · ${esc(new Date(result.draft.generated_at).toLocaleString(LOCALE))}</p><pre style="white-space:pre-wrap;overflow-wrap:anywhere">${esc(result.draft.summary)}</pre><button class="primary" data-sess-file="${esc(d.sessSummarize)}">${esc(t('sessions.fileSummary'))}</button></div>`;
+  });
+  if (d.sessFile) (async (id) => {
+    const choices = (S.vaults || []).filter((v) => v.exists && v.writes !== 'off').map((v) => `<option value="${esc(v.name)}">${esc(v.name)}</option>`).join('');
+    let recommendation = { vault: null, reason: '', project: null, remember_available: false };
+    try { recommendation = await api('POST', '/api/sessions/recommend', { id }); } catch {}
+    const initialVault = recommendation.vault || (S.vaults || []).find((v) => v.exists && v.writes !== 'off')?.name || '';
+    let folderInfo = { folders: [], suggested_folder: null, folder_suggestion_source: null, default_folder: '' };
+    if (initialVault) try { folderInfo = await api('POST', '/api/sessions/filing-folders', { id, vault: initialVault }); } catch {}
+    const folderOptions = (info) => (info.folders || []).map((f) => `<option value="${esc(f.path)}">${esc(f.path || t('sessions.vaultRoot'))}</option>`).join('');
+    $('session-detail').innerHTML = `<div class="card"><b>${esc(t('sessions.fileSummary'))}</b><p class="muted">${esc(t('sessions.fileHint'))}</p>
+      <label>${esc(t('sessions.destination'))}<select id="session-file-vault">${choices}</select></label>
+      ${recommendation.vault ? `<p class="hint">${esc(t('sessions.destinationSuggestion', { vault: recommendation.vault }))}</p>` : `<p class="hint">${esc(t('sessions.noDestinationSuggestion'))}</p>`}
+      <label>${esc(t('sessions.folder'))}<select id="session-file-folder">${folderOptions(folderInfo)}</select></label>
+      ${folderInfo.suggested_folder !== null ? `<p class="hint">${esc(t(`sessions.folderSuggestion.${folderInfo.folder_suggestion_source}`, { folder: folderInfo.suggested_folder || t('sessions.vaultRoot') }))}</p>` : ''}
+      ${recommendation.remember_available ? `<label class="muted" style="display:flex;flex-direction:row;gap:6px;align-items:center"><input type="checkbox" id="session-remember-destination" style="width:auto"><span>${esc(t('sessions.rememberDestinationAndFolder'))}</span></label>` : ''}
+      <div class="row"><button class="secondary" data-file-preview="${esc(id)}">${esc(t('sessions.preview'))}</button><button class="primary" data-file-confirm="${esc(id)}" hidden>${esc(t('sessions.savePrivate'))}</button></div>
+      <pre id="session-file-preview" style="white-space:pre-wrap;overflow-wrap:anywhere"></pre></div>`;
+    if (recommendation.vault) $('session-file-vault').value = recommendation.vault;
+    const selectSuggestedFolder = (info) => {
+      const select = $('session-file-folder');
+      const desired = info.suggested_folder ?? info.default_folder;
+      if ([...select.options].some((o) => o.value === desired)) select.value = desired;
+      else if (select.options.length) select.selectedIndex = 0;
+    };
+    selectSuggestedFolder(folderInfo);
+    $('session-file-vault').onchange = async () => {
+      try {
+        folderInfo = await api('POST', '/api/sessions/filing-folders', { id, vault: $('session-file-vault').value });
+        $('session-file-folder').innerHTML = folderOptions(folderInfo);
+        selectSuggestedFolder(folderInfo);
+        $('session-file-preview').textContent = '';
+        $('session-file-preview').dataset.vault = '';
+        document.querySelector('[data-file-confirm]').hidden = true;
+      } catch (e) { toast(e.message); }
+    };
+    $('session-file-folder').onchange = () => {
+      $('session-file-preview').textContent = '';
+      $('session-file-preview').dataset.vault = '';
+      $('session-file-preview').dataset.folder = '';
+      document.querySelector('[data-file-confirm]').hidden = true;
+    };
+    if (choices) await previewSessionFile(id).catch((error) => toast(error.message, true));
+    if (!choices) $('session-detail').textContent = t('sessions.noDestination');
+  })(d.sessFile);
+  if (d.filePreview) act(() => previewSessionFile(d.filePreview));
+  if (d.fileConfirm) act(async () => {
+    const vault = $('session-file-vault').value;
+    const folder = $('session-file-folder').value;
+    if ($('session-file-preview').dataset.vault !== vault || $('session-file-preview').dataset.folder !== folder) throw new Error(t('sessions.previewFirst'));
+    const result = await api('POST', '/api/sessions/file', { id: d.fileConfirm, vault, folder, confirm: true, rememberDestination: Boolean($('session-remember-destination')?.checked), useLocalDraft: fileLocalDraftIds.has(d.fileConfirm) });
+    if (!result.ok || !result.written) throw new Error((result.errors || []).join('; ') || result.next || 'Not saved.');
+    const prefix = `${vault}/`;
+    if (!String(result.path || '').startsWith(prefix)) throw new Error('The saved note path could not be confirmed.');
+    activeFiledSummary = { sessionId: d.fileConfirm, vault, path: result.path.slice(prefix.length), status: 'proposed' };
+    fileLocalDraftIds.delete(d.fileConfirm);
+    document.querySelector('[data-file-confirm]').hidden = true;
+    toast(t('sessions.savedPrivate', { path: result.path }));
+    if (result.destination_rule_saved) toast(t('sessions.destinationRemembered'));
+    $('filed-summary-editor').innerHTML = '';
+    $('session-detail').insertAdjacentHTML('beforeend', `<div class="row" style="margin-top:8px"><button class="secondary" data-filed-edit="1">${esc(t('sessions.editFiledSummary'))}</button></div>`);
+  });
+  if (d.filedEdit) act(showFiledSummaryEditor);
+  if (d.filedList) act(listFiledSummaries);
+  if (d.filedOpen !== undefined) act(async () => {
+    const item = filedSummaryRefs[Number(d.filedOpen)];
+    if (!item) throw new Error('That filed summary is no longer in the list. Search again.');
+    activeFiledSummary = item;
+    await showFiledSummaryEditor();
+  });
+  if (d.filedSave) act(async () => {
+    if (!activeFiledSummary?.etag) throw new Error('Reload the filed summary before saving.');
+    const result = await api('POST', '/api/sessions/filed-summary', { ...activeFiledSummary, action: 'correct', summary: $('filed-summary-text').value });
+    activeFiledSummary = { ...activeFiledSummary, etag: result.etag };
+    toast(t('sessions.filingUpdated'));
+    const note = await api('POST', '/api/sessions/filed-summary', { ...activeFiledSummary, action: 'read' });
+    activeFiledSummary.etag = note.etag;
+    $('filed-summary-text').value = note.summary;
+  });
+  if (d.filedWithdraw) act(async () => {
+    if (!activeFiledSummary?.etag) throw new Error('Reload the filed summary before withdrawing it.');
+    if (!confirm(t('sessions.withdrawConfirm'))) return;
+    const result = await api('POST', '/api/sessions/filed-summary', { ...activeFiledSummary, action: 'withdraw' });
+    activeFiledSummary = { ...activeFiledSummary, etag: result.etag, status: result.status };
+    document.querySelector('[data-filed-edit]').hidden = true;
+    $('filed-summary-editor').innerHTML = `<p class="notice">${esc(t('sessions.proposalWithdrawn'))}</p>`;
+  });
   if (d.sessToggle) act(() => api('POST', '/api/sessions/private', { id: d.sessToggle, private: !d.sessPrivate }));
+  if (d.sessAssign) act(async () => {
+    const select = [...document.querySelectorAll('[data-sess-profile]')].find((item) => item.dataset.sessProfile === d.sessAssign);
+    const profile = (S.twin_profiles?.profiles || []).find((item) => item.id === select?.value);
+    if (!profile) { toast(t('sessions.invalidTwinChoice')); return; }
+    if (!confirm(t('sessions.assignTwinWarning', { profile: profile.name }))) return;
+    await api('POST', '/api/sessions/assign-twin', { id: d.sessAssign, profile_id: profile.id });
+    toast(t('sessions.assignedTwin', { profile: profile.name }));
+    await loadSessions();
+  });
   if (d.syncPick) $('sync-folder').value = d.syncPick;
   if (d.syncOnbPick) $('sync-onb-folder').value = d.syncOnbPick;
+});
+
+function renderPresetConnectOptions() {
+  const profile = S?.twin_profiles?.profiles?.find((item) => item.id === $('preset-profile').value);
+  if (!profile) { $('preset-vault-list').innerHTML = `<p class="muted">${esc(t('connect.noProfile'))}</p>`; $('preset-memory-list').innerHTML = ''; $('preset-connect-review').textContent = t('connect.reviewEmpty'); $('preset-connect-submit').disabled = true; return; }
+  const assigned = profile.agents?.find((agent) => agent.preset_client_id === pendingPresetClient);
+  const defaultMemory = assigned?.memory_policy || { working: false, semantic: profile.memory_policy?.semantic === true, procedural: false, episodic: false };
+  $('preset-memory-list').innerHTML = ['working','semantic','procedural','episodic'].map((key) => `<label class="card" style="display:flex;flex-direction:row;align-items:center;gap:6px;margin:0"><input type="checkbox" data-preset-memory="${key}" ${defaultMemory[key] ? 'checked' : ''} ${profile.memory_policy?.[key] === true ? '' : 'disabled'} style="width:auto">${esc(t('twinProfiles.memory.' + key))}</label>`).join('');
+  const vaults = (profile.vaults || []).filter((grant) => S.vaults.some((vault) => vault.name === grant.name && vault.exists && !vault.private));
+  const labels = [['search','connect.search','semantic'],['read_note','connect.readNote','semantic'],['read_session','connect.readSession','episodic'],['log_session','twinProfiles.operation.log_session','episodic'],['propose_note','twinProfiles.operation.propose_note','semantic'],['handoff_read','connect.readHandoffs','working'],['write_handoff','connect.sendHandoffs','working']];
+  $('preset-vault-list').innerHTML = vaults.length ? vaults.map((grant, index) => {
+    const available = labels.filter(([action]) => !['handoff_read','write_handoff'].includes(action) || S.handoff?.vault === grant.name);
+    const canPropose = grant.access === 'propose' && profile.memory_policy?.semantic === true && document.querySelector('[data-preset-memory="semantic"]')?.checked;
+    return `<div class="card"><b>${esc(grant.name)}</b><div class="row" style="margin-top:7px">${available.map(([action,key,memory]) => {
+      const needsPropose = ['propose_note','write_handoff'].includes(action);
+      const selectedMemory = Object.fromEntries([...document.querySelectorAll('[data-preset-memory]')].map((input) => [input.dataset.presetMemory, input.checked]));
+      const allowed = twinActionMemoryAllowed(action, selectedMemory) && profile.memory_policy?.[memory] === true && (!needsPropose || grant.access === 'propose');
+      return `<label class="muted" style="display:flex;flex-direction:row;align-items:center;gap:5px"><input type="checkbox" data-preset-vault="${esc(grant.name)}" value="${action}" ${index === 0 && ['search','read_note'].includes(action) ? 'checked' : ''} ${allowed ? '' : 'disabled'} style="width:auto">${esc(t(key))}</label>`;
+    }).join('')}</div>${canPropose ? `<button type="button" data-preset-read-propose="${esc(grant.name)}">${esc(t('connect.readProposePreset'))}</button>` : ''}</div>`;
+  }).join('') : `<p class="muted">${esc(t('connect.noVault'))}</p>`;
+  $('preset-connect-summary').textContent = t('connect.permissionSummary');
+  updatePresetPermissionControls(profile);
+  $('preset-connect-submit').disabled = !vaults.length || !document.querySelector('[data-preset-vault]:checked');
+}
+function updatePresetPermissionControls(profile) {
+  const selectedMemory = Object.fromEntries([...document.querySelectorAll('[data-preset-memory]')].map((input) => [input.dataset.presetMemory, input.checked]));
+  document.querySelectorAll('[data-preset-vault]').forEach((input) => {
+    const required = { search: 'semantic', read_note: 'semantic', read_session: 'episodic', log_session: 'episodic', propose_note: 'semantic', handoff_read: 'working', write_handoff: 'working' }[input.value];
+    input.disabled = !required || profile?.memory_policy?.[required] !== true || selectedMemory[required] !== true;
+    if (input.disabled) input.checked = false;
+  });
+  const memories = [...document.querySelectorAll('[data-preset-memory]:checked')].map((input) => t('twinProfiles.memory.' + input.dataset.presetMemory));
+  const actionKeys = { search: 'connect.search', read_note: 'connect.readNote', read_session: 'connect.readSession', log_session: 'twinProfiles.operation.log_session', propose_note: 'twinProfiles.operation.propose_note', handoff_read: 'connect.readHandoffs', write_handoff: 'connect.sendHandoffs' };
+  const grants = [...document.querySelectorAll('[data-preset-vault]:checked')].reduce((items, input) => {
+    const name = input.dataset.presetVault;
+    let grant = items.find((item) => item.name === name);
+    if (!grant) { grant = { name, actions: [] }; items.push(grant); }
+    grant.actions.push(t(actionKeys[input.value]));
+    return items;
+  }, []);
+  const vaultSummary = grants.map((grant) => `${grant.name}: ${grant.actions.join(', ')}`).join(' · ');
+  $('preset-connect-review').textContent = grants.length
+    ? t('connect.reviewSelected', { memories: memories.join(', ') || t('connect.reviewNone'), grants: vaultSummary })
+    : t('connect.reviewEmpty');
+}
+function openPresetConnect(clientId) {
+  pendingPresetClient = clientId;
+  const profiles = S?.twin_profiles?.profiles || [];
+  $('preset-connect-title').textContent = t('connect.permissionsTitle', { client: S.clients[clientId]?.title || clientLabel(clientId) });
+  $('preset-profile').innerHTML = profiles.map((profile) => `<option value="${esc(profile.id)}">${esc(profile.name)} · ${esc(t('twinProfiles.mode.' + profile.mode))}</option>`).join('');
+  $('preset-connect-modal').hidden = false;
+  renderPresetConnectOptions();
+  $('preset-profile').focus();
+}
+$('preset-profile').onchange = renderPresetConnectOptions;
+$('preset-vault-list').addEventListener('click', (event) => {
+  const button = event.target.closest('[data-preset-read-propose]');
+  if (!button) return;
+  const vault = button.dataset.presetReadPropose;
+  const semantic = document.querySelector('[data-preset-memory="semantic"]');
+  if (semantic && !semantic.disabled) semantic.checked = true;
+  updatePresetPermissionControls(S?.twin_profiles?.profiles?.find((item) => item.id === $('preset-profile').value));
+  document.querySelectorAll(`[data-preset-vault="${CSS.escape(vault)}"]`).forEach((input) => {
+    input.checked = ['search', 'read_note', 'propose_note'].includes(input.value);
+  });
+  $('preset-connect-submit').disabled = !document.querySelector('[data-preset-vault]:checked');
+});
+$('preset-vault-list').onchange = () => {
+  updatePresetPermissionControls(S?.twin_profiles?.profiles?.find((item) => item.id === $('preset-profile').value));
+  $('preset-connect-submit').disabled = !document.querySelector('[data-preset-vault]:checked');
+};
+$('preset-memory-list').onchange = () => {
+  updatePresetPermissionControls(S?.twin_profiles?.profiles?.find((item) => item.id === $('preset-profile').value));
+  $('preset-connect-submit').disabled = !document.querySelector('[data-preset-vault]:checked');
+};
+$('preset-connect-cancel').onclick = () => { $('preset-connect-modal').hidden = true; pendingPresetClient = null; };
+$('preset-connect-modal').onclick = (event) => { if (event.target === $('preset-connect-modal')) $('preset-connect-cancel').click(); };
+$('preset-connect-submit').onclick = () => act(async () => {
+  if (!pendingPresetClient) return;
+  const grants = [...document.querySelectorAll('[data-preset-vault]:checked')].reduce((items, input) => {
+    let grant = items.find((item) => item.name === input.dataset.presetVault);
+    if (!grant) { grant = { name: input.dataset.presetVault, operations: [] }; items.push(grant); }
+    grant.operations.push(input.value);
+    return items;
+  }, []);
+  const memory_policy = Object.fromEntries([...document.querySelectorAll('[data-preset-memory]')].map((input) => [input.dataset.presetMemory, input.checked]));
+  const response = await api('POST', '/api/connect', { client: pendingPresetClient, profile_id: $('preset-profile').value, vaults: grants, memory_policy });
+  healthByClient[pendingPresetClient] = response.health;
+  toast(t('connect.connectedToast', { title: response.title, msg: response.health.message }));
+  $('preset-connect-modal').hidden = true;
+  pendingPresetClient = null;
 });
 $('sess-private').onchange = () => loadSessions().catch(() => {});
 $('sessions-private-notice-btn').onclick = () => act(async () => {
@@ -829,12 +1979,579 @@ $('sess-share-full').onchange = () => act(async () => {
   S.sessions_sharing = r.sessions;
   toast(t('sessions.shareToastSaved'));
 });
-$('sync-provider').onchange = () => { const p = $('sync-provider').value; $('sync-folder-row').hidden = p === 'local'; renderSyncSuggestions(p, S.sync.suggested_folders); };
+$('sessions-hermes-profile-choose').onclick = () => act(async () => {
+  const result = await api('POST', '/api/sessions/hermes-profile/pick', {});
+  const home = result.path || (result.unavailable ? await window.promptForFolder() : '');
+  if (!home) return;
+  const saved = await api('POST', '/api/sessions/hermes-profile', { home });
+  S.sessions_hermes_profile = saved.profile;
+  toast(t('sessions.hermesProfileSaved', { count: saved.sessionCount }));
+  await loadSessions();
+});
+$('sessions-hermes-profile-default').onclick = () => act(async () => {
+  const saved = await api('POST', '/api/sessions/hermes-profile', { home: null });
+  S.sessions_hermes_profile = saved.profile;
+  toast(t('sessions.hermesProfileDefaultSaved', { count: saved.sessionCount }));
+  await loadSessions();
+});
+const updateLocalSummaryControls = () => {
+  $('sess-local-summary-model').disabled = !$('sess-local-summary-enabled').checked;
+  $('sess-local-summary-auto').disabled = !$('sess-local-summary-enabled').checked;
+  $('sess-local-summary-auto-file').disabled = !$('sess-local-summary-enabled').checked || !$('sess-local-summary-auto').checked;
+  if (!$('sess-local-summary-enabled').checked) { $('sess-local-summary-auto').checked = false; $('sess-local-summary-auto-file').checked = false; }
+  if (!$('sess-local-summary-auto').checked) $('sess-local-summary-auto-file').checked = false;
+};
+$('sess-local-summary-enabled').onchange = updateLocalSummaryControls;
+$('sess-local-summary-auto').onchange = updateLocalSummaryControls;
+$('sess-local-summary-find').onclick = () => act(async () => {
+  const result = await api('POST', '/api/sessions/local-summary/models', {});
+  const options = $('sess-local-summary-model-options');
+  options.replaceChildren(...result.models.map((name) => { const option = document.createElement('option'); option.value = name; return option; }));
+  if (!result.available) { toast(t('sessions.localSummaryUnavailable')); return; }
+  if (!result.models.length) { toast(t('sessions.localSummaryNone')); return; }
+  if (!result.models.includes($('sess-local-summary-model').value)) $('sess-local-summary-model').value = result.models[0];
+  toast(t('sessions.localSummaryFound', { count: result.models.length }));
+});
+$('sess-local-summary-save').onclick = () => act(async () => {
+  const result = await api('POST', '/api/sessions/local-summary/settings', { enabled: $('sess-local-summary-enabled').checked, model: $('sess-local-summary-model').value, autoDraftOnEnd: $('sess-local-summary-enabled').checked && $('sess-local-summary-auto').checked, autoFileOnEnd: $('sess-local-summary-enabled').checked && $('sess-local-summary-auto').checked && $('sess-local-summary-auto-file').checked });
+  S.sessions_local_summary = result.settings;
+  toast(t('sessions.localSummarySaved'));
+});
+$('sync-provider').onchange = () => { const p = $('sync-provider').value; $('sync-folder-row').hidden = p === 'local'; $('sync-vault-row').hidden = p === 'local'; $('sync-schedule-row').hidden = p === 'local'; renderSyncSuggestions(p, S.sync.suggested_folders); };
+$('sync-scheduled').onchange = () => { $('sync-interval-row').hidden = !$('sync-scheduled').checked; };
 $('sync-save').onclick = () => act(async () => {
   const provider = $('sync-provider').value;
-  const r = await api('POST', '/api/sync', { provider, folder: provider === 'local' ? null : $('sync-folder').value, device: $('sync-device').value });
+  const r = await api('POST', '/api/sync', { provider, folder: provider === 'local' ? null : $('sync-folder').value, vault: provider === 'local' ? null : $('sync-vault').value, scheduled: provider !== 'local' && $('sync-scheduled').checked, intervalHours: Number($('sync-interval').value), device: $('sync-device').value });
   toast(provider === 'local' ? t('sync.localToast') : t('sync.providerToast', { folder: r.sync.folder }));
 });
+$('sync-run').onclick = () => act(async () => {
+  const provider = $('sync-provider').value;
+  await api('POST', '/api/sync', { provider, folder: provider === 'local' ? null : $('sync-folder').value, vault: provider === 'local' ? null : $('sync-vault').value, scheduled: provider !== 'local' && $('sync-scheduled').checked, intervalHours: Number($('sync-interval').value), device: $('sync-device').value });
+  const { result } = await api('POST', '/api/sync/run', {});
+  if (result.status === 'ok' || result.status === 'local-only') toast(t('sync.runDone', { pushed: result.pushed.length, pulled: result.pulled.length, conflicts: result.conflicts.length }));
+  else toast(t('sync.runStatus', { status: result.status }));
+});
+let githubCandidates = [];
+let githubInspected = null;
+const githubProfileId = () => $('github-profile').value || '';
+const githubAssignment = () => (S.github_assignments || []).find((x) => x.profile_id === githubProfileId()) || null;
+const githubUsesAssignment = () => githubAssignment()?.status === 'assigned';
+const githubRepoValue = () => (githubUsesAssignment() ? '' : $('github-repository').value.trim());
+const githubAssignInput = () => ({ profile_id: githubProfileId(), vault: $('github-vault').value, repository: $('github-repository').value.trim(), folders: $('github-assign-folders').value.split('\n').map((x) => x.trim()).filter(Boolean), whole_vault: $('github-assign-whole-vault').checked });
+// A repository, selection, receipt or pending confirmation never survives a profile change.
+function githubResetState() {
+  githubCandidates = []; githubPullCandidates = []; githubInspected = null;
+  renderGitHubCandidates(); renderGitHubPullCandidates();
+  $('github-status').textContent = ''; $('github-result').hidden = true;
+  $('github-assign-review').hidden = true; $('github-assign-confirm').disabled = true;
+}
+function renderGitHubProfile(shareableVaults) {
+  const list = S.github_assignments || [];
+  const previous = $('github-profile').value;
+  $('github-profile-row').hidden = !list.length;
+  $('github-no-profiles').hidden = list.length > 0;
+  $('github-profile').innerHTML = list.map((x) => `<option value="${esc(x.profile_id)}">${esc(x.name)}</option>`).join('');
+  if (!list.length) {
+    githubResetState();
+    $('github-assignment').hidden = true; $('github-assign-form').hidden = true; $('github-assign-clear').hidden = true;
+    $('github-repository-row').hidden = true; $('github-vault').innerHTML = '';
+    $('github-load').disabled = true; $('github-preview').disabled = true; $('github-commit').disabled = true;
+    $('github-push').disabled = true; $('github-pull-check').disabled = true;
+    $('github-pull-import').disabled = true; $('github-pull-conflict-copy').disabled = true;
+    $('github-assign-inspect').disabled = true; $('github-assign-confirm').disabled = true;
+    return;
+  }
+  if (list.some((x) => x.profile_id === previous)) $('github-profile').value = previous;
+  const a = githubAssignment();
+  $('github-assignment').hidden = !a;
+  $('github-assign-form').hidden = true;
+  $('github-repository-row').hidden = false;
+  if (!a) { $('github-pull-check').disabled = false; return; }
+  const ready = a.status === 'assigned';
+  const names = ready ? [a.assignment.vault] : a.vaults;
+  $('github-vault').innerHTML = shareableVaults.filter((v) => names.includes(v.name)).map((v) => `<option value="${esc(v.name)}">${esc(v.name)}</option>`).join('');
+  const scope = ready && !a.assignment.whole_vault ? a.assignment.folders.join(', ') : t('github.wholeVault');
+  $('github-assignment-text').textContent = ready ? t('github.assigned', { remote: a.assignment.remote, vault: a.assignment.vault, scope }) : t('github.assignment.' + a.status, { remote: a.assignment?.remote || '' });
+  const auto = a.assignment?.automatic_sync || { enabled: false, intervalHours: 6 };
+  $('github-auto-enabled').checked = auto.enabled;
+  $('github-auto-enabled').disabled = !ready;
+  $('github-auto-interval').value = String(auto.intervalHours || 6);
+  $('github-auto-interval').disabled = !ready;
+  $('github-auto-save').disabled = !ready;
+  $('github-auto-run').disabled = !ready || !auto.enabled;
+  renderGitHubAutoStatus();
+  $('github-assign-form').hidden = ready;
+  $('github-repository-row').hidden = ready;
+  $('github-assign-clear').hidden = !a.assignment;
+  $('github-load').disabled = !ready || !$('github-vault').value;
+  $('github-pull-check').disabled = !ready;
+}
+function renderGitHubAutoStatus() {
+  const status = S.github_auto_sync?.[githubProfileId()];
+  if (status?.running) { $('github-auto-status').textContent = t('github.autoRunning'); return; }
+  if (!status?.at) { $('github-auto-status').textContent = $('github-auto-enabled').checked ? '' : t('github.autoOff'); return; }
+  const result = status.ok ? (status.error || t('github.autoSuccess')) : t('github.autoFailure', { error: status.error || 'Review the repository and retry.' });
+  $('github-auto-status').textContent = t('github.autoStatus', { at: new Date(status.at).toLocaleString(LOCALE), pulled: status.pulled || 0, pushed: status.pushed || 0, conflicts: status.conflicts || 0, result });
+}
+let githubPendingPush = null;
+let githubPullCandidates = [];
+function githubPullSelection(action) { return [...document.querySelectorAll('[data-github-pull-path]:checked:not(:disabled)')].filter((el) => !action || action.split(',').includes(el.dataset.action)).map((el) => el.value); }
+function renderGitHubPullCandidates() {
+  $('github-pull-candidates').innerHTML = githubPullCandidates.length ? githubPullCandidates.map((n) => `<label class="muted" style="display:flex;flex-direction:row;gap:8px;align-items:center;margin:6px 0"><input type="checkbox" data-github-pull-path data-action="${esc(n.action)}" value="${esc(n.path)}" ${n.action === 'add' ? 'checked' : ''} ${['add', 'update', 'conflict'].includes(n.action) ? '' : 'disabled'} style="width:auto"><span>${esc(n.title)} <span class="mono">· ${esc(n.path)}</span> — ${esc(t('github.pullAction.' + n.action))}</span></label>`).join('') : '';
+  $('github-pull-import').disabled = !githubPullSelection('add,update').length;
+  $('github-pull-conflict-copy').disabled = !githubPullSelection('conflict').length;
+}
+function githubSelection() {
+  return [...document.querySelectorAll('[data-github-path]:checked')].map((el) => el.value);
+}
+function renderGitHubCandidates() {
+  $('github-candidates').innerHTML = githubCandidates.length ? githubCandidates.map((n, i) => `<label class="muted" style="display:flex;flex-direction:row;gap:8px;align-items:center;margin:6px 0"><input type="checkbox" data-github-path value="${esc(n.path)}" checked style="width:auto"><span>${esc(n.title)} <span class="mono">· ${esc(n.path)}</span></span></label>`).join('') : '';
+  $('github-preview').disabled = !githubCandidates.length;
+  $('github-commit').disabled = true;
+  githubPendingPush = null; $('github-push').hidden = true; $('github-push').disabled = true;
+}
+$('github-assign-inspect').onclick = async () => {
+  githubInspected = null; $('github-assign-confirm').disabled = true; $('github-status').textContent = '';
+  try {
+    const r = await api('POST', '/api/github/assignment/inspect', githubAssignInput());
+    githubInspected = r;
+    const scope = r.whole_vault ? t('github.wholeVault') : r.folders.join(', ');
+    $('github-assign-review').hidden = false;
+    $('github-assign-review').innerHTML = `<p>${esc(t('github.assignReview', { remote: r.remote, branch: r.branch || t('github.noBranch'), profile: r.profile_name, vault: r.vault, scope }))}</p>${r.blocked.map((m) => `<p>${esc(m)}</p>`).join('')}`;
+    $('github-assign-confirm').disabled = r.blocked.length > 0;
+  } catch (e) { $('github-status').textContent = e.message; }
+};
+$('github-repository-pick').onclick = () => act(async () => {
+  const result = await api('POST', '/api/github/assignment/pick-repository', {});
+  const selected = result.path || (result.unavailable ? await window.promptForFolder() : '');
+  if (!selected) return;
+  $('github-repository').value = selected;
+  githubInspected = null;
+  $('github-assign-review').hidden = true;
+  $('github-assign-confirm').disabled = true;
+});
+$('github-assign-confirm').onclick = () => act(async () => {
+  if (!githubInspected) return;
+  const scope = githubInspected.whole_vault ? t('github.wholeVault') : githubInspected.folders.join(', ');
+  if (!confirm(t('github.assignConfirmPrompt', { remote: githubInspected.remote, profile: githubInspected.profile_name, vault: githubInspected.vault, scope }))) return;
+  await api('POST', '/api/github/assignment/set', { ...githubAssignInput(), confirm_remote: githubInspected.remote });
+  githubResetState(); $('github-repository').value = ''; $('github-assign-folders').value = '';
+  toast(t('github.assignSaved'));
+});
+$('github-assign-clear').onclick = () => act(async () => {
+  if (!confirm(t('github.assignClearPrompt'))) return;
+  await api('POST', '/api/github/assignment/clear', { profile_id: githubProfileId() });
+  githubResetState();
+  toast(t('github.assignCleared'));
+});
+$('github-load').onclick = async () => {
+  $('github-status').textContent = t('github.loading'); $('github-result').hidden = true;
+  try {
+    const r = await api('POST', '/api/github/share-candidates', { vault: $('github-vault').value, profile_id: githubProfileId() });
+    githubCandidates = r.notes || []; renderGitHubCandidates();
+    $('github-status').textContent = githubCandidates.length ? t('github.loaded', { count: githubCandidates.length }) : t('github.empty');
+  } catch (e) { $('github-status').textContent = e.message; }
+};
+$('github-preview').onclick = async () => {
+  $('github-status').textContent = t('github.previewing'); $('github-result').hidden = true;
+  try {
+    const r = await api('POST', '/api/github/preview', { vault: $('github-vault').value, repository: githubRepoValue(), profile_id: githubProfileId(), paths: githubSelection() });
+    $('github-result').hidden = false;
+    $('github-result').innerHTML = `<b>${esc(t('github.previewResult'))}</b><ul>${r.files.map((x) => `<li><span class="mono">${esc(x.path)}</span> — ${esc(t('github.action.' + x.action))}</li>`).join('')}</ul><p>${esc(t('github.noRemote'))}</p>`;
+    $('github-commit').disabled = !r.files.some((x) => ['add', 'update'].includes(x.action));
+    $('github-status').textContent = '';
+  } catch (e) { $('github-status').textContent = e.message; }
+};
+$('github-commit').onclick = async () => {
+  const paths = githubSelection();
+  if (!paths.length || !confirm(t('github.confirmCommit', { count: paths.length, paths: paths.join('\n') }))) return;
+  $('github-status').textContent = t('github.committing'); $('github-commit').disabled = true;
+  try {
+    const r = await api('POST', '/api/github/commit-selected', { vault: $('github-vault').value, repository: githubRepoValue(), profile_id: githubProfileId(), paths });
+    $('github-status').textContent = r.committed ? t('github.committed', { commit: r.commit }) : t('github.nothingToCommit');
+    githubPendingPush = r.committed ? { commit: r.commit, paths: r.committed_paths || paths, profile: githubProfileId() } : null;
+    $('github-push').hidden = !githubPendingPush; $('github-push').disabled = !githubPendingPush;
+    $('github-result').hidden = true;
+  } catch (e) { $('github-status').textContent = e.message; $('github-commit').disabled = false; }
+};
+$('github-push').onclick = async () => {
+  if (!githubPendingPush) return;
+  if (githubPendingPush.profile !== githubProfileId()) { githubPendingPush = null; $('github-push').hidden = true; return; }
+  const paths = githubPendingPush.paths;
+  if (!confirm(t('github.confirmPush', { count: paths.length, paths: paths.join('\n') }))) return;
+  $('github-status').textContent = t('github.pushing'); $('github-push').disabled = true;
+  try {
+    const r = await api('POST', '/api/github/push-selected', { vault: $('github-vault').value, repository: githubRepoValue(), profile_id: githubProfileId(), paths, commit: githubPendingPush.commit });
+    $('github-status').textContent = t('github.pushed', { commit: r.commit, branch: r.branch });
+    githubPendingPush = null; $('github-push').hidden = true;
+  } catch (e) { $('github-status').textContent = e.message; $('github-push').disabled = false; }
+};
+$('github-auto-save').onclick = async () => {
+  const assignment = githubAssignment()?.assignment;
+  const enabled = $('github-auto-enabled').checked;
+  if (!assignment) return;
+  if (enabled && !window.confirm(t('github.autoConfirm', { name: githubAssignment().name, remote: assignment.remote }))) {
+    $('github-auto-enabled').checked = false;
+    return;
+  }
+  try {
+    const result = await api('POST', '/api/github/automatic-sync', { profile_id: githubProfileId(), enabled, intervalHours: Number($('github-auto-interval').value), confirm: enabled, confirm_profile_id: enabled ? githubProfileId() : null });
+    const row = (S.github_assignments || []).find((item) => item.profile_id === githubProfileId());
+    if (row && result.assignment) row.assignment = result.assignment.assignment;
+    $('github-auto-run').disabled = !enabled;
+    $('github-auto-status').textContent = enabled ? t('github.autoSaved') : t('github.autoOff');
+    await load();
+  } catch (e) { $('github-auto-status').textContent = e.message; }
+};
+$('github-auto-run').onclick = async () => {
+  $('github-auto-run').disabled = true; $('github-auto-status').textContent = t('github.autoRunning');
+  try {
+    const status = await api('POST', '/api/github/automatic-sync/run', { profile_id: githubProfileId() });
+    S.github_auto_sync = { ...(S.github_auto_sync || {}), [githubProfileId()]: status };
+    renderGitHubAutoStatus();
+  } catch (e) { $('github-auto-status').textContent = e.message; }
+  finally { $('github-auto-run').disabled = !$('github-auto-enabled').checked; }
+};
+$('github-pull-check').onclick = async () => {
+  $('github-status').textContent = t('github.pullChecking'); $('github-pull-import').disabled = true; $('github-pull-conflict-copy').disabled = true;
+  try {
+    const r = await api('POST', '/api/github/pull-candidates', { vault: $('github-vault').value, repository: githubRepoValue(), profile_id: githubProfileId() });
+    githubPullCandidates = r.files || []; renderGitHubPullCandidates();
+    $('github-status').textContent = t('github.pullFound', { count: githubPullCandidates.length, branch: r.branch });
+  } catch (e) { githubPullCandidates = []; renderGitHubPullCandidates(); $('github-status').textContent = e.message; }
+};
+$('github-pull-import').onclick = async () => {
+  const paths = githubPullSelection('add,update');
+  if (!paths.length || !confirm(t('github.confirmImport', { count: paths.length, paths: paths.join('\n') }))) return;
+  $('github-status').textContent = t('github.importing'); $('github-pull-import').disabled = true;
+  try {
+    const r = await api('POST', '/api/github/import-selected', { vault: $('github-vault').value, repository: githubRepoValue(), profile_id: githubProfileId(), paths });
+    $('github-status').textContent = t('github.imported', { count: r.imported.length, updated: (r.updated || []).length, unchanged: r.unchanged.length });
+    githubPullCandidates = []; renderGitHubPullCandidates();
+  } catch (e) { $('github-status').textContent = e.message; $('github-pull-import').disabled = !githubPullSelection('add,update').length; }
+};
+$('github-pull-conflict-copy').onclick = async () => {
+  const paths = githubPullSelection('conflict');
+  if (!paths.length || !confirm(t('github.confirmConflictCopy', { count: paths.length, paths: paths.join('\n') }))) return;
+  $('github-status').textContent = t('github.savingConflictCopy'); $('github-pull-conflict-copy').disabled = true;
+  try {
+    const r = await api('POST', '/api/github/save-conflict-copies', { vault: $('github-vault').value, repository: githubRepoValue(), profile_id: githubProfileId(), paths });
+    $('github-status').textContent = t('github.conflictCopiesSaved', { count: r.saved.filter((x) => x.action === 'saved').length, unchanged: r.saved.filter((x) => x.action === 'unchanged').length });
+    githubPullCandidates = []; renderGitHubPullCandidates();
+  } catch (e) { $('github-status').textContent = e.message; $('github-pull-conflict-copy').disabled = !githubPullSelection('conflict').length; }
+};
+document.addEventListener('input', (e) => { if (e.target.id === 'github-assign-folders') { if (e.target.value.trim()) $('github-assign-whole-vault').checked = false; githubInspected = null; $('github-assign-confirm').disabled = true; }
+  if (e.target.id === 'github-repository') { githubInspected = null; $('github-assign-confirm').disabled = true; $('github-commit').disabled = true; $('github-push').hidden = true; githubPendingPush = null; githubPullCandidates = []; renderGitHubPullCandidates(); } });
+document.addEventListener('change', (e) => {
+  if (e.target.matches('[data-github-path]')) { $('github-preview').disabled = !githubSelection().length; $('github-commit').disabled = true; $('github-push').hidden = true; githubPendingPush = null; }
+  if (e.target.matches('[data-github-pull-path]')) { $('github-pull-import').disabled = !githubPullSelection('add,update').length; $('github-pull-conflict-copy').disabled = !githubPullSelection('conflict').length; }
+  if (e.target.id === 'github-profile') { $('github-repository').value = ''; $('github-assign-folders').value = ''; $('github-assign-whole-vault').checked = false; githubResetState(); renderGitHubProfile(S.vaults.filter((v) => !v.private && v.exists)); }
+  if (e.target.id === 'github-assign-whole-vault') { if (e.target.checked) $('github-assign-folders').value = ''; githubInspected = null; $('github-assign-confirm').disabled = true; }
+  if (e.target.id === 'github-vault') { githubInspected = null; $('github-assign-confirm').disabled = true; githubCandidates = []; githubPullCandidates = []; renderGitHubCandidates(); renderGitHubPullCandidates(); $('github-status').textContent = ''; $('github-result').hidden = true; }
+  if (e.target.id === 'ingestion-vault') {
+    const target = currentIngestionTargets().find((item) => item.vault === e.target.value);
+    refreshIngestionFolders(target?.folder || '').catch(() => {});
+  }
+});
+document.addEventListener('click', async (event) => {
+  const removeIngestionTarget = event.target.closest('[data-ingestion-remove]');
+  if (removeIngestionTarget) {
+    currentIngestionTargets().splice(Number(removeIngestionTarget.dataset.ingestionRemove), 1);
+    renderIngestionTargets();
+    return;
+  }
+  const draftSource = event.target.closest('[data-ingestion-draft]');
+  if (draftSource) {
+    try {
+      if (!S.sessions_local_summary?.enabled || !S.sessions_local_summary?.model) throw new Error(t('ingestion.localDraftNeedsModel'));
+      draftSource.disabled = true;
+      const result = await api('POST', '/api/ingestion/draft', { vault: draftSource.dataset.vault, folder: draftSource.dataset.folder, source_id: draftSource.dataset.sourceId, revision: draftSource.dataset.revision });
+      await renderIngestionDraftList();
+      toast(t('ingestion.localDraftReady'));
+    } catch (error) { toast(error.message, true); }
+    finally { draftSource.disabled = false; }
+    return;
+  }
+  const saveDraft = event.target.closest('[data-ingestion-save-draft]');
+  if (saveDraft) {
+    const draftId = saveDraft.dataset.ingestionSaveDraft;
+    const selector = document.querySelector(`[data-ingestion-destination="${CSS.escape(draftId)}"]`);
+    if (!selector?.value) { toast(t('ingestion.chooseDestination'), true); return; }
+    if (!window.confirm(t('ingestion.confirmSaveProposal'))) return;
+    try {
+      saveDraft.disabled = true;
+      const related_note_paths = [...document.querySelectorAll(`[data-ingestion-related="${CSS.escape(draftId)}"]:checked`)].map((item) => item.value);
+      const result = await api('POST', '/api/ingestion/save-draft', { draft_id: draftId, destination: selector.value, related_note_paths, confirm: true });
+      if (result.written) saveDraft.closest('.card').innerHTML = `<b>${esc(t('ingestion.proposalSaved'))}</b><p>${esc(result.path)}</p><p class="muted">${esc(t('ingestion.proposalUnverified'))}</p>`;
+      else if (result.preview) toast(t('ingestion.proposalNeedsReview'), true);
+      else toast((result.errors || []).join(' '), true);
+      if (result.written) await renderIngestionDraftList();
+    } catch (error) { toast(error.message, true); }
+    finally { saveDraft.disabled = false; }
+    return;
+  }
+  const discardDraft = event.target.closest('[data-ingestion-discard-draft]');
+  if (discardDraft) {
+    if (!window.confirm(t('ingestion.confirmDiscardDraft'))) return;
+    try {
+      discardDraft.disabled = true;
+      await api('POST', '/api/ingestion/discard-draft', { draft_id: discardDraft.dataset.ingestionDiscardDraft, confirm: true });
+      await renderIngestionDraftList();
+    } catch (error) { toast(error.message, true); }
+    return;
+  }
+  const editButton = event.target.closest('[data-twin-edit]');
+  if (editButton) {
+    editingTwinId = editButton.dataset.twinEdit;
+    $('twin-profiles-panel').open = true;
+    await load();
+    $('twin-create-card').scrollIntoView({ behavior: 'smooth', block: 'start' });
+  }
+});
+$('twin-edit-cancel').onclick = async () => { editingTwinId = null; await load(); };
+function twinActionMemoryAllowed(action, policy) {
+  const required = { search: 'semantic', read_note: 'semantic', read_session: 'episodic', log_session: 'episodic', propose_note: 'semantic', handoff_read: 'working', write_handoff: 'working' };
+  return policy?.[required[action]] === true;
+}
+function updateTwinPermissionControls() {
+  const enabled = Object.fromEntries([...document.querySelectorAll('[data-twin-memory]')].map((input) => [input.dataset.twinMemory, input.checked]));
+  const agentMemory = new Map();
+  document.querySelectorAll('[data-twin-agent-memory]').forEach((input) => {
+    const id = input.dataset.twinAgentMemory;
+    const type = input.dataset.memoryType;
+    const allowedByProfile = enabled[type] === true;
+    input.disabled = !allowedByProfile;
+    if (!allowedByProfile) input.checked = false;
+    if (!agentMemory.has(id)) agentMemory.set(id, {});
+    agentMemory.get(id)[type] = allowedByProfile && input.checked;
+  });
+  document.querySelectorAll('[data-twin-operation]').forEach((input) => {
+    const allowed = twinActionMemoryAllowed(input.value, agentMemory.get(input.dataset.twinOperation));
+    input.disabled = !allowed;
+    if (!allowed) input.checked = false;
+  });
+}
+function copyTwinMemoryToSelectedAgents() {
+  const agents = [...document.querySelectorAll('[data-twin-agent]:checked')];
+  if (!agents.length) { toast(t('twinProfiles.applyMemoryToAgentsSelect'), true); return false; }
+  const allowed = Object.fromEntries([...document.querySelectorAll('[data-twin-memory]')].map((input) => [input.dataset.twinMemory, input.checked]));
+  const agentMemory = [...document.querySelectorAll('[data-twin-agent-memory]')];
+  for (const agent of agents) {
+    for (const input of agentMemory) {
+      if (input.dataset.twinAgentMemory === agent.dataset.twinAgent) input.checked = allowed[input.dataset.memoryType] === true;
+    }
+  }
+  updateTwinPermissionControls();
+  toast(t('twinProfiles.applyMemoryToAgentsDone'));
+  return true;
+}
+$('twin-apply-memory-to-agents').addEventListener('click', copyTwinMemoryToSelectedAgents);
+$('twin-new-memory').addEventListener('change', updateTwinPermissionControls);
+$('twin-new-agents').addEventListener('change', (event) => {
+  if (event.target.closest('[data-twin-agent-memory]')) updateTwinPermissionControls();
+});
+$('twin-new-agents').addEventListener('change', (event) => {
+  const agent = event.target.closest('[data-twin-agent]');
+  if (agent) {
+    const panel = document.querySelector(`[data-twin-agent-options="${CSS.escape(agent.dataset.twinAgent)}"]`);
+    if (panel) panel.hidden = !agent.checked;
+    return;
+  }
+  const grant = event.target.closest('[data-twin-agent-vault]');
+  if (!grant) return;
+  const scope = document.querySelector(`[data-twin-agent-scope="${CSS.escape(grant.dataset.twinAgentVault)}"][data-vault-scope="${CSS.escape(grant.dataset.vaultName)}"]`);
+  if (scope) scope.hidden = !grant.checked;
+});
+$('twin-read-propose-preset').addEventListener('click', () => {
+  const selectedVaults = [...document.querySelectorAll('[data-twin-vault]:checked')];
+  const selectedAgents = [...document.querySelectorAll('[data-twin-agent]:checked')];
+  if (!selectedVaults.length || !selectedAgents.length) {
+    toast(t('twinProfiles.readProposePresetSelect'), true);
+    return;
+  }
+  for (const vault of selectedVaults) {
+    const access = document.querySelector(`[data-twin-vault-access="${CSS.escape(vault.dataset.twinVault)}"]`);
+    if (access) access.value = 'propose';
+  }
+  for (const agent of selectedAgents) {
+    const id = agent.dataset.twinAgent;
+    for (const vault of selectedVaults) {
+      const name = vault.dataset.twinVault;
+      const grant = document.querySelector(`[data-twin-agent-vault="${CSS.escape(id)}"][data-vault-name="${CSS.escape(name)}"]`);
+      if (grant) grant.checked = true;
+      const scope = document.querySelector(`[data-twin-agent-scope="${CSS.escape(id)}"][data-vault-scope="${CSS.escape(name)}"]`);
+      if (scope) scope.hidden = false;
+      document.querySelectorAll(`[data-twin-operation="${CSS.escape(id)}"][data-vault-name="${CSS.escape(name)}"]`).forEach((operation) => {
+        operation.checked = ['search', 'read_note', 'propose_note'].includes(operation.value);
+      });
+    }
+  }
+  const semantic = document.querySelector('[data-twin-memory="semantic"]');
+  if (semantic) semantic.checked = true;
+  updateTwinPermissionControls();
+  toast(t('twinProfiles.readProposePresetApplied'));
+});
+$('twin-create').onclick = async () => {
+  const name = $('twin-new-name').value.trim();
+  const owner = $('twin-new-owner').value.trim() || name;
+  const vaults = [...document.querySelectorAll('[data-twin-vault]:checked')].map((input) => ({
+    name: input.dataset.twinVault,
+    access: document.querySelector(`[data-twin-vault-access="${CSS.escape(input.dataset.twinVault)}"]`)?.value || 'read',
+  }));
+  const selectedAgents = [...document.querySelectorAll('[data-twin-agent]:checked')];
+  const agent_access = selectedAgents.map((input) => ({
+    agent_id: input.dataset.twinAgent,
+    memory_policy: Object.fromEntries([...document.querySelectorAll(`[data-twin-agent-memory="${CSS.escape(input.dataset.twinAgent)}"]`)].map((memory) => [memory.dataset.memoryType, memory.checked])),
+    vaults: [...document.querySelectorAll(`[data-twin-agent-vault="${CSS.escape(input.dataset.twinAgent)}"]:checked`)].map((grant) => ({
+      name: grant.dataset.vaultName,
+      operations: [...document.querySelectorAll(`[data-twin-operation="${CSS.escape(input.dataset.twinAgent)}"][data-vault-name="${CSS.escape(grant.dataset.vaultName)}"]:checked`)].map((operation) => operation.value),
+    })),
+  }));
+  if (!name || !vaults.length) { toast(t('twinProfiles.needNameVault'), true); return; }
+  if (agent_access.some((agent) => !agent.vaults.length || agent.vaults.some((grant) => !grant.operations.length || !vaults.some((vault) => vault.name === grant.name) || (grant.operations.some((operation) => ['propose_note', 'write_handoff'].includes(operation)) && !vaults.some((vault) => vault.name === grant.name && vault.access === 'propose'))))) { toast(t('twinProfiles.needAgentVault'), true); return; }
+  const vaultNames = vaults.map((item) => `${item.name} (${t('twinProfiles.access.' + item.access)})`).join(', ');
+  const agentNames = selectedAgents.map((input) => {
+    const entry = agent_access.find((item) => item.agent_id === input.dataset.twinAgent);
+    const grants = entry?.vaults || [];
+    const scope = grants.map((grant) => `${grant.name}: ${grant.operations.map((operation) => t(`twinProfiles.operation.${operation}`)).join(', ') || t('twinProfiles.noneSelected')}`).join(' · ');
+    const memories = Object.entries(entry?.memory_policy || {}).filter(([, enabled]) => enabled).map(([key]) => t(`twinProfiles.memory.${key}`)).join(', ') || t('twinProfiles.noneSelected');
+    return `${input.closest('.card')?.querySelector('b')?.textContent || input.dataset.twinAgent}: ${scope || t('twinProfiles.noneSelected')} · ${t('twinProfiles.agentMemory')}: ${memories}`;
+  }).join('; ') || t('twinProfiles.noneSelected');
+  const selectedMemories = [...document.querySelectorAll('[data-twin-memory]:checked')].map((input) => t(`twinProfiles.memory.${input.dataset.twinMemory}`)).join(', ') || t('twinProfiles.noneSelected');
+  const editingProfile = editingTwinId && S.twin_profiles?.profiles?.find((profile) => profile.id === editingTwinId);
+  if (editingProfile ? !confirm(t('twinProfiles.confirmUpdate', { name, vaults: vaultNames, agents: agentNames, memory: selectedMemories })) : !confirm(t('twinProfiles.confirmCreate', { name, vaults: vaultNames, agents: agentNames, memory: selectedMemories }))) return;
+  $('twin-create').disabled = true;
+  $('twin-create-status').textContent = t('twinProfiles.creating');
+  try {
+    const payload = {
+      name, owner, mode: $('twin-new-mode').value, vaults, agent_access,
+      memory_policy: Object.fromEntries([...document.querySelectorAll('[data-twin-memory]')].map((input) => [input.dataset.twinMemory, input.checked])),
+    };
+    if (editingTwinId) {
+      payload.profile_id = editingTwinId;
+      await api('POST', '/api/twins/update', payload);
+    } else await api('POST', '/api/twins/create', payload);
+    $('twin-new-name').value = '';
+    $('twin-new-owner').value = '';
+    const message = editingTwinId ? t('twinProfiles.updated') : t('twinProfiles.created');
+    editingTwinId = null;
+    $('twin-create-status').textContent = message;
+    toast(message);
+    await load();
+  } catch (error) { $('twin-create-status').textContent = error.message; toast(error.message, true); }
+  finally { $('twin-create').disabled = false; }
+};
+$('backup-pick').onclick = async () => {
+  try {
+    const r = await api('POST', '/api/backup/pick-folder');
+    if (r.path) $('backup-folder').value = r.path;
+    else if (r.unavailable) toast(t('backup.pickerUnavailable'), true);
+  } catch (e) { toast(e.message, true); }
+};
+$('ingestion-add').onclick = () => {
+  const target = { vault: $('ingestion-vault').value, folder: $('ingestion-folder').value };
+  if (!target.vault || !target.folder) { toast(t('ingestion.targetRequired'), true); return; }
+  if (currentIngestionTargets().length >= 20) { toast(t('ingestion.maxTargets'), true); return; }
+  if (currentIngestionTargets().some((item) => item.vault.toLocaleLowerCase() === target.vault.toLocaleLowerCase() && item.folder.toLocaleLowerCase() === target.folder.toLocaleLowerCase())) { toast(t('ingestion.duplicateTarget'), true); return; }
+  currentIngestionTargets().push(target);
+  $('ingestion-folder').value = '';
+  renderIngestionTargets();
+};
+$('ingestion-save').onclick = () => act(async () => {
+  const r = await api('POST', '/api/ingestion/settings', { enabled: $('ingestion-enabled').checked, autoDrafts: $('ingestion-auto-drafts').checked, targets: currentIngestionTargets(), time: $('ingestion-time').value });
+  ingestionTargetsDraft = null;
+  toast(t(r.ingestion.enabled ? 'ingestion.saved' : 'ingestion.disabled'));
+});
+$('ingestion-run').onclick = () => act(async () => {
+  const r = await api('POST', '/api/ingestion/run', { targets: currentIngestionTargets() });
+  $('ingestion-queue').innerHTML = r.candidates.length ? `${r.limited ? `<p class="muted">${esc(t('ingestion.limited', { shown: r.candidates.length, total: r.queued_total }))}</p>` : ''}${r.candidates.map((item) => `<div class="card"><button class="link" data-open-note="${esc(item.vault || r.vault)}::${esc(item.path)}"><b>${esc(item.title)}</b></button><span class="mono muted">${esc(item.vault || r.vault)} · ${esc(item.path)}</span><small class="muted">${esc(item.updated_at)}</small>${S.sessions_local_summary?.enabled ? `<button class="secondary" type="button" data-ingestion-draft data-vault="${esc(item.vault || r.vault)}" data-folder="${esc(item.folder)}" data-source-id="${esc(item.source_id)}" data-revision="${esc(item.revision)}">${esc(t('ingestion.makeLocalDraft'))}</button>` : ''}<div id="ingestion-draft-${esc(item.source_id.slice(0, 12))}"></div></div>`).join('')}` : `<p class="muted">${esc(t('ingestion.empty'))}</p>`;
+  toast(r.ok ? t('ingestion.scanDone', { count: r.queued_total }) : (r.error || t('ingestion.failed', { error: '' })), !r.ok);
+});
+$('brief-save').onclick = () => act(async () => {
+  const r = await api('POST', '/api/brief/settings', { enabled: $('brief-enabled').checked, vault: $('brief-vault').value, time: $('brief-time').value });
+  toast(t(r.brief.enabled ? 'brief.saved' : 'brief.disabled'));
+});
+$('brief-run').onclick = () => act(async () => {
+  await api('POST', '/api/brief/run', { vault: $('brief-vault').value });
+  toast(t('brief.done'));
+});
+$('backup-restore-pick-source').onclick = async () => {
+  try {
+    const r = await api('POST', '/api/backup/restore/pick-source');
+    if (r.path) $('backup-restore-source').value = r.path;
+    else if (r.unavailable) toast(t('backup.pickerUnavailable'), true);
+  } catch (e) { toast(e.message, true); }
+};
+$('backup-history-refresh').onclick = () => act(async () => {
+  const result = await api('POST', '/api/backup/history', {});
+  const history = $('backup-history');
+  history.innerHTML = `<option value="">${esc(t('backup.historyEmpty'))}</option>` + result.backups.map((item) => {
+    const label = `${new Date(item.created_at).toLocaleString(LOCALE)} · ${item.file_count} ${t('backup.historyFiles')}${item.encrypted ? ` · ${t('backup.historyEncrypted')}` : ''}`;
+    return `<option value="${esc(item.folder)}">${esc(label)}</option>`;
+  }).join('');
+  $('backup-history-status').textContent = result.backups.length
+    ? t('backup.historyFound', { count: result.backups.length, invalid: result.invalid_count, more: result.truncated ? t('backup.historyMore') : '' })
+    : t('backup.historyNone', { invalid: result.invalid_count });
+});
+$('backup-history').onchange = () => { if ($('backup-history').value) $('backup-restore-source').value = $('backup-history').value; };
+$('backup-restore-pick-destination').onclick = async () => {
+  try {
+    const r = await api('POST', '/api/backup/restore/pick-destination');
+    if (r.path) $('backup-restore-destination').value = r.path;
+    else if (r.unavailable) toast(t('backup.pickerUnavailable'), true);
+  } catch (e) { toast(e.message, true); }
+};
+$('backup-save').onclick = () => act(async () => {
+  const r = await api('POST', '/api/backup', { enabled: $('backup-enabled').checked,
+    folder: $('backup-folder').value, scheduleMode: $('backup-schedule-mode').value, time: $('backup-time').value,
+    intervalHours: Number($('backup-hours').value), keepCount: Number($('backup-keep').value), encrypted: $('backup-encrypted').checked,
+    recoveryKeyConfirmation: $('backup-key-confirm').value });
+  $('backup-key-confirm').value = '';
+  $('backup-key-confirm-wrap').hidden = true;
+  toast(r.backup.enabled ? t('backup.saved') : t('backup.disabled'));
+});
+$('backup-encrypted').onchange = () => {
+  $('backup-key-confirm-wrap').hidden = Boolean(S.backup?.encrypted) || !$('backup-encrypted').checked;
+  if ($('backup-key-confirm-wrap').hidden) $('backup-key-confirm').value = '';
+};
+$('backup-key').onclick = () => act(async () => {
+  const r = await api('POST', '/api/backup/encryption-key');
+  $('backup-key-value').value = r.key;
+  $('backup-key-value').type = 'text';
+  toast(t(r.created ? 'backup.keyCreated' : 'backup.keyShown'));
+});
+$('backup-key-value').onclick = (event) => event.currentTarget.select();
+$('backup-key-copy').onclick = () => act(async () => {
+  const key = $('backup-key-value').value;
+  if (!key) throw new Error(t('backup.keyShowFirst'));
+  try { await navigator.clipboard.writeText(key); }
+  catch { $('backup-key-value').focus(); $('backup-key-value').select(); document.execCommand('copy'); }
+  toast(t('backup.keyCopied'));
+});
+$('startup-at-login').onchange = async () => {
+  const requested = $('startup-at-login').checked;
+  try {
+    const r = await api('POST', '/api/startup', { enabled: requested });
+    $('startup-at-login').checked = Boolean(r.enabled);
+    toast(t(r.enabled ? 'startup.enabledToast' : 'startup.disabledToast'));
+    await load();
+  } catch (e) {
+    $('startup-at-login').checked = !requested;
+    toast(e.message, true);
+  }
+};
+$('backup-run').onclick = () => act(async () => {
+  const r = await api('POST', '/api/backup/run');
+  toast(t('backup.lastVerified', { count: r.file_count, folder: r.folder }));
+});
+$('backup-restore').onclick = () => {
+  if (!confirm(t('backup.restoreConfirm'))) return;
+  act(async () => {
+    const r = await api('POST', '/api/backup/restore', { backupFolder: $('backup-restore-source').value,
+      destination: $('backup-restore-destination').value, confirm: true, recoveryKey: $('backup-restore-key').value || undefined });
+    toast(t('backup.restored', { count: r.file_count, folder: r.folder }));
+  });
+};
 $('http-token').onclick = () => act(async () => { const r = await api('POST', '/api/http-token'); $('http-out').innerHTML = `URL: ${esc(r.url)}<br>Header: Authorization: Bearer ${esc(r.token)}<br>Start: ${esc(r.start)}`; });
 $('test').onclick = () => {
   $('test-out').innerHTML = `<p class="skeleton">${esc(t('test.searching'))}</p>`;
@@ -856,7 +2573,8 @@ boot();
 // Light refresh: only the activity table, so edits in progress are never wiped.
 setInterval(async () => {
   if (document.visibilityState !== 'visible') return;
-  try { const s = await api('GET', '/api/state'); S.activity = s.activity; $('activity').innerHTML = s.activity.length ? s.activity.map((e) => `<tr><td>${esc(new Date(e.at).toLocaleString(LOCALE))}</td><td>${esc(e.platform)}</td><td class="mono">${esc(e.tool)}</td><td>${e.ok ? (e.written ? esc(t('test.written')) : esc(t('test.ok'))) : esc(t('test.refused'))}</td></tr>`).join('') : `<tr><td colspan="4" class="muted">${esc(t('ready.noCalls'))}</td></tr>`; $('n4').className = 'step' + (s.activity.length ? ' done' : ''); } catch {}
+  if (!$('sessions-panel').hidden) loadSessionEndCues();
+  try { const s = await api('GET', '/api/state'); S.activity = s.activity; S.github_auto_sync = s.github_auto_sync; renderGitHubAutoStatus(); $('activity').innerHTML = s.activity.length ? s.activity.map((e) => `<tr><td>${esc(new Date(e.at).toLocaleString(LOCALE))}</td><td>${esc(e.platform)}</td><td class="mono">${esc(e.tool)}</td><td>${e.ok ? (e.written ? esc(t('test.written')) : esc(t('test.ok'))) : esc(t('test.refused'))}</td></tr>`).join('') : `<tr><td colspan="4" class="muted">${esc(t('ready.noCalls'))}</td></tr>`; $('n4').className = 'step' + (s.activity.length ? ' done' : ''); } catch {}
 }, 5000);
 </script>
 <script src="agents.js"></script>

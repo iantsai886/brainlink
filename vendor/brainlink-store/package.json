@@ -1,0 +1,11 @@
+{
+  "name": "brainlink-store",
+  "version": "0.2.0",
+  "description": "BrainLink store contract v0.2 (Obsidian-independent data layer): types, errors, in-memory reference impl.",
+  "private": true,
+  "type": "module",
+  "main": "memory-store.mjs",
+  "types": "interface.d.ts",
+  "exports": { ".": "./memory-store.mjs", "./memory-store.mjs": "./memory-store.mjs", "./errors.mjs": "./errors.mjs" },
+  "engines": { "node": ">=22" }
+}

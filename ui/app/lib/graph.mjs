@@ -19,3 +19,29 @@ export function layoutGraph(graph,{seed=42,iterations=220,width=900,height=560}=
   const cool=1-step/Math.max(1,steps);for(let i=0;i<nodes.length;i++){nodes[i].x=Math.max(15,Math.min(width-15,nodes[i].x+Math.max(-4,Math.min(4,fx[i]))*cool));nodes[i].y=Math.max(15,Math.min(height-15,nodes[i].y+Math.max(-4,Math.min(4,fy[i]))*cool));}
  }return {nodes,edges,static:false};
 }
+
+// Deterministic 3D force layout for the interactive Setup graph.
+export function layoutGraph3d(graph,{seed=42,iterations=140}={}){
+ let rand=seed>>>0;const random=()=>{rand=(Math.imul(rand,1664525)+1013904223)>>>0;return rand/4294967296;};
+ const nodes=graph.nodes.map(n=>({...n,x:(random()-.5)*440,y:(random()-.5)*300,z:(random()-.5)*360}));
+ const map=new Map(nodes.map((n,i)=>[n.id,i]));
+ const edges=graph.edges.filter(e=>map.has(e.source)&&map.has(e.target));
+ if(nodes.length>400){
+  const golden=Math.PI*(3-Math.sqrt(5));
+  for(let i=0;i<nodes.length;i++){const t=(i+.5)/nodes.length, r=300*Math.sqrt(1-t*t),a=i*golden;nodes[i].x=Math.cos(a)*r;nodes[i].y=Math.sin(a)*r;nodes[i].z=(t-.5)*420;}
+  return {nodes,edges,static:true};
+ }
+ const steps=Math.min(Math.max(0,iterations),180);
+ for(let step=0;step<steps;step++){
+  const fx=new Float64Array(nodes.length),fy=new Float64Array(nodes.length),fz=new Float64Array(nodes.length);
+  for(let i=0;i<nodes.length;i++)for(let j=i+1;j<nodes.length;j++){
+   const a=nodes[i],b=nodes[j],dx=a.x-b.x,dy=a.y-b.y,dz=a.z-b.z,d2=dx*dx+dy*dy+dz*dz+16,f=Math.min(7,1500/d2);
+   fx[i]+=dx*f;fy[i]+=dy*f;fz[i]+=dz*f;fx[j]-=dx*f;fy[j]-=dy*f;fz[j]-=dz*f;
+  }
+  for(const e of edges){const a=map.get(e.source),b=map.get(e.target),dx=nodes[b].x-nodes[a].x,dy=nodes[b].y-nodes[a].y,dz=nodes[b].z-nodes[a].z;fx[a]+=dx*.006;fy[a]+=dy*.006;fz[a]+=dz*.006;fx[b]-=dx*.006;fy[b]-=dy*.006;fz[b]-=dz*.006;}
+  const cool=1-step/Math.max(1,steps);
+  for(let i=0;i<nodes.length;i++){nodes[i].x=bound(nodes[i].x+bound(fx[i],-4,4)*cool,-340,340);nodes[i].y=bound(nodes[i].y+bound(fy[i],-4,4)*cool,-240,240);nodes[i].z=bound(nodes[i].z+bound(fz[i],-4,4)*cool,-300,300);}
+ }
+ return {nodes,edges,static:false};
+}
+const bound=(n,min,max)=>Math.max(min,Math.min(max,n));

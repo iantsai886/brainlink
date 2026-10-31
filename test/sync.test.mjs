@@ -9,7 +9,7 @@ import { syncSettings, chooseSync, syncOnce, readSessionIndex, restoreSnapshot, 
 
 // Real BrainStore contract (brainlink-store, commit d8e792b): interface.d.ts, memory-store.mjs, errors.mjs.
 const STORE_DIR = process.env.BRAINLINK_STORE_DIR
-  || ['../src/store', '../../brainlink-store'].map((p) => path.resolve(import.meta.dirname, p)).find((d) => existsSync(path.join(d, 'memory-store.mjs')));
+  || ['../vendor/brainlink-store', '../src/store', '../../brainlink-store'].map((p) => path.resolve(import.meta.dirname, p)).find((d) => existsSync(path.join(d, 'memory-store.mjs')));
 if (!STORE_DIR) throw new Error('memory-store.mjs not found; set BRAINLINK_STORE_DIR');
 const { createMemoryStore, toSessionRecord } = await import(pathToFileURL(path.join(STORE_DIR, 'memory-store.mjs')).href);
 
@@ -26,6 +26,18 @@ test('local only is the default and syncs nothing', async () => {
   const store = freshStore(); await store.write({ vault: 'brain', path: 'a.md', body: 'x' }, { expected_etag: '' });
   assert.equal((await syncOnce({ store })).status, 'local-only');
   assert.throws(() => chooseSync({}, { provider: 'gdrive', folder: 'rel/path' }));
+});
+
+test('sync settings accept a named public vault and refuse an unknown or private vault', () => {
+  const cfg = { vaults: [{ name: 'Work', private: false }, { name: 'Personal', private: true }] };
+  const folder = path.resolve('Drive');
+  assert.equal(chooseSync(cfg, { provider: 'gdrive', folder, vault: 'Work' }).sync.vault, 'Work');
+  assert.throws(() => chooseSync(cfg, { provider: 'gdrive', folder, vault: 'Missing' }), /existing public vault/);
+  assert.throws(() => chooseSync(cfg, { provider: 'gdrive', folder, vault: 'Personal' }), /existing public vault/);
+  assert.equal(chooseSync(cfg, { provider: 'gdrive', folder, vault: 'Work', scheduled: true, intervalHours: 12 }).sync.scheduled, true);
+  assert.equal(chooseSync(cfg, { provider: 'gdrive', folder, vault: 'Work', intervalHours: 12 }).sync.intervalHours, 12);
+  assert.throws(() => chooseSync(cfg, { provider: 'gdrive', folder, vault: 'Work', scheduled: 'yes' }), /scheduled must be a boolean/);
+  assert.throws(() => chooseSync(cfg, { provider: 'gdrive', folder, vault: 'Work', intervalHours: 0 }), /intervalHours must be 1–168/);
 });
 
 for (const p of ['gdrive', 'icloud', 'dropbox']) test(`${p}: push then pull round trip`, async () => {

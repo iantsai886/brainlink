@@ -1,9 +1,9 @@
-<title>BrainLink MCP</title>
+<title>BrainLink — Product Preview</title>
 <meta name="claude:viewport-fit-sides" content="cover">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,500;12..96,700&family=IBM+Plex+Sans:wght@400;500;600&family=IBM+Plex+Mono:wght@400;500&display=swap">
 <style>
-/* Layout: one sales sheet. Thesis band, then a two-column "what you say / what lands in your vault" demo, then safety, plans and setup. */
+/* Layout: product preview with a clear capability, setup and release-status story. */
 :root {
   --bg: #f3f4f0; --paper: #ffffff; --ink: #18211e; --muted: #5d6a64; --line: #dbe0db;
   --brand: #2f5d50; --brand-ink: #f5f3ea; --gold: #c98f2c; --gold-soft: #f6ead3; --code: #eef1ec;
@@ -59,16 +59,9 @@ section + section { border-top: 1px solid var(--line); }
 .steps p { color: var(--muted); font-size: 15px; }
 ol.steps { padding: 0; margin: 0; }
 
-.plans { display: grid; grid-template-columns: repeat(4, 1fr); gap: 12px; }
-@media (max-width: 900px) { .plans { grid-template-columns: repeat(2, 1fr); } }
-@media (max-width: 480px) { .plans { grid-template-columns: 1fr; } }
-.plan { background: var(--paper); border: 1px solid var(--line); border-radius: 12px; padding: 18px; display: grid; gap: 8px; align-content: start; }
-.plan.pick { border: 2px solid var(--brand); }
-.plan h3 { font-size: 18px; }
-.plan .price { font: 700 30px/1.1 var(--display); font-variant-numeric: tabular-nums; }
-.plan .price small { font: 400 14px var(--body); color: var(--muted); }
-.plan ul { margin: 0; padding-left: 18px; color: var(--muted); font-size: 14px; display: grid; gap: 3px; }
-.tag { font-size: 12px; font-weight: 600; color: var(--brand); }
+.product-status { background: var(--paper); border: 1px solid var(--line); border-left: 4px solid var(--brand); border-radius: 12px; padding: 20px 22px; display: grid; gap: 8px; max-width: 760px; }
+.product-status p, .product-status li { color: var(--muted); }
+.product-status ul { margin: 0; padding-left: 20px; }
 
 .facts { display: grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); gap: 18px 28px; }
 .facts div { display: grid; gap: 2px; }
@@ -80,10 +73,10 @@ footer .wrap { padding-block: 28px 44px; color: var(--muted); font-size: 14px; d
 
 <header class="hero">
   <div class="wrap">
-    <span class="eyebrow">BrainLink MCP · by Iango</span>
-    <h1>One second brain. Every AI.</h1>
-    <p class="lede">BrainLink connects your Obsidian or Markdown vault to every AI you use, so they all work from the same notes, follow your rules, and save what they learn back into the vault without overwriting anything.</p>
-    <div class="apps" aria-label="Works with"><span>Claude Desktop</span><span>Claude Code</span><span>ChatGPT Codex</span><span>Cursor</span><span>Gemini CLI</span><span>Windsurf</span><span>Grok and other HTTP MCP clients</span></div>
+    <span class="eyebrow">BrainLink by Iango · Product preview</span>
+    <h1>One governed memory layer for your AI tools.</h1>
+    <p class="lede">BrainLink connects selected Markdown vaults to supported AI clients. You set which vaults and actions each client can use. Agents can retrieve cited context, hand work to another agent, and prepare notes for your review.</p>
+    <div class="apps" aria-label="Supported client connectors"><span>Claude Desktop and Code</span><span>ChatGPT Codex</span><span>Cursor</span><span>Gemini CLI</span><span>Google Antigravity</span><span>Hermes Agent</span><span>DeepSeek Harness</span><span>Windsurf</span><span>Custom MCP clients</span></div>
   </div>
 </header>
 
@@ -93,13 +86,13 @@ footer .wrap { padding-block: 28px 44px; color: var(--muted); font-size: 14px; d
       <div class="head">
         <span class="eyebrow">The problem</span>
         <h2>Each AI starts from zero, and the ones that can write make a mess</h2>
-        <p>You paste the same context into Claude in the morning and into ChatGPT in the afternoon. Decisions made in one chat never reach the next one. When an AI can edit your notes, it rewrites them without a trace. BrainLink gives every AI the same memory and the same rules.</p>
+        <p>AI tools often start without the context from your other work. BrainLink keeps selected notes in your vault, filters retrieval by each client's permissions, and provides source links so work can continue with the right context.</p>
       </div>
       <div class="demo">
         <div class="chat">
-          <div class="say"><span class="who">You, in Claude</span><span class="phrase">"Connect to Chief of Staff"</span><span class="then">The AI loads the agent's role, current goal, recent decisions and open handoffs from your vault, and flags notes that are out of date.</span></div>
-          <div class="say"><span class="who">You, in Cursor or Codex, later</span><span class="phrase">"What did we decide about the launch?"</span><span class="then">A different AI finds the same decision by searching the same vault, and cites the note it came from.</span></div>
-          <div class="say"><span class="who">You, at the end</span><span class="phrase">"Chief of Staff close loop"</span><span class="then">The session's decisions and next actions are appended to the agent's log, signed by the AI that wrote them.</span></div>
+          <div class="say"><span class="who">You, in a connected AI</span><span class="phrase">"Connect to Chief of Staff"</span><span class="then">If that role and its procedural memory are enabled, the AI receives the allowed role notes and current context. Older sources can be flagged.</span></div>
+          <div class="say"><span class="who">You, in another connected AI</span><span class="phrase">"What did we decide about the launch?"</span><span class="then">The other AI searches only its assigned vaults and can cite the note it found.</span></div>
+          <div class="say"><span class="who">You, at the end</span><span class="phrase">"Chief of Staff close loop"</span><span class="then">BrainLink prepares an attributed summary and asks for review before saving, unless you separately enabled a private draft route.</span></div>
         </div>
         <div>
 <div class="note" role="img" aria-label="Example of a close-loop capture appended to a Markdown note"><span class="h">## 2026-10-18 09:30 — Launch review</span>
@@ -125,12 +118,12 @@ footer .wrap { padding-block: 28px 44px; color: var(--muted); font-size: 14px; d
         <h2>Your rules are enforced in software, not left to a prompt</h2>
       </div>
       <div class="safety">
-        <div><b>Nothing is overwritten</b><span>AIs can only add new notes or append to existing ones. Nothing is ever deleted.</span></div>
-        <div><b>Preview before write</b><span>Every write shows a preview first. Your close phrase approves the capture.</span></div>
-        <div><b>Signed edits</b><span>Each note records which AI, agent and session wrote it, with a timestamp.</span></div>
-        <div><b>Secrets refused</b><span>API keys, tokens, card and account numbers are blocked from entering the vault.</span></div>
-        <div><b>Private stays private</b><span>Limit each AI to specific vaults, make a connection read-only, or set a journal to proposals only.</span></div>
-        <div><b>Stays on your computer</b><span>BrainLink runs locally. Your notes are never sent to Iango.</span></div>
+        <div><b>No silent overwrites</b><span>AI note tools create new notes or append to an approved target; they do not replace an existing note.</span></div>
+        <div><b>Review before saving</b><span>Note proposals show a preview and require separate approval. Optional closeout drafts stay private and unverified.</span></div>
+        <div><b>Clear attribution</b><span>Saved notes can record the AI, agent, session, source and time.</span></div>
+        <div><b>Secret checks</b><span>BrainLink scans proposed content for common secrets and blocks flagged text; this check cannot guarantee that every secret is detected.</span></div>
+        <div><b>Scoped access</b><span>Assign each AI a Twin profile, specific vaults and allowed actions. Private content is filtered before retrieval.</span></div>
+        <div><b>Local first</b><span>BrainLink does not upload vaults to Iango. When you use an AI provider, it may receive the context you ask BrainLink to retrieve.</span></div>
       </div>
     </div>
   </section>
@@ -139,16 +132,17 @@ footer .wrap { padding-block: 28px 44px; color: var(--muted); font-size: 14px; d
     <div class="wrap">
       <div class="head">
         <span class="eyebrow">Smart by default</span>
-        <h2>A brain that organises itself as your AIs use it</h2>
-        <p>You don't need Obsidian or a filing system. BrainLink does the linking and the bookkeeping.</p>
+        <h2>Linked knowledge with review and source context</h2>
+        <p>BrainLink can suggest organization and connections. You can inspect the source and review proposed graph links.</p>
       </div>
       <div class="safety">
-        <div><b>Notes link themselves</b><span>Every new note links the people, projects and notes it mentions, plus the most related ones. A Home note links everything.</span></div>
-        <div><b>Finds what you meant</b><span>Keyword search with filters by folder, tag and date. Add a free local model and it also searches by meaning.</span></div>
+        <div><b>Suggested note links</b><span>New notes can include links to visible notes by name and related terms.</span></div>
+        <div><b>Search options</b><span>Use keyword search and filters. Optional local embeddings can add meaning-based results.</span></div>
+        <div><b>Compact cited context</b><span>Agents receive short excerpts with source links first. On a 30-case fictional test, estimated tool-result tokens were 27.5% lower than compact search with the same task score and source recall. Provider-billed savings are not measured.</span></div>
         <div><b>"Brief me"</b><span>What changed this week, open tasks, next actions and decisions waiting on you, in one answer.</span></div>
-        <div><b>Remembers you</b><span>Say "remember that I prefer short answers" once; every connected AI knows it from then on.</span></div>
+        <div><b>Saved memories</b><span>Authorized agents can receive saved facts when semantic memory and vault access are enabled for their profile.</span></div>
         <div><b>Meeting notes from transcripts</b><span>Paste a transcript and get a meeting note with attendees linked and action items as tasks.</span></div>
-        <div><b>One command, every AI</b><span>Save a prompt like "Weekly review" once; it appears as a command in Claude, Cursor and every other connected app.</span></div>
+        <div><b>Shared commands and Skills</b><span>Versioned prompts and Agent Skills can be installed for supported clients, subject to each client's own discovery and reload behavior.</span></div>
       </div>
     </div>
   </section>
@@ -156,13 +150,13 @@ footer .wrap { padding-block: 28px 44px; color: var(--muted); font-size: 14px; d
   <section>
     <div class="wrap">
       <div class="head">
-        <span class="eyebrow">Setup in under a minute</span>
-        <h2>Install, pick your notes, done</h2>
+        <span class="eyebrow">Getting started</span>
+        <h2>Choose what to connect and what each AI may use</h2>
       </div>
       <ol class="steps">
-        <li><h3>Install</h3><p>One installer, with everything included. No Node, Python or terminal needed.</p></li>
-        <li><h3>Pick your notes</h3><p>BrainLink finds your Obsidian vaults. No notes yet? It creates a new brain for you. Every AI app on the computer is connected in the same click.</p></li>
-        <li><h3>Talk to it</h3><p>Reopen your AI app and say "Connect to my brain". The first 14 days include everything, with no card needed.</p></li>
+        <li><h3>Install and open</h3><p>Run the installer. The BrainLink shortcut opens its local Setup screen.</p></li>
+        <li><h3>Select vaults and access</h3><p>Choose your Markdown folders, Twin profile, memory types and the actions allowed for each AI client.</p></li>
+        <li><h3>Connect and check</h3><p>Connect each supported client, follow its reload instructions, then confirm BrainLink tools appear before using them.</p></li>
       </ol>
     </div>
   </section>
@@ -170,14 +164,12 @@ footer .wrap { padding-block: 28px 44px; color: var(--muted); font-size: 14px; d
   <section>
     <div class="wrap">
       <div class="head">
-        <span class="eyebrow">Plans</span>
-        <h2>Buy once for yourself, or set up your whole team</h2>
+        <span class="eyebrow">Product status</span>
+        <h2>Development preview</h2>
       </div>
-      <div class="plans">
-        <div class="plan"><h3>Free</h3><div class="price">US$0</div><ul><li>1 vault</li><li>Search and read</li><li>2 AI apps</li></ul></div>
-        <div class="plan pick"><span class="tag">Most popular</span><h3>Personal</h3><div class="price">US$79 <small>one-time</small></div><ul><li>Unlimited vaults and AI apps</li><li>Agents and close-loop captures</li><li>Safe writes and inter-AI handoffs</li><li>2 devices, 1 year of updates</li></ul></div>
-        <div class="plan"><h3>Team</h3><div class="price">US$12 <small>/ user / month</small></div><ul><li>Everything in Personal</li><li>Shared-folder team setup</li><li>Team rule pack</li><li>Priority support (min. 3 users)</li></ul></div>
-        <div class="plan"><h3>Iango Setup</h3><div class="price">NT$15,000 <small>from</small></div><ul><li>Iango designs your vault, agents and rules</li><li>Connects your team's AIs</li><li>Training session</li></ul></div>
+      <div class="product-status">
+        <b>The current development build has no trial countdown or licence gate.</b>
+        <p>Pricing, paid plans and a commercial release date have not been announced. The development build is not a signed commercial release; supported clients and operating systems still require the validation described in the project status record.</p>
       </div>
     </div>
   </section>
@@ -185,12 +177,12 @@ footer .wrap { padding-block: 28px 44px; color: var(--muted); font-size: 14px; d
   <section>
     <div class="wrap">
       <div class="facts">
-        <div><b>Platforms</b><span>macOS 11 or later (Apple silicon and Intel) and Linux (Ubuntu, Debian, Fedora; x64 and ARM). Windows 10 and 11 are coming soon.</span></div>
-        <div><b>Works with</b><span>Any app that supports the Model Context Protocol (MCP), over local stdio or token-protected local HTTP.</span></div>
-        <div><b>Your files</b><span>Plain Markdown in a folder you choose, including Obsidian vaults synced with iCloud, Google Drive or Dropbox.</span></div>
+        <div><b>Build targets</b><span>Windows, macOS and Linux packages are maintained. Package signing and complete install acceptance across operating systems are still release work.</span></div>
+        <div><b>Connections</b><span>Supported clients connect through local MCP. Remote access requires a separately configured secure HTTPS relay; local access does not make a remote AI reachable.</span></div>
+        <div><b>Your files</b><span>Markdown files stay in folders you choose. A cloud drive may store those files under its own service terms, and AI providers may receive retrieved context.</span></div>
       </div>
     </div>
   </section>
 </main>
 
-<footer><div class="wrap"><span>BrainLink MCP 1.1 · Iango</span><span>Ask Iango for a 15-minute demo with your own vault.</span></div></footer>
+<footer><div class="wrap"><span>BrainLink · Iango Product Preview</span><span>Capabilities and commercial terms are still under development.</span></div></footer>

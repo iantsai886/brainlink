@@ -400,9 +400,19 @@ export function startSnapshotWatcher(ctx, cfg, env = process.env, opts = {}) {
   const intervalMs = opts.intervalMs ?? 15 * 60 * 1000;
   const onResult = opts.onResult || (() => {});
   let debounceTimer = null;
+  let initializing = true;
+  let stopped = false;
   const runOnce = () => writeSnapshotOnce(ctx, cfg, env).catch((e) => ({ ok: false, error: e.message || String(e) }));
-  const runAndReport = async () => onResult(await runOnce());
-  const ready = runOnce().then(async (r) => { await onResult(r); return r; });
+  const runAndReport = async () => {
+    if (initializing || stopped) return;
+    const result = await runOnce();
+    if (!stopped) await onResult(result);
+  };
+  const ready = runOnce().then(async (r) => {
+    if (!stopped) await onResult(r);
+    initializing = false;
+    return r;
+  });
   const intervalId = setInterval(runAndReport, intervalMs);
   intervalId.unref?.();
   const watchers = [];
@@ -410,7 +420,13 @@ export function startSnapshotWatcher(ctx, cfg, env = process.env, opts = {}) {
     const v = ctx.byName.get(name);
     if (v.private) continue;
     try {
-      const w = watch(v.path, { recursive: true }, () => { clearTimeout(debounceTimer); debounceTimer = setTimeout(runAndReport, debounceMs); });
+      const w = watch(v.path, { recursive: true }, () => {
+        // Building the first snapshot can itself cause index/setup writes in some vaults.
+        // The initial pass already includes that state; don't schedule a duplicate sync for it.
+        if (initializing || stopped) return;
+        clearTimeout(debounceTimer);
+        debounceTimer = setTimeout(runAndReport, debounceMs);
+      });
       w.on('error', () => {});
       watchers.push(w);
     } catch {}
@@ -418,6 +434,7 @@ export function startSnapshotWatcher(ctx, cfg, env = process.env, opts = {}) {
   return {
     ready,
     stop() {
+      stopped = true;
       clearTimeout(debounceTimer);
       clearInterval(intervalId);
       for (const w of watchers) { try { w.close(); } catch {} }

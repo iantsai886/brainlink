@@ -1,0 +1,167 @@
+{
+  "schema": 2,
+  "vault": "RSI Fictional",
+  "topK": 5,
+  "cases": [
+    {
+      "id": "fictional-01",
+      "query": "fictional-marker-01",
+      "answerable": true,
+      "expected": [
+        "Fictional Topic 01.md"
+      ]
+    },
+    {
+      "id": "fictional-02",
+      "query": "fictional-marker-02",
+      "answerable": true,
+      "expected": [
+        "Fictional Topic 02.md"
+      ]
+    },
+    {
+      "id": "fictional-03",
+      "query": "fictional-marker-03",
+      "answerable": true,
+      "expected": [
+        "Fictional Topic 03.md"
+      ]
+    },
+    {
+      "id": "fictional-04",
+      "query": "fictional-marker-04",
+      "answerable": true,
+      "expected": [
+        "Fictional Topic 04.md"
+      ]
+    },
+    {
+      "id": "fictional-05",
+      "query": "fictional-marker-05",
+      "answerable": true,
+      "expected": [
+        "Fictional Topic 05.md"
+      ]
+    },
+    {
+      "id": "fictional-06",
+      "query": "fictional-marker-06",
+      "answerable": true,
+      "expected": [
+        "Fictional Topic 06.md"
+      ]
+    },
+    {
+      "id": "fictional-07",
+      "query": "fictional-marker-07",
+      "answerable": true,
+      "expected": [
+        "Fictional Topic 07.md"
+      ]
+    },
+    {
+      "id": "fictional-08",
+      "query": "fictional-marker-08",
+      "answerable": true,
+      "expected": [
+        "Fictional Topic 08.md"
+      ]
+    },
+    {
+      "id": "fictional-09",
+      "query": "fictional-marker-09",
+      "answerable": true,
+      "expected": [
+        "Fictional Topic 09.md"
+      ]
+    },
+    {
+      "id": "fictional-10",
+      "query": "fictional-marker-10",
+      "answerable": true,
+      "expected": [
+        "Fictional Topic 10.md"
+      ]
+    },
+    {
+      "id": "fictional-11",
+      "query": "fictional-marker-11",
+      "answerable": true,
+      "expected": [
+        "Fictional Topic 11.md"
+      ]
+    },
+    {
+      "id": "fictional-12",
+      "query": "fictional-marker-12",
+      "answerable": true,
+      "expected": [
+        "Fictional Topic 12.md"
+      ]
+    },
+    {
+      "id": "fictional-13",
+      "query": "fictional-marker-13",
+      "answerable": true,
+      "expected": [
+        "Fictional Topic 13.md"
+      ]
+    },
+    {
+      "id": "fictional-14",
+      "query": "fictional-marker-14",
+      "answerable": true,
+      "expected": [
+        "Fictional Topic 14.md"
+      ]
+    },
+    {
+      "id": "fictional-15",
+      "query": "fictional-marker-15",
+      "answerable": true,
+      "expected": [
+        "Fictional Topic 15.md"
+      ]
+    },
+    {
+      "id": "fictional-16",
+      "query": "fictional-marker-16",
+      "answerable": true,
+      "expected": [
+        "Fictional Topic 16.md"
+      ]
+    },
+    {
+      "id": "fictional-17",
+      "query": "fictional-marker-17",
+      "answerable": true,
+      "expected": [
+        "Fictional Topic 17.md"
+      ]
+    },
+    {
+      "id": "fictional-18",
+      "query": "fictional-marker-18",
+      "answerable": true,
+      "expected": [
+        "Fictional Topic 18.md"
+      ]
+    },
+    {
+      "id": "fictional-19",
+      "query": "fictional-marker-19",
+      "answerable": true,
+      "expected": [
+        "Fictional Topic 19.md"
+      ]
+    },
+    {
+      "id": "fictional-20",
+      "query": "fictional-marker-20",
+      "answerable": true,
+      "expected": [
+        "Fictional Topic 20.md"
+      ]
+    }
+  ]
+}

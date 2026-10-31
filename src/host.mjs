@@ -8,19 +8,25 @@ import { launchSpec } from './runtime.mjs';
 import { loadConfig, saveConfig } from './config.mjs';
 import { syncSettings, suggestFolders, validateSync, chooseSync } from './sync/settings.mjs';
 import { createFolderStore } from './store/folder-store.mjs';
-import { openSessionStore, importAll } from './sessions/index.mjs';
+import { openSessionStore, createSessionRefresher } from './sessions/index.mjs';
 import { sessionList, sessionRead } from './sessions/mcp.mjs';
 
 export { CLIENTS };
 
 // Cross-session reads over the local session store (src/sessions/*): list, read-summary, privacy
-// toggle. One instance per host lifetime so the first call's import (Claude Code + Codex history)
-// is memoized instead of re-walking those files on every list/read.
-export function sessionsService(env) {
+// toggle. Import incrementally, with a fast refresh method for an explicit session review.
+export function sessionsService(env, home) {
+  // Setup's explicit home is also the boundary for session import. Without this fallback,
+  // a test or secondary BrainLink profile that supplies an isolated home but no HOME variable
+  // can silently scan the OS user's real Claude/Codex history.
+  const sessionEnv = env.HOME ? env : { ...env, HOME: home || env.USERPROFILE || homedir() };
   let ready = null;
-  const store = () => ready ||= openSessionStore(env).then(async (s) => { await importAll({ store: s, env }); return s; });
+  const store = () => ready ||= openSessionStore(sessionEnv);
+  const refresh = createSessionRefresher({ getStore: store, env: sessionEnv });
   return {
-    list: async (a = {}) => sessionList(await store(), a),
+    store,
+    refresh: () => refresh({ force: true }),
+    list: async (a = {}) => sessionList(await refresh(), a),
     read: async (a = {}) => sessionRead(await store(), a),
     async setPrivate(id, isPrivate) { const r = await (await store()).setSessionPrivate(id, Boolean(isPrivate)); return { id: r.id, private: r.private }; },
   };
@@ -55,7 +61,7 @@ function settingsService({ env, configFile }) {
 
 function services({ env, os, home, configFile }) {
   const clientOpts = () => ({ home, os, env, launch: launchSpec(env) });
-  return { connectors: connectorService(clientOpts), settings: settingsService({ env, configFile }), sessions: sessionsService(env) };
+  return { connectors: connectorService(clientOpts), settings: settingsService({ env, configFile }), sessions: sessionsService(env, home) };
 }
 
 // The real host: store backed by every vault in config.json.

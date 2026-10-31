@@ -1,0 +1,28 @@
+{
+  "schema": 1,
+  "vault": "Acme Eval",
+  "topK": 1,
+  "cases": [
+    { "id": "goal-positioning", "query": "What kind of businesses does Acme serve?", "queries": ["Acme target customer sectors"], "expected": ["Strategy 2027.md"], "forbidden": ["Private/Acquisition Budget.md"] },
+    { "id": "goal-recurring", "query": "How many care plan clients should Acme reach?", "queries": ["recurring care plan growth target"], "expected": ["Strategy 2027.md"] },
+    { "id": "goal-margin", "query": "What minimum gross margin should projects keep?", "queries": ["project profitability floor"], "expected": ["Strategy 2027.md"] },
+    { "id": "goal-fixed-offer", "query": "Which service should become a fixed price package?", "queries": ["productize a repeatable offer"], "expected": ["Strategy 2027.md"] },
+    { "id": "brand-sprint-price", "query": "How much is the Brand Sprint and how long does it take?", "queries": ["fixed fee two week brand identity engagement"], "expected": ["Pricing and Packages.md"] },
+    { "id": "brand-sprint-deliverables", "query": "What is included in the Brand Sprint?", "queries": ["logo palette typography and voice guide"], "expected": ["Pricing and Packages.md"] },
+    { "id": "launch-site-price", "query": "What does a Launch Site cost?", "queries": ["website package starting price"], "expected": ["Pricing and Packages.md"] },
+    { "id": "launch-site-scope", "query": "How many pages can the Launch Site include?", "queries": ["maximum page count and CMS analytics"], "expected": ["Pricing and Packages.md"] },
+    { "id": "care-plan-price", "query": "What is the monthly Care Plan fee?", "queries": ["recurring support subscription cost"], "expected": ["Pricing and Packages.md"] },
+    { "id": "care-plan-scope", "query": "What work comes with a Care Plan?", "queries": ["hosting updates hours of changes monthly report"], "expected": ["Pricing and Packages.md"] },
+    { "id": "discount-approval", "query": "When does a discount need the founder's approval?", "queries": ["discount approval threshold"], "expected": ["Pricing and Packages.md"] },
+    { "id": "northwind-faq", "query": "What content is still needed for the Northwind subscription page?", "queries": ["who will write subscription FAQ copy"], "expected": ["Projects/Northwind Launch Site.md"], "forbidden": ["Private/Acquisition Budget.md"] },
+    { "id": "northwind-photo", "query": "What is the open photography issue on Northwind's site?", "queries": ["photo delivery date is not confirmed"], "expected": ["Projects/Northwind Launch Site.md", "Chief of Staff Office/Current Goal.md"], "forbidden": ["Private/Acquisition Budget.md"] },
+    { "id": "northwind-build-week", "query": "Which week is the Northwind site build in?", "queries": ["current website project phase"], "expected": ["Projects/Northwind Launch Site.md"] },
+    { "id": "northwind-business", "query": "How many locations does Northwind Coffee have?", "queries": ["Northwind customer company profile"], "expected": ["Clients/Northwind Coffee.md"], "forbidden": ["Private/Acquisition Budget.md"] },
+    { "id": "northwind-phase-two", "query": "Which integration is planned for phase two for Northwind?", "queries": ["later Shopify subscription integration"], "expected": ["Clients/Northwind Coffee.md"] },
+    { "id": "clinic-requirement", "query": "What accessibility standard must the clinic website meet?", "queries": ["Blue Harbor WCAG requirement"], "expected": ["Clients/Blue Harbor Clinic.md"], "forbidden": ["Private/Acquisition Budget.md"] },
+    { "id": "clinic-timeline", "query": "How long is the Blue Harbor Launch Site timeline?", "queries": ["clinic website delivery schedule"], "expected": ["Clients/Blue Harbor Clinic.md"], "forbidden": ["Private/Acquisition Budget.md"] },
+    { "id": "clinic-vendor", "query": "Which system still needs a decision for Blue Harbor?", "queries": ["online booking vendor selection"], "expected": ["Clients/Blue Harbor Clinic.md"] },
+    { "id": "delivery-weekly", "query": "What is the client communication rhythm for a project?", "queries": ["weekly plan check-in and demo cadence"], "expected": ["Playbooks/Project Delivery Playbook.md"] },
+    { "id": "delivery-quality", "query": "What checks must happen before a website launches?", "queries": ["launch quality gates accessibility performance signoff"], "expected": ["Playbooks/Project Delivery Playbook.md"] }
+  ]
+}

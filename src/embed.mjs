@@ -80,6 +80,10 @@ export const chunkText = (note, c) => `${note.title}${c.heading ? ' › ' + c.he
 // Embed chunks that have no vector yet, up to `budget` per call. Returns how many are done.
 export async function fillVectors(emb, store, index, budget = 256) {
   await store.load();
+  // Old builds could have embedded private notes before the output filter ran. Keep only keys
+  // belonging to the current permission-filtered index, even when no new embedding is needed.
+  const visibleKeys = new Set(index.chunks.map((c) => c.vkey ||= chunkKey(chunkText(index.notes[c.noteIdx], c))));
+  for (const key of store.vectors.keys()) if (!visibleKeys.has(key)) { store.vectors.delete(key); store.dirty = true; }
   const missing = [], queued = new Set();
   for (const c of index.chunks) {
     c.vkey ||= chunkKey(chunkText(index.notes[c.noteIdx], c));
@@ -92,7 +96,7 @@ export async function fillVectors(emb, store, index, budget = 256) {
     batch.forEach((c, k) => store.vectors.set(c.vkey, vecs[k]));
     store.dirty = true;
   }
-  if (missing.length) await store.save();
+  if (store.dirty) await store.save();
   const total = index.chunks.length;
   const ready = index.chunks.filter((c) => store.vectors.has(c.vkey)).length;
   return { ready, total };

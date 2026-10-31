@@ -1,0 +1,341 @@
+import test from 'node:test';
+import assert from 'node:assert/strict';
+import { mkdtemp, mkdir, writeFile, readFile } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import path from 'node:path';
+import { normalize } from '../src/config.mjs';
+import { createContext, loadVault } from '../src/core.mjs';
+import { buildGraph3D, noteDetail3D } from '../src/graph3d.mjs';
+import { deriveTypedRelations, deriveRejectedTypedRelations, discoverTypedRelationshipCandidates, discoverTypedRelationshipCandidatesForSources, appendTypedRelationProposal, approveTypedRelation, rejectTypedRelation, reopenTypedRelation, typedGraphHealth } from '../src/typed-graph.mjs';
+import { proposeNote } from '../src/writes.mjs';
+import { createMcp } from '../src/server.mjs';
+
+const temp = (name) => mkdtemp(path.join(tmpdir(), `brainlink-typed-graph-${name}-`));
+const entity = ({ type, id, scope = 'organisation', body = '', relations = '', extra = '' }) => `---\ntype: ${type}\nid: ${id}\nscope: ${scope}\nstatus: current\n${extra}${relations ? `relations:\n${relations}` : ''}---\n# ${id}\n${body}`;
+
+test('typed graph health returns structural counts only and excludes private or generated notes', () => {
+  const notes = [
+    { rel: 'Team.md', raw: entity({ type: 'team', id: 'team.product', relations: '  - predicate: runs\n    target: workflow.triage\n    review: verified\n    source: "Approved process map"\n    confidence: 0.9\n' }) },
+    { rel: 'Workflow.md', raw: entity({ type: 'workflow', id: 'workflow.triage', relations: '  - predicate: consumes\n    target: dataset.missing\n    review: proposed\n    source: "Approved process map"\n    confidence: 0.8\n' }) },
+    { rel: 'Project.md', raw: entity({ type: 'project', id: 'project.alpha', relations: '  - predicate: informed_by\n    target: dataset.alpha\n    review: proposed\n    source: "Approved project brief"\n    confidence: 0.8\n' }) },
+    { rel: 'Dataset.md', raw: entity({ type: 'dataset', id: 'dataset.alpha' }) },
+    { rel: 'Duplicate A.md', raw: entity({ type: 'concept', id: 'concept.duplicate' }) },
+    { rel: 'Duplicate B.md', raw: entity({ type: 'concept', id: 'concept.duplicate' }) },
+    { rel: 'Private.md', private: true, raw: entity({ type: 'team', id: 'team.private', relations: '  - predicate: runs\n    target: team.product\n    review: verified\n    source: PRIVATE_CANARY\n    confidence: 0.9\n' }) },
+    { rel: 'Generated.md', generated: true, raw: entity({ type: 'team', id: 'team.generated' }) },
+  ];
+  const health = typedGraphHealth(notes);
+  assert.deepEqual(health, {
+    typed_entity_count: 6,
+    verified_typed_relation_count: 1,
+    proposed_typed_relation_count: 1,
+    unresolved_typed_relation_count: 1,
+    duplicate_typed_id_count: 1,
+  });
+  assert.doesNotMatch(JSON.stringify(health), /PRIVATE_CANARY|team\.private|dataset\.missing|Team\.md/);
+});
+
+async function context(vaults) {
+  const config = normalize({ vaults: await Promise.all(vaults.map(async ({ name, path: p, private: isPrivate = false }) => {
+    await mkdir(p, { recursive: true });
+    return { name, path: p, private: isPrivate };
+  })) });
+  return createContext(config, { env: { BRAINLINK_SEMANTIC: '0' } });
+}
+
+test('typed relationships resolve by stable ID and appear in graph links and note details', async () => {
+  const dir = await temp('valid');
+  await writeFile(path.join(dir, 'Product Team.md'), entity({ type: 'team', id: 'team.product', body: 'Product group.' }));
+  await writeFile(path.join(dir, 'Collect Questions.md'), entity({
+    type: 'workflow', id: 'workflow.collect-questions',
+    relations: '  - predicate: owned_by\n    target: team.product\n    review: verified\n    source: "Operations handbook, section 2"\n    confidence: 0.96\n',
+    body: 'A workflow that collects questions.'
+  }));
+  const ctx = await context([{ name: 'Company', path: dir }]);
+  const toolSchema = createMcp(ctx).tools.find((tool) => tool.name === 'propose_note').inputSchema.properties;
+  assert.ok(toolSchema.relations.items.properties.predicate.enum.includes('owned_by'));
+  assert.ok(toolSchema.relations.items.properties.predicate.enum.includes('communicates_with'));
+  assert.match(toolSchema.relations.description, /review=proposed/);
+  const graph = await buildGraph3D(ctx, 'Company');
+  const workflow = graph.nodes.find((n) => n.entity_id === 'workflow.collect-questions');
+  const team = graph.nodes.find((n) => n.entity_id === 'team.product');
+  assert.equal(workflow.type, 'workflow');
+  assert.ok(graph.links.some((l) => l.source === workflow.id && l.target === team.id && l.predicate === 'owned_by'));
+  const index = await loadVault(ctx, 'Company');
+  assert.ok(index.outlinks[index.byRel.get('Collect Questions.md')].has(index.byRel.get('Product Team.md')), 'typed relationships feed existing graph-aware retrieval');
+  const detail = await noteDetail3D(ctx, 'Company', 'Collect Questions.md');
+  assert.deepEqual(detail.relationships.map((r) => ({ direction: r.direction, predicate: r.predicate, target: r.note.title })), [
+    { direction: 'outgoing', predicate: 'owned_by', target: 'Product Team' },
+  ]);
+  assert.equal(detail.relationships[0].evidence, 'Operations handbook, section 2');
+});
+
+test('rejecting a proposed relationship preserves source evidence and does not verify the edge', () => {
+  const raw = `---\ntype: team\nid: team.product\nscope: organisation\nstatus: proposed\nrelations:\n  - predicate: runs\n    target: workflow.collect\n    review: proposed\n    source: "Operations handbook section 2"\n    confidence: 0.8\n---\n# Product team\n`;
+  const rejected = rejectTypedRelation(raw, 0);
+  assert.match(rejected, /^status: proposed$/m, 'rejecting a link does not promote its record');
+  assert.match(rejected, /^    review: rejected$/m);
+  assert.match(rejected, /^    source: "Operations handbook section 2"$/m);
+  assert.deepEqual(deriveTypedRelations([{ rel: 'Workflow.md', raw: rejected }]), []);
+  const notes = [{ rel: 'Team.md', raw: rejected }, { rel: 'Workflow.md', raw: entity({ type: 'workflow', id: 'workflow.collect' }) }];
+  assert.equal(deriveRejectedTypedRelations(notes).length, 1);
+  assert.match(reopenTypedRelation(rejected, 0, 'rejected'), /^    review: proposed$/m);
+  assert.throws(() => rejectTypedRelation(rejected, 0), /no longer awaiting review/i);
+});
+
+test('reopening an approved relationship returns it to proposal state and preserves evidence', () => {
+  const raw = `---\ntype: team\nid: team.product\nscope: organisation\nstatus: proposed\nrelations:\n  - predicate: runs\n    target: workflow.collect\n    review: proposed\n    source: "Operations handbook section 2"\n    confidence: 0.8\n---\n# Product team\n`;
+  const approved = approveTypedRelation(raw, 0);
+  const reopened = reopenTypedRelation(approved, 0);
+  assert.match(reopened, /^status: current$/m, 'undoing an edge does not demote the already approved record');
+  assert.match(reopened, /^    review: proposed$/m);
+  assert.match(reopened, /^    source: "Operations handbook section 2"$/m);
+  assert.deepEqual(deriveTypedRelations([{ rel: 'Workflow.md', raw: reopened }]), []);
+  assert.throws(() => reopenTypedRelation(reopened, 0), /no longer awaiting review/i);
+});
+
+test('reopening a rejected relation explicitly changes only its review marker', () => {
+  const raw = `---\ntype: team\nid: team.product\nscope: organisation\nstatus: current\nrelations:\n  - predicate: runs\n    target: workflow.collect\n    review: rejected\n    source: "Operations handbook section 2"\n    confidence: 0.8\n---\n# Product team\n`;
+  const reopened = reopenTypedRelation(raw, 0, 'rejected');
+  assert.match(reopened, /^status: current$/m);
+  assert.match(reopened, /^    review: proposed$/m);
+  assert.match(reopened, /^    source: "Operations handbook section 2"$/m);
+});
+
+test('typed graph relationship suggestions are saved as proposed and become edges only after explicit review', async () => {
+  const dir = await temp('relationship-proposal');
+  await mkdir(path.join(dir, 'Inbox'), { recursive: true });
+  await writeFile(path.join(dir, 'Product Team.md'), entity({ type: 'team', id: 'team.product', body: 'The product team.' }));
+  const ctx = await context([{ name: 'Company', path: dir }]);
+  const result = await proposeNote(ctx, {
+    vault: 'Company', folder: 'Inbox', title: 'Collect questions', type: 'workflow',
+    status: 'current', entity_id: 'workflow.collect-questions', entity_scope: 'organisation',
+    body: 'Collects incoming support questions.', source: 'Operations handbook', confirm: true,
+    ai_platform: 'ChatGPT', agent_or_role: 'test', session_or_task_id: 'typed-graph-test',
+    relations: [{ predicate: 'owned_by', target: 'team.product', source: '"The product team owns question collection"', confidence: 0.92 }],
+  }, new Date('2026-10-26T12:00:00Z'));
+  assert.equal(result.written, true, JSON.stringify(result));
+  const notePath = path.join(dir, 'Inbox/2026-10-26 — Collect questions.md');
+  let saved = await readFile(notePath, 'utf8');
+  assert.match(saved, /^status: proposed$/m, 'caller cannot make a generated entity current at creation');
+  assert.match(saved, /^id: workflow\.collect-questions$/m);
+  assert.match(saved, /^scope: organisation$/m);
+  assert.match(saved, /^    review: proposed$/m, 'suggested edges are never marked verified by the AI');
+  assert.match(saved, /^    source: "\\"The product team owns question collection\\""$/m);
+  const unreviewed = await buildGraph3D(ctx, 'Company');
+  assert.ok(!unreviewed.links.some((link) => link.predicate === 'owned_by'));
+
+  saved = saved.replace(/^status: proposed$/m, 'status: current').replace(/^    review: proposed$/m, '    review: verified');
+  await writeFile(notePath, saved);
+  const reviewedCtx = await context([{ name: 'Company', path: dir }]);
+  const reviewed = await buildGraph3D(reviewedCtx, 'Company');
+  assert.ok(reviewed.links.some((link) => link.predicate === 'owned_by'), 'explicitly reviewed relation enters the typed graph');
+});
+
+test('proposed relationship list shows only valid same-scope candidates targeting current visible entities', async () => {
+  const notes = [
+    { rel: 'Target.md', raw: entity({ type: 'workflow', id: 'workflow.target' }) },
+    { rel: 'Proposal.md', raw: `---\ntype: team\nid: team.proposal\nscope: organisation\nstatus: proposed\nrelations:\n  - predicate: runs\n    target: workflow.target\n    review: proposed\n    source: "Team workflow map"\n    confidence: 0.8\n---\n# Proposal\n` },
+    { rel: 'Private.md', private: true, raw: entity({ type: 'team', id: 'team.private' }) },
+    { rel: 'BadTarget.md', raw: entity({ type: 'workflow', id: 'workflow.bad', relations: '  - predicate: runs\n    target: team.private\n    review: proposed\n    source: private\n    confidence: 0.9\n' }) },
+  ];
+  const { deriveProposedTypedRelations } = await import('../src/typed-graph.mjs');
+  assert.deepEqual(deriveProposedTypedRelations(notes).map(({ source, target, relation_index, predicate }) => [source, target, relation_index, predicate]), [[1, 0, 0, 'runs']]);
+});
+
+test('typed relation source and target types follow the workflow model at discovery, review, and graph materialization', async () => {
+  const notes = [
+    { rel: 'Product Team.md', title: 'Product Team', body: 'Product Team runs Slack Questions workflow, which consumes Ticket Data and produces Answers.', raw: entity({ type: 'team', id: 'team.product' }) },
+    { rel: 'Slack Questions workflow.md', title: 'Slack Questions workflow', body: 'Slack Questions workflow consumes Ticket Data and produces Answers.', raw: entity({ type: 'workflow', id: 'workflow.slack-questions' }) },
+    { rel: 'Ticket Data.md', title: 'Ticket Data', body: '', raw: entity({ type: 'dataset', id: 'dataset.tickets' }) },
+    { rel: 'Answers.md', title: 'Answers', body: '', raw: entity({ type: 'artifact', id: 'artifact.answers' }) },
+  ];
+  const teamCandidates = discoverTypedRelationshipCandidates(notes, 0);
+  assert.deepEqual(teamCandidates.map(({ predicate, target_id }) => [predicate, target_id]), [['runs', 'workflow.slack-questions']], 'team prose cannot attribute workflow inputs or outputs to the team');
+  const workflowCandidates = discoverTypedRelationshipCandidates(notes, 1);
+  assert.deepEqual(workflowCandidates.map(({ predicate, target_id }) => [predicate, target_id]), [
+    ['consumes', 'dataset.tickets'], ['produces', 'artifact.answers'],
+  ]);
+
+  const malformed = notes.map((note) => ({ ...note }));
+  malformed[0].raw = entity({ type: 'team', id: 'team.product', relations: '  - predicate: consumes\n    target: dataset.tickets\n    review: verified\n    source: invalid subject\n    confidence: 0.9\n' });
+  assert.deepEqual(deriveTypedRelations(malformed), [], 'a reviewed but semantically invalid edge is not materialized');
+  const { deriveProposedTypedRelations } = await import('../src/typed-graph.mjs');
+  malformed[0].raw = entity({ type: 'team', id: 'team.product', status: 'proposed', relations: '  - predicate: consumes\n    target: dataset.tickets\n    review: proposed\n    source: invalid subject\n    confidence: 0.9\n' });
+  assert.deepEqual(deriveProposedTypedRelations(malformed), [], 'invalid proposals are not shown in the review queue');
+  assert.throws(() => appendTypedRelationProposal(notes[0].raw, { predicate: 'consumes', target_id: 'dataset.tickets', evidence: 'Team consumes tickets', confidence: 0.5 }), /cannot receive this kind/i);
+});
+
+test('deterministic relationship discovery proposes only explicit same-scope text patterns', () => {
+  const notes = [
+    { rel: 'Workflow.md', title: 'Question workflow', body: 'Consumes [[Question data]] every morning. May mention Client secret dataset.', raw: '---\ntype: workflow\nid: workflow.questions\nscope: organisation\nstatus: current\n---\n' },
+    { rel: 'Question data.md', title: 'Question data', body: 'Approved sample.', raw: '---\ntype: dataset\nid: dataset.questions\nscope: organisation\nstatus: current\n---\n' },
+    { rel: 'Client secret dataset.md', title: 'Client secret dataset', body: 'private fixture', private: true, raw: '---\ntype: dataset\nid: dataset.secret\nscope: organisation\nstatus: current\n---\n' },
+    { rel: 'Other dataset.md', title: 'Other dataset', body: '', raw: '---\ntype: dataset\nid: dataset.other\nscope: client\nstatus: current\n---\n' },
+  ];
+  const candidates = discoverTypedRelationshipCandidates(notes, 0);
+  assert.deepEqual(candidates.map(({ predicate, target_id, evidence }) => [predicate, target_id, evidence]), [['consumes', 'dataset.questions', 'Consumes [[Question data]] every morning.']]);
+  assert.deepEqual(discoverTypedRelationshipCandidatesForSources(notes, [0]).get(0), candidates, 'batch discovery must preserve single-source results');
+});
+
+test('relationship discovery does not turn membership phrases into ownership edges', () => {
+  const notes = [
+    { rel: 'Product Team.md', title: 'Product Team', body: 'Product Team belongs to Operations.', raw: entity({ type: 'team', id: 'team.product' }) },
+    { rel: 'Operations.md', title: 'Operations', body: '', raw: entity({ type: 'team', id: 'team.operations' }) },
+    { rel: 'Intake Workflow.md', title: 'Intake Workflow', body: 'The intake workflow is owned by Product Team.', raw: entity({ type: 'workflow', id: 'workflow.intake' }) },
+  ];
+  const links = discoverTypedRelationshipCandidates(notes, 0);
+  assert.deepEqual(links.map(({ predicate, target_id, evidence }) => [predicate, target_id, evidence]), [
+    ['part_of', 'team.operations', 'Product Team belongs to Operations.'],
+  ]);
+  const workflowLinks = discoverTypedRelationshipCandidates(notes, 2);
+  assert.deepEqual(workflowLinks.map(({ predicate, target_id, evidence }) => [predicate, target_id, evidence]), [
+    ['owned_by', 'team.product', 'The intake workflow is owned by Product Team.'],
+  ]);
+});
+
+test('relationship discovery classifies Portuguese membership separately from ownership', () => {
+  const notes = [
+    { rel: 'Equipe A.md', title: 'Equipe A', body: 'Equipe A pertence a Operações.', raw: entity({ type: 'team', id: 'team.a' }) },
+    { rel: 'Operações.md', title: 'Operações', body: '', raw: entity({ type: 'team', id: 'team.ops' }) },
+  ];
+  assert.deepEqual(discoverTypedRelationshipCandidates(notes, 0).map(({ predicate, target_id }) => [predicate, target_id]), [['part_of', 'team.ops']]);
+});
+
+test('workflow graph suggests explicit team communication links without auto-verifying them', () => {
+  const notes = [
+    { rel: 'Product Team.md', title: 'Product Team', body: 'The Product Team coordinates with the Data Team to review incoming questions.', raw: '---\ntype: team\nid: team.product\nscope: organisation\nstatus: current\n---\n' },
+    { rel: 'Data Team.md', title: 'Data Team', body: '', raw: '---\ntype: team\nid: team.data\nscope: organisation\nstatus: current\n---\n' },
+  ];
+  const links = discoverTypedRelationshipCandidates(notes, 0);
+  assert.deepEqual(links.map(({ predicate, target_id, evidence }) => [predicate, target_id, evidence]), [
+    ['communicates_with', 'team.data', 'The Product Team coordinates with the Data Team to review incoming questions.'],
+  ]);
+  const proposed = appendTypedRelationProposal(notes[0].raw, { predicate: links[0].predicate, target_id: links[0].target_id, evidence: links[0].evidence, confidence: 0.5 });
+  assert.match(proposed, /^    review: proposed$/m);
+  assert.deepEqual(deriveTypedRelations([{ ...notes[0], raw: proposed }, notes[1]]), [], 'suggestion must be reviewed before becoming a graph edge');
+});
+
+test('typed relationship discovery recognizes explicit Portuguese and Chinese workflow sentences', () => {
+  const portuguese = [
+    { rel: 'Equipe de Produto.md', title: 'Equipe de Produto', body: 'A Equipe de Produto coordena com a Equipe de Dados durante a triagem.', raw: '---\ntype: team\nid: team.produto\nscope: organisation\nstatus: current\n---\n' },
+    { rel: 'Equipe de Dados.md', title: 'Equipe de Dados', body: '', raw: '---\ntype: team\nid: team.dados\nscope: organisation\nstatus: current\n---\n' },
+  ];
+  assert.deepEqual(discoverTypedRelationshipCandidates(portuguese, 0).map(({ predicate, target_id }) => [predicate, target_id]), [['communicates_with', 'team.dados']]);
+
+  const chinese = [
+    { rel: '問題工作流程.md', title: '問題工作流程', body: '問題工作流程使用問題資料來整理回覆。', raw: '---\ntype: workflow\nid: workflow.questions-zh\nscope: organisation\nstatus: current\n---\n' },
+    { rel: '問題資料.md', title: '問題資料', body: '', raw: '---\ntype: dataset\nid: dataset.questions-zh\nscope: organisation\nstatus: current\n---\n' },
+  ];
+  assert.deepEqual(discoverTypedRelationshipCandidates(chinese, 0).map(({ predicate, target_id }) => [predicate, target_id]), [['consumes', 'dataset.questions-zh']]);
+});
+
+test('automatic relationship candidates are saved as proposed YAML and never verified automatically', () => {
+  const raw = '---\ntype: workflow\nid: workflow.questions\nscope: organisation\nstatus: current\n---\n# Questions\n';
+  const saved = appendTypedRelationProposal(raw, { predicate: 'consumes', target_id: 'dataset.questions', evidence: 'Consumes Question data.', confidence: 0.72 });
+  assert.match(saved, /^status: current$/m);
+  assert.match(saved, /^    review: proposed$/m);
+  assert.match(saved, /^    source: "Consumes Question data\."$/m);
+  assert.match(saved, /^    confidence: 0\.72$/m);
+  assert.throws(() => appendTypedRelationProposal(saved, { predicate: 'consumes', target_id: 'dataset.questions', evidence: 'Consumes Question data.', confidence: 0.72 }), /already recorded/i);
+});
+
+test('relationship review accepts valid quoted YAML status markers without changing unrelated frontmatter', () => {
+  const raw = '---\ntype: workflow\nid: workflow.questions\nscope: organisation\nstatus: "proposed"\ncustom: keep\nrelations:\n  - predicate: consumes\n    target: dataset.questions\n    review: "proposed"\n    source: evidence\n    confidence: 0.8\n---\nBody\n';
+  const saved = approveTypedRelation(raw, 0);
+  assert.match(saved, /^status: current$/m);
+  assert.match(saved, /^custom: keep$/m);
+  assert.match(saved, /^    review: verified$/m);
+});
+
+test('typed relationship proposals reject invalid IDs, predicates, evidence and cross-profile scopes', async () => {
+  const dir = await temp('relationship-validation');
+  await mkdir(path.join(dir, 'Inbox'), { recursive: true });
+  await writeFile(path.join(dir, 'Questions Dataset.md'), entity({ type: 'dataset', id: 'dataset.questions' }));
+  const ctx = await context([{ name: 'Company', path: dir }]);
+  const base = { vault: 'Company', folder: 'Inbox', title: 'Workflow', type: 'workflow', entity_id: 'workflow.test', entity_scope: 'organisation', body: 'Do work.', source: 'test', confirm: true };
+  const invalid = await proposeNote(ctx, { ...base, relations: [{ predicate: 'invented', target: 'x', source: '', confidence: 2 }] });
+  assert.equal(invalid.ok, false);
+  assert.ok(invalid.errors.length >= 4);
+  ctx.twinScope = { mode: 'scoped', profile_id: 'client-1' , grants: [] };
+  const mismatch = await proposeNote(ctx, base);
+  assert.equal(mismatch.ok, false);
+  assert.match(mismatch.errors.join(' '), /match the active Twin profile/);
+  ctx.twinScope = null;
+  const wrongDomain = await proposeNote(ctx, { ...base, ai_platform: 'ChatGPT', type: 'team', entity_id: 'team.questions', relations: [
+    { predicate: 'consumes', target: 'dataset.questions', source: 'Team reads the dataset.', confidence: 0.8 },
+  ] });
+  assert.equal(wrongDomain.ok, false, 'a direct AI note proposal cannot bypass relationship type rules');
+  assert.match(wrongDomain.errors.join(' '), /relationship target/i);
+});
+
+test('typed relationship proposals cannot reveal private or cross-scope target IDs', async () => {
+  const dir = await temp('relationship-private-target');
+  await mkdir(path.join(dir, 'Inbox'), { recursive: true });
+  const privateId = 'dataset.private-canary';
+  await writeFile(path.join(dir, 'Private Dataset.md'), `---\nprivate: true\ntype: dataset\nid: ${privateId}\nscope: organisation\nstatus: current\n---\n# Private Dataset\nsecret\n`);
+  const ctx = await context([{ name: 'Company', path: dir }]);
+  const result = await proposeNote(ctx, {
+    vault: 'Company', folder: 'Inbox', title: 'Public workflow', type: 'workflow', entity_id: 'workflow.public',
+    entity_scope: 'organisation', body: 'A public workflow.', source: 'public source',
+    ai_platform: 'ChatGPT', agent_or_role: 'test', session_or_task_id: 'privacy-test',
+    relations: [{ predicate: 'consumes', target: privateId, source: 'public text', confidence: 0.9 }],
+  });
+  assert.equal(result.ok, false);
+  assert.match(result.errors.join(' '), /unique, current, visible typed record/);
+  assert.doesNotMatch(JSON.stringify(result), new RegExp(privateId));
+});
+
+test('only verified, allowlisted predicates with evidence, confidence and same-scope targets become edges', async () => {
+  const notes = [
+    { rel: 'A.md', raw: entity({ type: 'team', id: 'team.a', body: '' }) },
+    { rel: 'B.md', raw: entity({ type: 'workflow', id: 'workflow.b', relations: [
+      '  - predicate: runs\n    target: workflow.c\n    review: verified\n    source: evidence\n    confidence: 0.9\n',
+      '  - predicate: consumes\n    target: dataset.d\n    review: proposed\n    source: evidence\n    confidence: 0.9\n',
+      '  - predicate: invents\n    target: dataset.d\n    review: verified\n    source: evidence\n    confidence: 0.9\n',
+      '  - predicate: produces\n    target: dataset.d\n    review: verified\n    source: evidence\n    confidence: 2\n',
+      '  - predicate: owned_by\n    target: team.a\n    review: verified\n    source: evidence\n    confidence: 0.9\n',
+    ].join(''), scope: 'organisation' }) },
+    { rel: 'C.md', raw: entity({ type: 'workflow', id: 'workflow.c' }) },
+    { rel: 'D.md', raw: entity({ type: 'dataset', id: 'dataset.d', scope: 'client' }) },
+  ];
+  const relations = deriveTypedRelations(notes);
+  assert.deepEqual(relations.map((r) => [r.source, r.target, r.predicate]), [[1, 2, 'runs'], [1, 0, 'owned_by']]);
+});
+
+test('private, generated, duplicate-ID and cross-vault records cannot become typed endpoints', async () => {
+  const dir = await temp('privacy');
+  const privateSecretId = 'dataset.private-canary';
+  await writeFile(path.join(dir, 'Public.md'), entity({
+    type: 'team', id: 'team.public',
+    relations: `  - predicate: consumes\n    target: ${privateSecretId}\n    review: verified\n    source: public reference\n    confidence: 0.9\n`,
+    body: 'Visible team.'
+  }));
+  await writeFile(path.join(dir, 'Private.md'), `---\nprivate: true\ntype: dataset\nid: ${privateSecretId}\nscope: organisation\n---\nPRIVATE_TYPED_EDGE_CANARY_9921\n`);
+  await writeFile(path.join(dir, 'Duplicate.md'), entity({
+    type: 'team', id: 'team.public',
+    relations: '  - predicate: consumes\n    target: dataset.open\n    review: verified\n    source: duplicate ID should abstain\n    confidence: 0.9\n',
+  }));
+  await writeFile(path.join(dir, 'Open Dataset.md'), entity({ type: 'dataset', id: 'dataset.open' }));
+  await writeFile(path.join(dir, 'Generated.md'), entity({ type: 'dataset', id: 'dataset.generated', extra: 'generated_by: brainlink\n' }));
+  await writeFile(path.join(dir, 'Current Workflow.md'), entity({
+    type: 'workflow', id: 'workflow.public',
+    relations: '  - predicate: produces\n    target: dataset.generated\n    review: verified\n    source: generated record should not resolve\n    confidence: 0.9\n',
+  }));
+  const clientDir = await temp('separate-client');
+  await writeFile(path.join(clientDir, 'Client Workflow.md'), entity({
+    type: 'workflow', id: 'workflow.client',
+    relations: '  - predicate: owned_by\n    target: team.public\n    review: verified\n    source: client record\n    confidence: 0.9\n',
+  }));
+  const ctx = await context([{ name: 'Company', path: dir }, { name: 'Client', path: clientDir }]);
+  const graph = await buildGraph3D(ctx);
+  const detail = await noteDetail3D(ctx, 'Company', 'Public.md');
+  const generatedDetail = await noteDetail3D(ctx, 'Company', 'Current Workflow.md');
+  const clientDetail = await noteDetail3D(ctx, 'Client', 'Client Workflow.md');
+  assert.deepEqual(detail.relationships, []);
+  assert.deepEqual(generatedDetail.relationships, [], 'generated records cannot be relationship endpoints');
+  assert.deepEqual(clientDetail.relationships, [], 'a same-ID record in another vault cannot resolve as a cross-vault edge');
+  assert.ok(!graph.nodes.some((n) => n.entity_id === privateSecretId));
+  assert.ok(!graph.nodes.some((n) => n.entity_id === 'team.public'), 'duplicate entity IDs are not exposed as typed nodes');
+  assert.doesNotMatch(JSON.stringify({ graph, detail }), /PRIVATE_TYPED_EDGE_CANARY_9921|dataset\.private-canary/);
+});

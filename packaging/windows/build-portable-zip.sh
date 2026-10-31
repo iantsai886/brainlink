@@ -1,21 +1,20 @@
 #!/bin/bash
 # Today's quick Windows preview: no installer, no bundled Node (Ian's PC already has Node 24).
-# Mirrors the sibling-repo layout exactly (brainlink-src/ next to brainlink-store/) so
-# `npm install`'s "brainlink-store": "file:../brainlink-store" dependency resolves unmodified.
+# Uses the checked-in store package, so no sibling checkout is required.
 # Full installer path (bundled Node, NSIS) is packaging/windows/build-windows.sh, for later.
 set -euo pipefail
 HERE="$(cd "$(dirname "$0")" && pwd)"
 ROOT="$(cd "$HERE/../.." && pwd)"
-STORE_SRC="$(cd "$ROOT/../brainlink-store" && pwd)"
 VERSION="$(node -p "require('$ROOT/package.json').version")"
 WORK="$ROOT/build/windows-portable"
 DIST="$ROOT/dist"
 NAME="BrainLink-Preview-$VERSION"
 STAGE="$WORK/$NAME"
 
-rm -rf "$WORK" && mkdir -p "$STAGE/brainlink-src" "$STAGE/brainlink-store" "$DIST"
-cp -R "$ROOT/bin" "$ROOT/src" "$ROOT/ui" "$ROOT/samples" "$ROOT/docs" "$ROOT/package.json" "$ROOT/LICENSE.txt" "$ROOT/README.md" "$STAGE/brainlink-src/"
-cp "$STORE_SRC/memory-store.mjs" "$STORE_SRC/errors.mjs" "$STORE_SRC/interface.d.ts" "$STORE_SRC/contract-tests.mjs" "$STORE_SRC/package.json" "$STORE_SRC/README.md" "$STAGE/brainlink-store/"
+rm -rf "$WORK" && mkdir -p "$STAGE/brainlink-src/vendor" "$DIST"
+cp -R "$ROOT/bin" "$ROOT/src" "$ROOT/ui" "$ROOT/samples" "$ROOT/docs" "$ROOT/skills" "$ROOT/package.json" "$ROOT/LICENSE.txt" "$ROOT/README.md" "$STAGE/brainlink-src/"
+rm -rf "$STAGE/brainlink-src/ui/app/test"
+cp -R "$ROOT/vendor/brainlink-store" "$STAGE/brainlink-src/vendor/"
 
 cat > "$STAGE/GETTING-STARTED-WINDOWS.txt" <<'TXT'
 BrainLink -- Windows preview (unsigned, no installer yet)
@@ -23,7 +22,7 @@ BrainLink -- Windows preview (unsigned, no installer yet)
 You need Node 24 (or any Node 22+) already installed. Check with:  node -v
 
 1. Unzip this folder anywhere, e.g. Desktop\BrainLink-Preview.
-   Keep "brainlink-src" and "brainlink-store" side by side -- do not separate them.
+   The storage package is included inside "brainlink-src".
 2. Open a terminal (PowerShell or cmd) in the "brainlink-src" folder.
 3. Run:
      npm install

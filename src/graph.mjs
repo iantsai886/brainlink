@@ -156,7 +156,10 @@ export function suggestRelated(mine, termSets, df, { exclude = new Set(), eligib
   const scored = [];
   for (let j = 0; j < N; j++) {
     if (exclude.has(j) || !eligible(j)) continue;
-    const shared = [...mine].filter((t) => termSets[j].has(t) && (df.get(t) || 0) < Math.max(2, N * 0.5));
+    // For tiny vaults, a useful term can occur in both notes and still be distinctive: two
+    // occurrences are half of a four-note vault, but previously the strict `< 2` cutoff meant
+    // a two-note vault could never suggest anything. Keep the half-vault cap inclusive.
+    const shared = [...mine].filter((t) => termSets[j].has(t) && (df.get(t) || 0) <= Math.max(2, N * 0.5));
     if (shared.length < 2) continue;
     const score = shared.reduce((s, t) => s + idf(t), 0) / Math.sqrt(mine.size * termSets[j].size || 1);
     scored.push({ j, score, shared: shared.sort((a, b) => idf(b) - idf(a)).slice(0, 6) });

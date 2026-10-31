@@ -1,9 +1,10 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtemp, cp, readFile } from 'node:fs/promises';
+import { mkdtemp, cp, mkdir, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { zstdCompressSync } from 'node:zlib';
 
 import { normalize, CONFIG_SCHEMA_VERSION, loadConfig, saveConfig } from '../src/config.mjs';
 import { createContext } from '../src/core.mjs';
@@ -11,6 +12,7 @@ import { createMcp } from '../src/server.mjs';
 import { openSessionStore } from '../src/sessions/index.mjs';
 import { sessionList, sessionRead } from '../src/sessions/mcp.mjs';
 import { estTokens } from '../src/sessions/tokens.mjs';
+import { sessionsService } from '../src/host.mjs';
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const FIXTURES = path.join(ROOT, 'test', 'fixtures');
@@ -18,22 +20,37 @@ const tmp = (p) => mkdtemp(path.join(tmpdir(), `brainlink-${p}-`));
 
 async function mcpWithHome(extraEnv = {}) {
   const home = await tmp('sess-mcp');
-  const env = { BRAINLINK_HOME: home, BRAINLINK_AI_PLATFORM: 'Claude', BRAINLINK_SEMANTIC: '0', ...extraEnv };
+  const env = { BRAINLINK_HOME: home, HOME: home, BRAINLINK_AI_PLATFORM: 'Claude', BRAINLINK_SEMANTIC: '0', ...extraEnv };
   const ctx = createContext(normalize({}), { env });
   return { mcp: createMcp(ctx), ctx, env };
 }
 
-// Imported Claude Code / Codex history lives under the real OS home (~/.claude, ~/.codex — see
-// defaultRoot in src/sessions/claude-code.mjs / codex.mjs), not under BRAINLINK_HOME. A fake HOME
-// with the test fixtures copied in is the only way to exercise the real import path end to end.
+// Imported Claude Code / Codex / DeepSeek Harness history lives under the real OS home (see each
+// importer's defaultRoot), not under BRAINLINK_HOME. A fake HOME with synthetic data exercises the
+// import path without reading real client histories.
 async function withFakeHome(run) {
   const fakeHome = await tmp('fake-home');
   await cp(path.join(FIXTURES, 'claude-code', 'projects'), path.join(fakeHome, '.claude', 'projects'), { recursive: true });
   await cp(path.join(FIXTURES, 'codex', 'sessions'), path.join(fakeHome, '.codex', 'sessions'), { recursive: true });
   await cp(path.join(FIXTURES, 'codex', 'history.jsonl'), path.join(fakeHome, '.codex', 'history.jsonl'));
+  const dshDir = path.join(fakeHome, '.dsh', 'sessions', '--fictional-project--', 'fictional-session-id');
+  await mkdir(dshDir, { recursive: true });
+  const dshAt = Date.parse('2026-10-20T14:00:00.000Z');
+  const dshRecords = [
+    { type: 'session', version: 4, id: 'fictional-session-id', cwd: '/fictional/project', createdAt: dshAt, isSeeded: false },
+    { type: 'user/message', seq: 0, time: dshAt, data: { role: 'user', source: { kind: 'user' }, content: [{ type: 'text', text: 'Fictional DeepSeek Harness task.' }] } },
+    { type: 'assistant/message', seq: 1, time: dshAt + 1000, data: { message: { role: 'assistant', provider: 'fixture', model: 'fixture', content: [{ type: 'text', text: 'Fictional Harness task result.' }] } } },
+  ].map((row) => zstdCompressSync(Buffer.from(JSON.stringify(row) + '\n')));
+  await writeFile(path.join(dshDir, 'session.v4.jsonl.zstd'), Buffer.concat(dshRecords));
   const savedHome = process.env.HOME;
+  const savedDshHome = process.env.DSH_HOME;
   process.env.HOME = fakeHome;
-  try { return await run(fakeHome); } finally { process.env.HOME = savedHome; }
+  process.env.DSH_HOME = path.join(fakeHome, '.dsh');
+  try { return await run(fakeHome); } finally {
+    process.env.HOME = savedHome;
+    if (savedDshHome === undefined) delete process.env.DSH_HOME;
+    else process.env.DSH_HOME = savedDshHome;
+  }
 }
 
 async function call(mcp, name, args = {}) {
@@ -51,7 +68,7 @@ test('session_log creates a private-by-default session; session_list hides it ev
   assert.deepEqual((await call(mcp, 'session_list', { include_private: true })).sessions, []);
   // session_read returns a clear "it's private" result, not a thrown error — and a caller-supplied
   // include_private has no effect: session_log entries are never relaxed by the imported-sessions
-  // Settings toggle (only Claude Code / Codex imports are, see src/sessions/mcp.mjs isRelaxableImport).
+  // Settings toggle (only supported local transcript imports are, see isRelaxableImport).
   const blocked1 = await call(mcp, 'session_read', { id: logged.id });
   assert.equal(blocked1.private, true);
   assert.match(blocked1.message, /private/i);
@@ -91,6 +108,25 @@ test('session_log appends to an existing session by id', async () => {
   const b = await call(mcp, 'session_log', { session_id: a.id, text: 'second' });
   assert.equal(b.id, a.id);
   assert.equal(b.message_count, 2);
+});
+
+test('Setup session imports stay inside its explicit home when HOME is not set', async (t) => {
+  const home = await tmp('setup-session-home');
+  const appHome = path.join(home, 'app');
+  const claudeProjects = path.join(home, '.claude', 'projects', 'fictional-project');
+  await mkdir(claudeProjects, { recursive: true });
+  await writeFile(path.join(claudeProjects, 'fictional-session.jsonl'), [
+    JSON.stringify({ type: 'user', timestamp: '2026-10-28T01:00:00.000Z', message: { role: 'user', content: 'Fictional setup-home session marker.' } }),
+    JSON.stringify({ type: 'assistant', timestamp: '2026-10-28T01:00:01.000Z', message: { role: 'assistant', content: 'Fictional reply.' } }),
+  ].join('\n'));
+  t.after(() => rm(home, { recursive: true, force: true }));
+
+  const service = sessionsService({ BRAINLINK_HOME: appHome }, home);
+  const result = await service.list({ include_private: true });
+  assert.equal(result.sessions.length, 1);
+  assert.equal(result.sessions[0].client, 'claude-code');
+  assert.equal(result.sessions[0].private, true);
+  assert.match(result.sessions[0].summary, /Fictional setup-home session marker/);
 });
 
 test('session_read: full=true pages long sessions at ~4k tokens via next_offset; default stays small', async () => {
@@ -150,7 +186,7 @@ test('token budget: representative session_list/session_read calls average <=105
 
 test('imported sessions stay hidden by default under a fake HOME; session_read points at Settings', async () => {
   await withFakeHome(async () => {
-    const { mcp, env } = await mcpWithHome(); // cfg.sessions defaults: shareSummaries false, shareFullText false
+    const { mcp, env } = await mcpWithHome({ HOME: process.env.HOME }); // cfg.sessions defaults: shareSummaries false, shareFullText false
     const list = await call(mcp, 'session_list', {});
     assert.deepEqual(list.sessions, [], 'imported sessions are not visible until the user opts in, in BrainLink Settings');
     const store = await openSessionStore(env);
@@ -190,7 +226,7 @@ test('R2: a config saved before the schema-version bump has shareSummaries force
 
 test('session sharing settings: shareSummaries=true opts in to imported-session summaries', async () => {
   await withFakeHome(async () => {
-    const { env } = await mcpWithHome();
+    const { env } = await mcpWithHome({ HOME: process.env.HOME });
     const ctx = createContext(normalize({ version: CONFIG_SCHEMA_VERSION, sessions: { shareSummaries: true, shareFullText: false } }), { env });
     const mcp = createMcp(ctx);
     const list = await call(mcp, 'session_list', {});
@@ -199,13 +235,67 @@ test('session sharing settings: shareSummaries=true opts in to imported-session 
     const id = list.sessions[0].id;
     const read = await call(mcp, 'session_read', { id });
     assert.equal(read.private, true);
-    assert.ok(Array.isArray(read.key_turns), 'the default (non-full) read works and returns key-turn snippets, not an error');
+    assert.deepEqual(read.key_turns, [], 'sharing summaries does not disclose private transcript excerpts');
   });
+});
+
+test('DeepSeek Harness session sharing uses the same explicit summary and full-text consent as other imports', async () => {
+  await withFakeHome(async () => {
+    const off = await mcpWithHome({ HOME: process.env.HOME });
+    await call(off.mcp, 'session_list', {}); // performs the normal local transcript refresh
+    const offStore = await openSessionStore(off.env);
+    const dsh = (await offStore.listSessions({ limit: 20 })).find((session) => session.client === 'deepseek-harness');
+    assert.ok(dsh, 'fictional DeepSeek Harness session is imported');
+    const hidden = await call(off.mcp, 'session_read', { id: dsh.id });
+    assert.equal(hidden.private, true);
+    assert.equal(hidden.summary, undefined);
+
+    const summaryCtx = createContext(normalize({ version: CONFIG_SCHEMA_VERSION, sessions: { shareSummaries: true, shareFullText: false } }), { env: off.env });
+    const summaryMcp = createMcp(summaryCtx);
+    const visible = await call(summaryMcp, 'session_read', { id: dsh.id });
+    assert.equal(visible.private, true);
+    assert.match(visible.summary, /Fictional DeepSeek Harness task/);
+    assert.deepEqual(visible.key_turns, [], 'summary consent does not reveal transcript excerpts');
+    const noFullConsent = await call(summaryMcp, 'session_read', { id: dsh.id, full: true });
+    assert.equal(noFullConsent.messages, undefined);
+
+    const fullCtx = createContext(normalize({ version: CONFIG_SCHEMA_VERSION, sessions: { shareSummaries: true, shareFullText: true } }), { env: off.env });
+    const fullMcp = createMcp(fullCtx);
+    const full = await call(fullMcp, 'session_read', { id: dsh.id, full: true });
+    assert.match(JSON.stringify(full), /Fictional Harness task result/);
+
+    const hermes = await offStore.putSession({ client: 'hermes', source_id: 'fictional-hermes-share', project: '/fictional',
+      title: 'Fictional Hermes task', summary: 'Fictional Hermes summary.', private: true,
+      started_at: '2026-10-28T03:00:00Z', note_refs: [], messages: [{ role: 'user', at: '2026-10-28T03:00:01Z', text: 'Fictional Hermes transcript.' }] });
+    const hermesHidden = await call(off.mcp, 'session_read', { id: hermes.id });
+    assert.equal(hermesHidden.summary, undefined, 'Hermes imports remain hidden by default');
+    const hermesSummary = await call(summaryMcp, 'session_read', { id: hermes.id });
+    assert.match(hermesSummary.summary, /Fictional Hermes summary/);
+    assert.deepEqual(hermesSummary.key_turns, [], 'Hermes summary consent must not expose transcript turns');
+    assert.equal((await call(summaryMcp, 'session_read', { id: hermes.id, full: true })).messages, undefined);
+    assert.match(JSON.stringify(await call(fullMcp, 'session_read', { id: hermes.id, full: true })), /Fictional Hermes transcript/);
+  });
+});
+
+test('private imported transcript needs full-text consent before excerpts appear', async () => {
+  const { env } = await mcpWithHome();
+  const store = await openSessionStore(env);
+  const saved = await store.putSession({ client: 'codex', source_id: 'private-excerpt', project: '/fictional',
+    title: 'Fictional project', summary: 'A safe project summary.', private: true,
+    started_at: '2026-10-10T00:00:00Z', note_refs: [],
+    messages: [{ role: 'user', at: '2026-10-10T00:00:00Z', text: 'PLANTED_PRIVATE_CLIENT_NOTE' }] });
+  const summaryOnly = await sessionRead(store, { id: saved.id, allow_imported_private: true });
+  assert.equal(summaryOnly.summary, 'A safe project summary.');
+  assert.deepEqual(summaryOnly.key_turns, []);
+  assert.ok(!JSON.stringify(summaryOnly).includes('PLANTED_PRIVATE_CLIENT_NOTE'));
+  const withConsent = await sessionRead(store, { id: saved.id, allow_imported_private: true,
+    allow_imported_full_private: true });
+  assert.match(withConsent.key_turns[0].text, /PLANTED_PRIVATE_CLIENT_NOTE/);
 });
 
 test('regression: a caller-supplied include_private=true has no effect, on session_list or session_read, full or not', async () => {
   await withFakeHome(async () => {
-    const { env } = await mcpWithHome();
+    const { env } = await mcpWithHome({ HOME: process.env.HOME });
     const ctx = createContext(normalize({ version: CONFIG_SCHEMA_VERSION, sessions: { shareSummaries: true, shareFullText: false } }), { env });
     const mcp = createMcp(ctx);
     const withFlag = await call(mcp, 'session_list', { include_private: true });
@@ -220,12 +310,12 @@ test('regression: a caller-supplied include_private=true has no effect, on sessi
 
 test('session sharing settings: shareSummaries=false hides imports again; shareFullText=true (with shareSummaries) unlocks full=true', async () => {
   await withFakeHome(async () => {
-    const off = await mcpWithHome();
+    const off = await mcpWithHome({ HOME: process.env.HOME });
     const ctxOff = createContext(normalize({ version: CONFIG_SCHEMA_VERSION, sessions: { shareSummaries: false, shareFullText: false } }), { env: off.env });
     const mcpOff = createMcp(ctxOff);
     assert.deepEqual((await call(mcpOff, 'session_list', {})).sessions, [], 'turning shareSummaries off hides imports again, matching the pre-fix default');
 
-    const on = await mcpWithHome();
+    const on = await mcpWithHome({ HOME: process.env.HOME });
     const ctxOn = createContext(normalize({ version: CONFIG_SCHEMA_VERSION, sessions: { shareSummaries: true, shareFullText: true } }), { env: on.env });
     const mcpOn = createMcp(ctxOn);
     const id = (await call(mcpOn, 'session_list', {})).sessions[0].id;
@@ -238,7 +328,7 @@ test('regression: session_log (deliberately-private, non-imported) sessions are 
   const { mcp } = await mcpWithHome();
   const logged = await call(mcp, 'session_log', { text: 'A private quick note, not an import.' });
   // Even with full sharing cfg, client-created private notes stay private: the toggle only ever
-  // applies to the "claude-code" / "codex" import clients (see isRelaxableImport in src/sessions/mcp.mjs).
+  // applies only to supported imported clients (see isRelaxableImport in src/sessions/mcp.mjs).
   assert.deepEqual((await call(mcp, 'session_list', {})).sessions, []);
   const read = await call(mcp, 'session_read', { id: logged.id });
   assert.equal(read.private, true);

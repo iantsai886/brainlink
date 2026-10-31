@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtemp, mkdir, writeFile, readFile, readdir, cp, utimes } from 'node:fs/promises';
+import { mkdtemp, mkdir, writeFile, readFile, readdir, cp, utimes, stat, symlink } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { spawn } from 'node:child_process';
 import { request } from 'node:http';
@@ -9,19 +9,47 @@ import { fileURLToPath } from 'node:url';
 
 import { normalize, validate, saveConfig } from '../src/config.mjs';
 import { tokens, extractLinks, linkGraph } from '../src/graph.mjs';
-import { createContext, chunkMarkdown, search, readNote, related, zonedNow, findSecrets, DEFAULT_EXCLUDED_FOLDERS, SUGGESTED_EXCLUDED_FOLDERS, ensureDefaultIgnore, readExcludedFolders, writeExcludedFolders, parseFrontmatter, isPrivateMeta, fmSaysPrivate, loadVault } from '../src/core.mjs';
+import { createContext, chunkMarkdown, search, readNote, related, zonedNow, findSecrets, DEFAULT_EXCLUDED_FOLDERS, SUGGESTED_EXCLUDED_FOLDERS, ensureDefaultIgnore, readExcludedFolders, writeExcludedFolders, parseFrontmatter, isPrivateMeta, fmSaysPrivate, loadVault, indexableHeader } from '../src/core.mjs';
 import { findObsidianVaults, nestedVaults } from '../src/obsidian.mjs';
 import { proposeNote, sendHandoff, listHandoffs, frontmatter, resolveIdentity } from '../src/writes.mjs';
 import { connectAgent, closeLoop, resolveAgent, latestCaptures } from '../src/agents.mjs';
-import { createMcp, serveHttp } from '../src/server.mjs';
+import { createMcp, serveHttp, VERSION } from '../src/server.mjs';
 import { buildPack, scaffold, mergePack } from '../src/packs.mjs';
-import { connectClient, disconnectClient, detect, codexToml } from '../src/connectors.mjs';
+import { connectClient, disconnectClient, detect, codexToml, readClientAgentToken } from '../src/connectors.mjs';
 import { startSetup } from '../src/setup.mjs';
+import { ingestionQueue, recordIngestion } from '../src/ingestion.mjs';
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const SAMPLE = path.join(ROOT, 'samples', 'acme-studio');
 const tmp = (p) => mkdtemp(path.join(tmpdir(), `brainlink-${p}-`));
 const NOW = new Date('2026-10-18T01:30:00Z');
+test('runtime version comes from the canonical package manifest', async () => {
+  const pkg = JSON.parse(await readFile(path.join(ROOT, 'package.json'), 'utf8'));
+  assert.equal(VERSION, pkg.version);
+});
+test('pre-release installer notice matches the full, non-expiring build', async () => {
+  const notice = await readFile(path.join(ROOT, 'LICENSE.txt'), 'utf8');
+  const macNotice = await readFile(path.join(ROOT, 'packaging', 'macos', 'resources', 'license.txt'), 'utf8');
+  assert.equal(macNotice.trim(), notice.trim());
+  assert.match(notice, /all implemented product features enabled/i);
+  assert.match(notice, /no trial timer,\s*feature expiry,\s*licence-key requirement, or account check/i);
+  assert.doesNotMatch(notice, /14-day trial|limited features|circumvent the licence check/i);
+});
+
+test('product preview matches approved commercial status and verified feature boundaries', async () => {
+  const page = await readFile(path.join(ROOT, 'docs', 'one-pager.html'), 'utf8');
+  assert.match(page, /development build has no trial countdown or licence gate/i);
+  assert.match(page, /pricing, paid plans and a commercial release date have not been announced/i);
+  assert.match(page, /AI providers may receive retrieved context/i);
+  assert.match(page, /secure HTTPS relay/i);
+  assert.match(page, /30-case fictional test/i);
+  assert.match(page, /27\.5% lower than compact search/i);
+  assert.match(page, /provider-billed savings are not measured/i);
+  assert.doesNotMatch(page, /14.day trial|first 14 days|free trial|trial ended/i);
+  assert.doesNotMatch(page, /US\$79|US\$12|NT\$15,000|one year of updates|2 devices/i);
+  assert.doesNotMatch(page, /every AI app on the computer is connected|Windows 10 and 11 are coming soon|signed edits/i);
+  assert.doesNotMatch(page, /Setup in under a minute|Buy once for yourself/i);
+});
 const long = Array.from({ length: 300 }, (_, i) => `filler${i}`).join(' ');
 
 // Company vault = copy of the sample with the Founder OS pack; private vault = journal pack.
@@ -108,6 +136,20 @@ test('reads are confined to the vault and to Markdown', async () => {
   assert.match((await readNote(ctx, 'Acme Studio', 'Home.md')).body, /Acme Studio/);
 });
 
+test('readNote refuses symlinked paths without building a whole-vault index', async (t) => {
+  const { base, cfg, company } = await fixture();
+  const outside = path.join(base, 'Outside.md');
+  await writeFile(outside, '# Outside\n\nMust not be exposed through the vault.');
+  try { await symlink(outside, path.join(company, 'Linked outside.md')); }
+  catch (error) {
+    if (error.code === 'EPERM' && process.platform === 'win32') { t.skip('Windows symlink privilege unavailable'); return; }
+    throw error;
+  }
+  const ctx = ctxOf(cfg);
+  await assert.rejects(readNote(ctx, 'Acme Studio', 'Linked outside.md'), /private/i);
+  assert.equal(ctx.cache.size, 0);
+});
+
 test('readNote refuses private notes and notes in an excluded folder, everywhere it is called', async () => {
   const { cfg, company } = await fixture();
   await writeFile(path.join(company, 'Secret Plan.md'), '---\nprivate: true\n---\n# Secret Plan\n\nAcquire Globex quietly.');
@@ -134,6 +176,83 @@ test('readNote refuses private notes and notes in an excluded folder, everywhere
   // readNote itself (used directly by /api/note)
   await assert.rejects(readNote(ctx, 'Acme Studio', 'Secret Plan.md'), /private/i);
   await assert.rejects(readNote(ctx, 'Acme Studio', '00 Home/Diary.md'), /private/i);
+});
+
+test('ingestion queue scans only a chosen folder and filters private, excluded, generated and malformed sources', async () => {
+  const { base, company, cfg } = await fixture();
+  const raw = path.join(company, 'Raw');
+  await mkdir(path.join(raw, 'Blocked'), { recursive: true });
+  await writeFile(path.join(raw, '.brainlinkignore'), 'Blocked/\n');
+  await writeFile(path.join(raw, 'Public.md'), '# Public source\n\nReusable project facts.');
+  await writeFile(path.join(raw, 'Private.md'), '---\nprivate: true\n---\n# PRIVATE_CANARY_DO_NOT_READ\nsecret body');
+  await writeFile(path.join(raw, 'Malformed.md'), '---\nprivate: true\n# malformed and unsafe\nPRIVATE_MALFORMED_CANARY');
+  await writeFile(path.join(raw, 'Generated.md'), '---\ngenerated_by: brainlink\n---\n# generated');
+  await writeFile(path.join(raw, 'Blocked', 'Excluded.md'), '# EXCLUDED_CANARY');
+  const env = { BRAINLINK_HOME: path.join(base, 'app') };
+  const queue = await ingestionQueue(ctxOf(cfg, env), 'Acme Studio', 'Raw');
+  assert.deepEqual(queue.candidates.map((x) => x.path), ['Raw/Public.md']);
+  assert.equal(queue.candidates[0].title, 'Public');
+  assert.equal(JSON.stringify(queue).includes('Reusable project facts'), false);
+  assert.equal(JSON.stringify(queue).includes('PRIVATE_CANARY_DO_NOT_READ'), false);
+  assert.equal(JSON.stringify(queue).includes('EXCLUDED_CANARY'), false);
+  assert.equal(JSON.stringify(queue).includes('PRIVATE_MALFORMED_CANARY'), false);
+  assert.ok(indexableHeader('---\nprivate: true\n---\n# private', 30) === false);
+  await assert.rejects(ingestionQueue(ctxOf(cfg, env), 'Acme Studio', '../Raw'), /folder/i);
+  await assert.rejects(ingestionQueue(ctxOf(cfg, env), 'Journal', 'Raw'), /private vault/i);
+});
+
+test('ingestion receipts are local and content-free; changed sources return to the queue', async () => {
+  const { base, company, cfg } = await fixture();
+  const raw = path.join(company, 'Raw');
+  await mkdir(raw);
+  await writeFile(path.join(raw, 'Source.md'), '# Source\n\nFIRST_SOURCE_CANARY');
+  const env = { BRAINLINK_HOME: path.join(base, 'app') };
+  const ctx = ctxOf(cfg, env);
+  const first = await ingestionQueue(ctx, 'Acme Studio', 'Raw');
+  const item = first.candidates[0];
+  assert.ok(item);
+  const recorded = await recordIngestion(ctx, 'Acme Studio', 'Raw', { ...item, outcome: 'skipped' });
+  assert.equal(recorded.recorded, true);
+  assert.equal((await ingestionQueue(ctx, 'Acme Studio', 'Raw')).candidates.length, 0);
+  await writeFile(path.join(raw, 'Source.md'), '# Source\n\nSECOND_SOURCE_CANARY');
+  const changed = await ingestionQueue(ctx, 'Acme Studio', 'Raw');
+  assert.equal(changed.candidates.length, 1);
+  assert.notEqual(changed.candidates[0].revision, item.revision);
+  const [journalName] = await readdir(path.join(env.BRAINLINK_HOME, 'ingestion'));
+  const journal = await readFile(path.join(env.BRAINLINK_HOME, 'ingestion', journalName), 'utf8');
+  assert.equal(journal.includes('FIRST_SOURCE_CANARY'), false);
+  assert.equal(journal.includes('Raw/Source.md'), false);
+});
+
+test('filed ingestion requires a saved linked knowledge note and refuses a stale source revision', async () => {
+  const { base, company, cfg } = await fixture();
+  const raw = path.join(company, 'Raw');
+  const wiki = path.join(company, 'Wiki');
+  await mkdir(raw); await mkdir(wiki);
+  await writeFile(path.join(raw, 'Source.md'), '# Source\n\nFacts to organize.');
+  await writeFile(path.join(wiki, 'Knowledge.md'), '---\ntype: note\nstatus: proposed\nai_platform: ChatGPT Codex\nsession_or_task_id: test\n---\n# Knowledge\n\nSummary from [[Raw/Source]].');
+  const ctx = ctxOf(cfg, { BRAINLINK_HOME: path.join(base, 'app') });
+  const item = (await ingestionQueue(ctx, 'Acme Studio', 'Raw')).candidates[0];
+  await assert.rejects(recordIngestion(ctx, 'Acme Studio', 'Raw', { ...item, outcome: 'filed', knowledge_path: 'Raw/Source.md' }), /outside the selected Raw folder/i);
+  await assert.rejects(recordIngestion(ctx, 'Acme Studio', 'Raw', { ...item, outcome: 'filed', knowledge_path: 'Wiki/Unlinked.md' }), /ENOENT|no such file/i);
+  const result = await recordIngestion(ctx, 'Acme Studio', 'Raw', { ...item, outcome: 'filed', knowledge_path: 'Wiki/Knowledge.md' });
+  assert.equal(result.recorded, true);
+  assert.equal((await ingestionQueue(ctx, 'Acme Studio', 'Raw')).candidates.length, 0);
+  await writeFile(path.join(raw, 'Source.md'), '# Source\n\nChanged after review.');
+  await assert.rejects(recordIngestion(ctx, 'Acme Studio', 'Raw', { ...item, outcome: 'skipped' }), /changed|Refresh/i);
+});
+
+test('ingestion MCP tools are exposed with explicit folder and review instructions', () => {
+  const mcp = createMcp(ctxOf(normalize({})));
+  const names = mcp.tools.map((t) => t.name);
+  assert.ok(names.includes('ingestion_queue'));
+  assert.ok(names.includes('ingestion_record'));
+  assert.match(mcp.instructions, /daily schedule while BrainLink is running/i);
+  assert.match(mcp.instructions, /do not ask an AI to read, summarize, or file notes/i);
+  assert.match(mcp.instructions, /never scan the whole vault/i);
+  const queue = mcp.tools.find((tool) => tool.name === 'ingestion_queue');
+  assert.match(queue.description, /does not read source bodies/i);
+  assert.match(queue.description, /does not .* change the Setup background-scan schedule/i);
 });
 
 test('parseFrontmatter: a leading UTF-8 BOM or blank lines before --- still detect private: true', () => {
@@ -212,9 +331,22 @@ test('R3: a note using one of the previously-missed private spellings is gated e
     await assert.rejects(readNote(ctx, 'Co', rel), /private/i, `${rel} is gated by readNote`);
   }
   const index = await loadVault(ctx, 'Co');
-  const privateFlags = index.notes.filter((n) => n.rel !== 'Public.md').map((n) => n.private);
-  assert.ok(privateFlags.every(Boolean), 'all three spellings are marked private in the vault index');
-  assert.ok(!index.notes.find((n) => n.rel === 'Public.md').private);
+  assert.deepEqual(index.notes.map((n) => n.rel), ['Public.md'], 'private notes never enter the vault index');
+  assert.equal(index.chunks.every((c) => c.noteIdx === 0), true);
+});
+
+test('private content cannot affect term frequencies, links or ranking candidates', async () => {
+  const vaultDir = await tmp('private-index-isolation');
+  await writeFile(path.join(vaultDir, 'Public.md'), '# Public\nFictional project calendar.');
+  const ctx = createContext(normalize({ vaults: [{ name: 'Co', path: vaultDir }] }), { env: { BRAINLINK_HOME: await tmp('private-index-home'), BRAINLINK_SEMANTIC: '0' } });
+  const before = await loadVault(ctx, 'Co');
+  const baselineTerms = [...before.df.entries()];
+  await writeFile(path.join(vaultDir, 'Secret.md'), '---\nprivate: true\n---\n# Secret\nZQXPRIVATECANARY [[Public]] launch budget');
+  const after = await loadVault(ctx, 'Co');
+  assert.deepEqual(after.notes.map((n) => n.rel), ['Public.md']);
+  assert.deepEqual([...after.df.entries()], baselineTerms);
+  assert.deepEqual(after.edges, []);
+  assert.ok(!after.chunks.some((c) => c.text.includes('ZQXPRIVATECANARY')));
 });
 
 test('BOM and leading-blank-line private notes are hidden from readNote and search, same as any other private note', async () => {
@@ -226,6 +358,31 @@ test('BOM and leading-blank-line private notes are hidden from readNote and sear
   await assert.rejects(readNote(ctx, 'Acme Studio', 'Secret Blank Lines.md'), /private/i);
   const r = await search(ctx, 'Acme Studio', 'Initech Umbrella quietly');
   assert.ok(!r.some((x) => /Secret BOM|Secret Blank Lines/.test(x.path)));
+});
+
+test('a same-size public-to-private edit invalidates the cached note even when mtime is preserved', async () => {
+  const vault = await tmp('cached-privacy-transition');
+  const file = path.join(vault, 'Cache transition.md');
+  const publicText = '---\npublic: false\n---\n# Cache transition\n\nZQX_PUBLIC_CACHE_CANARY should be searchable.\n';
+  const privateText = publicText.replace('public: false', 'private: true');
+  assert.equal(Buffer.byteLength(publicText), Buffer.byteLength(privateText), 'the privacy flip keeps file size unchanged');
+  const fixedTime = new Date('2026-10-28T00:00:00.000Z');
+  await writeFile(file, publicText);
+  await utimes(file, fixedTime, fixedTime);
+  const original = await stat(file);
+  const ctx = ctxOf(normalize({ vaults: [{ name: 'Company', path: vault }] }));
+  assert.equal((await search(ctx, 'Company', 'ZQX_PUBLIC_CACHE_CANARY')).some((note) => note.path === 'Cache transition.md'), true);
+
+  // Windows may report identical ctime values for back-to-back writes within one clock tick.
+  await new Promise((resolve) => setTimeout(resolve, 25));
+  await writeFile(file, privateText);
+  await utimes(file, fixedTime, fixedTime);
+  const current = await stat(file);
+  assert.equal(current.size, Buffer.byteLength(publicText));
+  assert.equal(current.mtimeMs, fixedTime.getTime(), 'the original mtime is restored exactly');
+  assert.notEqual(current.ctimeMs, original.ctimeMs, 'the filesystem change time reveals the replacement');
+  assert.deepEqual(await search(ctx, 'Company', 'ZQX_PUBLIC_CACHE_CANARY'), [], 'the cached public content is removed from retrieval');
+  await assert.rejects(readNote(ctx, 'Company', 'Cache transition.md'), /private/i);
 });
 
 test('S1: a private note never surfaces in search, related notes or the 2D graph', async () => {
@@ -333,6 +490,53 @@ test('every install is fully unlocked: every vault enabled, writes and agents on
   assert.ok(names.includes('vault_search') && names.includes('propose_note') && names.includes('agent_connect'));
 });
 
+test('vault_search defaults to compact output without dropping sources, citation context or freshness cues', async () => {
+  const { cfg } = await fixture();
+  const searchTool = createMcp(ctxOf(cfg)).tools.find((tool) => tool.name === 'vault_search');
+  const args = { vault: 'Acme Studio', query: 'launch package', limit: 8 };
+  const compact = await searchTool.run(args);
+  const full = await searchTool.run({ ...args, detail: 'full' });
+  const contextFields = ['path', 'title', 'date', 'status', 'confidence', 'historical', 'superseded_by', 'match', 'heading', 'snippet'];
+  assert.equal(compact.status, full.status);
+  assert.equal(compact.coverage, full.coverage);
+  assert.equal(compact.note, full.note);
+  assert.deepEqual(compact.results, full.results.map((result) => Object.fromEntries(contextFields.filter((key) => Object.hasOwn(result, key)).map((key) => [key, result[key]]))));
+  assert.ok(compact.results.length > 0);
+  assert.ok(JSON.stringify(compact).length < JSON.stringify(full).length, 'compact output removes ranking metadata while preserving every result');
+  for (const result of compact.results) for (const key of ['score', 'graph_boost', 'coverage', 'collection', 'tags']) assert.equal(Object.hasOwn(result, key), false, key);
+});
+
+test('context_packet returns bounded cited excerpts and keeps private notes out', async () => {
+  const { cfg, company } = await fixture();
+  await writeFile(path.join(company, 'Packet Source.md'), `---\nstatus: current\nconfidence: verified\n---\n# Packet Source\n\n${'Fictional context packet retrieval test. '.repeat(18)}`);
+  await writeFile(path.join(company, 'Private Packet.md'), '---\nprivate: true\n---\n# Private Packet\n\nPRIVATE_PACKET_CANARY_9137 context packet retrieval test.');
+  const ctx = ctxOf(cfg);
+  const packetTool = createMcp(ctx).tools.find((tool) => tool.name === 'context_packet');
+  const packet = await packetTool.run({ vault: 'Acme Studio', query: 'context packet retrieval test', max_sources: 2, excerpt_chars: 90 });
+  assert.equal(packet.vault, 'Acme Studio');
+  assert.ok(['hits', 'weak'].includes(packet.status));
+  assert.ok(packet.sources.length <= 2);
+  assert.ok(packet.sources.some((source) => source.path === 'Packet Source.md'));
+  const source = packet.sources.find((item) => item.path === 'Packet Source.md');
+  assert.equal(source.confidence, 'verified');
+  assert.ok(source.excerpt.length <= 90);
+  assert.equal(source.truncated, true);
+  assert.match(packetTool.description, /vault_read_note/);
+  assert.doesNotMatch(JSON.stringify(packet), /PRIVATE_PACKET_CANARY_9137|private diary|pricing and agent memory/);
+  const compact = await packetTool.run({ vault: 'Acme Studio', query: 'context packet retrieval test', max_sources: 4, excerpt_chars: 300, max_total_chars: 160 });
+  assert.equal(compact.excerpt_chars_budget, 160);
+  assert.equal(compact.excerpt_chars_used, compact.sources.reduce((sum, item) => sum + item.excerpt.length, 0));
+  assert.ok(compact.excerpt_chars_used <= 160);
+  assert.ok(compact.sources.length <= 2, 'keep at least 80 characters per selected source');
+  assert.ok(compact.sources.every((item) => item.path && item.title && item.excerpt.length <= 80));
+  assert.doesNotMatch(JSON.stringify(compact), /PRIVATE_PACKET_CANARY_9137/);
+  const empty = await packetTool.run({ vault: 'Acme Studio', query: 'zzqv-no-matching-record-771' });
+  assert.equal(empty.status, 'not_in_brain');
+  assert.equal(empty.sources.length, 0);
+  assert.equal(empty.excerpt_chars_used, 0);
+  assert.match(packetTool.description, /not_in_brain, do not guess/);
+});
+
 // ---- writes ----
 
 test('propose_note: preview, write, never overwrite, attribution in the vault schema', async () => {
@@ -390,15 +594,92 @@ test('handoffs: send to a mailbox and filter by recipient', async () => {
   assert.equal((await listHandoffs(ctx, {})).length, 2);
 });
 
+test('structured handoff keeps scope and evidence, and refuses private source links before writing', async () => {
+  const { cfg, company } = await fixture();
+  const ctx = ctxOf(cfg);
+  const args = { to: 'Codex', subject: 'Continue fictional site', goal: 'Finish the public landing page',
+    current_state: 'Design approved', decisions: ['Keep one-column layout'], modified_files: ['site/index.html'],
+    tests: ['Local preview passed'], open_questions: ['Check keyboard navigation'],
+    next_steps: ['Add focus states'], scope: 'company', confidence: 'reported',
+    source_refs: ['Home.md'], confirm: true };
+  const made = await sendHandoff(ctx, args, NOW);
+  assert.equal(made.written, true);
+  const saved = await readFile(path.join(company, made.path.split('/').slice(1).join('/')), 'utf8');
+  assert.match(saved, /handoff_schema: 1/);
+  assert.match(saved, /scope: "company"/);
+  assert.match(saved, /## Tests and results\n\n- Local preview passed/);
+  assert.match(saved, /`Home\.md`/);
+  const privateRef = await sendHandoff(ctx, { ...args, subject: 'Must not write', source_refs: ['Secret Note.md'] }, NOW);
+  assert.equal(privateRef.ok, false);
+  assert.match(privateRef.errors.join(' '), /private note/);
+  assert.equal((await listHandoffs(ctx, { to: 'Codex' })).length, 1);
+});
+
+test('handoff confirmation keeps its preview path, resolves filename collisions, and never overwrites a race winner', async () => {
+  const { cfg, company } = await fixture();
+  const ctx = ctxOf(cfg);
+  const args = { to: 'Codex', subject: 'Continue fictional demo', goal: 'Finish the local demo', confirm: false };
+  const firstPreview = await sendHandoff(ctx, args, NOW);
+  const first = await sendHandoff(ctx, { ...args, preview_path: firstPreview.path, confirm: true }, NOW);
+  assert.equal(first.written, true);
+  assert.equal(first.path, firstPreview.path);
+
+  const secondPreview = await sendHandoff(ctx, args, NOW);
+  assert.notEqual(secondPreview.path, firstPreview.path);
+  assert.match(secondPreview.path, /continue-fictional-demo-2\.md$/);
+  const second = await sendHandoff(ctx, { ...args, preview_path: secondPreview.path, confirm: true }, new Date(NOW.getTime() + 60000));
+  assert.equal(second.written, true);
+  assert.equal(second.path, secondPreview.path, 'the exact reviewed path survives a later confirmation');
+
+  const wrongSubject = await sendHandoff(ctx, { ...args, subject: 'Different subject', preview_path: secondPreview.path, confirm: true }, NOW);
+  assert.equal(wrongSubject.ok, false);
+  assert.match(wrongSubject.errors.join(' '), /exact preview path/);
+
+  const racePreview = await sendHandoff(ctx, { ...args, subject: 'Race check' }, NOW);
+  const raceFile = path.join(company, racePreview.path.split('/').slice(1).join('/'));
+  await writeFile(raceFile, 'another sender won this path');
+  const race = await sendHandoff(ctx, { ...args, subject: 'Race check', preview_path: racePreview.path, confirm: true }, NOW);
+  assert.equal(race.ok, false);
+  assert.equal(race.conflict, true);
+  assert.equal(await readFile(raceFile, 'utf8'), 'another sender won this path');
+});
+
+test('handoff replies are append-only and use a constrained lifecycle status', async () => {
+  const { cfg, company } = await fixture();
+  const ctx = ctxOf(cfg);
+  const request = await sendHandoff(ctx, { to: 'Codex', subject: 'Fictional task', goal: 'Complete the demo', confirm: true }, NOW);
+  assert.equal(request.written, true);
+  const requestFile = await readFile(path.join(company, request.path.split('/').slice(1).join('/')), 'utf8');
+  assert.match(requestFile, /status: REQUEST/);
+
+  const invalid = await sendHandoff(ctx, { to: 'Claude', subject: 'Invalid update', body: 'No arbitrary status', ack_of: request.path, status: 'MAGIC', confirm: true }, new Date(NOW.getTime() + 3600000));
+  assert.equal(invalid.ok, false);
+  assert.match(invalid.errors.join(' '), /status must be one of/);
+  const blocked = await sendHandoff(ctx, { to: 'Claude', subject: 'Blocked on approval', body: 'Waiting for approval.', ack_of: request.path, status: 'BLOCKED', confirm: true }, new Date(NOW.getTime() + 3600000));
+  const completed = await sendHandoff(ctx, { to: 'Claude', subject: 'Demo complete', body: 'The fictional demo is done.', ack_of: request.path, status: 'COMPLETED', confirm: true }, new Date(NOW.getTime() + 7200000));
+  assert.equal(blocked.written, true);
+  assert.equal(completed.written, true);
+  assert.notEqual(blocked.path, completed.path);
+  const items = await listHandoffs(ctx, {});
+  assert.equal(items.find((item) => item.path === blocked.path).status, 'BLOCKED');
+  assert.equal(items.find((item) => item.path === completed.path).status, 'COMPLETED');
+  const unchanged = await readFile(path.join(company, request.path.split('/').slice(1).join('/')), 'utf8');
+  assert.equal(unchanged, requestFile, 'replies never rewrite the original request');
+});
+
 test('P0: listHandoffs carries ack_of/sent_at for pickup pairing, and never surfaces a private or excluded handoff', async () => {
   const { cfg, company } = await fixture();
   const ctx = ctxOf(cfg);
   const r1 = await sendHandoff(ctx, { to: 'Grok', subject: 'Check pricing page', body: 'Please review.', confirm: true }, NOW);
   const r2 = await sendHandoff(ctx, { to: 'Claude', subject: 'Pricing page reviewed', body: 'Done, looks good.', ack_of: r1.path, confirm: true }, new Date(NOW.getTime() + 3600000));
+  const r3 = await sendHandoff(ctx, { to: 'Grok', subject: 'Pricing page complete', body: 'Changes are finished.', ack_of: r1.path, status: 'COMPLETED', confirm: true }, new Date(NOW.getTime() + 7200000));
   const list = await listHandoffs(ctx, {});
   const original = list.find((x) => x.path === r1.path);
   const ack = list.find((x) => x.path === r2.path);
+  const completion = list.find((x) => x.path === r3.path);
   assert.equal(ack.ack_of, r1.path);
+  assert.equal(ack.status, 'ACKNOWLEDGED', 'reply without a status defaults to acknowledgement');
+  assert.equal(completion.status, 'COMPLETED');
   assert.match(original.sent_at, /^2026-10-18T09:30/);
   assert.match(ack.sent_at, /^2026-10-18T10:30/);
 
@@ -439,6 +720,16 @@ test('agent_connect loads role notes, newest captures and stale warnings', async
   assert.match(r.instructions, /Chief of Staff close loop/);
 });
 
+test('agent_connect stays fast by loading configured context without indexing the whole vault', async () => {
+  const { cfg } = await fixture();
+  const ctx = ctxOf(cfg);
+  const r = await connectAgent(ctx, { agent: 'Connect to Chief of Staff' });
+  assert.ok(r.role_notes.some((n) => /Operating coordinator/.test(n.excerpt)));
+  assert.equal(r.whats_new, undefined);
+  assert.equal(r.open_loops, undefined);
+  assert.equal(ctx.cache.size, 0, 'activation should not build a whole-vault index');
+});
+
 test('agent_connect: private connect notes and private recent_dir entries never reach the agent', async () => {
   const { cfg, company } = await fixture();
   const office = 'Chief of Staff Office';
@@ -452,6 +743,51 @@ test('agent_connect: private connect notes and private recent_dir entries never 
   assert.ok(r.warnings.some((w) => /Current Goal/.test(w)), 'private connect note reported as missing, not private');
   assert.ok(!r.recent_notes.some((p) => /Secret/.test(p)));
   assert.ok(r.recent_notes.some((p) => /Public/.test(p)));
+});
+
+test('agent_connect applies each Twin memory-type switch to its mixed connection packet', async () => {
+  const { cfg, company } = await fixture();
+  const office = 'Chief of Staff Office';
+  const workingFile = 'BrainLink/Working Canary.md';
+  await mkdir(path.dirname(path.join(company, workingFile)), { recursive: true });
+  await writeFile(path.join(company, workingFile), '# Working\n\nWORKING_MEMORY_CANARY');
+  await writeFile(path.join(company, 'BrainLink/Memories.md'), '# Memories\n\n- SEMANTIC_MEMORY_CANARY _(BrainLink memory; date: 2026-10-27; platform: "Test"; source: "fixture"; confidence: reported)_\n');
+  await writeFile(path.join(company, `${office}/2026-10-27 — Semantic Canary.md`), '# Semantic Canary\n\nRECENT_SEMANTIC_CANARY');
+  await writeFile(path.join(company, `${office}/Session Captures.md`), '## 2026-10-27 10:00 — Episode Canary\n\nEPISODIC_MEMORY_CANARY\n');
+  cfg.agents[0].tail_notes = [workingFile];
+
+  for (const disabled of ['working', 'semantic', 'episodic']) {
+    const ctx = ctxOf(cfg, { BRAINLINK_VAULTS: 'Acme Studio' });
+    ctx.twinScope = {
+      mode: 'scoped', profile_id: 'fictional-twin',
+      memory_policy: { working: true, semantic: true, procedural: true, episodic: true, [disabled]: false },
+      grants: [{ name: 'Acme Studio', operations: ['read_note', 'search'] }],
+    };
+    const mcp = createMcp(ctx);
+    const listed = await mcp.handle({ jsonrpc: '2.0', id: 2, method: 'tools/list' });
+    const activation = listed.result.tools.find((tool) => tool.name === 'agent_connect');
+    assert.match(activation.description, /configured notes allowed by this Twin's memory policy/);
+    assert.match(activation.description, /Does not scan the whole vault by default/);
+    assert.match(activation.description, /include_vault_context=true/);
+    const result = await mcp.handle({ jsonrpc: '2.0', id: 1, method: 'tools/call', params: { name: 'agent_connect', arguments: { agent: 'Chief of Staff' } } });
+    assert.equal(result.result.isError, false, JSON.stringify(result));
+    const packet = JSON.stringify(result.result.structuredContent);
+    assert.match(result.result.structuredContent.instructions, /Mention only changes and open items present in the returned context/);
+    const expected = {
+      working: 'WORKING_MEMORY_CANARY',
+      semantic: 'SEMANTIC_MEMORY_CANARY|RECENT_SEMANTIC_CANARY',
+      episodic: 'EPISODIC_MEMORY_CANARY',
+    };
+    for (const [type, canary] of Object.entries(expected)) {
+      if (type === disabled) assert.doesNotMatch(packet, new RegExp(canary), `${type} content must be omitted when its policy is off`);
+      else assert.match(packet, new RegExp(canary), `${type} content remains available when its policy is on`);
+    }
+    const prompts = await mcp.handle({ jsonrpc: '2.0', id: 3, method: 'prompts/list' });
+    const connectPrompt = prompts.result.prompts.find((prompt) => prompt.name === 'connect-chief-of-staff');
+    assert.ok(connectPrompt);
+    const prompt = await mcp.handle({ jsonrpc: '2.0', id: 4, method: 'prompts/get', params: { name: connectPrompt.name } });
+    assert.match(prompt.result.messages[0].content.text, /Report only context sections actually returned/);
+  }
 });
 
 test('latestCaptures sorts by date, not file order', () => {
@@ -506,11 +842,44 @@ test('MCP: initialize, tools, prompts, resources, errors', async () => {
   const call = (method, params, id = 1) => mcp.handle({ jsonrpc: '2.0', id, method, params });
   const init = await call('initialize', { protocolVersion: '2025-03-26' });
   assert.equal(init.result.protocolVersion, '2025-03-26');
-  assert.match(init.result.instructions, /"Connect to Chief of Staff" → agent_connect/);
+  assert.match(init.result.instructions, /"Connect to Chief of Staff" → agent_connect_chief_of_staff \(direct tool; preferred\) or agent_connect/);
+  assert.match(init.result.instructions, /call BrainLink’s agent_connect tool directly/);
+  assert.match(init.result.instructions, /do not search a connector directory/);
   const names = (await call('tools/list')).result.tools.map((t) => t.name);
-  for (const n of ['brainlink_guide', 'vault_search', 'agent_connect', 'agent_close_loop', 'propose_note', 'send_handoff', 'search', 'fetch']) assert.ok(names.includes(n), n);
+  for (const n of ['brainlink_guide', 'vault_search', 'agent_connect', 'agent_connect_chief_of_staff', 'agent_close_loop', 'propose_note', 'send_handoff', 'search', 'fetch']) assert.ok(names.includes(n), n);
+  const activationTool = (await call('tools/list')).result.tools.find((t) => t.name === 'agent_connect');
+  assert.match(activationTool.description, /Call this BrainLink tool directly/);
+  assert.match(activationTool.description, /not a separate connector or app/);
+  const directActivation = (await call('tools/list')).result.tools.find((tool) => tool.name === 'agent_connect_chief_of_staff');
+  assert.equal(directActivation.title, 'Connect to Chief of Staff');
+  assert.match(directActivation.description, /Use this BrainLink tool when the user asks to connect to Chief of Staff/);
+  const directResult = await call('tools/call', { name: 'agent_connect_chief_of_staff', arguments: {} }, 5);
+  assert.equal(directResult.result.isError, false, JSON.stringify(directResult));
+  assert.equal(directResult.result.structuredContent.agent.name, 'Chief of Staff');
+  const guide = await call('tools/call', { name: 'brainlink_guide', arguments: {} });
+  const model = guide.result.structuredContent.memory_model;
+  assert.deepEqual(Object.keys(model.types), ['working', 'semantic', 'procedural', 'episodic']);
+  assert.ok(Object.values(model.types).every((item) => item.enabled));
+  assert.match(model.approval, /Each additional durable semantic or procedural note needs a separate preview and approval/);
+  assert.match(init.result.instructions, /MEMORY TYPES ENABLED FOR THIS CONNECTION: working, semantic, procedural, episodic/);
   const prompts = (await call('prompts/list')).result.prompts.map((p) => p.name);
   assert.ok(prompts.includes('connect-chief-of-staff') && prompts.includes('close-loop-chief-of-staff'));
+  assert.ok(prompts.includes('review-session'));
+  assert.ok(prompts.includes('organize-sources'));
+  const sourcePrompt = await call('prompts/get', { name: 'organize-sources', arguments: { vault: 'Acme Studio', folder: 'Inbox/Raw' } });
+  const sourceText = sourcePrompt.result.messages[0].content.text;
+  assert.match(sourceText, /exact requested vault is "Acme Studio" and folder is "Inbox\/Raw"/);
+  assert.match(sourceText, /at most five candidates/);
+  assert.match(sourceText, /confirm=false/);
+  assert.match(sourceText, /invoking this prompt is not approval to write/);
+  assert.match(sourceText, /ingestion_record/);
+  const reviewPrompt = await call('prompts/get', { name: 'review-session', arguments: { session_hint: 'Fictional demo', vault: 'Acme Studio' } });
+  assert.match(reviewPrompt.result.messages[0].content.text, /session_list/);
+  assert.match(reviewPrompt.result.messages[0].content.text, /session_read\(full=true\)/);
+  assert.match(reviewPrompt.result.messages[0].content.text, /confirm=false/);
+  assert.match(reviewPrompt.result.messages[0].content.text, /only after the user approves/);
+  assert.match(reviewPrompt.result.messages[0].content.text, /source_session_id set to the exact imported session ID/);
+  assert.match(reviewPrompt.result.messages[0].content.text, /Fictional demo/);
   assert.match((await call('prompts/get', { name: 'close-loop-chief-of-staff', arguments: { focus: 'launch' } })).result.messages[0].content.text, /launch/);
   const res = (await call('resources/list')).result.resources;
   const rule = res.find((r) => r.name === 'Acme Studio: AGENTS.md');
@@ -519,6 +888,31 @@ test('MCP: initialize, tools, prompts, resources, errors', async () => {
   assert.equal(await mcp.handle({ jsonrpc: '2.0', method: 'notifications/initialized' }), null);
   const bad = await call('tools/call', { name: 'vault_read_note', arguments: { vault: 'Acme Studio', path: '../x.md' } });
   assert.equal(bad.result.isError, true);
+});
+
+test('named agent activation tools keep the same Twin procedural and vault gates', async () => {
+  const { cfg } = await fixture();
+  const ctx = ctxOf(cfg, { BRAINLINK_VAULTS: 'Acme Studio' });
+  ctx.twinScope = {
+    mode: 'scoped', profile_id: 'fictional-org', profile_name: 'Fictional Organisation Twin',
+    memory_policy: { working: false, semantic: true, procedural: true, episodic: false },
+    grants: [{ name: 'Acme Studio', operations: ['read_note'] }],
+  };
+  const mcp = createMcp(ctx);
+  const list = () => mcp.handle({ jsonrpc: '2.0', id: 1, method: 'tools/list' });
+  let listed = await list();
+  const directName = 'agent_connect_chief_of_staff';
+  assert.ok(listed.result.tools.some((tool) => tool.name === directName));
+  const allowed = await mcp.handle({ jsonrpc: '2.0', id: 2, method: 'tools/call', params: { name: directName, arguments: {} } });
+  assert.equal(allowed.result.isError, false, JSON.stringify(allowed));
+  assert.equal(allowed.result.structuredContent.agent.name, 'Chief of Staff');
+
+  ctx.twinScope.memory_policy.procedural = false;
+  listed = await list();
+  assert.ok(!listed.result.tools.some((tool) => tool.name === directName));
+  const denied = await mcp.handle({ jsonrpc: '2.0', id: 3, method: 'tools/call', params: { name: directName, arguments: {} } });
+  assert.equal(denied.result.isError, true);
+  assert.match(denied.result.content[0].text, /procedural memory access/);
 });
 
 test('connector search/fetch exclude private vaults', async () => {
@@ -558,7 +952,7 @@ test('connectors: JSON clients keep other servers and get a backup; bad JSON is 
   const j = JSON.parse(await readFile(file, 'utf8'));
   assert.equal(j.mcpServers.other.command, 'x');
   assert.equal(j.theme, 'dark');
-  assert.deepEqual(j.mcpServers.brainlink, { command: '/opt/BrainLink/node', args: ['/opt/BrainLink/cli.mjs', 'serve'], env: { BRAINLINK_AI_PLATFORM: 'Claude', BRAINLINK_AGENT_ROLE: 'Claude Desktop' } });
+  assert.deepEqual(j.mcpServers.brainlink, { command: '/opt/BrainLink/node', args: ['/opt/BrainLink/cli.mjs', 'serve'], env: { BRAINLINK_AGENT_TOKEN: '', BRAINLINK_AI_PLATFORM: 'Claude', BRAINLINK_AGENT_ROLE: 'Claude Desktop', BRAINLINK_HOME: path.join(home, 'Library', 'Application Support', 'BrainLink') } });
   assert.ok(r.backup && JSON.parse(await readFile(r.backup, 'utf8')).mcpServers.brainlink === undefined);
   assert.equal((await detect(opts))['claude-desktop'].connected, true);
   await disconnectClient('claude-desktop', opts);
@@ -580,6 +974,17 @@ test('connectors: Codex TOML block is replaced, not duplicated', async () => {
   assert.match(twice, /command = "C:\\\\BrainLink\\\\node.exe"/);
   assert.match(twice, /\[mcp_servers\.other\]\ncommand = "x"/);
   assert.equal(codexToml(twice, null).includes('brainlink'), false);
+});
+
+test('connectors: the scoped Codex health check reads its token only from the BrainLink TOML env table', async () => {
+  const home = await tmp('codex-token-home');
+  const codexHome = path.join(home, '.codex');
+  const opts = { home, os: 'linux', env: { CODEX_HOME: codexHome }, launch: { command: '/brainlink/node', args: ['serve'] }, useCli: false };
+  await mkdir(codexHome, { recursive: true });
+  const token = 'bla_scoped-codex-token';
+  const content = codexToml('[mcp_servers.other]\ncommand = "other"\n', { command: '/brainlink/node', args: ['serve'], env: { BRAINLINK_AGENT_TOKEN: token, BRAINLINK_AI_PLATFORM: 'ChatGPT Codex' } });
+  await writeFile(path.join(codexHome, 'config.toml'), content);
+  assert.equal(await readClientAgentToken('codex', opts), token);
 });
 
 test('packs: scaffold never overwrites; merge replaces same-named vault', async () => {
@@ -605,14 +1010,23 @@ test('setup UI: host check, token check, add vault, connect with no plan limits'
   const s = await startSetup({ env, home, os: 'darwin', port: 0, pick: async () => vaultDir, useCli: false });
   const base = `http://127.0.0.1:${s.port}`;
   const api = (method, p, body, token = s.token) => fetch(base + p, { method, headers: { 'X-BrainLink-Token': token, 'Content-Type': 'application/json' }, body: body && JSON.stringify(body) });
+  const visibleCount = async () => {
+    const deadline = Date.now() + 5000;
+    while (Date.now() < deadline) {
+      const state = await (await api('GET', '/api/state')).json();
+      if (state.vaults[0]?.notes_status === 'ready') return state.vaults[0].notes;
+      await new Promise((resolve) => setTimeout(resolve, 10));
+    }
+    throw new Error('visible note count did not finish in time');
+  };
   try {
     assert.equal((await fetch(base + '/')).status, 200);
     assert.equal((await api('GET', '/api/state', null, 'wrong')).status, 401);
     assert.equal((await api('POST', '/api/pick-folder')).status, 200);
     const add = await (await api('POST', '/api/vault', { path: vaultDir, name: 'Acme', pack: 'founder-os', agentName: 'Chief of Staff' })).json();
     assert.equal(add.ok, true);
+    assert.equal((await visibleCount()) > 5, true);
     const st = await (await api('GET', '/api/state')).json();
-    assert.equal(st.vaults[0].notes > 5, true);
     assert.equal(st.agents[0].name, 'Chief of Staff');
     // No vault cap: a second vault is always allowed, not just on a paid plan.
     const second = await api('POST', '/api/vault', { path: home, name: 'Other' });
@@ -638,10 +1052,19 @@ test('P1a: the vault card\'s note count matches what is actually visible (privat
   const s = await startSetup({ env, home, os: 'darwin', port: 0, pick: async () => vaultDir, useCli: false });
   const base = `http://127.0.0.1:${s.port}`;
   const api = (method, p, body) => fetch(base + p, { method, headers: { 'X-BrainLink-Token': s.token, 'Content-Type': 'application/json' }, body: body && JSON.stringify(body) });
+  const visibleCount = async () => {
+    const deadline = Date.now() + 5000;
+    while (Date.now() < deadline) {
+      const state = await (await api('GET', '/api/state')).json();
+      if (state.vaults[0]?.notes_status === 'ready') return state.vaults[0].notes;
+      await new Promise((resolve) => setTimeout(resolve, 10));
+    }
+    throw new Error('visible note count did not finish in time');
+  };
   try {
     const add = await (await api('POST', '/api/vault', { path: vaultDir, name: 'Acme', pack: 'founder-os', agentName: 'Chief of Staff' })).json();
     assert.equal(add.ok, true);
-    const before = (await (await api('GET', '/api/state')).json()).vaults[0].notes;
+    const before = await visibleCount();
     const g0 = await (await api('POST', '/api/graph', {})).json();
     assert.equal(before, g0.health.notes, 'the vault card count must match the Brain map\'s own visible-notes count');
 
@@ -673,8 +1096,12 @@ test('P0: POST /api/handoffs shows a clear receipt (who sent, who picked up, whe
     // A: handed off by Claude, picked up (acked) by Grok.
     await writeFile(path.join(dir, '2026-10-18-0930-from-claude-to-grok-check-pricing-page.md'),
       '---\ntype: handoff\nstatus: REQUEST\nai_platform: "Claude"\nwritten_at: 2026-10-18T09:30:00+08:00\nto: "Grok"\npriority: P1\nsubject: "Check pricing page"\n---\n# Check pricing page\n');
-    await writeFile(path.join(dir, '2026-10-18-1030-from-grok-to-claude-pricing-page-done.md'),
-      `---\ntype: handoff\nstatus: DONE\nai_platform: "Grok"\nwritten_at: 2026-10-18T10:30:00+08:00\nto: "Claude"\npriority: P1\nsubject: "Pricing page done"\nack_of: "Acme/Chief of Staff Office/Handoffs/2026-10-18-0930-from-claude-to-grok-check-pricing-page.md"\n---\n# Pricing page done\n`);
+    await writeFile(path.join(dir, '2026-10-18-1030-from-grok-to-claude-pricing-page-started.md'),
+      `---\ntype: handoff\nstatus: IN_PROGRESS\nai_platform: "Grok"\nwritten_at: 2026-10-18T10:30:00+08:00\nto: "Claude"\npriority: P1\nsubject: "Pricing page started"\nack_of: "Acme/Chief of Staff Office/Handoffs/2026-10-18-0930-from-claude-to-grok-check-pricing-page.md"\n---\n# Pricing page started\n`);
+    await writeFile(path.join(dir, '2026-10-18-1130-from-grok-to-claude-pricing-page-done.md'),
+      `---\ntype: handoff\nstatus: COMPLETED\nai_platform: "Grok"\nwritten_at: 2026-10-18T11:30:00+08:00\nto: "Claude"\npriority: P1\nsubject: "Pricing page done"\nack_of: "Acme/Chief of Staff Office/Handoffs/2026-10-18-0930-from-claude-to-grok-check-pricing-page.md"\n---\n# Pricing page done\n`);
+    await writeFile(path.join(dir, '2026-10-18-1130-from-codex-to-claude-pricing-page-blocked.md'),
+      `---\ntype: handoff\nstatus: BLOCKED\nai_platform: "Codex"\nwritten_at: 2026-10-18T11:30:00+08:00\nto: "Claude"\npriority: P1\nsubject: "Pricing page blocked"\nack_of: "Acme/Chief of Staff Office/Handoffs/2026-10-18-0930-from-claude-to-grok-check-pricing-page.md"\n---\n# Pricing page blocked\n`);
     // B: handed off by Claude to Codex, no reply yet.
     await writeFile(path.join(dir, '2026-10-19-0900-from-claude-to-codex-deploy-the-fix.md'),
       '---\ntype: handoff\nstatus: REQUEST\nai_platform: "Claude"\nwritten_at: 2026-10-19T09:00:00+08:00\nto: "Codex"\npriority: P1\nsubject: "Deploy the fix"\n---\n# Deploy the fix\n');
@@ -693,8 +1120,11 @@ test('P0: POST /api/handoffs shows a clear receipt (who sent, who picked up, whe
     assert.equal(picked.from, 'claude');
     assert.equal(picked.to, 'grok');
     assert.equal(picked.picked_up, true);
-    assert.equal(picked.picked_up_by, 'grok');
-    assert.match(picked.picked_up_at, /^2026-10-18T10:30/);
+    assert.equal(picked.picked_up_by, null, 'simultaneous updates must not select an arbitrary agent');
+    assert.match(picked.picked_up_at, /^2026-10-18T11:30/);
+    assert.equal(picked.update_conflict, true);
+    assert.equal(picked.update_status, 'CONCURRENT_UPDATES');
+    assert.equal(picked.update_subject, '2 updates need review');
     assert.match(picked.sent_at, /^2026-10-18T09:30/);
 
     const pending = r.receipts.find((x) => x.subject === 'Deploy the fix');
@@ -714,15 +1144,22 @@ test('CLI: `brainlink serve` speaks MCP over stdio and logs content-free activit
   let buf = '';
   child.stdout.on('data', (d) => { buf += d; let i; while ((i = buf.indexOf('\n')) !== -1) { lines.push(JSON.parse(buf.slice(0, i))); buf = buf.slice(i + 1); } });
   child.stdin.write(JSON.stringify({ jsonrpc: '2.0', id: 1, method: 'initialize', params: {} }) + '\n');
-  child.stdin.write(JSON.stringify({ jsonrpc: '2.0', id: 2, method: 'tools/call', params: { name: 'vault_search', arguments: { vault: 'Acme Studio', query: 'secret pricing words' } } }) + '\n');
-  for (let i = 0; i < 100 && lines.length < 2; i++) await new Promise((r) => setTimeout(r, 50));
+  child.stdin.write(JSON.stringify({ jsonrpc: '2.0', id: 2, method: 'tools/call', params: { name: 'brainlink_guide', arguments: {} } }) + '\n');
+  child.stdin.write(JSON.stringify({ jsonrpc: '2.0', id: 3, method: 'tools/call', params: { name: 'vault_search', arguments: { vault: 'Acme Studio', query: 'secret pricing words' } } }) + '\n');
+  for (let i = 0; i < 300 && lines.length < 3 && child.exitCode === null; i++) await new Promise((r) => setTimeout(r, 50));
+  assert.equal(lines.length, 3, `expected three MCP responses before timeout; received ${lines.length}, child exit=${child.exitCode}`);
   for (let i = 0; i < 40; i++) { if (await readFile(path.join(home, 'activity.log'), 'utf8').then((t) => t.includes('vault_search'), () => false)) break; await new Promise((r) => setTimeout(r, 50)); }
   child.kill();
   assert.equal(lines[0].result.serverInfo.name, 'brainlink');
-  assert.equal(lines[1].result.isError, false); // every install searches, no licence needed
+  assert.equal(lines[1].result.isError, false);
+  assert.equal(lines[2].result.isError, false); // every install searches, no licence needed
   const log = await readFile(path.join(home, 'activity.log'), 'utf8');
   assert.match(log, /"tool":"vault_search"/);
   assert.match(log, /"platform":"Cursor"/);
+  const searchActivity = log.trim().split(/\r?\n/).map(JSON.parse).find((entry) => entry.tool === 'vault_search');
+  assert.ok(Number.isSafeInteger(searchActivity.result_token_estimate) && searchActivity.result_token_estimate > 0);
+  const guideActivity = log.trim().split(/\r?\n/).map(JSON.parse).find((entry) => entry.tool === 'brainlink_guide');
+  assert.ok(Number.isSafeInteger(guideActivity.result_token_estimate) && guideActivity.result_token_estimate > 0);
   assert.doesNotMatch(log, /secret pricing/);
 });
 
@@ -743,6 +1180,12 @@ test('identity and secret helpers', () => {
   assert.equal(resolveIdentity(ctx, { ai_platform: 'Gemini' }).errors.length, 0);
   assert.deepEqual(findSecrets('plain text with 2026-10-18 date'), []);
   assert.ok(findSecrets('-----BEGIN OPENSSH PRIVATE KEY-----').length);
+  assert.deepEqual(findSecrets(JSON.stringify({ fixture_sha256: 'a'.repeat(64), source_commit_sha: 'b'.repeat(40) })), [], 'typed public fingerprints are not credentials');
+  assert.deepEqual(findSecrets(JSON.stringify({ question_sha256: 'c'.repeat(64) })), [], 'typed question fingerprints are public hashes, never question text');
+  assert.ok(findSecrets('Unlabelled digest: ' + 'a'.repeat(64)).length, 'an unlabeled long hex string still needs review');
+  assert.ok(findSecrets(JSON.stringify({ fixture_sha256: 'a'.repeat(63) })).length, 'a malformed public-hash field is not exempt');
+  assert.ok(findSecrets(JSON.stringify({ question_sha256: 'c'.repeat(63) })).length, 'a malformed question fingerprint is not exempt');
+  assert.ok(findSecrets(JSON.stringify({ fixture_sha256: 'sk-' + 'a'.repeat(40) })).length, 'key patterns remain active in recognized fields');
 });
 
 // ---- easy setup ----
@@ -963,14 +1406,18 @@ test('remember, daily note, open loops, recent, health and brief', async () => {
   await writeFile(path.join(company, '.obsidian/daily-notes.json'), JSON.stringify({ folder: 'Journal/Daily', format: 'YYYY-MM-DD' }));
   await writeFile(path.join(company, 'Lonely.md'), '# Lonely\n\nNo links here, and a [[Missing Note]].');
   const ctx = ctxOf(cfg);
-  const m1 = await remember(ctx, { vault: 'Acme Studio', fact: 'Founder prefers short answers.', confirm: true }, NOW);
+  const m1 = await remember(ctx, { vault: 'Acme Studio', facts: ['Founder prefers short answers.', 'Founder uses markdown _(literal)_'], source: 'Ian stated this preference in planning', confirm: true }, NOW);
   assert.equal(m1.written, true);
+  const memoryNote = await readFile(path.join(company, 'BrainLink', 'Memories.md'), 'utf8');
+  assert.match(memoryNote, /source: "Ian stated this preference in planning"; confidence: reported/);
+  assert.equal((await remember(ctx, { vault: 'Acme Studio', fact: 'No source', source: { private: true }, confirm: true }, NOW)).ok, false);
+  assert.equal((await remember(ctx, { vault: 'Acme Studio', fact: 'No source', source: 'x'.repeat(301), confirm: true }, NOW)).ok, false);
   assert.equal((await remember(ctx, { vault: 'Acme Studio', fact: 'founder prefers short answers', confirm: true }, NOW)).written, false, 'duplicates skipped');
   const d = await appendDaily(ctx, { vault: 'Acme Studio', text: 'Called the printer', confirm: true }, NOW);
   assert.equal(d.path, 'Acme Studio/Journal/Daily/2026-10-18.md');
   assert.match(await readFile(path.join(company, 'Journal/Daily/2026-10-18.md'), 'utf8'), /- 09:30 Called the printer _\(Claude\)_/);
   const loops = await openLoops(ctx, 'Acme Studio', { days: 3650 });
-  assert.ok(loops.next_actions.some((x) => /booking vendor/.test(x.action)));
+  assert.ok(loops.next_actions.some((x) => /booking vendor/.test(x.action)), JSON.stringify(loops));
   const rec = await recentNotes(ctx, 'Acme Studio', { days: 1 });
   assert.ok(rec.some((x) => x.title === 'Lonely'));
   const h = await vaultHealth(ctx, 'Acme Studio');
@@ -978,8 +1425,9 @@ test('remember, daily note, open loops, recent, health and brief', async () => {
   assert.ok(h.broken_links.some((b) => b.target === 'Missing Note'));
   const b = await brief(ctx, 'Acme Studio');
   assert.ok(b.changed.length && b.health.notes > 10 && 'open_loops' in b);
-  const c = await connectAgent(ctx, { agent: 'Chief of Staff' });
+  const c = await connectAgent(ctx, { agent: 'Chief of Staff', include_vault_context: true });
   assert.ok(c.memories.includes('Founder prefers short answers.'));
+  assert.ok(c.memories.includes('Founder uses markdown _(literal)_'), 'metadata parsing preserves fact text that resembles a legacy metadata suffix');
   assert.ok(c.whats_new.length);
   assert.ok(c.open_loops.counts);
 });
@@ -1044,7 +1492,7 @@ test('Windows: one-click setup connects apps with node.exe paths, and disconnect
 
 // ---- Linux code paths ----
 
-test('Linux: XDG config, Claude Desktop path, and Obsidian found in native, Flatpak and Snap installs', async () => {
+test('Linux: XDG config, Claude Desktop path, and Obsidian found in native, Flatpak and Snap installs', { skip: process.platform !== 'linux' }, async () => {
   const home = await tmp('linux');
   assert.equal(appHome({}, 'linux', home), path.join(home, '.config', 'brainlink'));
   assert.equal(appHome({ XDG_CONFIG_HOME: '/x' }, 'linux', home), '/x/brainlink');

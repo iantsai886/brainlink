@@ -2,7 +2,7 @@
 // (/api/connect's health field, /api/client-health), and the `brainlink sync` session-count fix.
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtemp, mkdir, cp, readFile } from 'node:fs/promises';
+import { mkdtemp, mkdir, cp, readFile, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -15,15 +15,15 @@ import { openSessionStore } from '../src/sessions/index.mjs';
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const tmp = (p) => mkdtemp(path.join(tmpdir(), `brainlink-${p}-`));
 
-async function withSampleVault(label) {
+async function withSampleVault(label, { agentName, os = 'linux', inspectClientRuntime } = {}) {
   const home = await tmp(`${label}-home`);
   const vaultPath = path.join(home, 'Acme Studio');
   await cp(path.join(ROOT, 'samples', 'acme-studio'), vaultPath, { recursive: true });
   const env = { BRAINLINK_HOME: path.join(home, 'app'), BRAINLINK_SEMANTIC: '0' };
-  const s = await startSetup({ env, home, os: 'linux', port: 0, useCli: false });
+  const s = await startSetup({ env, home, os, port: 0, useCli: false, ...(inspectClientRuntime ? { inspectClientRuntime } : {}) });
   const base = `http://127.0.0.1:${s.port}`;
   const api = (p, body) => fetch(base + p, { method: 'POST', headers: { 'X-BrainLink-Token': s.token, 'Content-Type': 'application/json' }, body: JSON.stringify(body || {}) });
-  const r = await (await api('/api/vault', { path: vaultPath, name: 'Acme Studio', pack: 'simple', scaffold: false })).json();
+  const r = await (await api('/api/vault', { path: vaultPath, name: 'Acme Studio', pack: 'simple', agentName, scaffold: false })).json();
   assert.equal(r.ok, true, JSON.stringify(r));
   return { home, env, s, api, vaultPath };
 }
@@ -99,19 +99,58 @@ test('/api/ask and /api/note: no vault configured yet returns a clear error, not
   } finally { s.server.close(); }
 });
 
-// ---- /api/client-health + /api/connect: live MCP call after connect ----
+// ---- /api/client-health + /api/connect: local BrainLink permission check ----
 
-test('/api/client-health: a real in-process MCP call (brainlink_guide) runs and is logged to Activity', async () => {
-  const { home, env, s, api } = await withSampleVault('health');
+test('/api/client-health: names the BrainLink roles this AI can call and gives clear full-restart steps', async () => {
+  const { home, env, s, api } = await withSampleVault('health', { agentName: 'Anna' });
   try {
     const r = await (await api('/api/client-health', { client: 'cursor' })).json();
     assert.equal(r.ok, true, JSON.stringify(r));
     assert.equal(r.tool, 'brainlink_guide');
+    assert.equal(r.verification, 'brainlink_local_mcp');
+    assert.equal(r.external_client_verified, false);
+    assert.deepEqual(r.available_agent_roles, ['Anna']);
+    assert.match(r.message, /Named BrainLink roles available: Anna/);
+    assert.match(r.message, /Fully quit.*tray\/background process.*start a new chat/i);
+    assert.match(r.message, /does not confirm that the app loaded the updated tools/i);
     assert.ok(typeof r.took_ms === 'number');
 
     const log = await readFile(path.join(env.BRAINLINK_HOME, 'activity.log'), 'utf8');
     const lines = log.trim().split('\n').map((l) => JSON.parse(l));
     assert.ok(lines.some((l) => l.tool === 'brainlink_guide' && l.mode === 'health-check' && l.ok === true), JSON.stringify(lines));
+  } finally { s.server.close(); }
+});
+
+test('/api/client-health: explains when Claude was open before its BrainLink config changed', async () => {
+  const { home, s, api } = await withSampleVault('health-claude-stale', {
+    agentName: 'Anna', os: 'win32',
+    inspectClientRuntime: async () => ({ status: 'running', started_before_config: true }),
+  });
+  const claudeConfig = path.join(home, 'AppData', 'Roaming', 'Claude', 'claude_desktop_config.json');
+  await mkdir(path.dirname(claudeConfig), { recursive: true });
+  await writeFile(claudeConfig, '{}');
+  try {
+    const r = await (await api('/api/client-health', { client: 'claude-desktop' })).json();
+    assert.equal(r.ok, true, JSON.stringify(r));
+    assert.deepEqual(r.client_runtime, { status: 'running', started_before_config: true });
+    assert.match(r.message, /Claude Desktop was already running when its BrainLink settings changed/i);
+    assert.match(r.message, /including the tray icon/i);
+    assert.equal(r.external_client_verified, false);
+  } finally { s.server.close(); }
+});
+
+test('/api/client-health: says to open Claude when it is fully closed', async () => {
+  const { home, s, api } = await withSampleVault('health-claude-closed', {
+    agentName: 'Anna', os: 'win32',
+    inspectClientRuntime: async () => ({ status: 'not_running', started_before_config: null }),
+  });
+  const claudeConfig = path.join(home, 'AppData', 'Roaming', 'Claude', 'claude_desktop_config.json');
+  await mkdir(path.dirname(claudeConfig), { recursive: true });
+  await writeFile(claudeConfig, '{}');
+  try {
+    const r = await (await api('/api/client-health', { client: 'claude-desktop' })).json();
+    assert.equal(r.ok, true, JSON.stringify(r));
+    assert.match(r.message, /Claude Desktop is not running now\. Open it and start a new chat/i);
   } finally { s.server.close(); }
 });
 
@@ -128,7 +167,7 @@ test('/api/client-health: with no vault yet, reports a friendly message instead 
   } finally { s.server.close(); }
 });
 
-test('/api/connect: one-click connect returns a live health-check result alongside the connect result', async () => {
+test('/api/connect: one-click connect returns a local BrainLink check, not an external client claim', async () => {
   const { home, s, api } = await withSampleVault('connect-health');
   await mkdir(path.join(home, '.cursor'), { recursive: true });
   try {
@@ -136,6 +175,9 @@ test('/api/connect: one-click connect returns a live health-check result alongsi
     assert.match(r.title, /Cursor/);
     assert.equal(r.health.ok, true, JSON.stringify(r.health));
     assert.equal(r.health.tool, 'brainlink_guide');
+    assert.equal(r.health.verification, 'brainlink_local_mcp');
+    assert.equal(r.health.external_client_verified, false);
+    assert.match(r.health.message, /Fully quit.*start a new chat/i);
   } finally { s.server.close(); }
 });
 
@@ -150,6 +192,16 @@ test('ui/index.html: #note-modal starts hidden (author CSS cannot override the h
   assert.match(html, /\.modal-overlay\[hidden\]\s*\{\s*display:\s*none;?\s*\}/, 'an explicit [hidden] override is required because .modal-overlay also sets `display`');
   assert.match(html, /\$\('note-close'\)\.onclick\s*=\s*closeNote/, 'Close must hide the modal');
   assert.match(html, /e\.key === 'Escape'\)\s*closeNote\(\)/, 'Escape must hide the modal');
+});
+
+test('ui/index.html: shared desktop content width grows while the graph still stacks on narrow screens', async () => {
+  const html = await readFile(path.join(ROOT, 'ui', 'index.html'), 'utf8');
+  const css = html.match(/<style>([\s\S]*?)<\/style>/)?.[1] || '';
+  assert.match(css, /--content-width:\s*1180px/, 'desktop content should use the wider shared layout size');
+  for (const selector of ['header', 'main', '#boot-loading, #boot-error', '#main-nav']) {
+    assert.match(css, new RegExp(`${selector.replace(/[.*+?^${}()|[\\]\\]/g, '\\$&')}\\s*\\{[^}]*max-width:\\s*var\\(--content-width\\)`), `${selector} should align to the same content grid`);
+  }
+  assert.match(css, /@media\s*\(max-width:\s*720px\)\s*\{\s*\.brain\s*\{\s*grid-template-columns:\s*1fr;/, 'graph and details should stack on narrow screens');
 });
 
 // ---- sync-cli / sync/engine: local-only `sessions` count (was hardcoded 0) ----

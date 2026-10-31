@@ -54,10 +54,11 @@ echo "ok"
 
 echo "== file tree =="
 REQUIRED=(
-  "app/bin/brainlink.mjs" "app/src/runtime.mjs" "app/src/connectors.mjs" "app/ui/index.html"
+  "app/bin/brainlink.mjs" "app/src/runtime.mjs" "app/src/connectors.mjs" "app/src/update-manifest.mjs" "app/ui/index.html"
   "app/ui/locales/en.json" "app/ui/locales/zh-TW.json" "app/ui/locales/pt.json"
-  "app/samples/acme-studio" "app/package.json" "app/LICENSE.txt" "app/README.md"
+  "app/samples/acme-studio" "app/skills/brainlink-session-closeout/SKILL.md" "app/skills/brainlink-graph-curation/SKILL.md" "app/package.json" "app/LICENSE.txt" "app/README.md"
   "app/node_modules/brainlink-store/memory-store.mjs" "app/node_modules/brainlink-store/package.json"
+  "app/node_modules/yaml/package.json" "app/node_modules/yaml/dist/index.js"
   "runtime/arm64/bin/node" "runtime/arm64/LICENSE" "runtime/x64/bin/node" "runtime/x64/LICENSE"
   "Install BrainLink.command" "Uninstall BrainLink.command" "READ ME FIRST.txt"
   "BrainLink.app/Contents/Info.plist" "BrainLink.app/Contents/MacOS/BrainLink"
@@ -74,7 +75,7 @@ done
 echo "ok: executable bits preserved through the zip"
 
 echo "== excluded paths and secrets =="
-for bad in app/test app/docs app/.git app/dist; do
+for bad in app/test app/ui/app/test app/docs app/.git app/dist; do
   [ -e "$BASE/$bad" ] && { echo "FAIL: excluded path present: $bad" >&2; exit 1; }
 done
 HITS="$(find "$BASE" -type f \( -iname '*.pem' -o -iname '*secret*' -o -iname 'id_rsa*' -o -iname '*.key' \) || true)"

@@ -28,6 +28,18 @@ test('search ranks exact title higher than body mentions', async () => {
   await search.open(search.get().result.hits.find(h=>h.title==='Website relaunch').id);
   assert.match(search.get().open.body,/Draft copy/);
 });
+test('search scope selection is retained and passed to the authorized store query',async()=>{
+ const store=await makeStore(),api=createApi({store});let seen;
+ store.search=async(q,options)=>{seen={q,options};return [];};
+ const search=useSearch(api);await search.run('website');await search.setScope('Work');
+ assert.equal(search.get().scope,'Work');assert.equal(seen.q,'website');assert.equal(seen.options.scope,'Work');
+ await search.setScope('');assert.equal(search.get().scope,'');assert.equal(seen.options.scope,undefined);
+});
+test('fallback search enforces a selected accessible vault before reading note content',async()=>{
+ const store=await makeStore();store.search=undefined;const api=createApi({store,access:{vaults:['Work']}});
+ const result=await api.search('private sync worries',{scope:'Journal'});assert.equal(result.hits.length,0);
+ const visible=await api.search('Website relaunch',{scope:'Work'});assert.ok(visible.hits.length>0);assert.ok(visible.hits.every(hit=>hit.vault==='Work'));
+});
 test('remote access never returns private session or private search result', async () => {
   const api = createApi({store:await makeStore(),access:{remote:true}});
   assert.ok((await api.listSessions()).every(s=>s.vault==='Work'));

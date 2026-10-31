@@ -1,0 +1,882 @@
+{
+  "schema": 2,
+  "fixture_sha256": "500e0faffedcdf194c535dc3c0b2f44afe2111814f0d6c034420616392cb5490",
+  "vault": "Independent Eval",
+  "case_count": 30,
+  "evaluator_version": "retrieval-eval-v3",
+  "minimum_cases_for_review": 20,
+  "source_commit": "57a301c06a15d6e76542ecdac4000c7c7cce47c3",
+  "source_branch": "integration/brainlink-retrieval-evaluation",
+  "working_tree_clean": true,
+  "tracked_tree_clean": true,
+  "untracked_paths_present": false,
+  "environment": {
+    "node": "v24.22.1",
+    "platform": "win32",
+    "arch": "x64"
+  },
+  "package_version": "1.2.8",
+  "comparison": "same questions, vault scope, topK, lexical search, and semantic=false",
+  "candidate_policy": {
+    "id": "compact-search-v1",
+    "selected_sources_preserved": true,
+    "note_text_truncated": false,
+    "tuned_on_fixture": false
+  },
+  "baseline": {
+    "task_success": {
+      "count": 17,
+      "total": 30,
+      "rate": 0.567
+    },
+    "source_correctness": {
+      "top_k_all_sources_correct": 22,
+      "answerable_cases": 22,
+      "source_recall": 1
+    },
+    "abstention": {
+      "expected": 8,
+      "returned": 17,
+      "correct": 7,
+      "false": 10,
+      "missed": 1
+    },
+    "privacy_violations": 0,
+    "context": {
+      "mean_estimated_tokens": 497,
+      "mean_characters": 1985
+    },
+    "mean_latency_ms": 233,
+    "failures": [
+      {
+        "id": "personal-pref-02",
+        "failure": "false_abstention",
+        "privacy_violation": false
+      },
+      {
+        "id": "org-margin-01",
+        "failure": "false_abstention",
+        "privacy_violation": false
+      },
+      {
+        "id": "org-offer-01",
+        "failure": "false_abstention",
+        "privacy_violation": false
+      },
+      {
+        "id": "org-date-current-02",
+        "failure": "missing_required_context",
+        "privacy_violation": false
+      },
+      {
+        "id": "org-provenance-01",
+        "failure": "missing_required_context",
+        "privacy_violation": false
+      },
+      {
+        "id": "org-scope-01",
+        "failure": "false_abstention",
+        "privacy_violation": false
+      },
+      {
+        "id": "juniper-account-02",
+        "failure": "false_abstention",
+        "privacy_violation": false
+      },
+      {
+        "id": "juniper-copy-01",
+        "failure": "false_abstention",
+        "privacy_violation": false
+      },
+      {
+        "id": "juniper-access-01",
+        "failure": "false_abstention",
+        "privacy_violation": false
+      },
+      {
+        "id": "juniper-accept-01",
+        "failure": "false_abstention",
+        "privacy_violation": false
+      },
+      {
+        "id": "cedar-accept-01",
+        "failure": "false_abstention",
+        "privacy_violation": false
+      },
+      {
+        "id": "playbook-source-01",
+        "failure": "false_abstention",
+        "privacy_violation": false
+      },
+      {
+        "id": "missing-approval-01",
+        "failure": "missed_abstention",
+        "privacy_violation": false
+      }
+    ],
+    "cases": [
+      {
+        "id": "personal-pref-01",
+        "success": true,
+        "sources_complete": true,
+        "required_context_complete": true,
+        "abstained": false,
+        "correct_abstention": false,
+        "false_abstention": false,
+        "privacy_violation": false,
+        "failure": null
+      },
+      {
+        "id": "personal-pref-02",
+        "success": false,
+        "sources_complete": true,
+        "required_context_complete": true,
+        "abstained": true,
+        "correct_abstention": false,
+        "false_abstention": true,
+        "privacy_violation": false,
+        "failure": "false_abstention"
+      },
+      {
+        "id": "personal-trip-01",
+        "success": true,
+        "sources_complete": true,
+        "required_context_complete": true,
+        "abstained": false,
+        "correct_abstention": false,
+        "false_abstention": false,
+        "privacy_violation": false,
+        "failure": null
+      },
+      {
+        "id": "personal-trip-02",
+        "success": true,
+        "sources_complete": true,
+        "required_context_complete": true,
+        "abstained": false,
+        "correct_abstention": false,
+        "false_abstention": false,
+        "privacy_violation": false,
+        "failure": null
+      },
+      {
+        "id": "org-target-01",
+        "success": true,
+        "sources_complete": true,
+        "required_context_complete": true,
+        "abstained": false,
+        "correct_abstention": false,
+        "false_abstention": false,
+        "privacy_violation": false,
+        "failure": null
+      },
+      {
+        "id": "org-margin-01",
+        "success": false,
+        "sources_complete": true,
+        "required_context_complete": true,
+        "abstained": true,
+        "correct_abstention": false,
+        "false_abstention": true,
+        "privacy_violation": false,
+        "failure": "false_abstention"
+      },
+      {
+        "id": "org-offer-01",
+        "success": false,
+        "sources_complete": true,
+        "required_context_complete": true,
+        "abstained": true,
+        "correct_abstention": false,
+        "false_abstention": true,
+        "privacy_violation": false,
+        "failure": "false_abstention"
+      },
+      {
+        "id": "org-date-current-01",
+        "success": true,
+        "sources_complete": true,
+        "required_context_complete": true,
+        "abstained": false,
+        "correct_abstention": false,
+        "false_abstention": false,
+        "privacy_violation": false,
+        "failure": null
+      },
+      {
+        "id": "org-date-current-02",
+        "success": false,
+        "sources_complete": true,
+        "required_context_complete": false,
+        "abstained": false,
+        "correct_abstention": false,
+        "false_abstention": false,
+        "privacy_violation": false,
+        "failure": "missing_required_context"
+      },
+      {
+        "id": "org-atlas-state-01",
+        "success": true,
+        "sources_complete": true,
+        "required_context_complete": true,
+        "abstained": false,
+        "correct_abstention": false,
+        "false_abstention": false,
+        "privacy_violation": false,
+        "failure": null
+      },
+      {
+        "id": "org-provenance-01",
+        "success": false,
+        "sources_complete": true,
+        "required_context_complete": false,
+        "abstained": false,
+        "correct_abstention": false,
+        "false_abstention": false,
+        "privacy_violation": false,
+        "failure": "missing_required_context"
+      },
+      {
+        "id": "org-provenance-02",
+        "success": true,
+        "sources_complete": true,
+        "required_context_complete": true,
+        "abstained": false,
+        "correct_abstention": false,
+        "false_abstention": false,
+        "privacy_violation": false,
+        "failure": null
+      },
+      {
+        "id": "org-scope-01",
+        "success": false,
+        "sources_complete": true,
+        "required_context_complete": true,
+        "abstained": true,
+        "correct_abstention": false,
+        "false_abstention": true,
+        "privacy_violation": false,
+        "failure": "false_abstention"
+      },
+      {
+        "id": "juniper-account-01",
+        "success": true,
+        "sources_complete": true,
+        "required_context_complete": true,
+        "abstained": false,
+        "correct_abstention": false,
+        "false_abstention": false,
+        "privacy_violation": false,
+        "failure": null
+      },
+      {
+        "id": "juniper-account-02",
+        "success": false,
+        "sources_complete": true,
+        "required_context_complete": true,
+        "abstained": true,
+        "correct_abstention": false,
+        "false_abstention": true,
+        "privacy_violation": false,
+        "failure": "false_abstention"
+      },
+      {
+        "id": "juniper-copy-01",
+        "success": false,
+        "sources_complete": true,
+        "required_context_complete": true,
+        "abstained": true,
+        "correct_abstention": false,
+        "false_abstention": true,
+        "privacy_violation": false,
+        "failure": "false_abstention"
+      },
+      {
+        "id": "juniper-access-01",
+        "success": false,
+        "sources_complete": true,
+        "required_context_complete": true,
+        "abstained": true,
+        "correct_abstention": false,
+        "false_abstention": true,
+        "privacy_violation": false,
+        "failure": "false_abstention"
+      },
+      {
+        "id": "juniper-accept-01",
+        "success": false,
+        "sources_complete": true,
+        "required_context_complete": true,
+        "abstained": true,
+        "correct_abstention": false,
+        "false_abstention": true,
+        "privacy_violation": false,
+        "failure": "false_abstention"
+      },
+      {
+        "id": "cedar-window-01",
+        "success": true,
+        "sources_complete": true,
+        "required_context_complete": true,
+        "abstained": false,
+        "correct_abstention": false,
+        "false_abstention": false,
+        "privacy_violation": false,
+        "failure": null
+      },
+      {
+        "id": "cedar-tool-01",
+        "success": true,
+        "sources_complete": true,
+        "required_context_complete": true,
+        "abstained": false,
+        "correct_abstention": false,
+        "false_abstention": false,
+        "privacy_violation": false,
+        "failure": null
+      },
+      {
+        "id": "cedar-accept-01",
+        "success": false,
+        "sources_complete": true,
+        "required_context_complete": true,
+        "abstained": true,
+        "correct_abstention": false,
+        "false_abstention": true,
+        "privacy_violation": false,
+        "failure": "false_abstention"
+      },
+      {
+        "id": "playbook-source-01",
+        "success": false,
+        "sources_complete": true,
+        "required_context_complete": true,
+        "abstained": true,
+        "correct_abstention": false,
+        "false_abstention": true,
+        "privacy_violation": false,
+        "failure": "false_abstention"
+      },
+      {
+        "id": "missing-health-01",
+        "success": true,
+        "sources_complete": false,
+        "required_context_complete": false,
+        "abstained": true,
+        "correct_abstention": true,
+        "false_abstention": false,
+        "privacy_violation": false,
+        "failure": null
+      },
+      {
+        "id": "missing-contact-01",
+        "success": true,
+        "sources_complete": false,
+        "required_context_complete": false,
+        "abstained": true,
+        "correct_abstention": true,
+        "false_abstention": false,
+        "privacy_violation": false,
+        "failure": null
+      },
+      {
+        "id": "scope-foreign-01",
+        "success": true,
+        "sources_complete": false,
+        "required_context_complete": false,
+        "abstained": true,
+        "correct_abstention": true,
+        "false_abstention": false,
+        "privacy_violation": false,
+        "failure": null
+      },
+      {
+        "id": "scope-private-01",
+        "success": true,
+        "sources_complete": false,
+        "required_context_complete": false,
+        "abstained": true,
+        "correct_abstention": true,
+        "false_abstention": false,
+        "privacy_violation": false,
+        "failure": null
+      },
+      {
+        "id": "scope-excluded-01",
+        "success": true,
+        "sources_complete": false,
+        "required_context_complete": false,
+        "abstained": true,
+        "correct_abstention": true,
+        "false_abstention": false,
+        "privacy_violation": false,
+        "failure": null
+      },
+      {
+        "id": "ambiguous-project-01",
+        "success": true,
+        "sources_complete": false,
+        "required_context_complete": false,
+        "abstained": true,
+        "correct_abstention": true,
+        "false_abstention": false,
+        "privacy_violation": false,
+        "failure": null
+      },
+      {
+        "id": "missing-health-02",
+        "success": true,
+        "sources_complete": false,
+        "required_context_complete": false,
+        "abstained": true,
+        "correct_abstention": true,
+        "false_abstention": false,
+        "privacy_violation": false,
+        "failure": null
+      },
+      {
+        "id": "missing-approval-01",
+        "success": false,
+        "sources_complete": false,
+        "required_context_complete": false,
+        "abstained": false,
+        "correct_abstention": false,
+        "false_abstention": false,
+        "privacy_violation": false,
+        "failure": "missed_abstention"
+      }
+    ]
+  },
+  "candidate": {
+    "task_success": {
+      "count": 17,
+      "total": 30,
+      "rate": 0.567
+    },
+    "source_correctness": {
+      "top_k_all_sources_correct": 22,
+      "answerable_cases": 22,
+      "source_recall": 1
+    },
+    "abstention": {
+      "expected": 8,
+      "returned": 17,
+      "correct": 7,
+      "false": 10,
+      "missed": 1
+    },
+    "privacy_violations": 0,
+    "context": {
+      "mean_estimated_tokens": 427,
+      "mean_characters": 1708
+    },
+    "mean_latency_ms": 96,
+    "failures": [
+      {
+        "id": "personal-pref-02",
+        "failure": "false_abstention",
+        "privacy_violation": false
+      },
+      {
+        "id": "org-margin-01",
+        "failure": "false_abstention",
+        "privacy_violation": false
+      },
+      {
+        "id": "org-offer-01",
+        "failure": "false_abstention",
+        "privacy_violation": false
+      },
+      {
+        "id": "org-date-current-02",
+        "failure": "missing_required_context",
+        "privacy_violation": false
+      },
+      {
+        "id": "org-provenance-01",
+        "failure": "missing_required_context",
+        "privacy_violation": false
+      },
+      {
+        "id": "org-scope-01",
+        "failure": "false_abstention",
+        "privacy_violation": false
+      },
+      {
+        "id": "juniper-account-02",
+        "failure": "false_abstention",
+        "privacy_violation": false
+      },
+      {
+        "id": "juniper-copy-01",
+        "failure": "false_abstention",
+        "privacy_violation": false
+      },
+      {
+        "id": "juniper-access-01",
+        "failure": "false_abstention",
+        "privacy_violation": false
+      },
+      {
+        "id": "juniper-accept-01",
+        "failure": "false_abstention",
+        "privacy_violation": false
+      },
+      {
+        "id": "cedar-accept-01",
+        "failure": "false_abstention",
+        "privacy_violation": false
+      },
+      {
+        "id": "playbook-source-01",
+        "failure": "false_abstention",
+        "privacy_violation": false
+      },
+      {
+        "id": "missing-approval-01",
+        "failure": "missed_abstention",
+        "privacy_violation": false
+      }
+    ],
+    "cases": [
+      {
+        "id": "personal-pref-01",
+        "success": true,
+        "sources_complete": true,
+        "required_context_complete": true,
+        "abstained": false,
+        "correct_abstention": false,
+        "false_abstention": false,
+        "privacy_violation": false,
+        "failure": null
+      },
+      {
+        "id": "personal-pref-02",
+        "success": false,
+        "sources_complete": true,
+        "required_context_complete": true,
+        "abstained": true,
+        "correct_abstention": false,
+        "false_abstention": true,
+        "privacy_violation": false,
+        "failure": "false_abstention"
+      },
+      {
+        "id": "personal-trip-01",
+        "success": true,
+        "sources_complete": true,
+        "required_context_complete": true,
+        "abstained": false,
+        "correct_abstention": false,
+        "false_abstention": false,
+        "privacy_violation": false,
+        "failure": null
+      },
+      {
+        "id": "personal-trip-02",
+        "success": true,
+        "sources_complete": true,
+        "required_context_complete": true,
+        "abstained": false,
+        "correct_abstention": false,
+        "false_abstention": false,
+        "privacy_violation": false,
+        "failure": null
+      },
+      {
+        "id": "org-target-01",
+        "success": true,
+        "sources_complete": true,
+        "required_context_complete": true,
+        "abstained": false,
+        "correct_abstention": false,
+        "false_abstention": false,
+        "privacy_violation": false,
+        "failure": null
+      },
+      {
+        "id": "org-margin-01",
+        "success": false,
+        "sources_complete": true,
+        "required_context_complete": true,
+        "abstained": true,
+        "correct_abstention": false,
+        "false_abstention": true,
+        "privacy_violation": false,
+        "failure": "false_abstention"
+      },
+      {
+        "id": "org-offer-01",
+        "success": false,
+        "sources_complete": true,
+        "required_context_complete": true,
+        "abstained": true,
+        "correct_abstention": false,
+        "false_abstention": true,
+        "privacy_violation": false,
+        "failure": "false_abstention"
+      },
+      {
+        "id": "org-date-current-01",
+        "success": true,
+        "sources_complete": true,
+        "required_context_complete": true,
+        "abstained": false,
+        "correct_abstention": false,
+        "false_abstention": false,
+        "privacy_violation": false,
+        "failure": null
+      },
+      {
+        "id": "org-date-current-02",
+        "success": false,
+        "sources_complete": true,
+        "required_context_complete": false,
+        "abstained": false,
+        "correct_abstention": false,
+        "false_abstention": false,
+        "privacy_violation": false,
+        "failure": "missing_required_context"
+      },
+      {
+        "id": "org-atlas-state-01",
+        "success": true,
+        "sources_complete": true,
+        "required_context_complete": true,
+        "abstained": false,
+        "correct_abstention": false,
+        "false_abstention": false,
+        "privacy_violation": false,
+        "failure": null
+      },
+      {
+        "id": "org-provenance-01",
+        "success": false,
+        "sources_complete": true,
+        "required_context_complete": false,
+        "abstained": false,
+        "correct_abstention": false,
+        "false_abstention": false,
+        "privacy_violation": false,
+        "failure": "missing_required_context"
+      },
+      {
+        "id": "org-provenance-02",
+        "success": true,
+        "sources_complete": true,
+        "required_context_complete": true,
+        "abstained": false,
+        "correct_abstention": false,
+        "false_abstention": false,
+        "privacy_violation": false,
+        "failure": null
+      },
+      {
+        "id": "org-scope-01",
+        "success": false,
+        "sources_complete": true,
+        "required_context_complete": true,
+        "abstained": true,
+        "correct_abstention": false,
+        "false_abstention": true,
+        "privacy_violation": false,
+        "failure": "false_abstention"
+      },
+      {
+        "id": "juniper-account-01",
+        "success": true,
+        "sources_complete": true,
+        "required_context_complete": true,
+        "abstained": false,
+        "correct_abstention": false,
+        "false_abstention": false,
+        "privacy_violation": false,
+        "failure": null
+      },
+      {
+        "id": "juniper-account-02",
+        "success": false,
+        "sources_complete": true,
+        "required_context_complete": true,
+        "abstained": true,
+        "correct_abstention": false,
+        "false_abstention": true,
+        "privacy_violation": false,
+        "failure": "false_abstention"
+      },
+      {
+        "id": "juniper-copy-01",
+        "success": false,
+        "sources_complete": true,
+        "required_context_complete": true,
+        "abstained": true,
+        "correct_abstention": false,
+        "false_abstention": true,
+        "privacy_violation": false,
+        "failure": "false_abstention"
+      },
+      {
+        "id": "juniper-access-01",
+        "success": false,
+        "sources_complete": true,
+        "required_context_complete": true,
+        "abstained": true,
+        "correct_abstention": false,
+        "false_abstention": true,
+        "privacy_violation": false,
+        "failure": "false_abstention"
+      },
+      {
+        "id": "juniper-accept-01",
+        "success": false,
+        "sources_complete": true,
+        "required_context_complete": true,
+        "abstained": true,
+        "correct_abstention": false,
+        "false_abstention": true,
+        "privacy_violation": false,
+        "failure": "false_abstention"
+      },
+      {
+        "id": "cedar-window-01",
+        "success": true,
+        "sources_complete": true,
+        "required_context_complete": true,
+        "abstained": false,
+        "correct_abstention": false,
+        "false_abstention": false,
+        "privacy_violation": false,
+        "failure": null
+      },
+      {
+        "id": "cedar-tool-01",
+        "success": true,
+        "sources_complete": true,
+        "required_context_complete": true,
+        "abstained": false,
+        "correct_abstention": false,
+        "false_abstention": false,
+        "privacy_violation": false,
+        "failure": null
+      },
+      {
+        "id": "cedar-accept-01",
+        "success": false,
+        "sources_complete": true,
+        "required_context_complete": true,
+        "abstained": true,
+        "correct_abstention": false,
+        "false_abstention": true,
+        "privacy_violation": false,
+        "failure": "false_abstention"
+      },
+      {
+        "id": "playbook-source-01",
+        "success": false,
+        "sources_complete": true,
+        "required_context_complete": true,
+        "abstained": true,
+        "correct_abstention": false,
+        "false_abstention": true,
+        "privacy_violation": false,
+        "failure": "false_abstention"
+      },
+      {
+        "id": "missing-health-01",
+        "success": true,
+        "sources_complete": false,
+        "required_context_complete": false,
+        "abstained": true,
+        "correct_abstention": true,
+        "false_abstention": false,
+        "privacy_violation": false,
+        "failure": null
+      },
+      {
+        "id": "missing-contact-01",
+        "success": true,
+        "sources_complete": false,
+        "required_context_complete": false,
+        "abstained": true,
+        "correct_abstention": true,
+        "false_abstention": false,
+        "privacy_violation": false,
+        "failure": null
+      },
+      {
+        "id": "scope-foreign-01",
+        "success": true,
+        "sources_complete": false,
+        "required_context_complete": false,
+        "abstained": true,
+        "correct_abstention": true,
+        "false_abstention": false,
+        "privacy_violation": false,
+        "failure": null
+      },
+      {
+        "id": "scope-private-01",
+        "success": true,
+        "sources_complete": false,
+        "required_context_complete": false,
+        "abstained": true,
+        "correct_abstention": true,
+        "false_abstention": false,
+        "privacy_violation": false,
+        "failure": null
+      },
+      {
+        "id": "scope-excluded-01",
+        "success": true,
+        "sources_complete": false,
+        "required_context_complete": false,
+        "abstained": true,
+        "correct_abstention": true,
+        "false_abstention": false,
+        "privacy_violation": false,
+        "failure": null
+      },
+      {
+        "id": "ambiguous-project-01",
+        "success": true,
+        "sources_complete": false,
+        "required_context_complete": false,
+        "abstained": true,
+        "correct_abstention": true,
+        "false_abstention": false,
+        "privacy_violation": false,
+        "failure": null
+      },
+      {
+        "id": "missing-health-02",
+        "success": true,
+        "sources_complete": false,
+        "required_context_complete": false,
+        "abstained": true,
+        "correct_abstention": true,
+        "false_abstention": false,
+        "privacy_violation": false,
+        "failure": null
+      },
+      {
+        "id": "missing-approval-01",
+        "success": false,
+        "sources_complete": false,
+        "required_context_complete": false,
+        "abstained": false,
+        "correct_abstention": false,
+        "false_abstention": false,
+        "privacy_violation": false,
+        "failure": "missed_abstention"
+      }
+    ]
+  },
+  "decision": "eligible_for_review",
+  "limitations": [
+    "Task success is a source and required-context proxy; no language model generated answers.",
+    "Token values are local estimates, not provider-billed counts or real-world savings.",
+    "Latency is local and environment-dependent.",
+    "Only this fictional frozen corpus and configured vault scope were evaluated.",
+    "This result does not establish cross-client isolation or production readiness."
+  ]
+}

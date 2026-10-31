@@ -1,16 +1,25 @@
-# Handoff to Claude 101 (src/sync/)
+# Sync implementation handoff
 
-No changes were made under `src/sync/`. `src/host.mjs` wraps your four pure exports from
-`src/sync/settings.mjs` — `syncSettings`, `suggestFolders`, `validateSync`, `chooseSync` — with
-`config.json` load/save to build the `get/suggestFolders/validate/save` shape
-`ui/app/README.md` asks for (`services.settings`). This wrapper lives in `src/host.mjs`, not in
-your file, per the ownership split — but it is now the thing the real UI's Settings tab calls in
-production (`brainlink ui` / `brainlink demo`), so a signature change to any of those four exports
-needs to stay compatible with that wrapper (`settingsService()` in `src/host.mjs`).
+Status snapshot: 2026-10-25. This note describes the current sync boundaries; `docs/IMPLEMENTATION-STATUS.md` is the evidence ledger.
 
-Open item worth knowing about: the real vault's content sync is still local-only end to end.
-`src/store/folder-store.mjs` (the real `BrainStore` now backing the UI and, once wired, the MCP
-server) never talks to `src/sync/engine.mjs` — picking a Drive/iCloud/Dropbox folder in Settings
-updates `config.json` only. Actually moving note files into that folder still needs wiring from
-`engine.mjs` to the folder store's vault paths; this matches what `docs/progress.md` already
-flags and `brainlink sync`'s CLI output already says ("notes: pending the store integration").
+## Local folder sync
+
+`src/host.mjs` wraps the pure exports in `src/sync/settings.mjs` — `syncSettings`, `suggestFolders`, `validateSync`, and `chooseSync` — with `config.json` load/save for the Settings UI. Keep the wrapper signature compatible with `settingsService()` in `src/host.mjs`.
+
+`brainlink sync` and the Setup **Sync now** button connect `src/sync/engine.mjs` to `src/store/folder-store.mjs` and the configured on-disk vault. Setup lets the user select one existing public vault. For older configurations without a selection, BrainLink picks a public vault named `brain`, or the sole public vault; if several public vaults exist and there is no `brain` vault, it stops with `vault-ambiguous` instead of guessing. Private vaults never qualify. It also refuses a sync folder located inside the selected vault. Users can opt into an hourly-to-weekly schedule; it runs only while BrainLink is open and keeps the app available. Start-at-sign-in can launch the app after login. The receiving folder must be a folder already synced by the user's Drive/iCloud/Dropbox desktop client.
+
+Local tests exercise send and receive between temporary folders, the Setup endpoint, scheduled operation without a button click, private-vault refusal, ambiguous-vault refusal, and target-inside-vault refusal. The full serialized core and UI suites pass on Windows/Node 24.22.1. A real Drive/iCloud/Dropbox desktop client run and a second-device acceptance check remain unverified. Sync state is local per device. Conflict handling keeps both copies; deletes are never propagated.
+
+## GitHub shared knowledge
+
+The authenticated Setup API in `src/sync/github-preview.mjs` now supports:
+
+- Listing eligible local vault notes, with private/generated/secret-bearing notes excluded.
+- Body-free local-clone preview and an explicitly confirmed commit of selected notes only.
+- A separate, explicitly confirmed push of that exact single commit. It fetches the tracked `origin` branch, verifies ancestry and selected paths/content, refuses dirty or unrelated work, uses Git's configured credential helper, and never force-pushes.
+- A remote-note check that fetches the tracked branch, lists only public Markdown notes after privacy/secret filtering, and classifies each as new, unchanged, or conflict.
+- An explicitly confirmed import of selected new notes into the chosen non-private vault. Existing content is never overwritten; if any selected path conflicts, the batch is rejected without importing other selected files.
+
+Every GitHub operation now requires a profile with a user-confirmed `github_repository` assignment (see `docs/GITHUB-SHARED-KNOWLEDGE.md`). Remote pull currently imports new files only. Updating an existing shared note, conflict resolution UI, automatic sync, cross-device acceptance, live GitHub account authentication, and customer deployment are not verified. The isolated tests use a local bare Git remote and do not stand in for live GitHub acceptance.
+
+GitHub collaborator permissions apply to the repository, not BrainLink folders. Keep Personal, Organisation, and each Client scope in separate repositories by default. Continue to use BrainLink's profile grants for agent access; direct GitHub access is a separate grant and can bypass BrainLink filtering.

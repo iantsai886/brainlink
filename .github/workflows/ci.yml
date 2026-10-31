@@ -1,0 +1,240 @@
+name: CI
+
+on:
+  push:
+  pull_request:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  test:
+    name: Node ${{ matrix.node }} / ${{ matrix.os }}
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 20
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest, macos-latest]
+        node: [22, 24]
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ matrix.node }}
+          cache: npm
+
+      - name: Install locked dependencies
+        run: npm ci
+
+      - name: Run core and UI suites
+        run: npm run test:all
+
+      - name: Run encrypted multi-scope backup and restore smoke
+        run: npm run smoke:backup-recovery
+
+  windows-package:
+    name: Build unsigned Windows installer
+    runs-on: windows-latest
+    timeout-minutes: 20
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Install production dependencies
+        run: npm ci --omit=dev
+
+      - name: Install Inno Setup
+        run: choco install innosetup --yes --no-progress
+
+      - name: Build installer with pinned, checksum-verified Node.js
+        shell: pwsh
+        run: ./packaging/windows/build-windows.ps1
+
+      - name: Smoke-test staged application runtime
+        shell: pwsh
+        run: |
+          $node = Join-Path $PWD 'build/windows/stage/node/node.exe'
+          $appRoot = Join-Path $PWD 'build/windows/stage/app'
+          $version = (Get-Content package.json | ConvertFrom-Json).version
+          & $node scripts/smoke-staged-runtime.mjs --node $node --app $appRoot --version $version
+          if ($LASTEXITCODE -ne 0) { throw 'Staged runtime MCP/privacy smoke failed' }
+
+      - name: Smoke-test isolated Windows shortcut install and uninstall
+        shell: pwsh
+        run: npm run smoke:installed:win
+
+      - name: Install, run and uninstall Windows package
+        shell: pwsh
+        run: |
+          $version = (Get-Content package.json | ConvertFrom-Json).version
+          $installer = Join-Path $PWD "dist/BrainLink-Setup-$version.exe"
+          $userPathBefore = [Environment]::GetEnvironmentVariable('Path', 'User')
+          $installCode = Start-Process -FilePath $installer -ArgumentList '/VERYSILENT','/SUPPRESSMSGBOXES','/NORESTART' -Wait -PassThru
+          if ($installCode.ExitCode -ne 0) { throw "Installer failed with $($installCode.ExitCode)" }
+          $installRoot = Join-Path $env:LOCALAPPDATA 'Programs/BrainLink'
+          if (Test-Path (Join-Path $installRoot 'app/ui/app/test')) { throw 'Windows installer included development UI tests' }
+          $desktopShortcut = Join-Path ([Environment]::GetFolderPath('Desktop')) 'BrainLink.lnk'
+          if (-not (Test-Path $desktopShortcut)) { throw 'Installer did not create the BrainLink desktop shortcut' }
+          $shortcut = (New-Object -ComObject WScript.Shell).CreateShortcut($desktopShortcut)
+          if ($shortcut.Arguments -notmatch 'BrainLink\.vbs') { throw 'Desktop shortcut does not open the BrainLink Setup launcher' }
+          $installedPath = [Environment]::GetEnvironmentVariable('Path', 'User')
+          if (-not (($installedPath -split ';') -contains (Join-Path $installRoot 'bin'))) { throw 'Installer did not add the BrainLink command to the user PATH' }
+          $env:APPDATA = Join-Path $env:RUNNER_TEMP 'brainlink-win-smoke-profile'
+          $vault = Join-Path $env:RUNNER_TEMP 'brainlink-win-smoke-vault'
+          New-Item -ItemType Directory -Force $vault | Out-Null
+          $version = & (Join-Path $installRoot 'bin/brainlink.cmd') --version
+          if ($version -ne (Get-Content package.json | ConvertFrom-Json).version) { throw "Installed runtime failed: $version" }
+          & (Join-Path $installRoot 'bin/brainlink.cmd') init --vault $vault --name Smoke
+          $config = Join-Path $env:APPDATA 'BrainLink/config.json'
+          if (-not (Test-Path $config)) { throw 'Installed app did not create its isolated config' }
+          $uninstaller = Join-Path $installRoot 'unins000.exe'
+          $uninstallCode = Start-Process -FilePath $uninstaller -ArgumentList '/VERYSILENT','/SUPPRESSMSGBOXES','/NORESTART' -Wait -PassThru
+          if ($uninstallCode.ExitCode -ne 0) { throw "Uninstaller failed with $($uninstallCode.ExitCode)" }
+          if (Test-Path $installRoot) { throw 'Uninstaller left the application files behind' }
+          if (Test-Path $desktopShortcut) { throw 'Uninstaller left the BrainLink desktop shortcut behind' }
+          if (-not (Test-Path $config)) { throw 'Uninstaller removed the user configuration' }
+          $userPathAfter = [Environment]::GetEnvironmentVariable('Path', 'User')
+          if ($userPathAfter -cne $userPathBefore) { throw 'Uninstaller did not restore the original user PATH' }
+
+      - name: Upload installer artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: brainlink-windows-installer
+          path: dist/BrainLink-Setup-*.exe
+          if-no-files-found: error
+          retention-days: 7
+
+  macos-package:
+    name: Build unsigned macOS installer
+    runs-on: macos-latest
+    timeout-minutes: 30
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Install production dependencies
+        run: npm ci --omit=dev
+
+      - name: Build universal package with pinned Node.js
+        run: bash packaging/macos/build-pkg.sh
+
+      - name: Expand and smoke-test packaged macOS runtime
+        run: |
+          version="$(node -p "require('./package.json').version")"
+          pkgutil --expand-full "dist/BrainLink-$version.pkg" "$RUNNER_TEMP/brainlink-pkg"
+          app="$(find "$RUNNER_TEMP/brainlink-pkg" -path '*/BrainLink.app/Contents/Resources/app/bin/brainlink.mjs' -print -quit)"
+          test -n "$app"
+          resources="${app%/app/bin/brainlink.mjs}"
+          test "$("$resources/node/bin/node" "$app" --version)" = "$(node -p "require('./package.json').version")"
+          app_root="${app%/bin/brainlink.mjs}"
+          test ! -e "$app_root/ui/app/test"
+          test -f "$app_root/skills/brainlink-session-closeout/SKILL.md"
+          test -f "$app_root/skills/brainlink-graph-curation/SKILL.md"
+          (cd "$app_root" && "$resources/node/bin/node" --input-type=module -e "await import('./src/connectors.mjs'); await import('./src/update-manifest.mjs')")
+          "$resources/node/bin/node" scripts/smoke-staged-runtime.mjs --node "$resources/node/bin/node" --app "$app_root" --version "$version"
+
+      - name: Install and smoke-test macOS package
+        run: |
+          version="$(node -p "require('./package.json').version")"
+          sudo installer -allowUntrusted -pkg "dist/BrainLink-$version.pkg" -target /
+          test "$(/usr/local/bin/brainlink --version)" = "$version"
+          test -f "/Applications/BrainLink.app/Contents/Resources/app/skills/brainlink-session-closeout/SKILL.md"
+          test -f "/Applications/BrainLink.app/Contents/Resources/app/skills/brainlink-graph-curation/SKILL.md"
+          test ! -e "/Applications/BrainLink.app/Contents/Resources/app/ui/app/test"
+          "/Applications/BrainLink.app/Contents/Resources/node/bin/node" --input-type=module -e "await import('/Applications/BrainLink.app/Contents/Resources/app/src/connectors.mjs'); await import('/Applications/BrainLink.app/Contents/Resources/app/src/update-manifest.mjs')"
+          "/Applications/BrainLink.app/Contents/Resources/node/bin/node" scripts/smoke-staged-runtime.mjs --node "/Applications/BrainLink.app/Contents/Resources/node/bin/node" --app "/Applications/BrainLink.app/Contents/Resources/app" --version "$version"
+
+      - name: Remove macOS smoke-test installation
+        if: always()
+        run: |
+          sudo rm -f /usr/local/bin/brainlink
+          sudo rm -rf /Applications/BrainLink.app
+          sudo pkgutil --forget com.iango.brainlink.pkg >/dev/null 2>&1 || true
+
+      - name: Upload installer artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: brainlink-macos-installer
+          path: dist/BrainLink-*.pkg*
+          if-no-files-found: error
+          retention-days: 7
+
+  linux-package:
+    name: Build Linux packages
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Install production dependencies
+        run: npm ci --omit=dev
+
+      - name: Build x64 and arm64 packages with pinned Node.js
+        run: bash packaging/linux/build-linux.sh
+
+      - name: Verify Linux package checksums and runtime architectures
+        run: |
+          (cd dist && sha256sum -c *.sha256)
+          test "$(dpkg-deb -f dist/brainlink_*_amd64.deb Architecture)" = amd64
+          test "$(dpkg-deb -f dist/brainlink_*_arm64.deb Architecture)" = arm64
+          mkdir -p "$RUNNER_TEMP/brainlink-amd64" "$RUNNER_TEMP/brainlink-arm64"
+          dpkg-deb --extract dist/brainlink_*_amd64.deb "$RUNNER_TEMP/brainlink-amd64"
+          dpkg-deb --extract dist/brainlink_*_arm64.deb "$RUNNER_TEMP/brainlink-arm64"
+          test "$(od -An -tu2 -j18 -N2 "$RUNNER_TEMP/brainlink-amd64/opt/brainlink/node/bin/node" | tr -d ' ')" = 62
+          test "$(od -An -tu2 -j18 -N2 "$RUNNER_TEMP/brainlink-arm64/opt/brainlink/node/bin/node" | tr -d ' ')" = 183
+
+      - name: Install and smoke-test x64 Debian package
+        run: |
+          sudo dpkg -i dist/brainlink_*_amd64.deb
+          test "$(brainlink --version)" = "$(node -p "require('./package.json').version")"
+          test -f /opt/brainlink/app/skills/brainlink-session-closeout/SKILL.md
+          test -f /opt/brainlink/app/skills/brainlink-graph-curation/SKILL.md
+          test ! -e /opt/brainlink/app/ui/app/test
+          /opt/brainlink/node/bin/node --input-type=module -e "await import('/opt/brainlink/app/src/connectors.mjs'); await import('/opt/brainlink/app/src/update-manifest.mjs')"
+          mkdir -p "$RUNNER_TEMP/brainlink-smoke-vault"
+          BRAINLINK_HOME="$RUNNER_TEMP/brainlink-smoke-home" brainlink init --vault "$RUNNER_TEMP/brainlink-smoke-vault" --name Smoke
+          test -f "$RUNNER_TEMP/brainlink-smoke-home/config.json"
+          node scripts/smoke-staged-runtime.mjs --node /opt/brainlink/node/bin/node --app /opt/brainlink/app --version "$(node -p "require('./package.json').version")"
+          sudo dpkg -r brainlink
+          test ! -e /opt/brainlink
+          test ! -e /usr/bin/brainlink
+          test -f "$RUNNER_TEMP/brainlink-smoke-home/config.json"
+
+      - name: Install and smoke-test per-user Linux tarball
+        run: |
+          mkdir -p "$RUNNER_TEMP/brainlink-tarball" "$RUNNER_TEMP/brainlink-tar-home/vault"
+          archive=$(printf '%s\n' dist/brainlink-*-linux-x64.tar.gz)
+          tar -xzf "$archive" -C "$RUNNER_TEMP/brainlink-tarball"
+          bundle="$RUNNER_TEMP/brainlink-tarball/$(basename "${archive%.tar.gz}")"
+          test ! -e "$bundle/app/ui/app/test"
+          export HOME="$RUNNER_TEMP/brainlink-tar-home"
+          export XDG_DATA_HOME="$HOME/.local/share"
+          export XDG_CONFIG_HOME="$HOME/.config"
+          export BRAINLINK_HOME="$HOME/brainlink-home"
+          "$bundle/install.sh" --no-open
+          test "$("$HOME/.local/bin/brainlink" version)" = "$(node -p "require('./package.json').version")"
+          "$HOME/.local/bin/brainlink" init --vault "$HOME/vault" --name Smoke
+          test -f "$BRAINLINK_HOME/config.json"
+          "$XDG_DATA_HOME/brainlink/uninstall.sh"
+          test ! -e "$XDG_DATA_HOME/brainlink"
+          test -f "$BRAINLINK_HOME/config.json"
+
+      - name: Upload Linux artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: brainlink-linux-packages
+          path: |
+            dist/brainlink-*.tar.gz*
+            dist/brainlink_*.deb*
+          if-no-files-found: error
+          retention-days: 7

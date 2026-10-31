@@ -1,5 +1,5 @@
 #!/bin/bash
-# Builds dist/BrainLink-<version>.pkg: BrainLink.app (universal Node 22 runtime + app) and the
+# Builds dist/BrainLink-<version>.pkg: BrainLink.app (universal pinned Node runtime + app) and the
 # `brainlink` command. Signs and notarises when certificates are configured:
 #   DEVELOPER_ID_APP="Developer ID Application: Name (TEAMID)"
 #   DEVELOPER_ID_INSTALLER="Developer ID Installer: Name (TEAMID)"
@@ -11,6 +11,7 @@ ROOT="$(cd "$HERE/../.." && pwd)"
 VERSION="$(node -p "require('$ROOT/package.json').version")"
 BUNDLE_ID="${BUNDLE_ID:-com.iango.brainlink}"
 NODE_VERSION="$(cat "$ROOT/vendor/node/VERSION")"
+NODE_DIST="https://nodejs.org/dist/v$NODE_VERSION"
 WORK="$ROOT/build/macos"
 DIST="$ROOT/dist"
 APP="$WORK/root/Applications/BrainLink.app"
@@ -19,17 +20,27 @@ echo "BrainLink $VERSION · Node $NODE_VERSION · $BUNDLE_ID"
 rm -rf "$WORK" && mkdir -p "$WORK/node" "$APP/Contents/MacOS" "$APP/Contents/Resources/bin" "$APP/Contents/Resources/node/bin" "$DIST"
 
 # 1. Universal Node runtime from the checksum-verified official tarballs.
+[ -f "$ROOT/vendor/node/SHASUMS256.txt" ] || curl -fsS "$NODE_DIST/SHASUMS256.txt" -o "$ROOT/vendor/node/SHASUMS256.txt"
+for arch in arm64 x64; do
+  archive="$ROOT/vendor/node/node-v$NODE_VERSION-darwin-$arch.tar.gz"
+  [ -f "$archive" ] || curl -fsS "$NODE_DIST/$(basename "$archive")" -o "$archive"
+done
 (cd "$ROOT/vendor/node" && grep -E "darwin-(arm64|x64).tar.gz" SHASUMS256.txt | shasum -a 256 -c --quiet)
 for arch in arm64 x64; do
   mkdir -p "$WORK/node/$arch"
-  tar -xzf "$ROOT/vendor/node/node-$NODE_VERSION-darwin-$arch.tar.gz" -C "$WORK/node/$arch" --strip-components=1 "node-$NODE_VERSION-darwin-$arch/bin/node" "node-$NODE_VERSION-darwin-$arch/LICENSE"
+  tar -xzf "$ROOT/vendor/node/node-v$NODE_VERSION-darwin-$arch.tar.gz" -C "$WORK/node/$arch" --strip-components=1 "node-v$NODE_VERSION-darwin-$arch/bin/node" "node-v$NODE_VERSION-darwin-$arch/LICENSE"
 done
 lipo -create "$WORK/node/arm64/bin/node" "$WORK/node/x64/bin/node" -output "$APP/Contents/Resources/node/bin/node"
 cp "$WORK/node/arm64/LICENSE" "$APP/Contents/Resources/node/LICENSE"
 
 # 2. App files (only what customers need: no tests, tools, vendor or issuer keys).
 mkdir -p "$APP/Contents/Resources/app"
-cp -R "$ROOT/bin" "$ROOT/src" "$ROOT/ui" "$ROOT/samples" "$ROOT/package.json" "$ROOT/LICENSE.txt" "$ROOT/README.md" "$APP/Contents/Resources/app/"
+cp -R "$ROOT/bin" "$ROOT/src" "$ROOT/ui" "$ROOT/samples" "$ROOT/skills" "$ROOT/package.json" "$ROOT/LICENSE.txt" "$ROOT/README.md" "$APP/Contents/Resources/app/"
+rm -rf "$APP/Contents/Resources/app/ui/app/test"
+mkdir -p "$APP/Contents/Resources/app/node_modules/brainlink-store"
+cp "$ROOT/vendor/brainlink-store/memory-store.mjs" "$ROOT/vendor/brainlink-store/errors.mjs" "$ROOT/vendor/brainlink-store/package.json" "$APP/Contents/Resources/app/node_modules/brainlink-store/"
+mkdir -p "$APP/Contents/Resources/app/node_modules/yaml"
+cp -R "$ROOT/node_modules/yaml/." "$APP/Contents/Resources/app/node_modules/yaml/"
 cp "$HERE/icon/BrainLink.icns" "$APP/Contents/Resources/BrainLink.icns"
 
 cat > "$APP/Contents/Resources/bin/brainlink" <<'SH'
@@ -80,13 +91,13 @@ codesign --verify --strict "$APP"
 
 # 4. Installer: component package (not relocatable) wrapped in a product archive.
 pkgbuild --analyze --root "$WORK/root" "$WORK/component.plist" >/dev/null
-/usr/libexec/PlistBuddy -c "Add :0:BundleIsRelocatable bool false" "$WORK/component.plist"
+/usr/libexec/PlistBuddy -c "Set :0:BundleIsRelocatable false" "$WORK/component.plist"
 pkgbuild --root "$WORK/root" --component-plist "$WORK/component.plist" --scripts "$HERE/scripts" --identifier "$BUNDLE_ID.pkg" --version "$VERSION" --install-location / "$WORK/BrainLink-component.pkg" >/dev/null
 cp "$ROOT/LICENSE.txt" "$HERE/resources/license.txt"
 cat > "$WORK/distribution.xml" <<XML
 <?xml version="1.0" encoding="utf-8"?>
 <installer-gui-script minSpecVersion="2">
-  <title>BrainLink MCP $VERSION</title>
+  <title>BrainLink $VERSION</title>
   <welcome file="welcome.html"/>
   <license file="license.txt"/>
   <conclusion file="conclusion.html"/>
