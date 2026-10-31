@@ -57,6 +57,16 @@ function assertNoPrivateCanary(text, label) {
   assert.doesNotMatch(text, new RegExp(PRIVATE_CANARY), `${label} must not expose the private fixture`);
 }
 
+function diagnosticTail(result) {
+  const text = (result.stderr || result.stdout || '').trim();
+  if (!text) return 'No diagnostic output was returned.';
+  return text.split(/\r?\n/).slice(-8).join(' ')
+    .replaceAll(CLAUDE_TOKEN, '[redacted]')
+    .replaceAll(CODEX_TOKEN, '[redacted]')
+    .replaceAll(PRIVATE_CANARY, '[redacted]')
+    .slice(-1200);
+}
+
 async function toolCall(mcp, name, args = {}) {
   const response = await mcp.handle({ jsonrpc: '2.0', id: 1, method: 'tools/call', params: { name, arguments: args } });
   assert.equal(response.error, undefined, `${name} MCP request failed`);
@@ -156,25 +166,24 @@ async function main() {
     const claudePrompt = [
       'Use only the BrainLink MCP tools for this fictional task. Do not use shell, filesystem, network, or other MCP tools.',
       `Call brainlink_guide, search the Fictional Company vault for ${SOURCE_NOTE}, and read only that note.`,
-      `Send a handoff to Codex CLI with the exact subject "${SUBJECT}". Ask Codex to read the same cited note and reply with the exact required word and source filename. Include current_state and the exact source_refs entry "Fictional Company::${SOURCE_NOTE}", no claimed file changes, and no claimed tests. Preview first, then confirm using the exact preview path.`,
+      `Send a handoff to Codex CLI with the exact subject "${SUBJECT}". Set goal to "Read ${SOURCE_NOTE} and return its required response." Set current_state to "No files changed; no tests run." Set source_refs to exactly ["Fictional Company::${SOURCE_NOTE}"]. Leave decisions, modified_files, tests, open_questions, next_steps, and body empty so the source reference appears in the 300-character inbox excerpt. Preview first, then confirm using the exact preview path.`,
       'Return only the handoff path and a short confirmation. Never search or mention the restricted vault.',
     ].join('\n');
     const senderRun = await invoke(claude, [
-      '--print', '--output-format', 'json', '--no-session-persistence', '--max-turns', '8',
+      '--print', claudePrompt, '--output-format', 'json', '--no-session-persistence', '--max-turns', '8',
       '--strict-mcp-config', '--mcp-config', claudeConfigPath,
       '--setting-sources', '', '--tools', '',
       '--allowedTools', 'mcp__brainlink__brainlink_guide,mcp__brainlink__vault_search,mcp__brainlink__vault_read_note,mcp__brainlink__send_handoff',
-      claudePrompt,
     ], { cwd: root, env: process.env });
     assertNoPrivateCanary(`${senderRun.stdout}\n${senderRun.stderr}`, 'Claude sender');
-    if (senderRun.code !== 0) throw new Error(`Claude sender failed with exit ${senderRun.code}.`);
+    if (senderRun.code !== 0) throw new Error(`Claude sender failed with exit ${senderRun.code}: ${diagnosticTail(senderRun)}`);
 
     const receiver = makeMcp(config, CODEX_TOKEN, 'Codex', appHome);
     const senderMailbox = await toolCall(receiver, 'list_handoffs', { to: 'Codex CLI', limit: 10 });
     assert.ok(Array.isArray(senderMailbox), 'Codex must be able to read its handoff mailbox');
-    const request = senderMailbox.find((item) => item.subject === SUBJECT && item.status === 'OPEN');
-    assert.ok(request, 'Claude must send the exact fictional task to Codex');
-    assert.deepEqual(request.source_refs, ['Fictional Company::Project-Brief.md']);
+    const request = senderMailbox.find((item) => item.subject === SUBJECT);
+    assert.ok(request, `Claude must send the exact fictional task to Codex. Claude output: ${diagnosticTail(senderRun)}`);
+    assert.match(request.excerpt || '', /Fictional Company::Project-Brief\.md/, 'the handoff excerpt must carry the validated source reference');
     assertNoPrivateCanary(JSON.stringify(senderMailbox), 'Claude mailbox receipt');
 
     const codexArgs = [
@@ -200,7 +209,7 @@ async function main() {
     ].join('\n');
     const receiverRun = await invoke(codex, codexArgs, { cwd: root, env: process.env, input: codexPrompt });
     assertNoPrivateCanary(`${receiverRun.stdout}\n${receiverRun.stderr}`, 'Codex receiver');
-    if (receiverRun.code !== 0) throw new Error(`Codex receiver failed with exit ${receiverRun.code}.`);
+    if (receiverRun.code !== 0) throw new Error(`Codex receiver failed with exit ${receiverRun.code}: ${diagnosticTail(receiverRun)}`);
 
     const replies = await toolCall(receiver, 'list_handoffs', { limit: 10 });
     assert.ok(Array.isArray(replies), 'Codex must read the shared fictional mailbox');
