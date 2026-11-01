@@ -249,6 +249,11 @@
   "vault.useSample": "使用範例筆記庫",
   "vault.folderLabel": "資料夾",
   "vault.nameLabel": "筆記庫名稱",
+  "vault.driveFolderId": "Google Drive 資料夾 ID（選填）",
+  "vault.driveFolderIdPlaceholder": "例如：1aU-XR6fHW8czFwpAn0GGEh500HkZ13-d",
+  "vault.driveParentId": "Drive 上層資料夾 ID（選填）",
+  "vault.driveParentIdPlaceholder": "例如：Obsidian 資料夾 ID",
+  "vault.driveHint": "在 Linux 上，BrainLink 使用上面的本機路徑。儲存 Drive ID 可讓 rclone 掛載範圍可追溯；BrainLink 本身不會直接向 Google 驗證或連線。",
   "vault.agentNameLabel": "代理人名稱",
   "vault.agentNamePlaceholder": "例如：小麥",
   "vault.scaffold": "建立起始筆記（絕不覆蓋既有內容）",
@@ -378,6 +383,15 @@
   "sync.runStatus": "同步未執行：{status}。",
   "sync.localToast": "同步：只留在本機。",
   "sync.providerToast": "已儲存同步設定：{folder}。",
+  "sync.gdriveLinuxTitle": "Linux Google Drive 設定",
+  "sync.gdriveRemote": "rclone 遠端名稱",
+  "sync.gdriveRemotePlaceholder": "brainlink-gdrive",
+  "sync.gdriveFolderId": "Drive 資料夾 ID",
+  "sync.gdriveFolderIdPlaceholder": "貼上選取的資料夾 ID",
+  "sync.gdriveInstall": "安裝",
+  "sync.gdriveAuthenticate": "驗證",
+  "sync.gdriveRestrict": "限制到此資料夾",
+  "sync.gdriveMount": "掛載",
   "sync.never": "尚未執行同步。",
   "sync.running": "同步進行中…",
   "sync.lastRun": "上次同步：{status} · {at}",
@@ -1075,3 +1089,4 @@
   "rsi.experiment.useForReview": "用這次測試作為審查依據",
   "rsi.experiment.evidencePrefilled": "已將測試執行、commit 和 fixture 填入審查欄位。"
 }
+

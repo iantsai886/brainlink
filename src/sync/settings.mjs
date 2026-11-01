@@ -3,6 +3,7 @@
 import { existsSync, readdirSync } from 'node:fs';
 import { homedir, hostname } from 'node:os';
 import path from 'node:path';
+import { normalizeDriveSelection } from './gdrive-linux.mjs';
 
 // The single BrainStore vault (brainlink-store interface.d.ts VaultInfo.name) sync ever touches.
 export const SYNC_VAULT = 'brain';
@@ -18,7 +19,7 @@ export const PROVIDER_LABELS_I18N = {
 };
 export function providerLabel(provider, locale = 'en') { return (PROVIDER_LABELS_I18N[locale] || PROVIDER_LABELS_I18N.en)[provider] || provider; }
 
-export function defaultSync() { return { provider: 'local', folder: null, vault: null, scheduled: false, intervalHours: 6, device: hostname().split('.')[0] || 'device' }; }
+export function defaultSync() { return { provider: 'local', folder: null, vault: null, scheduled: false, intervalHours: 6, device: hostname().split('.')[0] || 'device', drive: null }; }
 
 export function syncSettings(cfg = {}) { return { ...defaultSync(), ...(cfg.sync || {}) }; }
 
@@ -29,6 +30,7 @@ export function validateSync(s) {
   if (!s.device || /[\/\\:()]/.test(s.device)) e.push('sync.device must be set and contain no / \\ : ( )');
   if (s.scheduled !== undefined && typeof s.scheduled !== 'boolean') e.push('sync.scheduled must be a boolean');
   if (s.intervalHours !== undefined && (!Number.isInteger(s.intervalHours) || s.intervalHours < 1 || s.intervalHours > 168)) e.push('sync.intervalHours must be 1–168');
+  try { normalizeDriveSelection(s.drive); } catch (error) { e.push(`sync.drive: ${error.message}`); }
   return e;
 }
 
@@ -45,8 +47,9 @@ export function suggestFolders(home = homedir()) {
 }
 
 // First-run / settings choice. Returns a new config; caller saves it with saveConfig().
-export function chooseSync(cfg, { provider = 'local', folder = null, vault, scheduled, intervalHours, device } = {}) {
+export function chooseSync(cfg, { provider = 'local', folder = null, vault, scheduled, intervalHours, device, drive } = {}) {
   const s = { ...syncSettings(cfg), provider, folder: provider === 'local' ? null : folder,
+    drive: drive !== undefined ? normalizeDriveSelection(drive) : provider === 'gdrive' ? syncSettings(cfg).drive : null,
     ...(vault !== undefined ? { vault: vault || null } : {}),
     ...(scheduled !== undefined ? { scheduled } : {}),
     ...(intervalHours !== undefined ? { intervalHours } : {}),
@@ -64,3 +67,4 @@ export function isPrivateNote(note, cfg = {}) {
   if (fm.private === true || fm.private === 'true') return true;
   return (cfg.vaults || []).some((v) => v.private && note.path?.startsWith(`${v.name}/`));
 }
+

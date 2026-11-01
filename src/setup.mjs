@@ -22,6 +22,7 @@ import { resolveNoteWikilinks } from './links.mjs';
 import { VERSION, createMcp } from './server.mjs';
 import { findObsidianVaults, nestedVaults } from './obsidian.mjs';
 import { syncSettings, chooseSync, suggestFolders, PROVIDERS, PROVIDER_LABELS } from './sync/settings.mjs';
+import { linuxDriveSetup, normalizeDriveSelection } from './sync/gdrive-linux.mjs';
 import { backupScheduleDue, normalizeBackupSchedule } from './backup-schedule.mjs';
 import { runSync } from './sync-cli.mjs';
 import { listGitHubShareCandidates, previewGitHubRepository, commitGitHubSelectedNotes, pushGitHubSelectedNotes, listGitHubPullCandidates, importGitHubSelectedNotes, saveGitHubConflictCopies, inspectGitHubAssignment, githubAssignmentStatus } from './sync/github-preview.mjs';
@@ -133,6 +134,9 @@ function startVaultChangeWatcher(vaults, onChange, { debounceMs = 300, pollMs = 
     timer.unref?.();
   };
   for (const vault of vaults) {
+    // Linux does not provide recursive fs.watch reliably. In particular, Node can
+    // walk a large FUSE tree while opening the watcher, which blocks Setup startup.
+    if (process.platform === 'linux') { fallback.push(vault); continue; }
     try {
       const watcher = watchFs(vault.path, { recursive: true }, (_event, filename) => {
         if (filename != null) {
@@ -149,7 +153,12 @@ function startVaultChangeWatcher(vaults, onChange, { debounceMs = 300, pollMs = 
   }
   let fingerprints = new Map();
   let pollTimer = null;
-  if (fallback.length) {
+  // Linux does not support recursive fs.watch. A recursive fingerprint fallback is
+  // acceptable for small local folders, but it can block startup indefinitely on a
+  // network/FUSE-backed vault (for example an rclone Google Drive mount). In that
+  // case the user can refresh Setup manually; never scan the whole remote tree just
+  // to start the local dashboard.
+  if (fallback.length && process.platform !== 'linux') {
     const initialize = Promise.all(fallback.map(async (vault) => fingerprints.set(vault.name, await markdownFingerprint(vault.path))));
     pollTimer = setInterval(async () => {
       if (stopped || pollRunning) return;
@@ -999,7 +1008,11 @@ export async function startSetup(opts = {}) {
       activity: await readActivity(env, 15),
       semantic: await detectEmbedder(cfg, env),
       obsidian_vaults: (await findObsidianVaults({ home, os, env })).filter((o) => !cfg.vaults.some((v) => path.resolve(v.path) === path.resolve(o.path))),
-      sync: { ...syncSettings(cfg), providers: PROVIDERS, provider_labels: PROVIDER_LABELS, suggested_folders: suggestFolders(home), status: syncStatus, running: syncRunning },
+      sync: (() => {
+        const current = syncSettings(cfg);
+        const recordedDrive = current.drive || cfg.vaults.find((vault) => vault.drive)?.drive || null;
+        return { ...current, providers: PROVIDERS, provider_labels: PROVIDER_LABELS, suggested_folders: suggestFolders(home), gdrive_setup: linuxDriveSetup({ home, os, env, sync: { ...current, drive: recordedDrive, folder: current.folder || recordedDrive?.mount_path || null } }), status: syncStatus, running: syncRunning };
+      })(),
       sessions_sharing: cfg.sessions,
       sessions_local_summary: cfg.sessions.localSummary,
       sessions_hermes_profile: { home: cfg.sessions.hermesHome, defaultHome: hermesDefaultRoot(home, env) },
@@ -1394,6 +1407,8 @@ export async function startSetup(opts = {}) {
       if (Array.isArray(b.excludedFolders)) await writeExcludedFolders(vaultPath, b.excludedFolders);
       else await ensureDefaultIgnore(vaultPath);
       const built = buildPack(b.pack || 'simple', { vaultName: name, vaultPath, agentName: String(b.agentName || '').trim() || undefined });
+      const drive = normalizeDriveSelection(b.drive);
+      if (drive) built.vault.drive = drive;
       if (b.private !== undefined) built.vault.private = Boolean(b.private);
       const created = b.scaffold === false ? [] : await scaffold(vaultPath, built.scaffold);
       const next = mergePack(cfg, built);
@@ -1457,7 +1472,7 @@ export async function startSetup(opts = {}) {
       // desktop client syncs it — no API, no credentials). validateSync (src/sync/settings.mjs)
       // rejects anything else.
       const cfg = await loadConfig(file);
-      const next = chooseSync(cfg, { provider: b.provider, folder: b.folder, vault: b.vault, scheduled: b.scheduled, intervalHours: b.intervalHours, device: b.device });
+      const next = chooseSync(cfg, { provider: b.provider, folder: b.folder, vault: b.vault, scheduled: b.scheduled, intervalHours: b.intervalHours, device: b.device, drive: b.drive });
       await saveConfig(next, file);
       refreshSyncSchedule(next);
       return { ok: true, sync: syncSettings(next) };
@@ -2582,3 +2597,4 @@ export function openInAppWindow(url, { os = process.platform, env = process.env,
 }
 
 export { CLIENTS };
+

@@ -19,6 +19,11 @@ brainlink setup | init | connect <client|all> | disconnect <client> | clients | 
 
 `connect` also accepts `--all`. `sync` runs one sync pass (local-only by default; choose Drive, iCloud or Dropbox in Setup).
 
+On Linux, Google Drive is intentionally local-folder based. Setup detects rclone and shows the
+safe install, OAuth, folder restriction, and mount commands. Select the mounted folder as the
+vault; BrainLink does not authenticate to Google or guess among Drive folders. The selected Drive
+folder ID and local path can be recorded in Setup for auditability.
+
 ## Smart features
 
 - **Auto-linking:** every note an AI writes links the notes it mentions or is about, and `BrainLink/Home.md` links everything, so notes connect even without Obsidian.
@@ -44,7 +49,7 @@ brainlink setup | init | connect <client|all> | disconnect <client> | clients | 
 
 ## Config
 
-`~/Library/Application Support/BrainLink/config.json` (macOS) or `%APPDATA%\BrainLink\config.json` (Windows). Vaults (`name, path, private, schema, intake_folder, decisions, read_first, folders, rules, writes, flat, protected, extra_fields`), agents (`name, vault, role, activation, close, connect_notes, tail_notes, recent_dir, close_target {mode: append-section | new-note | append-task | proposal-only}`), optional `handoff {vault, folder}`, `timezone`, `locale`, `http`, optional `sync {provider: local|gdrive|icloud|dropbox, folder, device}` (local by default).
+`~/.config/brainlink/config.json` (Linux), `~/Library/Application Support/BrainLink/config.json` (macOS) or `%APPDATA%\BrainLink\config.json` (Windows). Vaults (`name, path, private, schema, intake_folder, decisions, read_first, folders, rules, writes, flat, protected, extra_fields, drive {provider, remote, root_folder_id, parent_folder_id, folder_name, mount_path}`), agents (`name, vault, role, activation, close, connect_notes, tail_notes, recent_dir, close_target {mode: append-section | new-note | append-task | proposal-only}`), optional `handoff {vault, folder}`, `timezone`, `locale`, `http`, optional `sync {provider: local|gdrive|icloud|dropbox, folder, device, drive {remote, root_folder_id, parent_folder_id, folder_name, mount_path}}` (local by default).
 
 ## Developers
 
@@ -70,3 +75,4 @@ Packaging notes: [Windows](packaging/windows/README.md), [macOS unsigned install
 ## Change log
 
 See [CHANGELOG.md](CHANGELOG.md) for dated development changes, test evidence, cross-client status, and release readiness.
+

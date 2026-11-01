@@ -370,6 +370,11 @@ main #ready, main #ask-panel, main #brain-panel, main #sessions-panel, main #s-c
           <label><span data-i18n="vault.folderLabel"></span><input id="v-path" class="mono"></label>
           <label><span data-i18n="vault.nameLabel"></span><input id="v-name"></label>
         </div>
+        <div class="grid2" style="margin-top:10px">
+          <label><span data-i18n="vault.driveFolderId"></span><input id="v-drive-id" class="mono" data-i18n-placeholder="vault.driveFolderIdPlaceholder"></label>
+          <label><span data-i18n="vault.driveParentId"></span><input id="v-drive-parent-id" class="mono" data-i18n-placeholder="vault.driveParentIdPlaceholder"></label>
+        </div>
+        <p class="hint" data-i18n="vault.driveHint"></p>
         <div class="packs" id="packs"></div>
         <div class="grid2">
           <label><span data-i18n="vault.agentNameLabel"></span><input id="v-agent" data-i18n-placeholder="vault.agentNamePlaceholder"></label>
@@ -424,6 +429,15 @@ main #ready, main #ask-panel, main #brain-panel, main #sessions-panel, main #s-c
     <div id="sync-folder-row" class="grid2" style="margin-top:10px" hidden>
       <label><span data-i18n="sync.syncedFolder"></span><input id="sync-folder" class="mono" data-i18n-placeholder="sync.folderPlaceholder"></label>
       <div id="sync-suggestions" class="muted" style="font-size:13px;align-self:end"></div>
+    </div>
+    <div id="sync-gdrive-guide" class="notice" style="margin-top:10px" hidden>
+      <b data-i18n="sync.gdriveLinuxTitle"></b>
+      <p id="sync-gdrive-guide-status" class="muted"></p>
+      <div class="grid2">
+        <label><span data-i18n="sync.gdriveRemote"></span><input id="sync-drive-remote" class="mono" data-i18n-placeholder="sync.gdriveRemotePlaceholder"></label>
+        <label><span data-i18n="sync.gdriveFolderId"></span><input id="sync-drive-folder-id" class="mono" data-i18n-placeholder="sync.gdriveFolderIdPlaceholder"></label>
+      </div>
+      <pre id="sync-gdrive-guide-commands" class="mono" style="white-space:pre-wrap;margin-top:8px"></pre>
     </div>
     <div id="sync-schedule-row" class="grid2" style="margin-top:10px" hidden>
       <label><span data-i18n="sync.automatic"></span><span><input id="sync-scheduled" type="checkbox" style="width:auto"> <span data-i18n="sync.enableSchedule"></span></span></label>
@@ -1607,6 +1621,17 @@ async function load() {
   renderGitHubProfile(shareableVaults);
   $('sync-device').value = SY.device || '';
   $('sync-folder').value = SY.folder || '';
+  const gdriveGuide = SY.gdrive_setup || {};
+  $('sync-gdrive-guide').hidden = SY.provider !== 'gdrive';
+  $('sync-drive-remote').value = SY.drive?.remote || gdriveGuide.selected?.remote || 'brainlink-gdrive';
+  $('sync-drive-folder-id').value = SY.drive?.root_folder_id || gdriveGuide.selected?.root_folder_id || '';
+  $('sync-gdrive-guide-status').textContent = gdriveGuide.message || '';
+  $('sync-gdrive-guide-commands').textContent = SY.provider === 'gdrive' && gdriveGuide.commands ? [
+    `${t('sync.gdriveInstall')}: ${gdriveGuide.commands.install}`,
+    `${t('sync.gdriveAuthenticate')}: ${gdriveGuide.commands.authenticate}`,
+    `${t('sync.gdriveRestrict')}: ${gdriveGuide.commands.restrict}`,
+    `${t('sync.gdriveMount')}: ${gdriveGuide.commands.mount}`,
+  ].join('\n') : '';
   $('backup-enabled').checked = Boolean(S.backup?.enabled);
   $('ingestion-enabled').checked = Boolean(S.ingestion?.enabled);
   $('ingestion-auto-drafts').checked = Boolean(S.ingestion?.autoDrafts);
@@ -1678,6 +1703,8 @@ function openForm(p) {
   $('v-name').value = p.replace(/[\/\\]+$/, '').split(/[\/\\]/).pop();
   $('v-private').checked = false;
   $('v-excluded').value = (S.default_excluded_folders || []).join('\n');
+  $('v-drive-id').value = '';
+  $('v-drive-parent-id').value = '';
   $('v-excluded-hint').textContent = t('vault.excludedHint', { list: (S.suggested_excluded_folders || []).join(', ') });
 }
 $('pick').onclick = () => act(async () => { const r = await api('POST', '/api/pick-folder'); const p = r.path || (r.unavailable ? await window.promptForFolder() : ''); if (p) openForm(p); });
@@ -1686,7 +1713,8 @@ $('cancel-vault').onclick = () => ($('vault-form').hidden = true);
 $('packs').onchange = (e) => { if (e.target.name === 'pack') { pack = e.target.value; document.querySelectorAll('.pack').forEach((el) => el.classList.toggle('sel', el.querySelector('input').checked)); } };
 $('save-vault').onclick = () => act(async () => {
   const excludedFolders = $('v-excluded').value.split('\n').map((s) => s.trim()).filter(Boolean);
-  const r = await api('POST', '/api/vault', { path: $('v-path').value, name: $('v-name').value, pack, agentName: $('v-agent').value, scaffold: $('v-scaffold').checked, private: $('v-private').checked, excludedFolders });
+  const drive = $('v-drive-id').value.trim() || $('v-drive-parent-id').value.trim() ? { remote: 'brainlink-gdrive', root_folder_id: $('v-drive-id').value.trim(), parent_folder_id: $('v-drive-parent-id').value.trim(), folder_name: $('v-name').value.trim() } : null;
+  const r = await api('POST', '/api/vault', { path: $('v-path').value, name: $('v-name').value, pack, agentName: $('v-agent').value, scaffold: $('v-scaffold').checked, private: $('v-private').checked, excludedFolders, drive });
   $('vault-form').hidden = true;
   toast(t('vault.addedToast', { vault: r.vault, extra: r.created.length ? t('vault.createdExtra', { n: r.created.length }) : '' }));
 });
@@ -2017,16 +2045,18 @@ $('sess-local-summary-save').onclick = () => act(async () => {
   S.sessions_local_summary = result.settings;
   toast(t('sessions.localSummarySaved'));
 });
-$('sync-provider').onchange = () => { const p = $('sync-provider').value; $('sync-folder-row').hidden = p === 'local'; $('sync-vault-row').hidden = p === 'local'; $('sync-schedule-row').hidden = p === 'local'; renderSyncSuggestions(p, S.sync.suggested_folders); };
+ $('sync-provider').onchange = () => { const p = $('sync-provider').value; $('sync-folder-row').hidden = p === 'local'; $('sync-vault-row').hidden = p === 'local'; $('sync-schedule-row').hidden = p === 'local'; $('sync-gdrive-guide').hidden = p !== 'gdrive'; renderSyncSuggestions(p, S.sync.suggested_folders); };
 $('sync-scheduled').onchange = () => { $('sync-interval-row').hidden = !$('sync-scheduled').checked; };
 $('sync-save').onclick = () => act(async () => {
   const provider = $('sync-provider').value;
-  const r = await api('POST', '/api/sync', { provider, folder: provider === 'local' ? null : $('sync-folder').value, vault: provider === 'local' ? null : $('sync-vault').value, scheduled: provider !== 'local' && $('sync-scheduled').checked, intervalHours: Number($('sync-interval').value), device: $('sync-device').value });
+  const drive = provider === 'gdrive' ? { remote: $('sync-drive-remote').value.trim(), root_folder_id: $('sync-drive-folder-id').value.trim(), folder_name: $('sync-vault').value.trim() } : null;
+  const r = await api('POST', '/api/sync', { provider, folder: provider === 'local' ? null : $('sync-folder').value, vault: provider === 'local' ? null : $('sync-vault').value, scheduled: provider !== 'local' && $('sync-scheduled').checked, intervalHours: Number($('sync-interval').value), device: $('sync-device').value, drive });
   toast(provider === 'local' ? t('sync.localToast') : t('sync.providerToast', { folder: r.sync.folder }));
 });
 $('sync-run').onclick = () => act(async () => {
   const provider = $('sync-provider').value;
-  await api('POST', '/api/sync', { provider, folder: provider === 'local' ? null : $('sync-folder').value, vault: provider === 'local' ? null : $('sync-vault').value, scheduled: provider !== 'local' && $('sync-scheduled').checked, intervalHours: Number($('sync-interval').value), device: $('sync-device').value });
+  const drive = provider === 'gdrive' ? { remote: $('sync-drive-remote').value.trim(), root_folder_id: $('sync-drive-folder-id').value.trim(), folder_name: $('sync-vault').value.trim() } : null;
+  await api('POST', '/api/sync', { provider, folder: provider === 'local' ? null : $('sync-folder').value, vault: provider === 'local' ? null : $('sync-vault').value, scheduled: provider !== 'local' && $('sync-scheduled').checked, intervalHours: Number($('sync-interval').value), device: $('sync-device').value, drive });
   const { result } = await api('POST', '/api/sync/run', {});
   if (result.status === 'ok' || result.status === 'local-only') toast(t('sync.runDone', { pushed: result.pushed.length, pulled: result.pulled.length, conflicts: result.conflicts.length }));
   else toast(t('sync.runStatus', { status: result.status }));
@@ -2583,3 +2613,4 @@ setInterval(async () => {
 <script src="share.js"></script>
 </body>
 </html>
+

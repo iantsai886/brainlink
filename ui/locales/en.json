@@ -249,6 +249,11 @@
   "vault.useSample": "Use the sample vault",
   "vault.folderLabel": "Folder",
   "vault.nameLabel": "Vault name",
+  "vault.driveFolderId": "Google Drive folder ID (optional)",
+  "vault.driveFolderIdPlaceholder": "e.g. 1aU-XR6fHW8czFwpAn0GGEh500HkZ13-d",
+  "vault.driveParentId": "Drive parent folder ID (optional)",
+  "vault.driveParentIdPlaceholder": "e.g. Obsidian folder ID",
+  "vault.driveHint": "On Linux, BrainLink uses the local path above. Store the Drive IDs for a safe, auditable rclone mount; BrainLink never authenticates to Google itself.",
   "vault.agentNameLabel": "Agent name",
   "vault.agentNamePlaceholder": "e.g. Max",
   "vault.scaffold": "Create starter notes (never overwrites)",
@@ -378,6 +383,15 @@
   "sync.runStatus": "Sync did not run: {status}.",
   "sync.localToast": "Sync: local only.",
   "sync.providerToast": "Sync settings saved for {folder}.",
+  "sync.gdriveLinuxTitle": "Linux Google Drive setup",
+  "sync.gdriveRemote": "rclone remote",
+  "sync.gdriveRemotePlaceholder": "brainlink-gdrive",
+  "sync.gdriveFolderId": "Drive folder ID",
+  "sync.gdriveFolderIdPlaceholder": "Paste the selected folder ID",
+  "sync.gdriveInstall": "Install",
+  "sync.gdriveAuthenticate": "Authenticate",
+  "sync.gdriveRestrict": "Restrict to this folder",
+  "sync.gdriveMount": "Mount",
   "sync.never": "Sync has not run yet.",
   "sync.running": "Sync is running…",
   "sync.lastRun": "Last sync: {status} · {at}",
@@ -1075,3 +1089,4 @@
   "rsi.experiment.useForReview": "Use this test for review",
   "rsi.experiment.evidencePrefilled": "Test run, commit and fixture are copied into the review fields."
 }
+
