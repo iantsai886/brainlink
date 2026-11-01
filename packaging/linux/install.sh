@@ -12,7 +12,7 @@ BIN="$HOME/.local/bin"
 APPS="$DATA/applications"
 rm -rf "$DEST.new"
 mkdir -p "$DEST.new" "$BIN" "$APPS"
-cp -R "$SRC/node" "$SRC/app" "$SRC/bin" "$SRC/brainlink.png" "$SRC/uninstall.sh" "$DEST.new/"
+cp -R "$SRC/node" "$SRC/app" "$SRC/bin" "$SRC/brainlink.svg" "$SRC/uninstall.sh" "$DEST.new/"
 rm -rf "$DEST"
 mv "$DEST.new" "$DEST"
 ln -sf "$DEST/bin/brainlink" "$BIN/brainlink"
@@ -22,7 +22,7 @@ Type=Application
 Name=BrainLink
 Comment=One Markdown second brain for every AI
 Exec="$DEST/bin/brainlink" setup --app
-Icon=$DEST/brainlink.png
+Icon=$DEST/brainlink.svg
 Terminal=false
 Categories=Office;Utility;
 DESKTOP
@@ -35,3 +35,4 @@ if [ "$1" != "--no-open" ] && [ -n "$DISPLAY$WAYLAND_DISPLAY" ]; then
 else
   echo "Run: brainlink setup"
 fi
+

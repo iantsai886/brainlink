@@ -25,7 +25,9 @@ if "$TAR" --version 2>&1 | grep -q 'GNU tar'; then
 fi
 "$TAR" --help 2>&1 | grep -q -- '--no-mac-metadata' && TAR_OPTS+=(--no-mac-metadata)
 [ -f "$ROOT/vendor/node/SHASUMS256.txt" ] || curl -fsS "$NODE_DIST/SHASUMS256.txt" -o "$ROOT/vendor/node/SHASUMS256.txt"
-sips -z 256 256 "$ROOT/packaging/macos/icon/icon-1024.png" --out "$WORK/brainlink.png" >/dev/null 2>&1 || cp "$ROOT/packaging/macos/icon/icon-1024.png" "$WORK/brainlink.png"
+ICON="$ROOT/packaging/linux/brainlink.svg"
+[ -f "$ICON" ] || { echo "Missing Linux icon: $ICON" >&2; exit 1; }
+cp "$ICON" "$WORK/brainlink.svg"
 
 for ARCH in x64 arm64; do
   NAME="brainlink-$VERSION-linux-$ARCH"
@@ -46,17 +48,17 @@ for ARCH in x64 arm64; do
   cp -R "$ROOT/node_modules/yaml/." "$S/app/node_modules/yaml/"
   cp "$HERE/brainlink.sh" "$S/bin/brainlink"
   cp "$HERE/install.sh" "$HERE/uninstall.sh" "$S/"
-  cp "$WORK/brainlink.png" "$S/brainlink.png"
+  cp "$WORK/brainlink.svg" "$S/brainlink.svg"
   chmod 755 "$S/bin/brainlink" "$S/install.sh" "$S/uninstall.sh" "$S/node/bin/node"
   COPYFILE_DISABLE=1 "$TAR" "${TAR_OPTS[@]}" -czf "$DIST/$NAME.tar.gz" -C "$WORK" "$NAME"
 
   # .deb: files owned by root, installed to /opt/brainlink.
   DEBARCH=$([ "$ARCH" = x64 ] && echo amd64 || echo arm64)
   D="$WORK/deb-$DEBARCH"
-  mkdir -p "$D/root/opt/brainlink" "$D/root/usr/bin" "$D/root/usr/share/applications" "$D/root/usr/share/icons/hicolor/256x256/apps" "$D/control"
+  mkdir -p "$D/root/opt/brainlink" "$D/root/usr/bin" "$D/root/usr/share/applications" "$D/root/usr/share/icons/hicolor/scalable/apps" "$D/control"
   cp -R "$S/node" "$S/app" "$S/bin" "$D/root/opt/brainlink/"
   ln -s /opt/brainlink/bin/brainlink "$D/root/usr/bin/brainlink"
-  cp "$WORK/brainlink.png" "$D/root/usr/share/icons/hicolor/256x256/apps/brainlink.png"
+  cp "$WORK/brainlink.svg" "$D/root/usr/share/icons/hicolor/scalable/apps/brainlink.svg"
   printf '[Desktop Entry]\nType=Application\nName=BrainLink\nComment=One Markdown second brain for every AI\nExec=/opt/brainlink/bin/brainlink setup --app\nIcon=brainlink\nTerminal=false\nCategories=Office;Utility;\n' > "$D/root/usr/share/applications/brainlink.desktop"
   SIZE=$(du -sk "$D/root" | cut -f1)
   printf 'Package: brainlink\nVersion: %s\nArchitecture: %s\nMaintainer: Iango <support@iango.ai>\nInstalled-Size: %s\nSection: utils\nPriority: optional\nHomepage: https://iango.ai/brainlink\nDescription: One Markdown second brain for every AI\n BrainLink connects an Obsidian or Markdown folder to Claude, ChatGPT Codex,\n Cursor, Gemini and other MCP clients, with safe, attributed writes.\n' "$VERSION" "$DEBARCH" "$SIZE" > "$D/control/control"
@@ -68,3 +70,4 @@ for ARCH in x64 arm64; do
 done
 (cd "$DIST" && for f in brainlink-$VERSION-linux-*.tar.gz brainlink_${VERSION}_*.deb; do shasum -a 256 "$f" > "$f.sha256"; done)
 ls -la "$DIST" | grep -i -E "linux|\.deb"
+

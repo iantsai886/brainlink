@@ -1,0 +1,6 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256" role="img" aria-labelledby="title">
+  <title id="title">BrainLink</title>
+  <rect width="256" height="256" rx="48" fill="#172554"/>
+  <path d="M128 48c-28-24-70-5-70 30 0 7 2 14 5 20-17 9-25 28-20 47 5 20 22 32 42 32h17v24h52v-24h17c20 0 37-12 42-32 5-19-3-38-20-47 3-6 5-13 5-20 0-35-42-54-70-30Z" fill="#67e8f9"/>
+  <path d="M128 72v120M96 82c12 8 20 20 20 36v74M160 82c-12 8-20 20-20 36v74M74 122h42M182 122h-42M86 154h30M170 154h-30" fill="none" stroke="#172554" stroke-width="12" stroke-linecap="round" stroke-linejoin="round"/>
+</svg>
