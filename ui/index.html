@@ -690,7 +690,6 @@ document.addEventListener('click', async (event) => {
     const opened = await api('POST', '/api/updates/open', { ticket: button.dataset.updateOpen });
     button.remove();
     const result = $('updates-result');
-    result.querySelector('a')?.remove();
     result.append(document.createTextNode(` ${t('updates.opened', { version: opened.version })}`));
   } catch {
     button.disabled = false;

@@ -107,6 +107,20 @@ async function readUiStatic(rel) {
 const json = (res, code, body) => res.writeHead(code, { 'Content-Type': 'application/json', 'Cache-Control': 'no-store' }).end(JSON.stringify(body));
 const LOCALES_DIR = path.join(ROOT, 'ui', 'locales');
 
+async function verifyStagedUpdate(pending) {
+  const root = path.resolve(pending.folder);
+  const file = path.resolve(pending.file);
+  const relative = path.relative(root, file);
+  if (!relative || relative === '..' || relative.startsWith(`..${path.sep}`) || path.isAbsolute(relative)) throw new Error('Verified update package path is invalid.');
+  const info = await lstat(file);
+  if (!info.isFile() || info.isSymbolicLink() || info.size !== pending.size) throw new Error('Verified update package changed after download. Prepare it again.');
+  const digest = createHash('sha256');
+  let bytes = 0;
+  for await (const chunk of createReadStream(file)) { bytes += chunk.length; digest.update(chunk); }
+  if (bytes !== pending.size || digest.digest('hex') !== pending.sha256) throw new Error('Verified update package changed after download. Prepare it again.');
+  return file;
+}
+
 async function markdownFingerprint(root) {
   const rows = [];
   async function walk(dir) {
@@ -240,6 +254,16 @@ export async function startSetup(opts = {}) {
   }
   const token = opts.token || randomBytes(18).toString('base64url');
   const updateDownloads = new Map();
+  function retainUpdatePackage(ticket, pending) {
+    clearTimeout(pending.timer);
+    pending.expiresAt = Date.now() + 24 * 60 * 60_000;
+    pending.timer = setTimeout(() => {
+      if (updateDownloads.get(ticket) !== pending) return;
+      updateDownloads.delete(ticket);
+      rm(pending.folder, { recursive: true, force: true }).catch(() => {});
+    }, 24 * 60 * 60_000);
+    pending.timer.unref?.();
+  }
   const pick = opts.pick || (() => pickFolder(os));
   const pickSnapshotFolder = opts.pickSnapshotFolder || (() => pickFolder(os, 'Choose a folder to share a read-only copy with cloud agents'));
   const pickBackupFolder = opts.pickBackupFolder || (() => pickFolder(os, 'Choose a private backup destination'));
@@ -1499,28 +1523,15 @@ export async function startSetup(opts = {}) {
       if (!/^[A-Za-z0-9_-]{40,48}$/.test(ticket)) throw new Error('This verified update has expired. Check for updates and try again.');
       const pending = updateDownloads.get(ticket);
       if (!pending || pending.expiresAt <= Date.now()) throw new Error('This verified update has expired. Check for updates and try again.');
-      if (pending.opened) throw new Error('This package was already opened. Use its download link if you need another copy.');
-      const root = path.resolve(pending.folder);
-      const file = path.resolve(pending.file);
-      const relative = path.relative(root, file);
-      if (!relative || relative === '..' || relative.startsWith(`..${path.sep}`) || path.isAbsolute(relative)) throw new Error('Verified update package path is invalid.');
-      const info = await lstat(file);
-      if (!info.isFile() || info.isSymbolicLink() || info.size !== pending.size) throw new Error('Verified update package changed after download. Prepare it again.');
-      const digest = createHash('sha256');
-      let bytes = 0;
-      for await (const chunk of createReadStream(file)) { bytes += chunk.length; digest.update(chunk); }
-      if (bytes !== pending.size || digest.digest('hex') !== pending.sha256) throw new Error('Verified update package changed after download. Prepare it again.');
-      await (opts.updateLauncher || openUpdatePackage)({ file, format: pending.format, platform: os });
-      pending.opened = true;
-      clearTimeout(pending.timer);
-      pending.expiresAt = Date.now() + 24 * 60 * 60_000;
-      pending.timer = setTimeout(() => {
-        if (updateDownloads.get(ticket) !== pending) return;
-        updateDownloads.delete(ticket);
-        rm(pending.folder, { recursive: true, force: true }).catch(() => {});
-      }, 24 * 60 * 60_000);
-      pending.timer.unref?.();
-      return { status: 'opened', version: pending.version, format: pending.format };
+      if (pending.opened || pending.opening || pending.downloadInProgress) throw new Error('This package is already being opened or was already opened. Use its verified download link if you need another copy.');
+      pending.opening = true;
+      try {
+        const file = await verifyStagedUpdate(pending);
+        await (opts.updateLauncher || openUpdatePackage)({ file, format: pending.format, platform: os });
+        pending.opened = true;
+        retainUpdatePackage(ticket, pending);
+        return { status: 'opened', version: pending.version, format: pending.format };
+      } finally { pending.opening = false; }
     },
     'GET /api/rsi': async () => ({ ideas: await rsiLedger.list() }),
     'GET /api/rsi/weekly-benchmark': async () => {
@@ -2718,14 +2729,20 @@ export async function startSetup(opts = {}) {
       if (given.length !== want.length || !timingSafeEqual(given, want)) { json(res, 401, { error: 'Setup session expired. Reopen BrainLink.' }); return; }
       const ticket = updateDownloadMatch[1];
       const pending = updateDownloads.get(ticket);
-      if (pending?.opened) { json(res, 409, { error: 'This package is already open. Check for updates again if you need another copy.' }); return; }
       if (!pending || pending.expiresAt <= Date.now()) {
         if (pending) { clearTimeout(pending.timer); updateDownloads.delete(ticket); await rm(pending.folder, { recursive: true, force: true }).catch(() => {}); }
         json(res, 404, { error: 'This verified download expired. Check for updates and try again.' });
         return;
       }
-      updateDownloads.delete(ticket);
-      clearTimeout(pending.timer);
+      if (pending.downloaded || pending.downloadInProgress || pending.opening) { json(res, 409, { error: 'This verified download is already in progress or has already been downloaded.' }); return; }
+      pending.downloadInProgress = true;
+      let file;
+      try { file = await verifyStagedUpdate(pending); }
+      catch (error) {
+        pending.downloadInProgress = false;
+        json(res, 409, { error: error.message || 'This verified package is no longer available.' });
+        return;
+      }
       res.writeHead(200, {
         'Content-Type': 'application/octet-stream',
         'Content-Length': String(pending.size),
@@ -2733,9 +2750,14 @@ export async function startSetup(opts = {}) {
         'Cache-Control': 'no-store',
         'X-Content-Type-Options': 'nosniff',
       });
-      const stream = createReadStream(pending.file);
+      const stream = createReadStream(file);
       stream.once('error', () => res.destroy());
-      stream.once('close', () => { rm(pending.folder, { recursive: true, force: true }).catch(() => {}); });
+      res.once('finish', () => {
+        pending.downloadInProgress = false;
+        pending.downloaded = true;
+        retainUpdatePackage(ticket, pending);
+      });
+      res.once('close', () => { if (!res.writableFinished) pending.downloadInProgress = false; });
       res.once('close', () => stream.destroy());
       stream.pipe(res);
       return;

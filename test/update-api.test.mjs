@@ -62,7 +62,10 @@ test('Setup update check requires its local token and returns only signed releas
     assert.equal(openedAgain.status, 400);
     assert.match((await openedAgain.json()).error, /already opened/);
     const openedDownload = await fetch(new URL(prepared.download_url, base));
-    assert.equal(openedDownload.status, 409, 'opening the package keeps the installer file stable until expiry');
+    assert.equal(openedDownload.status, 200, 'the verified manual fallback remains available after opening the installer');
+    assert.deepEqual(Buffer.from(await openedDownload.arrayBuffer()), packageBytes);
+    assert.equal((await fetch(new URL(prepared.download_url, base))).status, 409, 'a verified fallback download is one-use');
+    assert.deepEqual(await readFile(launched.file), packageBytes, 'the installer handoff remains stable after fallback download');
 
     const manualResponse = await fetch(`${base}/api/updates/download`, { method: 'POST', headers: { 'X-BrainLink-Token': app.token, 'Content-Type': 'application/json' }, body: '{}' });
     const manual = await manualResponse.json();
@@ -73,10 +76,11 @@ test('Setup update check requires its local token and returns only signed releas
     assert.equal(file.status, 200);
     assert.equal(file.headers.get('content-disposition'), 'attachment; filename="brainlink_1.2.9_amd64.deb"');
     assert.deepEqual(Buffer.from(await file.arrayBuffer()), packageBytes);
-    for (let attempt = 0; attempt < 50 && (await readdir(home)).some((name) => name.startsWith('brainlink-update-')); attempt++) await new Promise((resolve) => setTimeout(resolve, 10));
-    assert.deepEqual((await readdir(home)).filter((name) => name.startsWith('brainlink-update-')), [path.basename(path.dirname(launched.file))], 'the served download is removed, but the OS-open package stays staged');
-    assert.deepEqual(await readFile(launched.file), packageBytes, 'the package remains stable after the server starts its installer handoff');
-    assert.equal((await fetch(new URL(manual.download_url, base))).status, 404, 'the download ticket can be used only once');
+    assert.equal((await fetch(new URL(manual.download_url, base))).status, 409, 'the verified download can be used only once');
+    const manualOpen = await fetch(`${base}/api/updates/open`, { method: 'POST', headers: { 'X-BrainLink-Token': app.token, 'Content-Type': 'application/json' }, body: JSON.stringify({ ticket: manual.ticket }) });
+    assert.equal(manualOpen.status, 200, 'the installer can still be opened after downloading the package');
+    assert.equal(launched.format, 'deb');
+    assert.deepEqual(await readFile(launched.file), packageBytes, 'the package remains available for OS handoff');
 
     const previousFolders = new Set((await readdir(home, { withFileTypes: true })).filter((entry) => entry.isDirectory() && entry.name.startsWith('brainlink-update-')).map((entry) => entry.name));
     const tamperedResponse = await fetch(`${base}/api/updates/download`, { method: 'POST', headers: { 'X-BrainLink-Token': app.token, 'Content-Type': 'application/json' }, body: '{}' });
