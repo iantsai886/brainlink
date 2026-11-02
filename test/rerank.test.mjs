@@ -5,8 +5,9 @@ import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { createContext, search } from '../src/core.mjs';
-import { normalize } from '../src/config.mjs';
+import { loadConfig, normalize } from '../src/config.mjs';
 import { rerankResults, testReranker, validateRerankerSettings } from '../src/rerank.mjs';
+import { startSetup } from '../src/setup.mjs';
 
 const enabled = { enabled: true, url: 'http://127.0.0.1:8080/rerank' };
 
@@ -88,4 +89,27 @@ test('reranker settings and connection controls are present in all user locales'
     const strings = JSON.parse(await readFile(path.join(root, 'ui', 'locales', `${locale}.json`), 'utf8'));
     for (const key of ['reranker.title', 'reranker.hint', 'reranker.enabled', 'reranker.url', 'reranker.save', 'reranker.test', 'reranker.testing', 'reranker.ready', 'reranker.failed', 'reranker.savedOn', 'reranker.savedOff']) assert.ok(strings[key], `${locale} ${key}`);
   }
+});
+
+test('authenticated Setup saves loopback reranker settings and rejects remote targets', async () => {
+  const home = await mkdtemp(path.join(os.tmpdir(), 'brainlink-rerank-api-'));
+  const env = { BRAINLINK_HOME: path.join(home, 'app'), BRAINLINK_SEMANTIC: '0' };
+  const app = await startSetup({ env, home, os: 'linux', port: 0, useCli: false });
+  const base = `http://127.0.0.1:${app.port}`;
+  const headers = { 'X-BrainLink-Token': app.token, 'Content-Type': 'application/json' };
+  try {
+    const noAuth = await fetch(`${base}/api/reranker/settings`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(enabled) });
+    assert.equal(noAuth.status, 401);
+    const response = await fetch(`${base}/api/reranker/settings`, { method: 'POST', headers, body: JSON.stringify({ ...enabled, url: 'http://localhost:8012/v1/rerank' }) });
+    const body = await response.json();
+    assert.equal(body.ok, true, JSON.stringify(body));
+    assert.deepEqual(body.reranker, { enabled: true, url: 'http://localhost:8012/v1/rerank' });
+    const stateResponse = await fetch(`${base}/api/state`, { headers: { 'X-BrainLink-Token': app.token } });
+    assert.deepEqual((await stateResponse.json()).reranker, body.reranker);
+    assert.deepEqual((await loadConfig(path.join(env.BRAINLINK_HOME, 'config.json'))).reranker, body.reranker);
+
+    const rejected = await fetch(`${base}/api/reranker/settings`, { method: 'POST', headers, body: JSON.stringify({ enabled: true, url: 'http://example.com/v1/rerank' }) });
+    assert.equal(rejected.status, 400);
+    assert.deepEqual((await loadConfig(path.join(env.BRAINLINK_HOME, 'config.json'))).reranker, body.reranker);
+  } finally { app.server.close(); }
 });
