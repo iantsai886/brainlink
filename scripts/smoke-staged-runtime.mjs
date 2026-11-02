@@ -32,8 +32,12 @@ await access(path.join(app, 'src', 'ingestion', 'pdf-worker.mjs'));
 await access(path.join(app, 'node_modules', 'pdfjs-dist', 'legacy', 'build', 'pdf.mjs'));
 await access(path.join(app, 'src', 'ingestion', 'docx-worker.mjs'));
 await access(path.join(app, 'src', 'ingestion', 'office-worker.mjs'));
+await access(path.join(app, 'src', 'ingestion', 'image-ocr.mjs'));
+for (const lang of ['eng', 'por', 'chi_tra']) await access(path.join(app, 'src', 'ingestion', 'tessdata', `${lang}.traineddata.gz`));
 await access(path.join(app, 'node_modules', 'mammoth', 'package.json'));
 await access(path.join(app, 'node_modules', 'fflate', 'package.json'));
+await access(path.join(app, 'node_modules', 'tesseract.js', 'package.json'));
+await access(path.join(app, 'node_modules', 'tesseract.js-core', 'package.json'));
 execFileSync(node, ['--input-type=module', '-e', "await import('./src/connectors.mjs'); await import('./src/update-manifest.mjs')"], {
   cwd: app,
   encoding: 'utf8',
@@ -45,6 +49,11 @@ execFileSync(node, ['--input-type=module', '-e', "const mammoth = await import('
   timeout: 20_000,
 });
 execFileSync(node, ['--input-type=module', '-e', "const zip = await import('fflate'); if (typeof zip.unzipSync !== 'function') process.exit(2)"], {
+  cwd: app,
+  encoding: 'utf8',
+  timeout: 20_000,
+});
+execFileSync(node, ['--input-type=module', '-e', "const ocr = await import('tesseract.js'); if (typeof ocr.createWorker !== 'function') process.exit(2)"], {
   cwd: app,
   encoding: 'utf8',
   timeout: 20_000,

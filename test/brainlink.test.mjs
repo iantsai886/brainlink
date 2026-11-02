@@ -19,6 +19,7 @@ import { buildPack, scaffold, mergePack } from '../src/packs.mjs';
 import { connectClient, disconnectClient, detect, codexToml, readClientAgentToken } from '../src/connectors.mjs';
 import { startSetup } from '../src/setup.mjs';
 import { ingestionQueue, readIngestionSource, recordIngestion } from '../src/ingestion.mjs';
+import { imageDimensions } from '../src/ingestion/image-ocr.mjs';
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const SAMPLE = path.join(ROOT, 'samples', 'acme-studio');
@@ -69,6 +70,14 @@ async function pptxFixture() {
   zip.file('ppt/slides/slide2.xml', '<p:sld xmlns:p="urn:p" xmlns:a="urn:a"><a:p><a:r><a:t>HIDDEN_PPTX_CANARY</a:t></a:r></a:p></p:sld>');
   return zip.generateAsync({ type: 'nodebuffer', compression: 'DEFLATE' });
 }
+test('image OCR checks PNG/JPEG/BMP type and pixel bounds before reading image text', async () => {
+  const png = await readFile(path.join(ROOT, 'test', 'fixtures', 'ocr-sample.png'));
+  assert.deepEqual(imageDimensions(png, '.png'), { width: 1000, height: 180 });
+  assert.throws(() => imageDimensions(png, '.jpg'), /supported or safe/);
+  const oversized = Buffer.from(png);
+  oversized.writeUInt32BE(10_000, 16); oversized.writeUInt32BE(10_000, 20);
+  assert.throws(() => imageDimensions(oversized, '.png'), /supported or safe/);
+});
 test('runtime version comes from the canonical package manifest', async () => {
   const pkg = JSON.parse(await readFile(path.join(ROOT, 'package.json'), 'utf8'));
   assert.equal(VERSION, pkg.version);
@@ -261,6 +270,8 @@ test('ingestion reads only supported text files from the selected folder and rej
   await writeFile(path.join(raw, 'finance.xlsx'), await xlsxFixture());
   await writeFile(path.join(raw, 'unsafe.xlsx'), await xlsxFixture({ unsafeXml: true }));
   await writeFile(path.join(raw, 'slides.pptx'), await pptxFixture());
+  await writeFile(path.join(raw, 'image.png'), await readFile(path.join(ROOT, 'test', 'fixtures', 'ocr-sample.png')));
+  await writeFile(path.join(raw, 'invalid.png'), 'NOT_A_PNG_CANARY');
   const oversizedDocx = await docxFixture('ZIP_BOMB_CANARY');
   const centralHeader = oversizedDocx.indexOf(Buffer.from([0x50, 0x4b, 0x01, 0x02]));
   assert.ok(centralHeader >= 0);
@@ -272,7 +283,7 @@ test('ingestion reads only supported text files from the selected folder and rej
   await writeFile(path.join(raw, 'Blocked', 'hidden.txt'), 'EXCLUDED_TEXT_CANARY');
   const ctx = ctxOf(cfg, { BRAINLINK_HOME: path.join(base, 'app') });
   const queue = await ingestionQueue(ctx, 'Acme Studio', 'Raw');
-  assert.deepEqual(queue.candidates.map((item) => item.path).sort(), ['Raw/brief.docx', 'Raw/brief.pdf', 'Raw/brief.txt', 'Raw/data.json', 'Raw/finance.xlsx', 'Raw/scan.pdf', 'Raw/slides.pptx', 'Raw/table.csv', 'Raw/unsafe.xlsx']);
+  assert.deepEqual(queue.candidates.map((item) => item.path).sort(), ['Raw/brief.docx', 'Raw/brief.pdf', 'Raw/brief.txt', 'Raw/data.json', 'Raw/finance.xlsx', 'Raw/image.png', 'Raw/scan.pdf', 'Raw/slides.pptx', 'Raw/table.csv', 'Raw/unsafe.xlsx']);
   assert.ok(queue.skipped >= 5, 'unsupported, malformed, unsafe, binary, and excluded inputs are counted as skipped');
   const item = queue.candidates.find((candidate) => candidate.path === 'Raw/brief.txt');
   const source = await readIngestionSource(ctx, 'Acme Studio', 'Raw', item);
@@ -301,9 +312,13 @@ test('ingestion reads only supported text files from the selected folder and rej
   assert.equal(presentationSource.format, 'pptx');
   assert.match(presentationSource.body, /Quarterly STRATEGY_PPTX_CANARY/);
   assert.doesNotMatch(presentationSource.body, /HIDDEN_PPTX_CANARY/);
+  const imageItem = queue.candidates.find((candidate) => candidate.path === 'Raw/image.png');
+  const imageSource = await readIngestionSource(ctx, 'Acme Studio', 'Raw', imageItem);
+  assert.equal(imageSource.format, 'png');
+  assert.match(imageSource.body, /BRAINLINK OCR TEST 123/);
   const scannedPdf = queue.candidates.find((candidate) => candidate.path === 'Raw/scan.pdf');
   await assert.rejects(readIngestionSource(ctx, 'Acme Studio', 'Raw', scannedPdf), /scanned PDF OCR is not available/i);
-  assert.doesNotMatch(JSON.stringify(queue), /FICTIONAL_TEXT_CANARY|JSON_CANARY|FICTIONAL_DOCX_CANARY|REVENUE_XLSX_CANARY|STRATEGY_PPTX_CANARY|ZIP_BOMB_CANARY|EXCLUDED_TEXT_CANARY/);
+  assert.doesNotMatch(JSON.stringify(queue), /FICTIONAL_TEXT_CANARY|JSON_CANARY|FICTIONAL_DOCX_CANARY|REVENUE_XLSX_CANARY|STRATEGY_PPTX_CANARY|BRAINLINK OCR TEST|ZIP_BOMB_CANARY|EXCLUDED_TEXT_CANARY/);
   await writeFile(path.join(raw, 'brief.txt'), 'CHANGED_TEXT_CANARY');
   await assert.rejects(readIngestionSource(ctx, 'Acme Studio', 'Raw', item), /changed|Refresh/i);
   await assert.rejects(readIngestionSource(ctx, 'Acme Studio', 'Raw', { ...item, source_id: 'a'.repeat(64) }), /changed|no longer available/i);

@@ -61,6 +61,8 @@ REQUIRED=(
   "app/node_modules/yaml/package.json" "app/node_modules/yaml/dist/index.js"
   "app/node_modules/pdfjs-dist/package.json" "app/node_modules/pdfjs-dist/legacy/build/pdf.mjs"
   "app/node_modules/mammoth/package.json" "app/node_modules/jszip/package.json" "app/node_modules/fflate/package.json"
+  "app/node_modules/tesseract.js/package.json" "app/node_modules/tesseract.js-core/package.json"
+  "app/src/ingestion/image-ocr.mjs" "app/src/ingestion/tessdata/eng.traineddata.gz" "app/src/ingestion/tessdata/por.traineddata.gz" "app/src/ingestion/tessdata/chi_tra.traineddata.gz"
   "app/src/ingestion/docx-worker.mjs"
   "app/src/ingestion/office-worker.mjs"
   "runtime/arm64/bin/node" "runtime/arm64/LICENSE" "runtime/x64/bin/node" "runtime/x64/LICENSE"

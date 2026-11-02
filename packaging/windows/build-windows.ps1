@@ -33,6 +33,10 @@ New-Item -ItemType Directory -Force $Store | Out-Null
 foreach ($p in "memory-store.mjs", "errors.mjs", "package.json") { Copy-Item "$Root\vendor\brainlink-store\$p" $Store }
 & "$Stage\node\node.exe" "$Root\scripts\stage-runtime-dependencies.mjs" "$Stage\app\node_modules"
 if ($LASTEXITCODE -ne 0) { throw "Failed to stage locked runtime dependencies (exit code $LASTEXITCODE)" }
+New-Item -ItemType Directory -Force "$Stage\app\src\ingestion" | Out-Null
+Copy-Item "$Root\src\ingestion\image-ocr.mjs" "$Stage\app\src\ingestion\image-ocr.mjs"
+& "$Stage\node\node.exe" "$Root\scripts\stage-ocr-data.mjs" "$Stage\app\src\ingestion\tessdata"
+if ($LASTEXITCODE -ne 0) { throw "Failed to stage offline OCR language data (exit code $LASTEXITCODE)" }
 
 # 3. Installer.
 $env:BRAINLINK_VERSION = $Version

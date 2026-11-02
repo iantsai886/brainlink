@@ -9,6 +9,7 @@ import { appHome } from './config.mjs';
 import { indexableHeader, isExcludedPath, isPrivateMeta, fmSaysPrivate, parseFrontmatter, safeJoin, vault, vaultRoot } from './core.mjs';
 import { extractLinks } from './graph.mjs';
 import { redactText } from './sessions/redact.mjs';
+import { extractImageText, imageDimensions } from './ingestion/image-ocr.mjs';
 
 const hash = (s) => createHash('sha256').update(Buffer.isBuffer(s) ? s : String(s)).digest('hex');
 const MAX_NOTES = 5000;
@@ -16,7 +17,7 @@ const MAX_DEPTH = 32;
 const MAX_NOTE_BYTES = 5 * 1024 * 1024;
 const MAX_HEADER_BYTES = 64 * 1024;
 const MAX_DRAFT_SOURCE_CHARS = 24_000;
-const TEXT_SOURCE_FORMATS = new Set(['.md', '.txt', '.csv', '.tsv', '.json', '.xml', '.yaml', '.yml', '.log', '.pdf', '.docx', '.xlsx', '.pptx']);
+const TEXT_SOURCE_FORMATS = new Set(['.md', '.txt', '.csv', '.tsv', '.json', '.xml', '.yaml', '.yml', '.log', '.pdf', '.docx', '.xlsx', '.pptx', '.png', '.jpg', '.jpeg', '.bmp']);
 const PDF_WORKER_TIMEOUT_MS = 15_000;
 const DOCX_WORKER_TIMEOUT_MS = 15_000;
 const OFFICE_WORKER_TIMEOUT_MS = 15_000;
@@ -246,6 +247,10 @@ async function readEligible(full, root, realRoot, rel, { includeBody = false } =
       validateDocxArchive(bytes);
       raw = includeBody ? await extractDocxText(bytes) : { text: '' };
     } else if (extension === '.xlsx' || extension === '.pptx') raw = includeBody ? await extractOfficeText(bytes, extension) : { text: '' };
+    else if (['.png', '.jpg', '.jpeg', '.bmp'].includes(extension)) {
+      imageDimensions(bytes, extension);
+      raw = includeBody ? await extractImageText(bytes) : { text: '' };
+    }
     else raw = { text: decodeSourceText(bytes) };
     const after = await fh.stat();
     const pathAfter = await lstat(full);

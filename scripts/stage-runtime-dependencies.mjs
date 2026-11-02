@@ -44,6 +44,7 @@ while (pending.length) {
 
 await mkdir(destination, { recursive: true });
 for (const relative of [...visited].sort()) {
+  if (relative.startsWith('node_modules/@tesseract.js-data/')) continue;
   const source = path.join(root, relative);
   const target = path.join(destination, relative.slice('node_modules/'.length));
   await rm(target, { recursive: true, force: true });

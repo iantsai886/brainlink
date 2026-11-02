@@ -22,6 +22,7 @@ test('every native installer bundles all production dependencies and portable Br
     const source = await read(file);
     assert.match(source, /skills/, `${label} must ship the versioned SKILL.md files`);
     assert.match(source, /stage-runtime-dependencies/, `${label} must stage every locked runtime dependency`);
+    assert.match(source, /stage-ocr-data/, `${label} must stage offline OCR language files`);
     assert.match(source, /brainlink-store/, `${label} must bundle the local store dependency`);
     assert.match(source, /ui[\\/]app[\\/]test/, `${label} must exclude development UI tests from the package`);
   }
@@ -32,6 +33,8 @@ test('every native installer bundles all production dependencies and portable Br
   assert.ok(pkg.dependencies['pdfjs-dist'], 'local PDF text extraction must remain a production dependency');
   assert.ok(pkg.dependencies.mammoth, 'local DOCX text extraction must remain a production dependency');
   assert.ok(pkg.dependencies.fflate, 'local XLSX and PPTX archive extraction must remain a production dependency');
+  assert.ok(pkg.dependencies['tesseract.js'], 'offline local OCR must remain a production dependency');
+  for (const lang of ['eng', 'por', 'chi_tra']) assert.ok(pkg.dependencies[`@tesseract.js-data/${lang}`], `${lang} OCR data must remain version locked`);
   assert.match(await read('packaging/windows/build-portable-zip.sh'), /npm install/, 'Windows source preview installs its declared production dependencies');
 
   const linuxBuilder = await read('packaging/linux/build-linux.sh');
@@ -43,6 +46,10 @@ test('every native installer bundles all production dependencies and portable Br
   assert.match(windowsBuilder, /Inno Setup compiler failed with exit code/, 'Windows builder must report compiler failures');
   const windowsInstaller = await read('packaging/windows/BrainLink.iss');
   const installedWindowsSmoke = await read('scripts/smoke-installed-windows.ps1');
+  const installedOcrSmoke = await read('scripts/smoke-installed-ocr.mjs');
+  assert.match(installedWindowsSmoke, /smoke-installed-ocr\.mjs/);
+  assert.match(installedOcrSmoke, /BRAINLINK OCR TEST 123/);
+  assert.match(installedWindowsSmoke, /OCR runtime could not read its local image fixture/);
   const windowsLauncher = await read('packaging/windows/BrainLink.vbs');
   assert.match(pkg.scripts['smoke:installed:win'], /smoke-installed-windows\.ps1/, 'Windows installed-app acceptance must have a repeatable command');
   assert.match(windowsInstaller, /BRAINLINK_SMOKE_TEST/, 'the test build must use an isolated Inno Setup identity');
@@ -95,6 +102,7 @@ test('every native installer bundles all production dependencies and portable Br
   assert.match(macZipTest, /app\/src\/ingestion\/docx-worker\.mjs/, 'the macOS package smoke test must check the isolated DOCX worker');
   assert.match(macZipTest, /app\/src\/ingestion\/office-worker\.mjs/, 'the macOS package smoke test must check the isolated Office worker');
   assert.match(macZipTest, /app\/node_modules\/fflate\/package\.json/, 'the macOS package smoke test must check the Office ZIP dependency');
+  assert.match(macZipTest, /app\/src\/ingestion\/tessdata\/chi_tra\.traineddata\.gz/, 'the macOS package smoke test must check offline Traditional Chinese OCR data');
   assert.match(macZipTest, /app\/skills\/brainlink-session-closeout\/SKILL\.md/, 'the macOS package smoke test must check a shipped skill');
   assert.match(macZipTest, /app\/skills\/brainlink-graph-curation\/SKILL\.md/, 'the macOS package smoke test must check the graph-curation skill');
   assert.match(macZipTest, /app\/ui\/app\/test/, 'the macOS package smoke test must reject development UI tests');
@@ -138,17 +146,35 @@ test('every native installer bundles all production dependencies and portable Br
   assert.match(workflow, /test ! -e "\$XDG_DATA_HOME\/brainlink"/, 'Linux CI must verify tarball uninstall removes the application only');
 });
 
-test('runtime dependency staging copies locked Office extractors and they import without the checkout', async () => {
+test('runtime dependency staging copies locked Office/OCR engines without bundling full language packages', async () => {
   const stage = await mkdtemp(path.join(tmpdir(), 'brainlink-runtime-deps-'));
   try {
-    const modules = path.join(stage, 'node_modules');
+    const app = path.join(stage, 'app');
+    const modules = path.join(app, 'node_modules');
+    await mkdir(app, { recursive: true });
     const child = spawnSync(process.execPath, ['scripts/stage-runtime-dependencies.mjs', modules], { cwd: ROOT, encoding: 'utf8', timeout: 20_000 });
     assert.equal(child.status, 0, child.stderr || child.stdout || child.error);
-    for (const name of ['mammoth', 'jszip', 'fflate', 'pdfjs-dist', 'yaml']) await access(path.join(modules, name, 'package.json'));
-    const importCheck = spawnSync(process.execPath, ['--input-type=module', '-e', "const mammoth = await import('mammoth'); const pdf = await import('pdfjs-dist/legacy/build/pdf.mjs'); const zip = await import('fflate'); if (typeof mammoth.default.extractRawText !== 'function' || typeof pdf.getDocument !== 'function' || typeof zip.unzipSync !== 'function') process.exit(2);"], {
-      cwd: stage, encoding: 'utf8', timeout: 20_000,
+    for (const name of ['mammoth', 'jszip', 'fflate', 'pdfjs-dist', 'tesseract.js', 'tesseract.js-core', 'yaml']) await access(path.join(modules, name, 'package.json'));
+    await assert.rejects(access(path.join(modules, '@tesseract.js-data', 'eng', 'package.json')));
+    const importCheck = spawnSync(process.execPath, ['--input-type=module', '-e', "const mammoth = await import('mammoth'); const pdf = await import('pdfjs-dist/legacy/build/pdf.mjs'); const zip = await import('fflate'); const ocr = await import('tesseract.js'); if (typeof mammoth.default.extractRawText !== 'function' || typeof pdf.getDocument !== 'function' || typeof zip.unzipSync !== 'function' || typeof ocr.createWorker !== 'function') process.exit(2);"], {
+      cwd: app, encoding: 'utf8', timeout: 20_000,
     });
     assert.equal(importCheck.status, 0, importCheck.stderr || importCheck.stdout || importCheck.error);
+    const ingestion = path.join(app, 'src', 'ingestion');
+    await mkdir(ingestion, { recursive: true });
+    await cp(path.join(ROOT, 'src', 'app-home.mjs'), path.join(app, 'src', 'app-home.mjs'));
+    await cp(path.join(ROOT, 'src', 'ingestion', 'image-ocr.mjs'), path.join(ingestion, 'image-ocr.mjs'));
+    const data = path.join(ingestion, 'tessdata');
+    const stagedData = spawnSync(process.execPath, ['scripts/stage-ocr-data.mjs', data], { cwd: ROOT, encoding: 'utf8', timeout: 20_000 });
+    assert.equal(stagedData.status, 0, stagedData.stderr || stagedData.stdout || stagedData.error);
+    for (const lang of ['eng', 'por', 'chi_tra']) {
+      const bytes = await readFile(path.join(data, `${lang}.traineddata.gz`));
+      assert.ok(bytes.length > 100_000 && bytes.length < 4_000_000, `${lang} OCR language data stays size-bounded`);
+    }
+    const ocrCheck = spawnSync(process.execPath, ['scripts/smoke-installed-ocr.mjs', app, path.join(ROOT, 'test', 'fixtures', 'ocr-sample.png')], {
+      cwd: ROOT, encoding: 'utf8', timeout: 60_000,
+    });
+    assert.equal(ocrCheck.status, 0, ocrCheck.stderr || ocrCheck.stdout || ocrCheck.error);
   } finally { await rm(stage, { recursive: true, force: true }); }
 });
 
