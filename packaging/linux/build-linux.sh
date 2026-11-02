@@ -46,6 +46,8 @@ for ARCH in x64 arm64; do
   cp "$ROOT/vendor/brainlink-store/memory-store.mjs" "$ROOT/vendor/brainlink-store/errors.mjs" "$ROOT/vendor/brainlink-store/package.json" "$S/app/node_modules/brainlink-store/"
   mkdir -p "$S/app/node_modules/yaml"
   cp -R "$ROOT/node_modules/yaml/." "$S/app/node_modules/yaml/"
+  mkdir -p "$S/app/node_modules/pdfjs-dist"
+  cp -R "$ROOT/node_modules/pdfjs-dist/." "$S/app/node_modules/pdfjs-dist/"
   cp "$HERE/brainlink.sh" "$S/bin/brainlink"
   cp "$HERE/install.sh" "$HERE/uninstall.sh" "$S/"
   cp "$WORK/brainlink.svg" "$S/brainlink.svg"

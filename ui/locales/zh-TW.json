@@ -634,7 +634,7 @@
   "share.clearAndReshare": "清除並重新分享",
   "share.confirmClearReshare": "這會移除該資料夾中先前分享的所有檔案，並重新開始分享。要繼續嗎？",
   "ingestion.title": "自動檢查新資料",
-  "ingestion.hint": "可從非私人 vault 加入資料夾。BrainLink 開啟時每天或按「立即掃描」檢查 Markdown、TXT、CSV/TSV、JSON、XML、YAML 和 LOG；其他格式會略過。",
+  "ingestion.hint": "可從非私人 vault 加入資料夾。BrainLink 開啟時每天或按「立即掃描」檢查 Markdown、TXT、CSV/TSV、JSON、XML、YAML、LOG 和文字型 PDF；其他格式會略過。",
   "ingestion.enabled": "每天在背景自動掃描",
   "ingestion.autoDrafts": "每天掃描時，也用本機 AI 為最多 5 篇新筆記建立草稿",
   "ingestion.autoDraftsHint": "只會在這台電腦使用 Ollama。新筆記仍屬未驗證內容；預設會留在本機等待檢查。",

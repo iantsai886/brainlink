@@ -23,6 +23,27 @@ const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const SAMPLE = path.join(ROOT, 'samples', 'acme-studio');
 const tmp = (p) => mkdtemp(path.join(tmpdir(), `brainlink-${p}-`));
 const NOW = new Date('2026-10-18T01:30:00Z');
+function pdfFixture(text = '') {
+  const stream = text ? `BT /F1 18 Tf 50 100 Td (${text.replace(/[\\()]/g, '\\$&')}) Tj ET\n` : 'q Q\n';
+  const objects = [
+    '<< /Type /Catalog /Pages 2 0 R >>',
+    '<< /Type /Pages /Kids [3 0 R] /Count 1 >>',
+    '<< /Type /Page /Parent 2 0 R /MediaBox [0 0 300 200] /Resources << /Font << /F1 4 0 R >> >> /Contents 5 0 R >>',
+    '<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>',
+    `<< /Length ${Buffer.byteLength(stream)} >>\nstream\n${stream}endstream`,
+  ];
+  let pdf = '%PDF-1.4\n';
+  const offsets = [0];
+  for (let i = 0; i < objects.length; i++) {
+    offsets.push(Buffer.byteLength(pdf));
+    pdf += `${i + 1} 0 obj\n${objects[i]}\nendobj\n`;
+  }
+  const xref = Buffer.byteLength(pdf);
+  pdf += `xref\n0 ${objects.length + 1}\n0000000000 65535 f \n`;
+  for (const offset of offsets.slice(1)) pdf += `${String(offset).padStart(10, '0')} 00000 n \n`;
+  pdf += `trailer\n<< /Size ${objects.length + 1} /Root 1 0 R >>\nstartxref\n${xref}\n%%EOF\n`;
+  return Buffer.from(pdf, 'binary');
+}
 test('runtime version comes from the canonical package manifest', async () => {
   const pkg = JSON.parse(await readFile(path.join(ROOT, 'package.json'), 'utf8'));
   assert.equal(VERSION, pkg.version);
@@ -201,7 +222,7 @@ test('ingestion queue scans only a chosen folder and filters private, excluded, 
   await assert.rejects(ingestionQueue(ctxOf(cfg, env), 'Journal', 'Raw'), /private vault/i);
 });
 
-test('ingestion reads only supported UTF-8 text files from the selected folder and rejects stale items', async () => {
+test('ingestion reads only supported text files from the selected folder and rejects stale items', async () => {
   const { base, company, cfg } = await fixture();
   const raw = path.join(company, 'Raw');
   await mkdir(path.join(raw, 'Blocked'), { recursive: true });
@@ -209,17 +230,26 @@ test('ingestion reads only supported UTF-8 text files from the selected folder a
   await writeFile(path.join(raw, 'brief.txt'), 'FICTIONAL_TEXT_CANARY');
   await writeFile(path.join(raw, 'table.csv'), 'name,value\nfictional,7');
   await writeFile(path.join(raw, 'data.json'), '{"fictional":"JSON_CANARY"}');
+  await writeFile(path.join(raw, 'brief.pdf'), pdfFixture('FICTIONAL_PDF_CANARY'));
+  await writeFile(path.join(raw, 'scan.pdf'), pdfFixture());
   await writeFile(path.join(raw, 'page.html'), '<p>HTML_UNSUPPORTED_CANARY</p>');
   await writeFile(path.join(raw, 'binary.log'), Buffer.from([0, 1, 2, 3]));
   await writeFile(path.join(raw, 'Blocked', 'hidden.txt'), 'EXCLUDED_TEXT_CANARY');
   const ctx = ctxOf(cfg, { BRAINLINK_HOME: path.join(base, 'app') });
   const queue = await ingestionQueue(ctx, 'Acme Studio', 'Raw');
-  assert.deepEqual(queue.candidates.map((item) => item.path).sort(), ['Raw/brief.txt', 'Raw/data.json', 'Raw/table.csv']);
+  assert.deepEqual(queue.candidates.map((item) => item.path).sort(), ['Raw/brief.pdf', 'Raw/brief.txt', 'Raw/data.json', 'Raw/scan.pdf', 'Raw/table.csv']);
   assert.ok(queue.skipped >= 3, 'unsupported, binary, and excluded inputs are counted as skipped');
   const item = queue.candidates.find((candidate) => candidate.path === 'Raw/brief.txt');
   const source = await readIngestionSource(ctx, 'Acme Studio', 'Raw', item);
   assert.equal(source.format, 'txt');
   assert.equal(source.body, 'FICTIONAL_TEXT_CANARY');
+  const pdfItem = queue.candidates.find((candidate) => candidate.path === 'Raw/brief.pdf');
+  const pdfSource = await readIngestionSource(ctx, 'Acme Studio', 'Raw', pdfItem);
+  assert.equal(pdfSource.format, 'pdf');
+  assert.match(pdfSource.body, /FICTIONAL_PDF_CANARY/);
+  assert.equal(pdfSource.body_truncated, false);
+  const scannedPdf = queue.candidates.find((candidate) => candidate.path === 'Raw/scan.pdf');
+  await assert.rejects(readIngestionSource(ctx, 'Acme Studio', 'Raw', scannedPdf), /scanned PDF OCR is not available/i);
   assert.doesNotMatch(JSON.stringify(queue), /FICTIONAL_TEXT_CANARY|JSON_CANARY|EXCLUDED_TEXT_CANARY/);
   await writeFile(path.join(raw, 'brief.txt'), 'CHANGED_TEXT_CANARY');
   await assert.rejects(readIngestionSource(ctx, 'Acme Studio', 'Raw', item), /changed|Refresh/i);
@@ -277,7 +307,7 @@ test('ingestion MCP tools are exposed with explicit folder and review instructio
   assert.match(mcp.instructions, /do not ask an AI to read, summarize, or file notes/i);
   assert.match(mcp.instructions, /never scan the whole vault/i);
   assert.match(mcp.instructions, /ingestion_read_source/);
-  assert.match(mcp.instructions, /TXT, CSV\/TSV, JSON, XML, YAML and LOG/);
+  assert.match(mcp.instructions, /TXT, CSV\/TSV, JSON, XML, YAML, LOG and text-based PDF/);
   const queue = mcp.tools.find((tool) => tool.name === 'ingestion_queue');
   assert.match(queue.description, /does not return source bodies/i);
   assert.match(queue.description, /does not .* change the Setup background-scan schedule/i);

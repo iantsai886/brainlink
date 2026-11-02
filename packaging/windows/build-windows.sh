@@ -26,6 +26,8 @@ mkdir -p "$STAGE/app/node_modules/brainlink-store"
 cp "$ROOT/vendor/brainlink-store/memory-store.mjs" "$ROOT/vendor/brainlink-store/errors.mjs" "$ROOT/vendor/brainlink-store/package.json" "$STAGE/app/node_modules/brainlink-store/"
 mkdir -p "$STAGE/app/node_modules/yaml"
 cp -R "$ROOT/node_modules/yaml/." "$STAGE/app/node_modules/yaml/"
+mkdir -p "$STAGE/app/node_modules/pdfjs-dist"
+cp -R "$ROOT/node_modules/pdfjs-dist/." "$STAGE/app/node_modules/pdfjs-dist/"
 cp "$HERE/brainlink.cmd" "$STAGE/bin/brainlink.cmd"
 cp "$HERE/BrainLink.vbs" "$HERE/BrainLink.ico" "$STAGE/"
 # Windows line endings for the scripts Windows runs directly.

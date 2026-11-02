@@ -28,6 +28,8 @@ for (const skill of ['brainlink-cross-ai-handoff', 'brainlink-session-closeout',
   await access(file);
 }
 await assert.rejects(access(path.join(app, 'ui', 'app', 'test')), 'development UI tests must not ship');
+await access(path.join(app, 'src', 'ingestion', 'pdf-worker.mjs'));
+await access(path.join(app, 'node_modules', 'pdfjs-dist', 'legacy', 'build', 'pdf.mjs'));
 execFileSync(node, ['--input-type=module', '-e', "await import('./src/connectors.mjs'); await import('./src/update-manifest.mjs')"], {
   cwd: app,
   encoding: 'utf8',

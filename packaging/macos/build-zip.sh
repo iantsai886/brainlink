@@ -49,6 +49,8 @@ cp "$STORE_SRC/memory-store.mjs" "$STORE_SRC/errors.mjs" "$STORE_SRC/interface.d
    "$STORE_SRC/package.json" "$STORE_SRC/README.md" "$STAGE/app/node_modules/brainlink-store/"
 mkdir -p "$STAGE/app/node_modules/yaml"
 cp -R "$ROOT/node_modules/yaml/." "$STAGE/app/node_modules/yaml/"
+mkdir -p "$STAGE/app/node_modules/pdfjs-dist"
+cp -R "$ROOT/node_modules/pdfjs-dist/." "$STAGE/app/node_modules/pdfjs-dist/"
 
 # 4. The BrainLink.app launcher bundle: a minimal double-clickable app (Info.plist + a small
 #    shell launcher in Contents/MacOS, no Node inside it). This IS the Finder install/open path:

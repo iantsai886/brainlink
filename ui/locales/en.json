@@ -634,7 +634,7 @@
   "share.clearAndReshare": "Clear and re-share",
   "share.confirmClearReshare": "This will remove everything previously shared in that folder and start sharing fresh. Continue?",
   "ingestion.title": "Automatic source scans",
-  "ingestion.hint": "Add folders from a non-private vault. While BrainLink is open, it scans Markdown, TXT, CSV/TSV, JSON, XML, YAML and LOG once a day, or when you press Scan now. Other file types are skipped.",
+  "ingestion.hint": "Add folders from a non-private vault. While BrainLink is open, it scans Markdown, TXT, CSV/TSV, JSON, XML, YAML, LOG and text-based PDFs once a day or when you press Scan now. Other file types are skipped.",
   "ingestion.enabled": "Run a daily background scan",
   "ingestion.autoDrafts": "Also draft up to 5 new notes with local AI",
   "ingestion.autoDraftsHint": "Uses Ollama only on this computer. New notes stay untrusted; by default they wait here for review.",

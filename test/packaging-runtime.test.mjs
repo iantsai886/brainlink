@@ -22,6 +22,7 @@ test('every native installer bundles all production dependencies and portable Br
     const source = await read(file);
     assert.match(source, /skills/, `${label} must ship the versioned SKILL.md files`);
     assert.match(source, /yaml/, `${label} must bundle the YAML runtime dependency`);
+    assert.match(source, /pdfjs-dist/, `${label} must bundle the local PDF text extractor`);
     assert.match(source, /brainlink-store/, `${label} must bundle the local store dependency`);
     assert.match(source, /ui[\\/]app[\\/]test/, `${label} must exclude development UI tests from the package`);
   }
@@ -29,6 +30,7 @@ test('every native installer bundles all production dependencies and portable Br
   assert.match(windowsPreview, /skills/, 'Windows portable preview must ship versioned BrainLink skills');
   assert.match(windowsPreview, /ui[\\/]app[\\/]test/, 'Windows portable preview must exclude development UI tests');
   assert.ok(pkg.dependencies.yaml, 'YAML connector dependency must remain a production dependency');
+  assert.ok(pkg.dependencies['pdfjs-dist'], 'local PDF text extraction must remain a production dependency');
 
   const linuxBuilder = await read('packaging/linux/build-linux.sh');
   assert.match(linuxBuilder, /NODE_VERSION="\$\(tr -d '\\r\\n' < "\$ROOT\/vendor\/node\/VERSION"\)"/, 'Linux builds must accept the Windows CRLF version file');
@@ -86,6 +88,7 @@ test('every native installer bundles all production dependencies and portable Br
   assert.match(await read('packaging/macos/resources/license.txt'), /^BrainLink — Pre-release Use Notice/, 'macOS license page should match the customer-facing product name');
   assert.match(macZipTest, /app\/src\/update-manifest\.mjs/, 'the macOS zip package must include the update verifier');
   assert.match(macZipTest, /app\/node_modules\/yaml\/dist\/index\.js/, 'the macOS package smoke test must check a loadable YAML runtime');
+  assert.match(macZipTest, /app\/node_modules\/pdfjs-dist\/legacy\/build\/pdf\.mjs/, 'the macOS package smoke test must check the PDF parser');
   assert.match(macZipTest, /app\/skills\/brainlink-session-closeout\/SKILL\.md/, 'the macOS package smoke test must check a shipped skill');
   assert.match(macZipTest, /app\/skills\/brainlink-graph-curation\/SKILL\.md/, 'the macOS package smoke test must check the graph-curation skill');
   assert.match(macZipTest, /app\/ui\/app\/test/, 'the macOS package smoke test must reject development UI tests');

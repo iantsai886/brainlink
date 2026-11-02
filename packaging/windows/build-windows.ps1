@@ -34,6 +34,9 @@ foreach ($p in "memory-store.mjs", "errors.mjs", "package.json") { Copy-Item "$R
 $Yaml = "$Stage\app\node_modules\yaml"
 New-Item -ItemType Directory -Force $Yaml | Out-Null
 Copy-Item -Recurse "$Root\node_modules\yaml\*" $Yaml
+$Pdfjs = "$Stage\app\node_modules\pdfjs-dist"
+New-Item -ItemType Directory -Force $Pdfjs | Out-Null
+Copy-Item -Recurse "$Root\node_modules\pdfjs-dist\*" $Pdfjs
 
 # 3. Installer.
 $env:BRAINLINK_VERSION = $Version

@@ -3,30 +3,72 @@
 // opaque identifiers and outcomes in the local app-data journal.
 import { appendFile, lstat, mkdir, open, readFile, readdir, realpath } from 'node:fs/promises';
 import { createHash } from 'node:crypto';
+import { Worker } from 'node:worker_threads';
 import path from 'node:path';
 import { appHome } from './config.mjs';
 import { indexableHeader, isExcludedPath, isPrivateMeta, fmSaysPrivate, parseFrontmatter, safeJoin, vault, vaultRoot } from './core.mjs';
 import { extractLinks } from './graph.mjs';
 import { redactText } from './sessions/redact.mjs';
 
-const hash = (s) => createHash('sha256').update(String(s)).digest('hex');
+const hash = (s) => createHash('sha256').update(Buffer.isBuffer(s) ? s : String(s)).digest('hex');
 const MAX_NOTES = 5000;
 const MAX_DEPTH = 32;
 const MAX_NOTE_BYTES = 5 * 1024 * 1024;
 const MAX_HEADER_BYTES = 64 * 1024;
 const MAX_DRAFT_SOURCE_CHARS = 24_000;
-const TEXT_SOURCE_FORMATS = new Set(['.md', '.txt', '.csv', '.tsv', '.json', '.xml', '.yaml', '.yml', '.log']);
+const TEXT_SOURCE_FORMATS = new Set(['.md', '.txt', '.csv', '.tsv', '.json', '.xml', '.yaml', '.yml', '.log', '.pdf']);
+const PDF_WORKER_TIMEOUT_MS = 15_000;
 
 function sourceExtension(rel) { return path.posix.extname(String(rel || '')).toLowerCase(); }
 
 function isSupportedSource(rel) { return TEXT_SOURCE_FORMATS.has(sourceExtension(rel)); }
 
-function decodeSourceText(bytes, extension) {
+function decodeSourceText(bytes) {
   let text;
   try { text = new TextDecoder('utf-8', { fatal: true }).decode(bytes).replace(/^\uFEFF/, ''); }
   catch { throw new Error('This source is not valid UTF-8 text.'); }
   if (text.includes('\0')) throw new Error('This source contains binary data and cannot be read as text.');
   return text;
+}
+
+function extractPdfText(bytes) {
+  if (!Buffer.from(bytes).subarray(0, 5).equals(Buffer.from('%PDF-'))) return Promise.reject(new Error('This file is not a valid PDF.'));
+  const data = Uint8Array.from(bytes);
+  const worker = new Worker(new URL('./ingestion/pdf-worker.mjs', import.meta.url), {
+    workerData: data,
+    transferList: [data.buffer],
+    resourceLimits: { maxOldGenerationSizeMb: 96, maxYoungGenerationSizeMb: 24, stackSizeMb: 4 },
+  });
+  return new Promise((resolve, reject) => {
+    let settled = false;
+    const finish = (fn, value) => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timer);
+      fn(value);
+    };
+    const timer = setTimeout(() => {
+      void worker.terminate();
+      finish(reject, new Error('PDF extraction exceeded its time limit.'));
+    }, PDF_WORKER_TIMEOUT_MS);
+    timer.unref?.();
+    worker.once('message', (result) => {
+      if (result?.ok && typeof result.text === 'string') finish(resolve, result);
+      else {
+        const reason = result?.reason === 'no_text'
+          ? 'This PDF has no selectable text; scanned PDF OCR is not available yet.'
+          : result?.reason === 'page_limit'
+            ? 'This PDF is over the 100-page extraction limit.'
+            : 'This PDF could not be safely extracted.';
+        finish(reject, new Error(reason));
+      }
+    });
+    worker.once('error', () => finish(reject, new Error('This PDF could not be safely extracted.')));
+    worker.once('exit', (code) => {
+      if (!settled && code !== 0) finish(reject, new Error('This PDF could not be safely extracted.'));
+      else if (!settled) finish(reject, new Error('PDF extraction ended without a result.'));
+    });
+  });
 }
 
 function selectedFolder(value) {
@@ -88,17 +130,19 @@ async function readEligible(full, root, realRoot, rel, { includeBody = false } =
     // Scope and .brainlinkignore exclusions were checked before opening the source. Markdown
     // additionally requires a bounded frontmatter privacy check before its body is read.
     const bytes = await fh.readFile();
-    const raw = decodeSourceText(bytes, extension);
+    const raw = extension === '.pdf'
+      ? (includeBody ? await extractPdfText(bytes) : { text: '' })
+      : { text: decodeSourceText(bytes) };
     const after = await fh.stat();
     const pathAfter = await lstat(full);
     if (after.size !== opened.size || after.mtimeMs !== opened.mtimeMs || pathAfter.isSymbolicLink() || (pathAfter.ino && opened.ino && pathAfter.ino !== opened.ino)) return null;
-    let body = raw;
+    let body = raw.text;
     if (extension === '.md') {
-      const { meta, body: markdownBody, frontmatter } = parseFrontmatter(raw);
+      const { meta, body: markdownBody, frontmatter } = parseFrontmatter(raw.text);
       if (isPrivateMeta(meta) || fmSaysPrivate(frontmatter) || meta.generated_by === 'brainlink') return null;
       body = markdownBody;
     }
-    return { rel, title: path.posix.basename(rel).slice(0, -extension.length), format: extension.slice(1), revision: hash(bytes), updated_at: new Date(after.mtimeMs).toISOString(), ...(includeBody ? { body } : {}) };
+    return { rel, title: path.posix.basename(rel).slice(0, -extension.length), format: extension.slice(1), revision: hash(bytes), updated_at: new Date(after.mtimeMs).toISOString(), ...(includeBody ? { body, body_truncated: raw.truncated === true } : {}) };
   } finally { await fh.close(); }
 }
 
@@ -167,7 +211,7 @@ export async function readIngestionSource(ctx, vaultName, folder, { source_id, r
   if (!queued || queued.revision !== revision) throw new Error('This source changed or is no longer available. Refresh the queue and review it again.');
   const source = await readEligible(safeJoin(folderInfo.root, queued.rel), folderInfo.root, folderInfo.realRoot, queued.rel, { includeBody: true });
   if (!source || source.revision !== revision) throw new Error('This source changed during review. Refresh the queue and review it again.');
-  return { ...source, source_id, vault: vaultName, folder: folderInfo.folder, body: redactText(source.body).slice(0, MAX_DRAFT_SOURCE_CHARS) };
+  return { ...source, source_id, vault: vaultName, folder: folderInfo.folder, body: redactText(source.body).slice(0, MAX_DRAFT_SOURCE_CHARS), body_truncated: source.body_truncated === true || source.body.length > MAX_DRAFT_SOURCE_CHARS };
 }
 
 export async function recordIngestion(ctx, vaultName, folder, { source_id, revision, outcome, knowledge_path } = {}) {
