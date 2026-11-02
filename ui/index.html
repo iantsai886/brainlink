@@ -362,6 +362,15 @@ main #ready, main #ask-panel, main #brain-panel, main #sessions-panel, main #s-c
     <p class="hint" data-i18n="updates.hint">Check for a signed BrainLink release. Checking does not download or install anything.</p>
     <div class="row"><button type="button" id="updates-check" data-i18n="updates.check">Check for updates</button><div id="updates-result" class="muted" role="status" aria-live="polite"></div></div>
   </section>
+  <section id="s-reranker">
+    <h2 data-i18n="reranker.title">Local search reranking</h2>
+    <p class="hint" data-i18n="reranker.hint">Optional. Connect a compatible reranking service running on this computer. BrainLink sends only already-authorized search candidates to it. If it is off or unavailable, normal search continues.</p>
+    <form id="reranker-form">
+      <label style="display:flex;gap:8px;align-items:center"><input type="checkbox" name="enabled" style="width:auto"><span data-i18n="reranker.enabled">Use local reranking</span></label>
+      <label><span data-i18n="reranker.url">Local rerank URL</span><input name="url" class="mono" type="url" value="http://127.0.0.1:8080/v1/rerank" autocomplete="off" spellcheck="false"></label>
+      <div class="row"><button type="submit" data-i18n="reranker.save">Save</button><button type="button" id="reranker-test" data-i18n="reranker.test">Test local connection</button><span id="reranker-status" class="muted" role="status" aria-live="polite"></span></div>
+    </form>
+  </section>
   <section id="s-vault">
     <h2><span class="step" id="n1">1</span> <span data-i18n="vault.step1Title"></span></h2>
     <p class="hint" data-i18n="vault.hint"></p>
@@ -706,6 +715,31 @@ document.addEventListener('click', async (event) => {
 });
 function toast(msg, bad) { const t = $('toast'); t.textContent = msg; t.className = 'show' + (bad ? ' bad' : ''); clearTimeout(t._h); t._h = setTimeout(() => (t.className = ''), bad ? 6000 : 3500); }
 async function act(fn) { try { await fn(); await load(); } catch (e) { toast(e.message, true); } }
+$('reranker-form').addEventListener('submit', (event) => {
+  event.preventDefault();
+  const form = event.currentTarget;
+  act(async () => {
+    const result = await api('POST', '/api/reranker/settings', {
+      enabled: form.elements.enabled.checked,
+      url: form.elements.url.value.trim(),
+    });
+    $('reranker-status').textContent = result.reranker.enabled ? t('reranker.savedOn') : t('reranker.savedOff');
+  });
+});
+$('reranker-test').addEventListener('click', async () => {
+  const form = $('reranker-form');
+  const status = $('reranker-status');
+  status.textContent = t('reranker.testing');
+  try {
+    const result = await api('POST', '/api/reranker/test', {
+      enabled: true,
+      url: form.elements.url.value.trim(),
+    });
+    status.textContent = t('reranker.ready', { ms: result.elapsed_ms });
+  } catch (error) {
+    status.textContent = t('reranker.failed', { error: error.message });
+  }
+});
 function currentIngestionTargets() {
   if (ingestionTargetsDraft === null) {
     const saved = S?.ingestion?.targets;
@@ -1535,6 +1569,8 @@ async function load() {
   $('twin-profiles-panel').hidden = !hasVault || onboardingSync;
   $('ask-panel').hidden = !hasVault || onboardingSync;
   $('smart').textContent = S.semantic?.available ? t('brain.smartOn', { model: S.semantic.model }) : t('brain.smartOff');
+  $('reranker-form').elements.enabled.checked = Boolean(S.reranker?.enabled);
+  $('reranker-form').elements.url.value = S.reranker?.url || 'http://127.0.0.1:8080/v1/rerank';
   if (!hasVault) renderStart(); else if (!onboardingSync) { renderReady(last); drawGraph().catch(() => {}); }
   $('sessions-panel').hidden = !hasVault || onboardingSync;
   $('sessions-hint').innerHTML = t('sessions.hint', { call: '<span class="mono">session_read</span>' });

@@ -9,6 +9,7 @@ import path from 'node:path';
 import { termFrequencies, terms, linkGraph, collection, suggestRelated, extractTags } from './graph.mjs';
 import { deriveTypedRelations } from './typed-graph.mjs';
 import { appHome } from './config.mjs';
+import { rerankResults } from './rerank.mjs';
 import { detectEmbedder, VectorStore, fillVectors, embedTexts, nearest } from './embed.mjs';
 import { findAgentByToken, publicAgent } from './mcp-agents.mjs';
 import { resolveTwinAgentScope, twinNoteMemoryAllowed } from './twin-profiles.mjs';
@@ -652,7 +653,12 @@ export async function search(ctx, name, query, opts = {}) {
   const q = String(query || '');
   const extra = (opts.queries || []).map(String).filter(Boolean).slice(0, 4);
   const semantic = opts.semantic === false ? [] : await semanticLists(ctx, name, index, [q, ...extra].filter((x) => x.trim()));
-  return searchIndex(index, q, { ...opts, queries: extra, semantic });
+  const limit = opts.limit ?? 8;
+  if (ctx.cfg?.reranker?.enabled !== true) return searchIndex(index, q, { ...opts, queries: extra, semantic });
+  const pool = Math.min(40, Math.max(limit, limit * 3));
+  const candidates = searchIndex(index, q, { ...opts, limit: pool, queries: extra, semantic });
+  try { return (await rerankResults(ctx.cfg.reranker, q, candidates)).slice(0, limit); }
+  catch { return candidates.slice(0, limit); }
 }
 
 const PRIVATE_NOTE_ERROR = 'This note is private.';

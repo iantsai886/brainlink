@@ -114,7 +114,7 @@ Clean-room implementations of the strongest patterns in Obsidian Copilot, Khoj a
 | **Smart connect** | "Connect to …" also loads what changed this week, open loops and memories | — |
 | **Graph view** | Setup shows a rotatable 3D map of note links and approved typed relationships. Users can zoom, reset the view, click to open notes, or use the keyboard-accessible note list. Typed relationship suggestions stay out of the graph until separately approved. | Brain 3D |
 
-Not yet: cross-encoder rerank, cloud embedding providers. Scheduled briefs run locally while BrainLink is open; there are no remote notifications, and the brief is stored in BrainLink's local app data rather than written into the vault or shared with connected agents.
+Optional local cross-encoder reranking is implemented as an opt-in connection to a compatible rerank service on loopback. BrainLink does not download or install a model. It sends only already-authorized, bounded search candidates; if the service is missing or fails, normal search continues. The connection test confirms protocol response only, not ranking quality. Setup instructions: [Local search reranking](LOCAL-RERANKING.md). Cloud embedding providers are not implemented. Scheduled briefs run locally while BrainLink is open; there are no remote notifications, and the brief is stored in BrainLink's local app data rather than written into the vault or shared with connected agents.
 
 ## 4c. Historical retrieval-quality experiment (2026-10-18)
 

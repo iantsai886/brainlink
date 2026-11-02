@@ -16,6 +16,7 @@ import { CLIENTS, resolveClient, detect, connectClient, disconnectClient, readCl
 import { createContext, search, searchWithVerdict, readNote, related as relatedNotes, relatedText, ensureDefaultIgnore, readExcludedFolders, writeExcludedFolders, DEFAULT_EXCLUDED_FOLDERS, SUGGESTED_EXCLUDED_FOLDERS, safeJoin, vaultRoot, countVisibleNotes, parseFrontmatter } from './core.mjs';
 import { ROOT, launchSpec, readActivity, refreshMap, logActivity } from './runtime.mjs';
 import { detectEmbedder } from './embed.mjs';
+import { validateRerankerSettings, testReranker } from './rerank.mjs';
 import { vaultHealth, brief as createBrief } from './insights.mjs';
 import { loadVault } from './core.mjs';
 import { resolveNoteWikilinks } from './links.mjs';
@@ -1240,6 +1241,7 @@ export async function startSetup(opts = {}) {
       http: { port: cfg.http.port, token_set: Boolean(cfg.http.token) },
       activity: await readActivity(env, 15),
       semantic: await detectEmbedder(cfg, env),
+      reranker: cfg.reranker,
       obsidian_vaults: (await findObsidianVaults({ home, os, env })).filter((o) => !cfg.vaults.some((v) => path.resolve(v.path) === path.resolve(o.path))),
       sync: (() => {
         const current = syncSettings(cfg);
@@ -1535,6 +1537,15 @@ export async function startSetup(opts = {}) {
         retainUpdatePackage(ticket, pending);
         return { status: 'opened', version: pending.version, format: pending.format };
       } finally { pending.opening = false; }
+    },
+    'POST /api/reranker/test': async (b) => testReranker(validateRerankerSettings(b)),
+    'POST /api/reranker/settings': async (b) => {
+      const cfg = await loadConfig(file);
+      const reranker = validateRerankerSettings(b);
+      const next = { ...cfg, reranker };
+      validate(next);
+      await saveConfig(next, file);
+      return { ok: true, reranker };
     },
     'GET /api/rsi': async () => ({ ideas: await rsiLedger.list() }),
     'GET /api/rsi/weekly-benchmark': async () => {
