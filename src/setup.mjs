@@ -625,7 +625,7 @@ export async function startSetup(opts = {}) {
     await logActivity(env, { tool: 'source_auto_draft', ok: record.ok });
     return record;
   }
-  async function saveIngestionDraftRecord(cfg, id, destination, requestedRelated = null) {
+  async function saveIngestionDraftRecord(cfg, id, destination, requestedRelated = null, entityIndexes = []) {
     const stored = await readIngestionDraft(ingestionDraftsDir, id);
     const draft = stored?.draft;
     if (!draft) throw new Error('This local draft is missing or damaged. Prepare it again from the source queue.');
@@ -635,6 +635,12 @@ export async function startSetup(opts = {}) {
     const source = await readIngestionSource(ctx, draft.vault, draft.folder, { source_id: draft.source_id, revision: draft.revision });
     const availableFolders = new Set((await listSessionFilingFolders(ctx, draft.vault)).map((entry) => entry.path));
     if (!availableFolders.has(chosen)) throw new Error('The selected knowledge folder is no longer available in this vault.');
+    if (!Array.isArray(entityIndexes) || entityIndexes.length > 8 || entityIndexes.some((choice) => !choice || !Number.isSafeInteger(choice.index) || choice.index < 0 || choice.index >= (draft.entities || []).length || !['personal', 'organisation', 'client'].includes(choice.scope))) throw new Error('Choose only entity suggestions shown in this draft and set a valid scope.');
+    const uniqueIndexes = new Set(entityIndexes.map((choice) => choice.index));
+    if (uniqueIndexes.size !== entityIndexes.length) throw new Error('An entity suggestion was selected more than once.');
+    const selectedEntities = entityIndexes.map((choice) => ({ ...draft.entities[choice.index], scope: choice.scope }));
+    const redactedSource = redactText(source.body);
+    if (selectedEntities.some((entity) => !entity.evidence || !redactedSource.includes(entity.evidence))) throw new Error('An entity quote no longer matches the selected source. Prepare the draft again.');
     const originalCandidates = new Set((draft.related_notes || []).map((item) => item.path));
     if (requestedRelated !== null && (!Array.isArray(requestedRelated) || requestedRelated.length > 5 || requestedRelated.some((item) => typeof item !== 'string'))) throw new Error('Choose up to five related-note suggestions from this draft.');
     const selectedPaths = requestedRelated === null ? [...originalCandidates].slice(0, 3) : [...new Set(requestedRelated)];
@@ -660,7 +666,23 @@ export async function startSetup(opts = {}) {
     await recordIngestion(ctx, draft.vault, draft.folder, { source_id: draft.source_id, revision: draft.revision, outcome: 'filed', knowledge_path: notePath });
     await removeIngestionDraft(ingestionDraftsDir, id);
     await logActivity(env, { tool: 'source_proposal_saved', ok: true });
-    return { ok: true, written: true, saved_as_proposal: true, path: result.path, note_status: 'proposed', confidence: 'reported', verified: false };
+    const entityProposals = [];
+    for (const entity of selectedEntities) {
+      const slug = entity.title.toLowerCase().normalize('NFKD').replace(/[\u0300-\u036f]/g, '').replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '').slice(0, 70);
+      if (!slug) continue;
+      const entityId = `${entity.type}.${slug}`;
+      const entityResult = await proposeNote(ctx, {
+        vault: draft.vault, folder: chosen, title: entity.title,
+        body: `## Description (AI draft; unverified)\n${entity.description}\n\n## Source evidence (exact quote; unverified)\n> ${entity.evidence}\n\n## Source\n[[${draft.source_path.replace(/\.md$/i, '')}]]\n\nReview this entity, its scope, and evidence before changing its status from proposed.`,
+        type: entity.type, entity_id: entityId, entity_scope: entity.scope,
+        memory_type: 'semantic', confidence: 'reported', source: `Exact quote from ${draft.source_path}`,
+        ai_platform: 'BrainLink Local Review', agent_or_role: 'Raw-to-Wiki entity suggestion',
+        session_or_task_id: `ingestion-${draft.source_id.slice(0, 12)}`, confirm: true, auto_link: false,
+      });
+      if (entityResult.ok && entityResult.written) entityProposals.push({ title: entity.title, path: entityResult.path, status: 'proposed', verified: false });
+      else entityProposals.push({ title: entity.title, errors: entityResult.errors || ['Could not save this entity proposal.'] });
+    }
+    return { ok: true, written: true, saved_as_proposal: true, path: result.path, entity_proposals: entityProposals, note_status: 'proposed', confidence: 'reported', verified: false };
   }
   let ingestionTickRunning = false;
   const ingestionTimer = setInterval(async () => {
@@ -2481,7 +2503,7 @@ export async function startSetup(opts = {}) {
       const destination = String(b.destination || '').trim().replace(/\\/g, '/').replace(/^\/+|\/+$/g, '');
       if (!destination || !Array.isArray(draft.destinations) || !draft.destinations.includes(destination)) throw new Error('Choose an existing knowledge folder outside the selected source folder.');
       const requestedRelated = b.related_note_paths === undefined ? [] : b.related_note_paths;
-      return saveIngestionDraftRecord(cfg, id, destination, requestedRelated);
+      return saveIngestionDraftRecord(cfg, id, destination, requestedRelated, b.entity_choices || []);
     },
     'POST /api/brief/settings': async (b) => {
       const cfg = await loadConfig(file);

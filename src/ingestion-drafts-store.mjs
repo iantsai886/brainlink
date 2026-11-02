@@ -27,6 +27,11 @@ function validRecord(record, id) {
     && typeof draft.summary === 'string' && draft.summary.length > 0 && draft.summary.length <= 2400
     && typeof draft.body === 'string' && draft.body.length <= 12_000
     && ['working', 'semantic', 'procedural', 'episodic'].includes(draft.memory_type)
+    && (draft.entities === undefined || (Array.isArray(draft.entities) && draft.entities.length <= 8 && draft.entities.every((item) => item
+      && ['person', 'team', 'workflow', 'dataset', 'artifact', 'project', 'policy', 'concept'].includes(item.type)
+      && typeof item.title === 'string' && item.title.length > 0 && item.title.length <= 100
+      && typeof item.description === 'string' && item.description.length > 0 && item.description.length <= 500
+      && typeof item.evidence === 'string' && item.evidence.length > 0 && item.evidence.length <= 240)))
     && (draft.related_basis === undefined || draft.related_basis === 'source_and_draft')
     && (draft.related_notes === undefined || (Array.isArray(draft.related_notes) && draft.related_notes.length <= 8 && draft.related_notes.every((item) => item
       && safeNotePath(item.path) && !/[\[\]]/.test(item.path)

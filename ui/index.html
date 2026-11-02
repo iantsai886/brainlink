@@ -757,7 +757,9 @@ async function renderIngestionDraftList() {
     const d = record.draft;
     const links = (d.related_notes || []).map((item) => `<label class="muted" style="display:flex;flex-direction:row;gap:8px;align-items:flex-start"><input type="checkbox" data-ingestion-related="${esc(record.id)}" value="${esc(item.path)}" style="width:auto;margin-top:3px"><span><b>${esc(item.title)}</b><br><span>${esc(t('ingestion.sharedTerms', { terms: item.shared_terms.join(', ') }))}</span></span></label>`).join('');
     const relatedChoices = links ? `<fieldset style="margin:10px 0"><legend>${esc(t('ingestion.relatedTitle'))}</legend><p class="muted">${esc(t('ingestion.relatedHint'))}</p>${links}</fieldset>` : '';
-    return `<div class="card"><b>${esc(d.title)}</b><p class="muted">${esc(d.vault)} · ${esc(d.source_path)} · ${esc(d.memory_type)} · ${esc(d.model)}</p><p>${esc(d.summary)}</p><details><summary>${esc(t('ingestion.reviewDraft'))}</summary><pre style="white-space:pre-wrap;overflow-wrap:anywhere">${esc(d.body)}</pre></details>${relatedChoices}${d.destinations?.length ? `<label>${esc(t('ingestion.destination'))}<select data-ingestion-destination="${esc(record.id)}"><option value="">${esc(t('ingestion.chooseDestination'))}</option>${d.destinations.map((folder) => `<option value="${esc(folder)}">${esc(folder)}</option>`).join('')}</select></label><button class="primary" type="button" data-ingestion-save-draft="${esc(record.id)}">${esc(t('ingestion.saveProposal'))}</button>` : `<p class="muted">${esc(t('ingestion.noDestination'))}</p>`}<button class="secondary" type="button" data-ingestion-discard-draft="${esc(record.id)}">${esc(t('ingestion.discardDraft'))}</button></div>`;
+    const entities = (d.entities || []).map((item, index) => `<div class="card"><label style="display:flex;gap:8px;align-items:center"><input type="checkbox" data-ingestion-entity="${esc(record.id)}" data-entity-index="${index}" style="width:auto"><b>${esc(item.title)}</b> · ${esc(item.type)}</label><p>${esc(item.description)}</p><small class="muted">${esc(t('ingestion.entityEvidence'))}: “${esc(item.evidence)}”</small><label>${esc(t('ingestion.entityScope'))}<select data-ingestion-entity-scope="${esc(record.id)}" data-entity-index="${index}"><option value="" selected>${esc(t('ingestion.chooseEntityScope'))}</option><option value="organisation">${esc(t('ingestion.scopeOrganisation'))}</option><option value="personal">${esc(t('ingestion.scopePersonal'))}</option><option value="client">${esc(t('ingestion.scopeClient'))}</option></select></label></div>`).join('');
+    const entityChoices = entities ? `<fieldset style="margin:10px 0"><legend>${esc(t('ingestion.entityTitle'))}</legend><p class="muted">${esc(t('ingestion.entityHint'))}</p>${entities}</fieldset>` : '';
+    return `<div class="card"><b>${esc(d.title)}</b><p class="muted">${esc(d.vault)} · ${esc(d.source_path)} · ${esc(d.memory_type)} · ${esc(d.model)}</p><p>${esc(d.summary)}</p><details><summary>${esc(t('ingestion.reviewDraft'))}</summary><pre style="white-space:pre-wrap;overflow-wrap:anywhere">${esc(d.body)}</pre></details>${relatedChoices}${entityChoices}${d.destinations?.length ? `<label>${esc(t('ingestion.destination'))}<select data-ingestion-destination="${esc(record.id)}"><option value="">${esc(t('ingestion.chooseDestination'))}</option>${d.destinations.map((folder) => `<option value="${esc(folder)}">${esc(folder)}</option>`).join('')}</select></label><button class="primary" type="button" data-ingestion-save-draft="${esc(record.id)}">${esc(t('ingestion.saveProposal'))}</button>` : `<p class="muted">${esc(t('ingestion.noDestination'))}</p>`}<button class="secondary" type="button" data-ingestion-discard-draft="${esc(record.id)}">${esc(t('ingestion.discardDraft'))}</button></div>`;
   }).join('') : `<p class="muted">${esc(t('ingestion.noPendingDrafts'))}</p>`;
 }
 
@@ -2358,11 +2360,17 @@ document.addEventListener('click', async (event) => {
     try {
       saveDraft.disabled = true;
       const related_note_paths = [...document.querySelectorAll(`[data-ingestion-related="${CSS.escape(draftId)}"]:checked`)].map((item) => item.value);
-      const result = await api('POST', '/api/ingestion/save-draft', { draft_id: draftId, destination: selector.value, related_note_paths, confirm: true });
+      const entity_choices = [...document.querySelectorAll(`[data-ingestion-entity="${CSS.escape(draftId)}"]:checked`)].map((item) => ({ index: Number(item.dataset.entityIndex), scope: document.querySelector(`[data-ingestion-entity-scope="${CSS.escape(draftId)}"][data-entity-index="${CSS.escape(item.dataset.entityIndex)}"]`)?.value || '' }));
+      const result = await api('POST', '/api/ingestion/save-draft', { draft_id: draftId, destination: selector.value, related_note_paths, entity_choices, confirm: true });
       if (result.written) saveDraft.closest('.card').innerHTML = `<b>${esc(t('ingestion.proposalSaved'))}</b><p>${esc(result.path)}</p><p class="muted">${esc(t('ingestion.proposalUnverified'))}</p>`;
       else if (result.preview) toast(t('ingestion.proposalNeedsReview'), true);
       else toast((result.errors || []).join(' '), true);
-      if (result.written) await renderIngestionDraftList();
+      if (result.written) {
+        const savedEntities = (result.entity_proposals || []).filter((item) => item.path).map((item) => `${item.title}: ${item.path}`);
+        const failedEntities = (result.entity_proposals || []).filter((item) => !item.path).map((item) => `${item.title}: ${t('ingestion.entitySaveFailed')}`);
+        if (savedEntities.length || failedEntities.length) toast([...savedEntities, ...failedEntities].join('\n'));
+        await renderIngestionDraftList();
+      }
     } catch (error) { toast(error.message, true); }
     finally { saveDraft.disabled = false; }
     return;

@@ -66,7 +66,9 @@ test('automatic retrieval observations keep only coarse outcomes and separate Tw
   assert.doesNotMatch(ledger, /question|query|note content|private-folder|secret-note/i);
   assert.match(ledger, /\"profile_id\":\"fictional_org\"/);
   assert.match(ledger, /\"duration_bucket_ms\":500/);
-  assert.doesNotMatch(ledger, /389|389 milliseconds/);
+  const stored = ledger.trim().split(/\r?\n/).map((line) => JSON.parse(line));
+  assert.ok(stored.every((row) => !Object.hasOwn(row.data, 'duration_ms') && !Object.hasOwn(row.data, 'duration')),
+    'the journal must not store exact response durations');
 });
 test('week-on-week delta and applied fix type', async () => {
   const home = await mkdtemp(path.join(tmpdir(), 'brainlink-rsi-weekly-'));
