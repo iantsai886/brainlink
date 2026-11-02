@@ -6,7 +6,7 @@
 import { createHash } from 'node:crypto';
 import { loadVault, summarize } from './core.mjs';
 import { linkGraph } from './graph.mjs';
-import { deriveTypedRelations, typedEntityMetadataMap, deriveProposedTypedRelations, deriveRejectedTypedRelations, discoverTypedRelationshipCandidates, discoverTypedRelationshipCandidatesForSources } from './typed-graph.mjs';
+import { deriveTypedRelations, typedEntityMetadataMap, typedEntityFields, deriveProposedTypedRelations, deriveRejectedTypedRelations, discoverTypedRelationshipCandidates, discoverTypedRelationshipCandidatesForSources } from './typed-graph.mjs';
 
 // n.private is already computed once, at index-build time, by core.mjs's isPrivateMeta — reusing
 // it here (rather than re-deriving private-ness from n.meta.private with a second, independent
@@ -161,7 +161,7 @@ export async function noteDetail3D(ctx, vaultName, rel) {
   });
   const discoveredRelationships = discoverTypedRelationshipCandidates(index.notes, i).map(({ target_index, ...candidate }) => ({ ...candidate, note: summarize(index, target_index) }));
   return {
-    vault: vaultName, path: n.rel, title: n.title, body: n.body, tags: [...n.tags],
+    vault: vaultName, path: n.rel, title: n.title, body: n.body, tags: [...n.tags], graph_record: typedEntityFields(n.raw),
     backlinks: [...index.backlinks[i]].filter(visible).map((j) => summarize(index, j)),
     outlinks: [...index.outlinks[i]].filter(visible).map((j) => summarize(index, j)),
     relationships, proposed_relationships: proposedRelationships, rejected_relationships: rejectedRelationships, discovered_relationships: discoveredRelationships,

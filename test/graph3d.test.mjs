@@ -237,6 +237,32 @@ test('/api/graph3d and /api/graph3d/note: same exclusion guarantee over HTTP', a
   } finally { s.server.close(); }
 });
 
+test('/api/graph3d/entity/save edits only the selected public note, checks unique IDs, and preserves its body', async () => {
+  const home = await tmp('graph3d-entity-home');
+  const vaultPath = await buildVault(path.join(home, 'vault'));
+  await writeFile(path.join(vaultPath, 'Team.md'), '---\ntype: team\nid: team.product\nscope: organisation\nstatus: current\n---\n# Product team\n');
+  const s = await startSetup({ env: { BRAINLINK_HOME: path.join(home, 'app'), BRAINLINK_SEMANTIC: '0' }, home, os: 'linux', port: 0, useCli: false });
+  const base = `http://127.0.0.1:${s.port}`;
+  const api = (p, body) => fetch(base + p, { method: 'POST', headers: { 'X-BrainLink-Token': s.token, 'Content-Type': 'application/json' }, body: JSON.stringify(body || {}) }).then((r) => r.json());
+  try {
+    await api('/api/vault', { path: vaultPath, name: 'Main', pack: 'simple', scaffold: false });
+    await new Promise((resolve) => setTimeout(resolve, 250));
+    const note = await api('/api/graph3d/note', { vault: 'Main', path: 'Beta.md' });
+    assert.deepEqual(note.graph_record, {});
+    const fields = { type: 'concept', id: 'concept.beta', scope: 'organisation', status: 'proposed' };
+    const saved = await api('/api/graph3d/entity/save', { vault: 'Main', path: 'Beta.md', etag: note.etag, graph_record: fields });
+    assert.equal(saved.ok, true, JSON.stringify(saved)); assert.deepEqual(saved.graph_record, fields);
+    const savedNote = await api('/api/graph3d/note', { vault: 'Main', path: 'Beta.md' });
+    assert.deepEqual(savedNote.graph_record, fields); assert.match(savedNote.body, /Backlinked from Alpha/);
+    const stale = await api('/api/graph3d/entity/save', { vault: 'Main', path: 'Beta.md', etag: note.etag, graph_record: { ...fields, id: 'concept.changed' } });
+    assert.match(stale.error || '', /changed since it was opened/);
+    const duplicate = await api('/api/graph3d/entity/save', { vault: 'Main', path: 'Beta.md', etag: savedNote.etag, graph_record: { ...fields, id: 'team.product' } });
+    assert.match(duplicate.error || '', /already used/);
+    const privateEdit = await api('/api/graph3d/entity/save', { vault: 'Main', path: 'Hidden Note.md', etag: 'x', graph_record: fields });
+    assert.ok(privateEdit.error || privateEdit.message);
+  } finally { s.server.close(); }
+});
+
 test('vault graph discovery is paged, scope-safe, excludes private records, and only saves review proposals', async () => {
   const home = await tmp('graph3d-discovery');
   const vaultPath = path.join(home, 'vault');
@@ -490,6 +516,19 @@ test('active Setup UI reloads the graph on vault events and keeps an open editor
   assert.match(page, /dispatchEvent\(new Event\('brainlink:vault-changed'\)\)/);
   assert.match(graph, /addEventListener\('brainlink:vault-changed',[\s\S]*?refreshGraph\(\)/);
   assert.match(graph, /if \(editor && !editor\.hidden\) \{ pendingVaultRefresh = true; return; \}/);
+});
+
+test('installed Setup graph panel exposes structured record fields and saves only its selected note', async () => {
+  const { readFile } = await import('node:fs/promises');
+  const page = await readFile(new URL('../ui/index.html', import.meta.url), 'utf8');
+  const graph = await readFile(new URL('../ui/notes3d.js', import.meta.url), 'utf8');
+  assert.match(page, /notes3d\.js/, 'the installed Setup page loads this graph panel');
+  for (const field of ['type','scope','status']) assert.ok(graph.includes(`graphChoices('${field}',`), `form includes ${field}`);
+  assert.match(graph, /data-graph-record-field="id"/);
+  assert.match(graph, /data-graph-record-field="\$\{field\}"/);
+  assert.match(graph, /api\('\/api\/graph3d\/entity\/save'/);
+  assert.match(graph, /notes3d-links'\)\.querySelectorAll\('\[data-graph-record-field\]'\)/, 'save reads only fields inside the selected note detail');
+  assert.match(graph, /etag: currentDetail\.etag/, 'save is tied to the note revision currently shown');
 });
 
 test('graph UI exposes a confirmation-gated action for reviewing a suggested relationship', async () => {

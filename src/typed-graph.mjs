@@ -74,6 +74,43 @@ function parseRecord(raw) {
   return { meta, relations };
 }
 
+export function typedEntityFields(raw) {
+  const { meta } = parseRecord(raw);
+  const fields = {};
+  for (const key of ['type','id','scope','status']) if (typeof meta[key] === 'string' && meta[key].length <= 160) fields[key] = meta[key];
+  return fields;
+}
+
+export function updateTypedEntityFields(raw, input) {
+  if (!input || typeof input !== 'object' || Array.isArray(input)) throw new Error('Graph record fields are required.');
+  const fields = Object.fromEntries(['type','id','scope','status'].map((key) => [key, String(input[key] ?? '').trim()]));
+  const present = Object.values(fields).filter(Boolean).length;
+  if (present === 0) {
+    const match = String(raw).match(/^(\uFEFF?---[^\S\r\n]*\r?\n)([\s\S]*?)(\r?\n---[^\S\r\n]*(?:\r?\n|$))/);
+    if (!match) return String(raw);
+    const lines = match[2].split(/\r?\n/).filter((line) => !/^(?:type|id|scope|status):\s*/.test(line));
+    return `${match[1]}${lines.join(raw.includes('\r\n') ? '\r\n' : '\n')}${match[3]}${String(raw).slice(match[0].length)}`;
+  }
+  if (present !== 4) throw new Error('Set type, ID, scope, and status together, or clear all four fields.');
+  if (!ENTITY_TYPES.has(fields.type)) throw new Error('Choose a supported graph record type.');
+  if (!ID.test(fields.id)) throw new Error('Graph IDs must start with a lowercase letter and use only lowercase letters, numbers, dot, underscore, colon, or hyphen.');
+  if (!SCOPES.has(fields.scope)) throw new Error('Choose a supported graph data scope.');
+  if (!['proposed','current','archived'].includes(fields.status)) throw new Error('Choose a supported graph record status.');
+  const source = String(raw || '');
+  const match = source.match(/^(\uFEFF?---[^\S\r\n]*\r?\n)([\s\S]*?)(\r?\n---[^\S\r\n]*(?:\r?\n|$))/);
+  const newline = source.includes('\r\n') ? '\r\n' : '\n';
+  let lines, prefix, suffix;
+  if (match) { lines = match[2].split(/\r?\n/); prefix = match[1]; suffix = match[3] + source.slice(match[0].length); }
+  else { lines = []; prefix = `---${newline}`; suffix = `${newline}---${newline}${source}`; }
+  for (const key of ['type','id','scope','status']) {
+    const indexes = lines.flatMap((line, index) => new RegExp(`^${key}:\\s*`).test(line) ? [index] : []);
+    if (indexes.length > 1) throw new Error(`This note has duplicate ${key} frontmatter fields. Fix them in the note before editing its graph record.`);
+    if (indexes.length) lines[indexes[0]] = `${key}: ${fields[key]}`;
+    else lines.push(`${key}: ${fields[key]}`);
+  }
+  return `${prefix}${lines.join(newline)}${suffix}`;
+}
+
 export function typedEntityMetadataMap(notes) {
   const candidates = notes.map((note) => ({ note, meta: parseRecord(note.raw).meta }));
   const counts = new Map();

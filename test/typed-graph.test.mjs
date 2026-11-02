@@ -6,12 +6,24 @@ import path from 'node:path';
 import { normalize } from '../src/config.mjs';
 import { createContext, loadVault } from '../src/core.mjs';
 import { buildGraph3D, noteDetail3D } from '../src/graph3d.mjs';
-import { deriveTypedRelations, deriveRejectedTypedRelations, discoverTypedRelationshipCandidates, discoverTypedRelationshipCandidatesForSources, appendTypedRelationProposal, approveTypedRelation, rejectTypedRelation, reopenTypedRelation, typedGraphHealth } from '../src/typed-graph.mjs';
+import { deriveTypedRelations, deriveRejectedTypedRelations, discoverTypedRelationshipCandidates, discoverTypedRelationshipCandidatesForSources, appendTypedRelationProposal, approveTypedRelation, rejectTypedRelation, reopenTypedRelation, typedGraphHealth, typedEntityFields, updateTypedEntityFields } from '../src/typed-graph.mjs';
 import { proposeNote } from '../src/writes.mjs';
 import { createMcp } from '../src/server.mjs';
 
 const temp = (name) => mkdtemp(path.join(tmpdir(), `brainlink-typed-graph-${name}-`));
 const entity = ({ type, id, scope = 'organisation', body = '', relations = '', extra = '' }) => `---\ntype: ${type}\nid: ${id}\nscope: ${scope}\nstatus: current\n${extra}${relations ? `relations:\n${relations}` : ''}---\n# ${id}\n${body}`;
+
+test('typed entity field updates preserve Markdown and relations, validate all fields, and can clear identity', () => {
+  const raw = entity({ type: 'workflow', id: 'workflow.triage', relations: '  - predicate: runs\n    target: workflow.followup\n    review: proposed\n    source: "Exact source sentence"\n    confidence: 0.8\n', body: 'Keep this note.' });
+  const next = updateTypedEntityFields(raw, { type: 'team', id: 'team.support', scope: 'organisation', status: 'proposed' });
+  assert.deepEqual(typedEntityFields(next), { type: 'team', id: 'team.support', scope: 'organisation', status: 'proposed' });
+  assert.match(next, /review: proposed/); assert.match(next, /source: "Exact source sentence"/); assert.match(next, /Keep this note\./);
+  assert.equal(updateTypedEntityFields(next, { type: '', id: '', scope: '', status: '' }), next.replace(/^type: team\nid: team\.support\nscope: organisation\nstatus: proposed\n/m, ''));
+  assert.throws(() => updateTypedEntityFields(raw, { type: 'team', id: 'Bad ID', scope: 'organisation', status: 'current' }), /Graph IDs/);
+  assert.throws(() => updateTypedEntityFields(raw, { type: 'team', id: 'team.support', scope: 'company', status: 'current' }), /data scope/);
+  assert.throws(() => updateTypedEntityFields(raw, { type: 'team', id: 'team.support', scope: 'organisation', status: '' }), /together/);
+  assert.throws(() => updateTypedEntityFields('---\ntype: team\ntype: workflow\n---\nBody', { type: 'team', id: 'team.support', scope: 'organisation', status: 'current' }), /duplicate type/);
+});
 
 test('typed graph health returns structural counts only and excludes private or generated notes', () => {
   const notes = [

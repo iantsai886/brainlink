@@ -162,6 +162,13 @@
         document.getElementById('notes3d-body').innerHTML = renderMarkdown(detail.body) || '<p class="muted">(This note is empty.)</p>';
         const chip = (n, label) => `<button class="chip" data-focus-title="${esc(n.title)}" title="${esc(n.path)}">${esc(n.title)}<small>${esc(label)}</small></button>`;
         const parts = [];
+        const graphRecord = detail.graph_record || {};
+        const graphChoices = (field, label, values) => {
+          const current = typeof graphRecord[field] === 'string' ? graphRecord[field] : '';
+          const custom = current && !values.includes(current) ? `<option value="${esc(current)}" selected>${esc(tr('notes3d.existingValue', { value: current }))}</option>` : '';
+          return `<label>${esc(label)}<select data-graph-record-field="${field}" ${detail.writable ? '' : 'disabled'}><option value="">${esc(tr('notes3d.notSet'))}</option>${custom}${values.map((value) => `<option value="${value}" ${current === value ? 'selected' : ''}>${value}</option>`).join('')}</select></label>`;
+        };
+        parts.push(`<details class="card" style="margin-top:10px"><summary>${esc(tr('notes3d.graphRecord'))}</summary><p class="muted">${esc(tr('notes3d.graphRecordHint'))}</p>${graphChoices('type', tr('notes3d.recordType'), ['person','team','workflow','dataset','artifact','project','policy','concept'])}<label>${esc(tr('notes3d.stableId'))}<input data-graph-record-field="id" value="${esc(graphRecord.id || '')}" placeholder="team.product" maxlength="128" ${detail.writable ? '' : 'disabled'}></label>${graphChoices('scope', tr('notes3d.recordScope'), ['personal','organisation','client'])}${graphChoices('status', tr('notes3d.recordStatus'), ['proposed','current','archived'])}<small class="muted">${esc(tr('notes3d.graphRecordSaveHint'))}</small><div class="row" style="margin-top:8px"><button type="button" class="chip" data-save-graph-record ${detail.writable ? '' : 'disabled'}>${esc(tr('notes3d.saveGraphRecord'))}</button></div></details>`);
         if (detail.backlinks.length) parts.push(`<div class="muted" style="font-size:12px;margin-top:10px">Linked from</div><div class="row">${detail.backlinks.map((n) => chip(n, 'backlink')).join('')}</div>`);
         if (detail.outlinks.length) parts.push(`<div class="muted" style="font-size:12px;margin-top:10px">Links to</div><div class="row">${detail.outlinks.map((n) => chip(n, 'link')).join('')}</div>`);
         if (detail.relationships?.length) parts.push(`<div class="muted" style="font-size:12px;margin-top:10px">Typed relationships</div>${detail.relationships.map((r) => `<div style="margin:5px 0"><div><b>${esc(r.predicate)}</b> · ${esc(r.direction)}</div><div class="row">${chip(r.note, 'related record')}</div><small class="muted">${esc(r.evidence)} · confidence ${esc(r.confidence)}</small>${detail.writable && r.direction === 'outgoing' ? `<div style="margin-top:8px"><button type="button" class="chip" data-reopen-relation="${esc(r.relation_index)}">${esc(tr('notes3d.undoApproval'))}</button></div>` : ''}</div>`).join('')}`);
@@ -299,6 +306,16 @@
       if (e.target.closest('[data-review-load-more]')) { loadReviewQueue({ append: true }); return; }
       const graphNote = e.target.closest('[data-graph-note-id]');
       if (graphNote) { openById(graphNote.dataset.graphNoteId); return; }
+      const saveGraphRecord = e.target.closest('[data-save-graph-record]');
+      if (saveGraphRecord) {
+        if (!currentDetail) return;
+        const fields = Object.fromEntries([...document.getElementById('notes3d-links').querySelectorAll('[data-graph-record-field]')].map((field) => [field.dataset.graphRecordField, field.value]));
+        saveGraphRecord.disabled = true;
+        api('/api/graph3d/entity/save', { vault: currentDetail.vault, path: currentDetail.path, etag: currentDetail.etag, graph_record: fields })
+          .then(async (result) => { toast(tr('notes3d.graphRecordSaved')); await loadGraph(); const updated = nodesById.find((node) => node.vault === currentDetail?.vault && node.path === currentDetail?.path); if (updated) openById(updated.id); })
+          .catch((err) => { toast(err.message, true); saveGraphRecord.disabled = false; });
+        return;
+      }
       if (e.target.id === 'notes3d-edit-toggle') {
         const editor = document.getElementById('notes3d-editor');
         editor.value = currentDetail?.body || '';

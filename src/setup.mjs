@@ -32,7 +32,7 @@ import { sessionsService } from './host.mjs';
 import { addAgent, renameAgent, removeAgent, revokeAgent, markConnected, findAgentByToken, publicAgent, localAgentSnippet, remoteAgentSnippet, generateAgentToken, hashToken } from './mcp-agents.mjs';
 import { analyzeActivitySignals, attachRetrievalObservationSignals } from './rsi-observations.mjs';
 import { buildGraph3D, noteDetail3D, listProposedTypedRelations, discoverVaultRelationshipCandidates, listGraphVaults } from './graph3d.mjs';
-import { deriveTypedRelations, deriveProposedTypedRelations, deriveRejectedTypedRelations, discoverTypedRelationshipCandidates, typedEntityMetadataMap, typedRelationAllowed, appendTypedRelationProposal, approveTypedRelation, rejectTypedRelation, reopenTypedRelation } from './typed-graph.mjs';
+import { deriveTypedRelations, deriveProposedTypedRelations, deriveRejectedTypedRelations, discoverTypedRelationshipCandidates, typedEntityFields, typedEntityMetadataMap, typedRelationAllowed, updateTypedEntityFields, appendTypedRelationProposal, approveTypedRelation, rejectTypedRelation, reopenTypedRelation } from './typed-graph.mjs';
 import { snapshotSettings, chooseSnapshot, suggestSnapshotFolder, clearSnapshot, startSnapshotWatcher, writeSnapshotOnce, loadSnapshotStatus, saveSnapshotStatus } from './snapshot.mjs';
 import { listHandoffs, proposeNote } from './writes.mjs';
 import { backupOnce, verifyBackup, restoreBackupToEmpty, loadBackupStatus, saveBackupStatus, pruneBackups, listVerifiedBackups } from './backup.mjs';
@@ -67,6 +67,7 @@ import { inspectClaudeDesktopRuntime } from './client-runtime.mjs';
 
 const GRAPH_NOTE_MUTATIONS = new Set([
   '/api/graph3d/note/save',
+  '/api/graph3d/entity/save',
   '/api/graph3d/relationship/approve',
   '/api/graph3d/relationship/reject',
   '/api/graph3d/relationship/reopen',
@@ -2045,6 +2046,32 @@ export async function startSetup(opts = {}) {
       try { await writeFile(tmp, next, 'utf8'); await rename(tmp, full); }
       catch (e) { try { await (await import('node:fs/promises')).unlink(tmp); } catch {} throw e; }
       return { ok: true, etag: createHash('sha256').update(next).digest('hex') };
+    },
+    'POST /api/graph3d/entity/save': async (b) => {
+      const cfg = await loadConfig(file);
+      const ctx = localContext(cfg, { ...env, BRAINLINK_SEMANTIC: '0' });
+      if (!b.vault || !ctx.enabled.includes(b.vault)) throw new Error('Unknown vault.');
+      const vault = ctx.byName.get(b.vault);
+      if (vault.private) throw new Error('Graph records in a private vault cannot be edited in the shared graph.');
+      if (ctx.readOnly || vault.writes !== 'on') throw new Error('This vault does not allow graph record edits.');
+      const current = await readNote(ctx, b.vault, String(b.path || ''));
+      const index = await loadVault(ctx, b.vault);
+      const noteIndex = index.byRel.get(current.path);
+      if (noteIndex === undefined || index.notes[noteIndex].generated) throw new Error('This record cannot be edited.');
+      const full = safeJoin(vaultRoot(ctx, b.vault), current.path);
+      const raw = await readFile(full, 'utf8');
+      const etag = createHash('sha256').update(raw).digest('hex');
+      if (typeof b.etag !== 'string' || b.etag !== etag) throw new Error('This note changed since it was opened. Reload it before saving.');
+      const next = updateTypedEntityFields(raw, b.graph_record);
+      const fields = typedEntityFields(next);
+      if (fields.id && index.notes.some((note, i) => i !== noteIndex && !note.private && !note.generated && typedEntityFields(note.raw).id === fields.id)) {
+        throw new Error('That graph ID is already used by another visible note in this vault. Choose a unique ID.');
+      }
+      const tmp = `${full}.brainlink-${randomBytes(6).toString('hex')}.tmp`;
+      try { await writeFile(tmp, next, 'utf8'); await rename(tmp, full); }
+      catch (error) { await unlink(tmp).catch(() => {}); throw error; }
+      await logActivity(env, { tool: 'graph_entity_edit', ok: true });
+      return { ok: true, etag: createHash('sha256').update(next).digest('hex'), graph_record: fields };
     },
     'POST /api/graph3d/relationship/approve': async (b) => {
       const cfg = await loadConfig(file);
