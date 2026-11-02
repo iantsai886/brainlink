@@ -35,6 +35,8 @@ $Installer = if ($SkipCompile) { $ReusableInstaller } else { Join-Path $TestRoot
 $OriginalPathExists = Test-Path 'HKCU:\Environment'
 $OriginalPath = if ($OriginalPathExists) { (Get-ItemProperty 'HKCU:\Environment' -Name Path -ErrorAction SilentlyContinue).Path } else { $null }
 $OldBrainLinkHome = $env:BRAINLINK_HOME
+$OldAppData = $env:APPDATA
+$IsolatedAppData = Join-Path $TestRoot 'roaming'
 $OldBrainLinkVersion = $env:BRAINLINK_VERSION
 $OldHermesHome = $env:HERMES_HOME
 $OldSetupPort = $env:BRAINLINK_SETUP_PORT
@@ -77,6 +79,9 @@ try {
   }
 
   $env:BRAINLINK_HOME = $BrainLinkHome
+  New-Item -ItemType Directory -Path $IsolatedAppData -Force | Out-Null
+  # Keep the app's managed sign-in launcher inside this isolated test profile.
+  $env:APPDATA = $IsolatedAppData
   $InstalledApp = Join-Path $InstallDir 'app'
   $InstalledNode = Join-Path $InstallDir 'node\node.exe'
   $OcrSmoke = Join-Path $Root 'scripts\smoke-installed-ocr.mjs'
@@ -205,6 +210,50 @@ try {
   $restoredYaml = Get-Content -LiteralPath $HermesConfig -Raw
   if ($disabledHook.configured -or $restoredYaml -notmatch 'echo preserve-user-hook' -or $restoredYaml -match 'session-end-cue') { throw 'Installed Hermes setup did not remove only its own hook.' }
   if ($page.Content -notmatch 'sessions\.hookHermesConfirm|user permissions') { throw 'Installed UI is missing the Hermes shell-hook permission warning.' }
+
+  # Verify the actual Windows sign-in launcher in isolated APPDATA. Stop the first
+  # instance, invoke the managed VBS as Windows Startup would, and require a fresh
+  # installed process plus a healthy authenticated Setup endpoint.
+  $startupEnabled = Invoke-RestMethod -Uri "http://127.0.0.1:$($instance.port)/api/startup" -Method Post -Headers $headers -ContentType 'application/json' -Body '{"enabled":true}' -TimeoutSec 5
+  if (-not $startupEnabled.enabled) { throw 'Installed Setup could not enable start-at-sign-in in the isolated profile.' }
+  $InstalledStartupFile = Join-Path $IsolatedAppData 'Microsoft\Windows\Start Menu\Programs\Startup\BrainLink Background.vbs'
+  if (-not (Test-Path -LiteralPath $InstalledStartupFile)) { throw 'Installed Setup did not create its managed Windows startup launcher.' }
+  $startupSource = Get-Content -LiteralPath $InstalledStartupFile -Raw
+  $InstalledCli = Join-Path $InstalledApp 'bin\brainlink.mjs'
+  if ($startupSource -notmatch 'BrainLink managed startup launcher' -or -not $startupSource.Contains($InstalledNode) -or -not $startupSource.Contains($InstalledCli) -or $startupSource -notmatch 'setup --app --no-open') { throw 'The sign-in launcher does not target the installed BrainLink runtime and app.' }
+  $previousPid = [int]$instance.pid
+  Stop-Process -Id $previousPid -Force -ErrorAction Stop
+  Wait-Process -Id $previousPid -Timeout 10 -ErrorAction SilentlyContinue
+  $shutdownDeadline = [DateTime]::UtcNow.AddSeconds(10)
+  $oldInstanceStopped = $false
+  while ([DateTime]::UtcNow -lt $shutdownDeadline) {
+    try { Invoke-RestMethod "http://127.0.0.1:$($instance.port)/health" -TimeoutSec 1 | Out-Null }
+    catch { $oldInstanceStopped = $true; break }
+    Start-Sleep -Milliseconds 100
+  }
+  if (-not $oldInstanceStopped) { throw 'The first installed Setup instance did not stop before the sign-in restart test.' }
+  $Process = $null
+  Start-Process -FilePath (Join-Path $env:WINDIR 'System32\wscript.exe') -ArgumentList @('//B', '//NoLogo', "`"$InstalledStartupFile`"") -WindowStyle Hidden | Out-Null
+  $startupDeadline = [DateTime]::UtcNow.AddSeconds(30)
+  $startupInstance = $null
+  $startupHealth = $null
+  while ([DateTime]::UtcNow -lt $startupDeadline) {
+    if (Test-Path -LiteralPath $InstanceFile) {
+      try { $candidate = Get-Content -LiteralPath $InstanceFile -Raw | ConvertFrom-Json } catch { $candidate = $null }
+      if ($candidate) {
+        $candidateProcess = Get-CimInstance Win32_Process -Filter "ProcessId = $($candidate.pid)" -ErrorAction SilentlyContinue
+        if ($candidateProcess -and $candidateProcess.ExecutablePath -and $candidateProcess.ExecutablePath.StartsWith((Join-Path $InstallDir ''), [StringComparison]::OrdinalIgnoreCase)) {
+          try { $startupHealth = Invoke-RestMethod "http://127.0.0.1:$($candidate.port)/health" -TimeoutSec 2 } catch { $startupHealth = $null }
+          if ($startupHealth) { $startupInstance = $candidate; $Process = $candidateProcess; break }
+        }
+      }
+    }
+    Start-Sleep -Milliseconds 250
+  }
+  if (-not $startupInstance -or $startupHealth.app -ne 'brainlink' -or $startupHealth.version -ne $Version) { throw 'Running the isolated Windows sign-in launcher did not start a healthy installed BrainLink instance.' }
+  $startupDisabled = Invoke-RestMethod -Uri "http://127.0.0.1:$($startupInstance.port)/api/startup" -Method Post -Headers $headers -ContentType 'application/json' -Body '{"enabled":false}' -TimeoutSec 5
+  if ($startupDisabled.enabled -or (Test-Path -LiteralPath $InstalledStartupFile)) { throw 'Turning start-at-sign-in off did not remove only the isolated BrainLink managed entry.' }
+  Write-Output 'PASS: the isolated Windows sign-in launcher started the installed BrainLink runtime, passed its health check, and removed only its own entry when disabled.'
   Write-Output "PASS: installed BrainLink $Version starts from its bundled runtime; both shortcuts work; Setup and folder-ingestion controls load; partial filing preserves a conflict and retries without duplicating the main note; and Hermes hook enable/disable preserves only the temporary profile settings."
   $Success = $true
 } finally {
@@ -229,6 +278,7 @@ try {
     }
   } finally {
     $env:BRAINLINK_HOME = $OldBrainLinkHome
+    $env:APPDATA = $OldAppData
     $env:BRAINLINK_VERSION = $OldBrainLinkVersion
     $env:HERMES_HOME = $OldHermesHome
     $env:BRAINLINK_SETUP_PORT = $OldSetupPort
