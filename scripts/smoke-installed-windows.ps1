@@ -109,6 +109,11 @@ try {
   $token = (Get-Content -LiteralPath (Join-Path $BrainLinkHome 'setup-token') -Raw).Trim()
   $page = Invoke-WebRequest "http://127.0.0.1:$($instance.port)/?t=$token" -Headers @{ 'X-BrainLink-Token' = $token } -TimeoutSec 5
   if ($page.StatusCode -ne 200 -or $page.Content -notmatch 'BrainLink Setup') { throw 'Installed Setup UI did not load with its local session token.' }
+  if ($page.Content -notmatch 'id="ingestion-enabled"' -or $page.Content -notmatch 'id="ingestion-auto-file"' -or $page.Content -notmatch 'id="ingestion-run"') { throw 'Installed Setup is missing the scheduled scan, auto-file, or manual scan control.' }
+  $englishLocale = Invoke-RestMethod "http://127.0.0.1:$($instance.port)/locales/en.json" -TimeoutSec 5
+  foreach ($key in @('ingestion.enabled', 'ingestion.autoFile', 'ingestion.run', 'ingestion.destination')) {
+    if (-not $englishLocale.PSObject.Properties[$key].Value) { throw "Installed Setup is missing the folder-ingestion label: $key" }
+  }
   $headers = @{ 'X-BrainLink-Token' = $token }
   $hooksUrl = "http://127.0.0.1:$($instance.port)/api/sessions/hooks"
   $hookSetUrl = "http://127.0.0.1:$($instance.port)/api/sessions/hooks/set"
@@ -125,7 +130,7 @@ try {
   $restoredYaml = Get-Content -LiteralPath $HermesConfig -Raw
   if ($disabledHook.configured -or $restoredYaml -notmatch 'echo preserve-user-hook' -or $restoredYaml -match 'session-end-cue') { throw 'Installed Hermes setup did not remove only its own hook.' }
   if ($page.Content -notmatch 'sessions\.hookHermesConfirm|user permissions') { throw 'Installed UI is missing the Hermes shell-hook permission warning.' }
-  Write-Output "PASS: installed BrainLink $Version starts from its bundled runtime; both shortcuts work; Setup loads; and Hermes hook enable/disable preserves only the temporary profile settings."
+  Write-Output "PASS: installed BrainLink $Version starts from its bundled runtime; both shortcuts work; Setup and folder-ingestion controls load; and Hermes hook enable/disable preserves only the temporary profile settings."
   $Success = $true
 } finally {
   try {
