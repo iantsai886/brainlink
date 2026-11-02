@@ -5,6 +5,10 @@ GitHub repository: `iantsai886/brainlink`
 Branch: `integration/brainlink-retrieval-evaluation` (integrates profile-scoped GitHub, RSI discovery, and independent retrieval evaluation)
 Code baseline: development target `1.2.8`, with `package.json` as the canonical version source. The `v1.2.7` tag belongs to the separate `wip/v1.2.7` release line; this branch continues from the full-source `main` history and does not move or recreate that tag.
 
+### Raw-to-Wiki automatic filing work (2026-11-02)
+
+Started branch `feat/complete-raw-wiki-folder-flow` from the freshly fetched `origin/main` commit `8336f10`. Added an opt-in automatic filing setting, per-scan-folder destination selection, and code to save local Ollama drafts as new linked `proposed` notes after scheduled or manual scans. The source folder and destination must be in the same non-private vault; existing notes are never overwritten. Only Markdown notes are scanned, up to five local AI drafts per run, and the schedule still requires BrainLink to be open. Static checks passed (`node --check` for the three changed JavaScript modules, PowerShell JSON parsing for all three locales, and `git diff --check`). The project test suite has not been run; this branch change is not yet tested functionally, packaged, or installed.
+
 ### Full current-branch verification (source commit `16425b7`, 2026-10-31)
 
 On Windows/Node.js 24.22.1, `npm run test:all` exited 0: core 609 total (601 passed, 0 failed, 8 platform/privilege skips); UI 44/44 passed. The run covers vault and Twin isolation, private-content filtering, graph editing and review, scheduled backups and restore, session capture/closeout, Git-backed sync, retrieval evaluation, RSI governance, and client connectors. This is local verification only. The live Claude Code-to-Codex handoff remains unverified because Claude Code is signed out; hosted GitHub Actions are still queued and are not counted as passing evidence.

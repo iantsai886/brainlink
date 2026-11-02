@@ -487,6 +487,8 @@ main #ready, main #ask-panel, main #brain-panel, main #sessions-panel, main #s-c
     <label class="muted" style="display:flex;flex-direction:row;gap:6px;align-items:center"><input type="checkbox" id="ingestion-enabled" style="width:auto"><span data-i18n="ingestion.enabled"></span></label>
     <label class="muted" style="display:flex;flex-direction:row;gap:6px;align-items:center;margin-top:6px"><input type="checkbox" id="ingestion-auto-drafts" style="width:auto"><span data-i18n="ingestion.autoDrafts"></span></label>
     <p class="muted" data-i18n="ingestion.autoDraftsHint"></p>
+    <label class="muted" style="display:flex;flex-direction:row;gap:6px;align-items:center;margin-top:6px"><input type="checkbox" id="ingestion-auto-file" style="width:auto"><span data-i18n="ingestion.autoFile"></span></label>
+    <p class="muted" data-i18n="ingestion.autoFileHint"></p>
     <div class="grid2" style="margin-top:10px">
       <label><span data-i18n="ingestion.vault"></span><select id="ingestion-vault"></select></label>
       <label><span data-i18n="ingestion.folder"></span><select id="ingestion-folder"></select></label>
@@ -697,7 +699,7 @@ async function act(fn) { try { await fn(); await load(); } catch (e) { toast(e.m
 function currentIngestionTargets() {
   if (ingestionTargetsDraft === null) {
     const saved = S?.ingestion?.targets;
-    ingestionTargetsDraft = Array.isArray(saved) && saved.length ? saved.map((target) => ({ vault: target.vault, folder: target.folder }))
+    ingestionTargetsDraft = Array.isArray(saved) && saved.length ? saved.map((target) => ({ vault: target.vault, folder: target.folder, ...(target.destination ? { destination: target.destination } : {}) }))
       : S?.ingestion?.vault && S?.ingestion?.folder ? [{ vault: S.ingestion.vault, folder: S.ingestion.folder }] : [];
   }
   return ingestionTargetsDraft;
@@ -721,10 +723,21 @@ async function refreshIngestionFolders(preferred = '') {
     if (request === ingestionFolderRequest) select.disabled = true;
   }
 }
-function renderIngestionTargets() {
+let ingestionTargetsRenderRequest = 0;
+async function renderIngestionTargets() {
   if (!$('ingestion-target-list') || !S) return;
-  const targets = currentIngestionTargets();
-  $('ingestion-target-list').innerHTML = targets.length ? targets.map((target, index) => `<div class="card" style="display:flex;align-items:center;justify-content:space-between;gap:12px"><span><b>${esc(target.vault)}</b><br><span class="mono muted">${esc(target.folder)}</span></span><button type="button" data-ingestion-remove="${index}">${esc(t('ingestion.removeTarget'))}</button></div>`).join('') : `<p class="muted">${esc(t('ingestion.emptyTargets'))}</p>`;
+  const request = ++ingestionTargetsRenderRequest;
+  const targets = currentIngestionTargets().map((target) => ({ ...target }));
+  const folderLists = new Map();
+  await Promise.all([...new Set(targets.map((target) => target.vault))].map(async (vault) => {
+    try { folderLists.set(vault, (await api('POST', '/api/ingestion/folders', { vault, destinationOnly: true })).folders || []); }
+    catch { folderLists.set(vault, []); }
+  }));
+  if (request !== ingestionTargetsRenderRequest) return;
+  $('ingestion-target-list').innerHTML = targets.length ? targets.map((target, index) => {
+    const destinations = (folderLists.get(target.vault) || []).filter((folder) => folder !== target.folder && !folder.startsWith(`${target.folder}/`));
+    return `<div class="card"><div style="display:flex;align-items:center;justify-content:space-between;gap:12px"><span><b>${esc(target.vault)}</b><br><span class="mono muted">${esc(target.folder)}</span></span><button type="button" data-ingestion-remove="${index}">${esc(t('ingestion.removeTarget'))}</button></div><label style="margin-top:8px"><span>${esc(t('ingestion.destination'))}</span><select data-ingestion-destination="${index}"><option value="">${esc(t('ingestion.chooseDestination'))}</option>${destinations.map((folder) => `<option value="${esc(folder)}" ${folder === target.destination ? 'selected' : ''}>${esc(folder)}</option>`).join('')}</select></label></div>`;
+  }).join('') : `<p class="muted">${esc(t('ingestion.emptyTargets'))}</p>`;
   $('ingestion-run').disabled = !targets.length;
 }
 async function renderIngestionDraftList() {
@@ -1637,6 +1650,8 @@ async function load() {
   $('ingestion-auto-drafts').checked = Boolean(S.ingestion?.autoDrafts);
   $('ingestion-auto-drafts').disabled = !S.sessions_local_summary?.enabled || !S.sessions_local_summary?.model;
   $('ingestion-auto-drafts').parentElement.title = $('ingestion-auto-drafts').disabled ? t('ingestion.autoDraftsNeedsModel') : '';
+  $('ingestion-auto-file').checked = Boolean(S.ingestion?.autoFile);
+  $('ingestion-auto-file').disabled = !S.ingestion?.autoDrafts || !S.sessions_local_summary?.enabled || !S.sessions_local_summary?.model;
   const scanVaults = S.vaults.filter((v) => !v.private && v.exists);
   const oldScanVault = $('ingestion-vault').value;
   $('ingestion-vault').innerHTML = scanVaults.map((v) => `<option value="${esc(v.name)}">${esc(v.name)}</option>`).join('');
@@ -1651,7 +1666,7 @@ async function load() {
     : t('ingestion.never');
   if (S.ingestion?.status?.running) $('ingestion-status').textContent = t('ingestion.running');
   const draftStatus = S.ingestion_drafts?.status;
-  $('ingestion-draft-status').textContent = draftStatus?.at ? t('ingestion.autoDraftStatus', { created: draftStatus.created || 0, attempted: draftStatus.attempted || 0, at: new Date(draftStatus.at).toLocaleString(LOCALE), failed: draftStatus.failed || 0 }) : '';
+  $('ingestion-draft-status').textContent = draftStatus?.at ? t('ingestion.autoDraftStatus', { trigger: t(`ingestion.trigger.${draftStatus.trigger || 'schedule'}`), created: draftStatus.created || 0, filed: draftStatus.filed || 0, attempted: draftStatus.attempted || 0, at: new Date(draftStatus.at).toLocaleString(LOCALE), failed: draftStatus.failed || 0 }) : '';
   await renderIngestionDraftList().catch(() => {});
   $('ingestion-run').disabled = !S.vaults.some((v) => !v.private && v.exists);
   $('brief-enabled').checked = Boolean(S.brief?.enabled);
@@ -2273,6 +2288,14 @@ $('github-pull-conflict-copy').onclick = async () => {
 document.addEventListener('input', (e) => { if (e.target.id === 'github-assign-folders') { if (e.target.value.trim()) $('github-assign-whole-vault').checked = false; githubInspected = null; $('github-assign-confirm').disabled = true; }
   if (e.target.id === 'github-repository') { githubInspected = null; $('github-assign-confirm').disabled = true; $('github-commit').disabled = true; $('github-push').hidden = true; githubPendingPush = null; githubPullCandidates = []; renderGitHubPullCandidates(); } });
 document.addEventListener('change', (e) => {
+  if (e.target.id === 'ingestion-auto-drafts') {
+    $('ingestion-auto-file').disabled = !e.target.checked || !S.sessions_local_summary?.enabled || !S.sessions_local_summary?.model;
+    if (!e.target.checked) $('ingestion-auto-file').checked = false;
+  }
+  if (e.target.matches('[data-ingestion-destination]')) {
+    const target = currentIngestionTargets()[Number(e.target.dataset.ingestionDestination)];
+    if (target) { if (e.target.value) target.destination = e.target.value; else delete target.destination; }
+  }
   if (e.target.matches('[data-github-path]')) { $('github-preview').disabled = !githubSelection().length; $('github-commit').disabled = true; $('github-push').hidden = true; githubPendingPush = null; }
   if (e.target.matches('[data-github-pull-path]')) { $('github-pull-import').disabled = !githubPullSelection('add,update').length; $('github-pull-conflict-copy').disabled = !githubPullSelection('conflict').length; }
   if (e.target.id === 'github-profile') { $('github-repository').value = ''; $('github-assign-folders').value = ''; $('github-assign-whole-vault').checked = false; githubResetState(); renderGitHubProfile(S.vaults.filter((v) => !v.private && v.exists)); }
@@ -2488,14 +2511,14 @@ $('ingestion-add').onclick = () => {
   renderIngestionTargets();
 };
 $('ingestion-save').onclick = () => act(async () => {
-  const r = await api('POST', '/api/ingestion/settings', { enabled: $('ingestion-enabled').checked, autoDrafts: $('ingestion-auto-drafts').checked, targets: currentIngestionTargets(), time: $('ingestion-time').value });
+  const r = await api('POST', '/api/ingestion/settings', { enabled: $('ingestion-enabled').checked, autoDrafts: $('ingestion-auto-drafts').checked, autoFile: $('ingestion-auto-file').checked, targets: currentIngestionTargets(), time: $('ingestion-time').value });
   ingestionTargetsDraft = null;
   toast(t(r.ingestion.enabled ? 'ingestion.saved' : 'ingestion.disabled'));
 });
 $('ingestion-run').onclick = () => act(async () => {
   const r = await api('POST', '/api/ingestion/run', { targets: currentIngestionTargets() });
   $('ingestion-queue').innerHTML = r.candidates.length ? `${r.limited ? `<p class="muted">${esc(t('ingestion.limited', { shown: r.candidates.length, total: r.queued_total }))}</p>` : ''}${r.candidates.map((item) => `<div class="card"><button class="link" data-open-note="${esc(item.vault || r.vault)}::${esc(item.path)}"><b>${esc(item.title)}</b></button><span class="mono muted">${esc(item.vault || r.vault)} · ${esc(item.path)}</span><small class="muted">${esc(item.updated_at)}</small>${S.sessions_local_summary?.enabled ? `<button class="secondary" type="button" data-ingestion-draft data-vault="${esc(item.vault || r.vault)}" data-folder="${esc(item.folder)}" data-source-id="${esc(item.source_id)}" data-revision="${esc(item.revision)}">${esc(t('ingestion.makeLocalDraft'))}</button>` : ''}<div id="ingestion-draft-${esc(item.source_id.slice(0, 12))}"></div></div>`).join('')}` : `<p class="muted">${esc(t('ingestion.empty'))}</p>`;
-  toast(r.ok ? t('ingestion.scanDone', { count: r.queued_total }) : (r.error || t('ingestion.failed', { error: '' })), !r.ok);
+  toast(r.ok ? (r.processing?.filed ? t('ingestion.scanFiled', { count: r.processing.filed }) : t('ingestion.scanDone', { count: r.queued_total })) : (r.error || t('ingestion.failed', { error: '' })), !r.ok);
 });
 $('brief-save').onclick = () => act(async () => {
   const r = await api('POST', '/api/brief/settings', { enabled: $('brief-enabled').checked, vault: $('brief-vault').value, time: $('brief-time').value });

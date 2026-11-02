@@ -549,7 +549,9 @@ export async function startSetup(opts = {}) {
             .map((entry) => entry.path)
             .filter((folder) => folder && folder !== target.folder && !folder.startsWith(`${target.folder}/`)
               && !(folder === ctx.byName.get(target.vault)?.intake_folder && ctx.byName.get(target.vault)?.decisions?.length));
-          for (const item of queue.candidates.slice(0, remaining)) candidates.push({ ...item, vault: target.vault, folder: queue.folder, destinations });
+          const configured = (cfg.ingestion?.targets || []).find((item) => item.vault === target.vault && item.folder === queue.folder);
+          const destination = target.destination || configured?.destination || null;
+          for (const item of queue.candidates.slice(0, remaining)) candidates.push({ ...item, vault: target.vault, folder: queue.folder, destination, destinations });
         } catch (error) {
           folders.push({ vault: target.vault, folder: target.folder, ok: false, error: error.message || String(error) });
         }
@@ -566,14 +568,24 @@ export async function startSetup(opts = {}) {
       throw error;
     } finally { ingestionRunning = false; }
   }
-  async function runScheduledIngestionDrafts(cfg, candidates) {
-    const record = { ok: true, at: new Date().toISOString(), trigger: 'schedule', attempted: 0, created: 0, already_pending: 0, failed: 0, limited: 0 };
+  async function runScheduledIngestionDrafts(cfg, candidates, { trigger = 'schedule' } = {}) {
+    const record = { ok: true, at: new Date().toISOString(), trigger, attempted: 0, created: 0, filed: 0, waiting_review: 0, already_pending: 0, failed: 0, limited: 0 };
     try {
       if (!cfg.ingestion?.autoDrafts || !cfg.sessions.localSummary?.enabled || !cfg.sessions.localSummary?.model) throw new Error('Local draft settings are not enabled.');
       const selected = [];
       for (const candidate of candidates) {
         const id = ingestionDraftId({ vault: candidate.vault, source_id: candidate.source_id, revision: candidate.revision });
-        if (await readIngestionDraft(ingestionDraftsDir, id)) { record.already_pending++; continue; }
+        const existing = await readIngestionDraft(ingestionDraftsDir, id);
+        if (existing) {
+          if (cfg.ingestion.autoFile && candidate.destination && existing.draft.destinations.includes(candidate.destination)) {
+            try {
+              const filed = await saveIngestionDraftRecord(cfg, id, candidate.destination);
+              if (filed.written) record.filed++;
+              else record.waiting_review++;
+            } catch { record.failed++; }
+          } else record.already_pending++;
+          continue;
+        }
         if (selected.length < 5) selected.push(candidate);
       }
       record.attempted = selected.length; record.limited = Math.max(0, candidates.length - selected.length - record.already_pending);
@@ -582,11 +594,21 @@ export async function startSetup(opts = {}) {
         try {
           const source = await readIngestionSource(ctx, candidate.vault, candidate.folder, { source_id: candidate.source_id, revision: candidate.revision });
           const draft = await generateLocalIngestionDraft(source, cfg.sessions.localSummary.model, { fetchImpl: opts.ingestionDraftFetch || fetch });
+          const related = await relatedNotes(ctx, draft.vault, source.rel);
+          draft.related_notes = related.suggested
+            .filter((item) => typeof item.path === 'string' && !/[\[\]]/.test(item.path) && Array.isArray(item.shared_terms))
+            .slice(0, 8)
+            .map((item) => ({ path: item.path, title: String(item.title || '').slice(0, 160), shared_terms: item.shared_terms.slice(0, 6).map((term) => String(term).slice(0, 50)), score: Number(item.score) || 0 }));
           draft.destinations = (await listSessionFilingFolders(ctx, draft.vault)).map((entry) => entry.path)
             .filter((folder) => folder && folder !== draft.folder && !folder.startsWith(`${draft.folder}/`)
               && !(folder === ctx.byName.get(draft.vault)?.intake_folder && ctx.byName.get(draft.vault)?.decisions?.length));
-          await saveIngestionDraft(ingestionDraftsDir, draft);
+          const savedDraft = await saveIngestionDraft(ingestionDraftsDir, draft);
           record.created++;
+          if (cfg.ingestion.autoFile && candidate.destination && draft.destinations.includes(candidate.destination)) {
+            const filed = await saveIngestionDraftRecord(cfg, savedDraft.id, candidate.destination);
+            if (filed.written) record.filed++;
+            else record.waiting_review++;
+          }
         } catch { record.failed++; }
       }
       record.ok = record.failed === 0;
@@ -597,6 +619,40 @@ export async function startSetup(opts = {}) {
     ingestionDraftStatus = record;
     await logActivity(env, { tool: 'source_auto_draft', ok: record.ok });
     return record;
+  }
+  async function saveIngestionDraftRecord(cfg, id, destination, requestedRelated = []) {
+    const stored = await readIngestionDraft(ingestionDraftsDir, id);
+    const draft = stored?.draft;
+    if (!draft) throw new Error('This local draft is missing or damaged. Prepare it again from the source queue.');
+    const chosen = String(destination || '').trim().replace(/\\/g, '/').replace(/^\/+|\/+$/g, '');
+    if (!chosen || !Array.isArray(draft.destinations) || !draft.destinations.includes(chosen)) throw new Error('Choose an existing knowledge folder outside the selected source folder.');
+    const ctx = localContext(cfg, { ...env, BRAINLINK_SEMANTIC: '0' });
+    await readIngestionSource(ctx, draft.vault, draft.folder, { source_id: draft.source_id, revision: draft.revision });
+    const availableFolders = new Set((await listSessionFilingFolders(ctx, draft.vault)).map((entry) => entry.path));
+    if (!availableFolders.has(chosen)) throw new Error('The selected knowledge folder is no longer available in this vault.');
+    if (!Array.isArray(requestedRelated) || requestedRelated.length > 5 || requestedRelated.some((item) => typeof item !== 'string')) throw new Error('Choose up to five related-note suggestions from this draft.');
+    const selectedPaths = [...new Set(requestedRelated)];
+    if (selectedPaths.length !== requestedRelated.length) throw new Error('A related-note suggestion was selected more than once.');
+    const originalCandidates = new Set((draft.related_notes || []).map((item) => item.path));
+    const currentCandidates = new Set((await relatedNotes(ctx, draft.vault, draft.source_path)).suggested.map((item) => item.path));
+    if (selectedPaths.some((item) => !originalCandidates.has(item) || !currentCandidates.has(item))) throw new Error('A related-note suggestion is no longer visible. Review the source and prepare the draft again.');
+    const relatedSection = selectedPaths.length
+      ? `\n\n## Related notes (selected similarity suggestions; not verified facts)\n${selectedPaths.map((item) => `- [[${item.replace(/\.md$/i, '')}]]`).join('\n')}`
+      : '';
+    const result = await proposeNote(ctx, {
+      vault: draft.vault, folder: chosen, title: draft.title, body: `${draft.body}${relatedSection}`,
+      type: draft.memory_type, confidence: 'reported',
+      source: `Local AI draft from ${draft.source_path}`,
+      ai_platform: 'BrainLink Local Review', agent_or_role: 'Raw-to-Wiki draft',
+      session_or_task_id: `ingestion-${draft.source_id.slice(0, 12)}`, confirm: true, auto_link: false,
+    });
+    if (!result.ok || !result.written) return { ...result, written: false, saved_as_proposal: false };
+    const prefix = `${draft.vault}/`;
+    const notePath = result.path.startsWith(prefix) ? result.path.slice(prefix.length) : '';
+    await recordIngestion(ctx, draft.vault, draft.folder, { source_id: draft.source_id, revision: draft.revision, outcome: 'filed', knowledge_path: notePath });
+    await removeIngestionDraft(ingestionDraftsDir, id);
+    await logActivity(env, { tool: 'source_proposal_saved', ok: true });
+    return { ok: true, written: true, saved_as_proposal: true, path: result.path, note_status: 'proposed', confidence: 'reported', verified: false };
   }
   let ingestionTickRunning = false;
   const ingestionTimer = setInterval(async () => {
@@ -2148,7 +2204,7 @@ export async function startSetup(opts = {}) {
       const autoDraftOnEnd = enabled && typeof b.autoDraftOnEnd === 'boolean' ? b.autoDraftOnEnd : enabled ? cfg.sessions.localSummary.autoDraftOnEnd : false;
       const autoFileOnEnd = enabled && autoDraftOnEnd && typeof b.autoFileOnEnd === 'boolean' ? b.autoFileOnEnd : enabled && autoDraftOnEnd ? cfg.sessions.localSummary.autoFileOnEnd : false;
       if (enabled && (!validLocalModelName(model) || !model)) throw new Error('Enter a valid local Ollama model name before enabling summaries.');
-      const next = { ...cfg, sessions: { ...cfg.sessions, localSummary: { enabled, model, autoDraftOnEnd, autoFileOnEnd } }, ingestion: enabled ? cfg.ingestion : { ...cfg.ingestion, autoDrafts: false } };
+      const next = { ...cfg, sessions: { ...cfg.sessions, localSummary: { enabled, model, autoDraftOnEnd, autoFileOnEnd } }, ingestion: enabled ? cfg.ingestion : { ...cfg.ingestion, autoDrafts: false, autoFile: false } };
       await saveConfig(next, file);
       localSummaryAutoDraftKeepsAlive = Boolean(enabled && autoDraftOnEnd);
       touch();
@@ -2277,6 +2333,17 @@ export async function startSetup(opts = {}) {
         const cfg = await loadConfig(file);
         const updated = { ...cfg, ingestion: validateIngestionSchedule(b, cfg.ingestion) };
         if (updated.ingestion.autoDrafts && (!cfg.sessions.localSummary?.enabled || !cfg.sessions.localSummary?.model)) throw new Error('Enable Local summary drafts and choose an Ollama model before scheduling AI drafts.');
+        if (updated.ingestion.autoFile) {
+          if (!updated.ingestion.targets.length || updated.ingestion.targets.some((target) => !target.destination)) throw new Error('Choose a filing destination for every scan folder before enabling automatic filing.');
+          const ctx = localContext(updated, { ...env, BRAINLINK_SEMANTIC: '0' });
+          for (const target of updated.ingestion.targets) {
+            const selected = ctx.byName.get(target.vault);
+            const folders = new Set((await listSessionFilingFolders(ctx, target.vault)).map((entry) => entry.path)
+              .filter((folder) => folder && !(folder === selected?.intake_folder && selected?.decisions?.length)));
+            if (!folders.has(target.destination)) throw new Error(`The filing destination for ${target.vault}/${target.folder} is not an existing allowed folder in that vault.`);
+            if (target.destination === target.folder || target.destination.startsWith(`${target.folder}/`)) throw new Error('A filing destination must be outside its scan folder.');
+          }
+        }
         if (updated.ingestion.enabled) {
           const ctx = localContext(updated, { ...env, BRAINLINK_SEMANTIC: '0' });
           for (const target of updated.ingestion.targets) await ingestionQueue(ctx, target.vault, target.folder, { limit: 1 });
@@ -2293,13 +2360,24 @@ export async function startSetup(opts = {}) {
       const selected = cfg.vaults.find((item) => item.name === vaultName);
       if (!selected || selected.private) throw new Error('Choose an existing non-private vault.');
       const ctx = localContext(cfg, { ...env, BRAINLINK_SEMANTIC: '0' });
-      const folders = await listSessionFilingFolders(ctx, vaultName);
+      let folders = await listSessionFilingFolders(ctx, vaultName);
+      if (b.destinationOnly) {
+        const vaultConfig = ctx.byName.get(vaultName);
+        folders = folders.filter((entry) => entry.path && !(entry.path === vaultConfig?.intake_folder && vaultConfig?.decisions?.length));
+      }
       return { folders: folders.map((item) => item.path).filter(Boolean) };
     },
     'POST /api/ingestion/run': async (b) => {
       const cfg = await loadConfig(file);
       const targets = Array.isArray(b.targets) ? b.targets : b.vault && b.folder ? [{ vault: String(b.vault), folder: String(b.folder) }] : undefined;
-      return runIngestion(cfg, { trigger: 'manual', targets });
+      const result = await runIngestion(cfg, { trigger: 'manual', targets });
+      if (cfg.ingestion?.autoDrafts && result.ok) {
+        const configured = new Map((cfg.ingestion.targets || []).map((target) => [`${target.vault}\0${target.folder}`, target]));
+        const eligible = result.candidates.filter((item) => configured.has(`${item.vault}\0${item.folder}`))
+          .map((item) => ({ ...item, destination: configured.get(`${item.vault}\0${item.folder}`).destination || null }));
+        if (eligible.length) result.processing = await runScheduledIngestionDrafts(cfg, eligible, { trigger: 'manual' });
+      }
+      return result;
     },
     'POST /api/ingestion/draft': async (b) => {
       const cfg = await loadConfig(file);
@@ -2346,32 +2424,8 @@ export async function startSetup(opts = {}) {
       if (!draft) throw new Error('This local draft is missing or damaged. Prepare it again from the source queue.');
       const destination = String(b.destination || '').trim().replace(/\\/g, '/').replace(/^\/+|\/+$/g, '');
       if (!destination || !Array.isArray(draft.destinations) || !draft.destinations.includes(destination)) throw new Error('Choose an existing knowledge folder outside the selected source folder.');
-      const ctx = localContext(cfg, { ...env, BRAINLINK_SEMANTIC: '0' });
-      await readIngestionSource(ctx, draft.vault, draft.folder, { source_id: draft.source_id, revision: draft.revision });
       const requestedRelated = b.related_note_paths === undefined ? [] : b.related_note_paths;
-      if (!Array.isArray(requestedRelated) || requestedRelated.length > 5 || requestedRelated.some((item) => typeof item !== 'string')) throw new Error('Choose up to five related-note suggestions from this draft.');
-      const selectedPaths = [...new Set(requestedRelated)];
-      if (selectedPaths.length !== requestedRelated.length) throw new Error('A related-note suggestion was selected more than once.');
-      const originalCandidates = new Set((draft.related_notes || []).map((item) => item.path));
-      const currentCandidates = new Set((await relatedNotes(ctx, draft.vault, draft.source_path)).suggested.map((item) => item.path));
-      if (selectedPaths.some((item) => !originalCandidates.has(item) || !currentCandidates.has(item))) throw new Error('A related-note suggestion is no longer visible. Review the source and prepare the draft again.');
-      const relatedSection = selectedPaths.length
-        ? `\n\n## Related notes (selected similarity suggestions; not verified facts)\n${selectedPaths.map((item) => `- [[${item.replace(/\.md$/i, '')}]]`).join('\n')}`
-        : '';
-      const result = await proposeNote(ctx, {
-        vault: draft.vault, folder: destination, title: draft.title, body: `${draft.body}${relatedSection}`,
-        type: draft.memory_type, confidence: 'reported',
-        source: `Local AI draft from ${draft.source_path}`,
-        ai_platform: 'BrainLink Local Review', agent_or_role: 'Raw-to-Wiki draft',
-        session_or_task_id: `ingestion-${draft.source_id.slice(0, 12)}`, confirm: true, auto_link: false,
-      });
-      if (!result.ok || !result.written) return { ...result, saved_as_proposal: false };
-      const prefix = `${draft.vault}/`;
-      const notePath = result.path.startsWith(prefix) ? result.path.slice(prefix.length) : '';
-      await recordIngestion(ctx, draft.vault, draft.folder, { source_id: draft.source_id, revision: draft.revision, outcome: 'filed', knowledge_path: notePath });
-      await removeIngestionDraft(ingestionDraftsDir, id);
-      await logActivity(env, { tool: 'source_proposal_saved', ok: true });
-      return { ok: true, written: true, saved_as_proposal: true, path: result.path, note_status: 'proposed', confidence: 'reported', verified: false };
+      return saveIngestionDraftRecord(cfg, id, destination, requestedRelated);
     },
     'POST /api/brief/settings': async (b) => {
       const cfg = await loadConfig(file);
