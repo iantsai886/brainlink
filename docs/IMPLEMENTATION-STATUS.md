@@ -2,6 +2,10 @@
 
 Status snapshot: 2026-11-03 (Asia/Taipei).
 
+### macOS universal ZIP build and install simulation (`6374414815172d1006e99c62d39690baae85a68d`; 2026-11-03)
+
+In a disposable Debian Bookworm / Node.js 24 container cloned from this exact branch commit, `npm ci --omit=dev`, `npm run build:mac-zip`, and `npm run test:mac-zip` passed. The 149 MB universal x64/arm64 ZIP SHA-256 is `e069bd27ebf037f48d6929746790d513d11b4a8e962d99137f595daddba47f4d`. The simulation checked bundle structure, executable bits, omitted files/strings, safe installation into a fake user Applications folder, per-user LaunchAgent setup, local HTTP startup, and uninstall while keeping notes. The local demo server ran with the container's Linux Node runtime, not either packaged Mac binary. This is package/simulation evidence only: no macOS binary was executed and no real Mac, Gatekeeper, signing, notarization or customer install was tested. The ZIP is QA output only and was not published.
+
 ### Linux test suite and installer QA (`3a1627fa14e7424d74be2a2d33f9d82de8f1021b`; 2026-11-03)
 
 In an isolated Debian Bookworm `node:24` container cloned from this exact GitHub branch commit, `npm ci` found 0 known vulnerabilities and `npm run test:all` passed: core 657 total (655 passed, 0 failed, 2 Windows-only skips); UI 48/48. `npm ci --omit=dev && npm run build:linux` created all four unsigned QA installers; each SHA-256 sidecar matched its package. Package SHA-256: x64 tar.gz `49837f9e12369314670962c2a2274ca9f6cc193174a4cfceeff9e012a280a41b`; ARM64 tar.gz `946075af9b698bfe52f7c2f567a935712ecad067d230174f08fb933075a60e9c`; amd64 `.deb` `e06134e8b052956701c7cc5b55881da820808d767c3e4e95477a9a10f7ed8aed`; arm64 `.deb` `57731c5cb87ff70a918d4c200bdf4b3f241229e85c0bfe6d44d3c5d3ade8098f`.
