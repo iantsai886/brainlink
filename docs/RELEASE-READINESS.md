@@ -4,19 +4,14 @@ Status checked: 2026-11-03 (Asia/Taipei)
 Repository: `iantsai886/brainlink`  
 Current working branch: `feat/complete-raw-wiki-folder-flow` (based on `origin/main`)
 
-Current worktree note (2026-11-03): the vault-count timing fix passes 4/4 focused tests and a clean Windows/Node.js 24.22.1 full suite (core 628 passed, 0 failed, 10 platform/privilege skips; UI 44/44). Browser visual review remains outstanding because the computer-use session stopped at its URL safety check.
+Current verification snapshot (2026-11-03): repository HEAD is `c8366c9c024a4131efa1e53fa0cf125d249a4601`; development version is 1.2.8. The app is still an unsigned, unpublished development build.
 
-The current branch's Windows package also passed `npm run smoke:installed:win` on 2026-11-03: bundled launch, shortcuts, Setup/folder controls, multilingual OCR, scanned-PDF OCR, safe HTML extraction, retry-safe filing, Hermes hook preservation, isolated uninstall, test data preservation, and PATH restoration. The package is unsigned and unpublished.
+- Windows/Node.js 24.22.1 `npm run test:all` passed on source checkout `9940dea`: core 637 passed, 0 failed, 10 platform/privilege skips; UI 48/48. The installed Windows package smoke passed on later 1.2.8 code, covering launch, Setup/folder controls, OCR/PDF/HTML ingestion, retry-safe filing, Hermes hook preservation, uninstall, data preservation and PATH restoration. An isolated 1.2.7-to-1.2.8 upgrade smoke also passed.
+- Linux/Node.js 24.22.2 `npm run test:all` passed on source checkout `db7707c`: core 645 passed, 0 failed, 2 Windows-only skips; UI 48/48. All four x64/arm64 tar and Debian QA packages passed checksum checks. Install and runtime checks passed in Debian containers; ARM64 ran under Docker emulation, not on physical hardware.
+- macOS universal ZIP build and install simulation passed on source checkout `b64c995`; SHA-256 is `46e81476c0af354f3081ff2b617ed314b1ddce1f35f4af4a64db424bf3714c54`. The simulation did not execute macOS binaries. Real Mac install, Gatekeeper/notarization and the native `.pkg` remain unverified.
+- Three fictional Claude Code-to-Codex handoff turns passed across two adjacent Windows checkouts, with a private canary excluded. This is a small synthetic check, not broad reliability or customer acceptance.
 
-On source commit `9abbfd8`, both `npm audit` and `npm audit --omit=dev` reported zero known vulnerabilities. This check reflects the current npm advisory database only; it is not a security certification.
-
-Linux package rebuild on source commit `af4f68d` (2026-11-03): all four x64/arm64 tar and Debian artifacts built and passed SHA-256 verification. The x64 portable smoke and amd64 install/version/remove passed in Debian; the arm64 portable smoke and `.deb` install/version/remove passed under Docker emulation. Physical ARM and graphical Linux desktop launch remain unverified. The QA packages were not signed or published; full hashes and commands/evidence are in [IMPLEMENTATION-STATUS.md](IMPLEMENTATION-STATUS.md).
-
-macOS ZIP rebuild on source commit `5c83178` (2026-11-03): the official Node.js 22.23.3 Darwin x64/arm64 runtimes passed SHA-256 verification; `npm run test:mac-zip` passed the simulated install, LaunchAgent, app HTTP, uninstall, and notes-preservation checks. ZIP SHA-256 is `077f5d91d498a3c95f373018dc833adc5847ec194fee2162db6dd57b5f78d0d2`. A real Mac, native Gatekeeper behavior, and the `.pkg` installer remain untested; this artifact is unsigned and unpublished.
-
-The isolated Windows `npm run smoke:upgrade:win` passed on source commit `9a8c394`: v1.2.7 upgraded in place to v1.2.8, Setup health passed, user data survived, and uninstall restored PATH. This is not a signed release test.
-
-The macOS ZIP builder's fresh-cache path passed on source commit `3e8a603`: from an empty repo-local cache and with no cache overrides, it fetched and checksum-verified the pinned Darwin runtimes, built the ZIP, and passed the install simulation. The output hash matched the prior build. This does not test a real Mac; the app remains unsigned and unpublished.
+These are separate, dated local checks; they are not a single cross-platform release run. Hosted CI, physical ARM, graphical Linux, real Mac behavior, production signing/publication, live model inference, measured customer token/time savings and customer acceptance remain open. Detailed commands, source commits, hashes and limits are in [IMPLEMENTATION-STATUS.md](IMPLEMENTATION-STATUS.md). Historical receipts below are retained as history and may describe older snapshots.
 
 ## Latest verification
 
