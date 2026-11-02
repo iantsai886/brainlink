@@ -1,6 +1,10 @@
 # BrainLink implementation status
 
 Status snapshot: 2026-11-03 (Asia/Taipei).
+
+### Exact current branch full-suite receipt (`56817e21978fcad3bf0751e9830390bbc69f4c1c`; 2026-11-03)
+
+On Windows with Node.js 24.22.1 and npm 11.19.1, `npm run test:all` passed on the exact current checkout: core 649 total (639 passed, 0 failed, 10 platform/privilege skips); UI 48/48 passed. The skips require other operating systems or Windows symlink privileges. The run covers the current source tree, including folder scanning and local draft filing, graph and workflow editing, Twin scope isolation, GitHub-backed knowledge sync, backups, session handoffs, and RSI evaluation. This is local automated evidence only; it does not establish native macOS/Linux desktop behavior, signed/public distribution, hosted CI, broad model quality, real-vault acceptance, or measured provider-billed token savings.
 ### Real Windows Ollama inference check (source commit `efb42bbd7616ab4d2c641a5926c9ebefa97eb40f`; 2026-11-03)
 
 Installed the signed per-user Ollama Windows app and pulled `qwen3.5:2b` (2.7 GB; model digest `0689d44085e06d165161a8a9a1731344278cfb5aade63a3c3dbdb48ab54b130a`). Windows 11 Pro, Node.js 24.22.1, NVIDIA RTX 2060 with 4 GB reported VRAM, driver `32.0.15.8142`. The model reported `completion`, `vision`, `tools`, and `thinking` capabilities and loaded onto the GPU.
