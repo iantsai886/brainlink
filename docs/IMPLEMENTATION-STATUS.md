@@ -7,7 +7,7 @@ Code baseline: development target `1.2.8`, with `package.json` as the canonical 
 
 ### Folder-scan help text matches supported file types (working tree based on `212ed49`, 2026-11-02)
 
-Setup's English, Portuguese and Traditional Chinese help text now lists the supported file types, including HTML/HTM and scanned PDF OCR, instead of incorrectly saying scanned PDFs are skipped. It also states the 100-page PDF limit and that OCR runs locally. The focused Linux container test `test/ingestion-schedule.test.mjs` passed 5/5, including locale-content assertions; `git diff --check` passed on Windows. This wording change does not alter scan behavior or prove OCR quality on user documents.
+Setup's English, Portuguese and Traditional Chinese help text now lists the supported file types, including HTML/HTM and scanned PDF OCR, instead of incorrectly saying scanned PDFs are skipped. It also states the 100-page PDF limit and that OCR runs locally. In a clean Docker `node:24-bookworm` container, `npm ci`, the focused `test/ingestion-schedule.test.mjs` (5/5), and full `npm run test:all` passed on this working tree based on `1009941`: core 634 total (632 passed, 0 failed, 2 Windows-only skips); UI 44/44. `git diff --check` passed on Windows. This wording change does not alter scan behavior or prove OCR quality on user documents.
 
 ### Latest Linux verification (exact source commit `cb9fdec`, 2026-11-02)
 
