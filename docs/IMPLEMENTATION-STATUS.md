@@ -5,9 +5,9 @@ GitHub repository: `iantsai886/brainlink`
 Branch: `feat/complete-raw-wiki-folder-flow` (current working branch; based on `origin/main`)
 Code baseline: development target `1.2.8`, with `package.json` as the canonical version source. The `v1.2.7` tag belongs to the separate `wip/v1.2.7` release line; this branch continues from the full-source `main` history and does not move or recreate that tag.
 
-### Windows local image OCR package verification (working tree after `a7cf688`, 2026-11-02)
+### Windows local image OCR package verification (code commit `404e602` and expanded test working tree, 2026-11-02)
 
-The full Windows/Node.js 24.22.1 `npm run test:all` passed: core 621 total (613 passed, 0 failed, 8 platform/privilege skips); UI 44/44. `npm run smoke:installed:win` passed on an unsigned local 1.2.8 QA installer and executed actual OCR from the installed files against the fictional English PNG fixture. The bundled OCR recognized `BRAINLINK OCR TEST 123`; application launch, shortcuts, folder controls, isolated uninstall, user-data preservation, and PATH restoration also passed. `npm audit --omit=dev` reported 0 vulnerabilities; focused installer-runtime test passed. This only checks a fictional English image, not real-world or Portuguese/Traditional Chinese OCR accuracy. Scanned PDFs, macOS/Linux installed OCR, hosted CI, signed release, and customer acceptance remain unverified.
+The full Windows/Node.js 24.22.1 `npm run test:all` passed after this quality-test addition: core 622 total (614 passed, 0 failed, 8 platform/privilege skips); UI 44/44. Three generated fictional fixtures cover English, accented Portuguese, and Traditional Chinese recognition in source and staged-package tests. `npm run smoke:installed:win` passed with all three fixtures from the installed 1.2.8 QA app, plus launch, shortcuts, folder controls, isolated uninstall, user-data preservation, and PATH restoration. This checks synthetic images, not real-world OCR quality. Scanned PDFs, macOS/Linux installed OCR, hosted CI, signed release, and customer acceptance remain unverified.
 
 ### Excel and PowerPoint text support for selected-folder ingestion (working tree based on `34c0082`, 2026-11-02)
 

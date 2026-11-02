@@ -171,7 +171,8 @@ test('runtime dependency staging copies locked Office/OCR engines without bundli
       const bytes = await readFile(path.join(data, `${lang}.traineddata.gz`));
       assert.ok(bytes.length > 100_000 && bytes.length < 4_000_000, `${lang} OCR language data stays size-bounded`);
     }
-    const ocrCheck = spawnSync(process.execPath, ['scripts/smoke-installed-ocr.mjs', app, path.join(ROOT, 'test', 'fixtures', 'ocr-sample.png')], {
+    const ocrCheck = spawnSync(process.execPath, ['scripts/smoke-installed-ocr.mjs', app,
+      ...['ocr-sample.png', 'ocr-portuguese.png', 'ocr-traditional-chinese.png'].map((file) => path.join(ROOT, 'test', 'fixtures', file))], {
       cwd: ROOT, encoding: 'utf8', timeout: 60_000,
     });
     assert.equal(ocrCheck.status, 0, ocrCheck.stderr || ocrCheck.stdout || ocrCheck.error);

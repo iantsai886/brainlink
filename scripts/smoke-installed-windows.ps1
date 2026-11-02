@@ -74,7 +74,6 @@ try {
   $env:BRAINLINK_HOME = $BrainLinkHome
   $InstalledApp = Join-Path $InstallDir 'app'
   $InstalledNode = Join-Path $InstallDir 'node\node.exe'
-  $OcrFixture = Join-Path $Root 'test\fixtures\ocr-sample.png'
   $OcrSmoke = Join-Path $Root 'scripts\smoke-installed-ocr.mjs'
   $HermesHome = Join-Path $TestRoot 'hermes-profile'
   New-Item -ItemType Directory -Path $HermesHome -Force | Out-Null
@@ -114,7 +113,8 @@ try {
   $page = Invoke-WebRequest "http://127.0.0.1:$($instance.port)/?t=$token" -Headers @{ 'X-BrainLink-Token' = $token } -TimeoutSec 5
   if ($page.StatusCode -ne 200 -or $page.Content -notmatch 'BrainLink Setup') { throw 'Installed Setup UI did not load with its local session token.' }
   if ($page.Content -notmatch 'id="ingestion-enabled"' -or $page.Content -notmatch 'id="ingestion-auto-file"' -or $page.Content -notmatch 'id="ingestion-run"') { throw 'Installed Setup is missing the scheduled scan, auto-file, or manual scan control.' }
-  & $InstalledNode $OcrSmoke $InstalledApp $OcrFixture | Out-Host
+  $OcrFixtures = @('ocr-sample.png', 'ocr-portuguese.png', 'ocr-traditional-chinese.png') | ForEach-Object { Join-Path $Root "test\fixtures\$_" }
+  & $InstalledNode $OcrSmoke $InstalledApp @OcrFixtures | Out-Host
   if ($LASTEXITCODE -ne 0) { throw 'The installed OCR runtime could not read its local image fixture.' }
   $englishLocale = Invoke-RestMethod "http://127.0.0.1:$($instance.port)/locales/en.json" -TimeoutSec 5
   foreach ($key in @('ingestion.enabled', 'ingestion.autoFile', 'ingestion.run', 'ingestion.destination')) {

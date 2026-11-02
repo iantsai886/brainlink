@@ -19,7 +19,7 @@ import { buildPack, scaffold, mergePack } from '../src/packs.mjs';
 import { connectClient, disconnectClient, detect, codexToml, readClientAgentToken } from '../src/connectors.mjs';
 import { startSetup } from '../src/setup.mjs';
 import { ingestionQueue, readIngestionSource, recordIngestion } from '../src/ingestion.mjs';
-import { imageDimensions } from '../src/ingestion/image-ocr.mjs';
+import { extractImageText, imageDimensions } from '../src/ingestion/image-ocr.mjs';
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const SAMPLE = path.join(ROOT, 'samples', 'acme-studio');
@@ -77,6 +77,18 @@ test('image OCR checks PNG/JPEG/BMP type and pixel bounds before reading image t
   const oversized = Buffer.from(png);
   oversized.writeUInt32BE(10_000, 16); oversized.writeUInt32BE(10_000, 20);
   assert.throws(() => imageDimensions(oversized, '.png'), /supported or safe/);
+});
+test('offline OCR recognizes fictional English Portuguese and Traditional Chinese fixtures', async () => {
+  const fixtures = [
+    ['ocr-sample.png', /BRAINLINK OCR TEST 123/i],
+    ['ocr-portuguese.png', /AÇÃO E INFORMAÇÃO/i],
+    ['ocr-traditional-chinese.png', /腦\s*連\s*結\s*測試/u],
+  ];
+  for (const [file, expected] of fixtures) {
+    const result = await extractImageText(await readFile(path.join(ROOT, 'test', 'fixtures', file)));
+    assert.match(result.text, expected, `${file} should be recognized by its bundled language data`);
+    assert.equal(result.truncated, false);
+  }
 });
 test('runtime version comes from the canonical package manifest', async () => {
   const pkg = JSON.parse(await readFile(path.join(ROOT, 'package.json'), 'utf8'));
