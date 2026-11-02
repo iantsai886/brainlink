@@ -413,10 +413,18 @@ test('ingestion MCP tools are exposed with explicit folder and review instructio
   assert.match(mcp.instructions, /do not ask an AI to read, summarize, or file notes/i);
   assert.match(mcp.instructions, /never scan the whole vault/i);
   assert.match(mcp.instructions, /ingestion_read_source/);
-  assert.match(mcp.instructions, /TXT, CSV\/TSV, JSON, XML, YAML, LOG and text-based PDF/);
+  assert.match(mcp.instructions, /selectable-text PDF up to 100 pages, DOCX, XLSX, PPTX, and PNG\/JPEG\/BMP images/);
+  assert.match(mcp.instructions, /image OCR extracts text only/);
+  assert.match(mcp.instructions, /Scanned-image PDFs.*not supported/);
   const queue = mcp.tools.find((tool) => tool.name === 'ingestion_queue');
   assert.match(queue.description, /does not return source bodies/i);
   assert.match(queue.description, /does not .* change the Setup background-scan schedule/i);
+  assert.match(queue.description, /DOCX, XLSX, PPTX and PNG\/JPEG\/BMP images/);
+  assert.match(queue.description, /Scanned-image PDFs.*unsupported/);
+  const read = mcp.tools.find((tool) => tool.name === 'ingestion_read_source');
+  assert.match(read.description, /DOCX, XLSX, and PPTX text locally/);
+  assert.match(read.description, /OCR reads text.*not image meaning/);
+  assert.match(read.description, /Scanned-image PDFs.*refused/);
 });
 
 test('parseFrontmatter: a leading UTF-8 BOM or blank lines before --- still detect private: true', () => {
