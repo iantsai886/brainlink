@@ -61,6 +61,8 @@ RES="$(cd "$(dirname "$0")/../Resources" && pwd)"
 exec "$RES/node/bin/node" "$RES/app/bin/brainlink.mjs" setup --app
 SH
 chmod +x "$APP/Contents/Resources/bin/brainlink" "$APP/Contents/MacOS/BrainLink"
+cp "$HERE/scripts/install-cli-link" "$APP/Contents/Resources/bin/install-cli-link"
+chmod 755 "$APP/Contents/Resources/bin/install-cli-link"
 
 cat > "$APP/Contents/Info.plist" <<PLIST
 <?xml version="1.0" encoding="UTF-8"?>
