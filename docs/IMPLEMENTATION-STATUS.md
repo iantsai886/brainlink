@@ -7,7 +7,7 @@ Code baseline: development target `1.2.8`, with `package.json` as the canonical 
 
 ### Local AI setup guidance (`686e60a`, 2026-11-03)
 
-The Sessions setup now gives four clear steps to enable local AI summaries and folder drafts, links to the official Ollama download page, and keeps connection results visible after checking. It reports whether Ollama is unavailable, running without a model, or ready with the selected model. English, Portuguese, and Traditional Chinese are covered. Focused UI tests passed 4/4; all three locale JSON files parsed; `git diff --check` passed. No Ollama/model installation or live inference was performed, so live analysis remains unverified on this computer.
+The Sessions setup now gives clear steps to enable local AI summaries and folder drafts, links to the official Ollama download page, and keeps connection results visible after checking. It reports whether Ollama is unavailable, running without a model, or ready with the selected model. English, Portuguese, and Traditional Chinese are covered. Focused UI tests passed 4/4; all three locale JSON files parsed; `git diff --check` passed. A clean `npm run test:all` on checkout `5ff1cf3` passed: core 647 total (637 passed, 0 failed, 10 Windows platform/privilege skips); UI 48/48. An earlier combined run had three transient failures; each affected test file passed alone, and the clean full rerun passed all suites. No Ollama/model installation or live inference was performed, so live analysis remains unverified on this computer.
 
 ### Release and RSI documentation correction (`4341ec0`, 2026-11-03)
 
