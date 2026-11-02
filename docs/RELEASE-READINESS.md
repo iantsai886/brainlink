@@ -16,6 +16,8 @@ macOS ZIP rebuild on source commit `5c83178` (2026-11-03): the official Node.js 
 
 The isolated Windows `npm run smoke:upgrade:win` passed on source commit `9a8c394`: v1.2.7 upgraded in place to v1.2.8, Setup health passed, user data survived, and uninstall restored PATH. This is not a signed release test.
 
+The macOS ZIP builder's fresh-cache path passed on source commit `3e8a603`: from an empty repo-local cache and with no cache overrides, it fetched and checksum-verified the pinned Darwin runtimes, built the ZIP, and passed the install simulation. The output hash matched the prior build. This does not test a real Mac; the app remains unsigned and unpublished.
+
 ## Latest verification
 
 - **Dependency audit (current source tree `a3eb985`, 2026-11-02):** both `npm audit` and `npm audit --omit=dev` completed with 0 known vulnerabilities. This is the advisory database result at the time of the check, not a security certification or substitute for code review.
