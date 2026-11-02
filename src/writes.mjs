@@ -24,6 +24,7 @@ export function resolveIdentity(ctx, a = {}) {
 const q = (s) => JSON.stringify(String(s ?? ''));
 export const madeBy = (id) => `**Made by ${id.ai_platform} (${id.agent_or_role}).**`;
 const TYPED_ENTITY_TYPES = new Set(['person', 'team', 'workflow', 'dataset', 'artifact', 'project', 'policy', 'concept']);
+const MEMORY_TYPES = new Set(['working', 'semantic', 'procedural', 'episodic']);
 const TYPED_PREDICATES = new Set(['owned_by', 'runs', 'consumes', 'produces', 'depends_on', 'part_of', 'assigned_to', 'informed_by', 'communicates_with']);
 const TYPED_ID = /^[a-z][a-z0-9._:-]{1,127}$/;
 
@@ -40,9 +41,10 @@ export function frontmatter(ctx, vaultName, id, f, now = new Date()) {
       '  - predicate: ' + r.predicate, `    target: ${r.target}`, '    review: proposed',
       `    source: ${q(r.source)}`, `    confidence: ${r.confidence}`,
     ])] : [])] : [];
+  const memoryTypeField = MEMORY_TYPES.has(f.memory_type) ? [`memory_type: ${f.memory_type}`] : [];
   if (v.schema === 'provenance') {
     const date = ts.slice(0, 10);
-    return ['---', `type: ${f.type || 'log'}`, `status: ${f.status || 'proposed'}`, `tags: ${tags}`, ...extra,
+    return ['---', `type: ${f.type || 'log'}`, `status: ${f.status || 'proposed'}`, ...memoryTypeField, `tags: ${tags}`, ...extra,
       ...(f.private ? ['private: true'] : []),
       `created_by_platform: ${slug(id.ai_platform)}`, `created_by_agent: ${slug(id.agent_or_role)}`, `created_session_or_task_id: ${q(id.session_or_task_id)}`, `created_date: ${date}`,
       `last_material_revision_by_platform: ${slug(id.ai_platform)}`, `last_material_revision_by_agent: ${slug(id.agent_or_role)}`,
@@ -50,7 +52,7 @@ export function frontmatter(ctx, vaultName, id, f, now = new Date()) {
       ...sourceSession, ...typedFields,
       `provenance_confidence: ${['verified', 'reported', 'inferred'].includes(f.confidence) ? f.confidence : 'unknown'}`, `source: ${q(f.source)}`, '---'].join('\n');
   }
-  return ['---', `type: ${f.type || 'note'}`, `status: ${f.status || 'proposed'}`, `ai_platform: ${q(id.ai_platform)}`, `agent_or_role: ${q(id.agent_or_role)}`,
+  return ['---', `type: ${f.type || 'note'}`, `status: ${f.status || 'proposed'}`, ...memoryTypeField, `ai_platform: ${q(id.ai_platform)}`, `agent_or_role: ${q(id.agent_or_role)}`,
     ...(f.private ? ['private: true'] : []),
     `session_or_task_id: ${q(id.session_or_task_id)}`, `written_at: ${ts}`, `source: ${q(f.source)}`, `confidence: ${q(f.confidence || 'proposed')}`, `tags: ${tags}`, ...extra, ...sourceSession, ...typedFields, '---'].join('\n');
 }
@@ -79,6 +81,10 @@ export async function proposeNote(ctx, a, now = new Date()) {
   const root = vaultRoot(ctx, vaultName);
   const id = resolveIdentity(ctx, a);
   const errors = checkCommon(ctx, vaultName, a, id);
+  if (a.memory_type !== undefined && !MEMORY_TYPES.has(a.memory_type)) errors.push('memory_type must be working, semantic, procedural, or episodic');
+  if (ctx.twinScope?.mode === 'scoped' && a.memory_type && ctx.twinScope.memory_policy?.[a.memory_type] !== true) {
+    errors.push(`this Twin profile does not allow proposing ${a.memory_type} memory`);
+  }
   const twinSourcePolicy = ctx.twinScope?.mode === 'scoped' ? ctx.twinScope.source_policy : null;
   let twinConfidence = a.confidence;
   if (twinSourcePolicy?.provenance_required) {
@@ -139,7 +145,7 @@ export async function proposeNote(ctx, a, now = new Date()) {
   const name = `${date} — ${title}.md`;
   const rel = folder ? `${folder}/${name}` : name;
   const fm = frontmatter(ctx, vaultName, id, { ...a, confidence: twinConfidence, private: twinSourcePolicy?.private_default === true ? true : a.private,
-    type: a.type || tpl?.type || (intake ? 'intake' : undefined),
+    type: a.type || tpl?.type || (intake ? 'intake' : undefined), memory_type: a.memory_type,
     status: typed ? 'proposed' : a.status, relations: typed ? a.relations : undefined }, now);
   const decision = needsDecision ? `## Decision\n\n**${String(a.decision).toUpperCase()}**\n\n` : '';
   const body = tpl ? renderTemplate(a.template, a.fields || {}, a.body) : String(a.body).trim();

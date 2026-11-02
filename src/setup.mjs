@@ -649,7 +649,7 @@ export async function startSetup(opts = {}) {
       : '';
     const result = await proposeNote(ctx, {
       vault: draft.vault, folder: chosen, title: draft.title, body: `${draft.body}${relatedSection}`,
-      type: draft.memory_type, confidence: 'reported',
+      type: 'note', memory_type: draft.memory_type, confidence: 'reported',
       source: `Local AI draft from ${draft.source_path}`,
       ai_platform: 'BrainLink Local Review', agent_or_role: 'Raw-to-Wiki draft',
       session_or_task_id: `ingestion-${draft.source_id.slice(0, 12)}`, confirm: true, auto_link: false,

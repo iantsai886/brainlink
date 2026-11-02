@@ -125,14 +125,21 @@ export function twinNoteMemoryAllowed(ctx, vaultName, rel, meta = {}) {
   }
   if (ctx.cfg?.handoff?.vault === vaultName && folderContains(ctx.cfg.handoff.folder)) required.add('working');
 
-  const declared = String(meta.memory_type || meta.brainlink_memory_type || '').toLowerCase();
-  if (['working', 'semantic', 'procedural', 'episodic'].includes(declared)) required.add(declared);
+  const declaredValue = meta.memory_type ?? meta.brainlink_memory_type;
+  if (declaredValue !== undefined && String(declaredValue).trim() !== '') {
+    const declared = String(declaredValue).trim().toLowerCase();
+    if (!MEMORY_TYPES.includes(declared)) return false;
+    required.add(declared);
+  }
   const type = String(meta.type || meta.note_type || '').trim().toLowerCase().replace(/[\s_]+/g, '-');
   if (NOTE_TYPE_MEMORY[type]) required.add(NOTE_TYPE_MEMORY[type]);
   const tags = Array.isArray(meta.tags) ? meta.tags.flat(Infinity) : String(meta.tags || '').replace(/^\[|\]$/g, '').split(',');
   for (const tag of tags.map((item) => String(item).trim().replace(/^['"]|['"]$/g, '').toLowerCase().replace(/[\s_]+/g, '-'))) {
     if (NOTE_TYPE_MEMORY[tag]) required.add(NOTE_TYPE_MEMORY[tag]);
   }
+  // Untyped, otherwise unclassified notes are ordinary semantic knowledge. Do not let an
+  // empty classification set bypass every memory switch; malformed declarations fail closed.
+  if (!required.size) required.add('semantic');
   return [...required].every((memoryType) => scope.memory_policy?.[memoryType] === true);
 }
 

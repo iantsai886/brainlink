@@ -101,6 +101,8 @@ test('selected source can become a proposed note only after explicit confirmatio
     assert.equal(saved.verified, false);
     const note = await readFile(path.join(vault, saved.path.slice('Fictional Company/'.length)), 'utf8');
     assert.match(note, /status: proposed/);
+    assert.match(note, /type: note/);
+    assert.match(note, /memory_type: procedural/);
     assert.match(note, /confidence: "reported"/);
     assert.match(note, /\[\[Raw\/Source\]\]/);
     assert.match(note, /\[\[Knowledge\/Team checklist\]\]/);

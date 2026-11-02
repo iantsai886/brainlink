@@ -270,6 +270,7 @@ export function createMcp(ctx, { onCall = () => {} } = {}) {
         auto_link: { type: 'boolean', default: true, description: 'Add a Related section linking notes this one mentions or is about.' },
         decision: { type: 'string', description: 'Required when the vault defines intake decisions (see brainlink_guide).' }, source: { type: 'string' }, confidence: { type: 'string', description: 'For a provenance-required Twin, use verified, reported, inferred, or unknown.' },
         type: { type: 'string', enum: ['note', 'meeting', 'decision', 'person', 'team', 'workflow', 'dataset', 'artifact', 'project', 'policy', 'concept'] },
+        memory_type: { type: 'string', enum: ['working', 'semantic', 'procedural', 'episodic'], description: 'Optional memory permission category. Scoped agents may propose only categories enabled for their Twin.' },
         entity_id: { type: 'string', description: 'For a typed entity, a stable ID such as workflow.collect-questions.' },
         entity_scope: { type: 'string', enum: ['personal', 'organisation', 'client'], description: 'Must match the active Twin profile when one is in use.' },
         relations: { type: 'array', description: 'Evidence-backed relationship suggestions. BrainLink always stores these as review=proposed; a person must review and verify them before they become graph edges.', maxItems: 20, items: { type: 'object', properties: {

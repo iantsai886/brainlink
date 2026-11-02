@@ -742,6 +742,10 @@ test('propose_note: preview, write, never overwrite, attribution in the vault sc
   assert.match(p.preview, /ai_platform: "Claude"/);
   assert.match(p.preview, /written_at: 2026-10-18T09:30:00\+08:00/);
   assert.match(p.preview, /\*\*ADOPT\*\*/);
+  const typedMemory = await proposeNote(ctx, { ...args, title: 'Typed memory', memory_type: 'procedural' }, NOW);
+  assert.match(typedMemory.preview, /memory_type: procedural/);
+  const invalidMemory = await proposeNote(ctx, { ...args, memory_type: 'unrestricted' }, NOW);
+  assert.match(invalidMemory.errors.join(), /memory_type must be/);
   const w = await proposeNote(ctx, { ...args, confirm: true }, NOW);
   assert.equal(w.path, 'Acme Studio/Knowledge Intake/2026-10-18 — Faster QA.md');
   assert.match(await readFile(path.join(company, 'Knowledge Intake/2026-10-18 — Faster QA.md'), 'utf8'), /Made by Claude \(direct assistant\)/);
@@ -765,9 +769,10 @@ test('propose_note refuses: missing decision, unknown folder, secrets, missing i
 test('proposal-only vault never writes; provenance schema used', async () => {
   const { cfg, journal } = await fixture();
   const ctx = ctxOf(cfg);
-  const r = await proposeNote(ctx, { vault: 'Journal', title: 'Mood', body: 'ok', source: 'chat', confidence: 'reported', confirm: true }, NOW);
+  const r = await proposeNote(ctx, { vault: 'Journal', title: 'Mood', body: 'ok', source: 'chat', confidence: 'reported', memory_type: 'episodic', confirm: true }, NOW);
   assert.equal(r.written, false);
   assert.match(r.preview, /created_by_platform: claude/);
+  assert.match(r.preview, /memory_type: episodic/);
   assert.match(r.preview, /provenance_confidence: reported/);
   assert.deepEqual((await readdir(path.join(journal, 'Inbox'))), []);
 });

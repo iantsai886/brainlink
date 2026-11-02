@@ -689,6 +689,8 @@ test('semantic-only agents cannot search or directly read typed operating manual
   const vaultPath = path.join(root, 'org');
   await mkdir(vaultPath, { recursive: true });
   await writeFile(path.join(vaultPath, 'Knowledge.md'), '# Knowledge\n\nSEMANTIC_TYPE_CANARY is ordinary shared knowledge.');
+  await writeFile(path.join(vaultPath, 'Malformed memory.md'), '---\nmemory_type: unrestricted\n---\n# Malformed\n\nMALFORMED_MEMORY_CANARY must fail closed.');
+  await writeFile(path.join(vaultPath, 'Untyped memory.md'), '# Untyped\n\nUNTYPED_MEMORY_CANARY defaults to semantic knowledge.');
   await writeFile(path.join(vaultPath, 'Anna Manual.md'), '---\ntype: operating-manual\ntags:\n  - company-role\n---\n# Anna\n\nPROCEDURAL_MANUAL_CANARY is private to agents with procedural permission.');
   await writeFile(path.join(vaultPath, 'Handoff Skill.md'), '---\ntags: [agent-skill]\n---\n# Handoff Skill\n\nPROCEDURAL_SKILL_CANARY is private to agents with procedural permission.');
   await writeFile(path.join(vaultPath, 'Session Summary Type.md'), '---\ntype: session_summary\n---\n# Session Summary\n\nEPISODIC_TYPE_CANARY is private to agents with episodic permission.');
@@ -699,20 +701,28 @@ test('semantic-only agents cannot search or directly read typed operating manual
   ctx.twinScope.memory_policy.episodic = false;
   const mcp = createMcp(ctx);
   const call = (name, args) => mcp.handle({ jsonrpc: '2.0', id: 1, method: 'tools/call', params: { name, arguments: args } });
-  const query = 'SEMANTIC_TYPE_CANARY PROCEDURAL_MANUAL_CANARY PROCEDURAL_SKILL_CANARY EPISODIC_TYPE_CANARY EPISODIC_TAG_CANARY';
+  const query = 'SEMANTIC_TYPE_CANARY PROCEDURAL_MANUAL_CANARY PROCEDURAL_SKILL_CANARY EPISODIC_TYPE_CANARY EPISODIC_TAG_CANARY MALFORMED_MEMORY_CANARY UNTYPED_MEMORY_CANARY';
   const search = await call('vault_search', { vault: 'Fictional Org', query });
   assert.equal(search.result.isError, false);
   assert.match(JSON.stringify(search.result.structuredContent), /Knowledge\.md|SEMANTIC_TYPE_CANARY/);
-  assert.doesNotMatch(JSON.stringify(search.result.structuredContent), /PROCEDURAL_MANUAL_CANARY|PROCEDURAL_SKILL_CANARY|EPISODIC_TYPE_CANARY|EPISODIC_TAG_CANARY/);
+  assert.doesNotMatch(JSON.stringify(search.result.structuredContent), /PROCEDURAL_MANUAL_CANARY|PROCEDURAL_SKILL_CANARY|EPISODIC_TYPE_CANARY|EPISODIC_TAG_CANARY|MALFORMED_MEMORY_CANARY/);
   const packet = await call('context_packet', { vault: 'Fictional Org', query });
   assert.equal(packet.result.isError, false);
   assert.match(JSON.stringify(packet.result.structuredContent), /Knowledge\.md|SEMANTIC_TYPE_CANARY/);
-  assert.doesNotMatch(JSON.stringify(packet.result.structuredContent), /PROCEDURAL_MANUAL_CANARY|PROCEDURAL_SKILL_CANARY|EPISODIC_TYPE_CANARY|EPISODIC_TAG_CANARY/);
-  for (const note of ['Anna Manual.md', 'Handoff Skill.md', 'Session Summary Type.md', 'Session Summary Tag.md']) {
+  assert.doesNotMatch(JSON.stringify(packet.result.structuredContent), /PROCEDURAL_MANUAL_CANARY|PROCEDURAL_SKILL_CANARY|EPISODIC_TYPE_CANARY|EPISODIC_TAG_CANARY|MALFORMED_MEMORY_CANARY/);
+  for (const note of ['Anna Manual.md', 'Handoff Skill.md', 'Session Summary Type.md', 'Session Summary Tag.md', 'Malformed memory.md']) {
     const read = await call('vault_read_note', { vault: 'Fictional Org', path: note });
     assert.equal(read.result.isError, true, `${note} must be blocked by its required memory grant`);
-    assert.doesNotMatch(JSON.stringify(read), /PROCEDURAL_MANUAL_CANARY|PROCEDURAL_SKILL_CANARY|EPISODIC_TYPE_CANARY|EPISODIC_TAG_CANARY/);
+    assert.doesNotMatch(JSON.stringify(read), /PROCEDURAL_MANUAL_CANARY|PROCEDURAL_SKILL_CANARY|EPISODIC_TYPE_CANARY|EPISODIC_TAG_CANARY|MALFORMED_MEMORY_CANARY/);
   }
+  ctx.twinScope.memory_policy.semantic = false;
+  const genericDenied = await call('vault_read_note', { vault: 'Fictional Org', path: 'Untyped memory.md' });
+  assert.equal(genericDenied.result.isError, true, 'unclassified notes require semantic memory');
+  assert.doesNotMatch(JSON.stringify(genericDenied), /UNTYPED_MEMORY_CANARY/);
+  ctx.twinScope.memory_policy.semantic = true;
+  const genericAllowed = await call('vault_read_note', { vault: 'Fictional Org', path: 'Untyped memory.md' });
+  assert.equal(genericAllowed.result.isError, false);
+  assert.match(JSON.stringify(genericAllowed.result.structuredContent), /UNTYPED_MEMORY_CANARY/);
   ctx.twinScope.memory_policy.procedural = true;
   ctx.twinScope.memory_policy.episodic = true;
   const allowed = await call('vault_read_note', { vault: 'Fictional Org', path: 'Anna Manual.md' });

@@ -5,6 +5,10 @@ GitHub repository: `iantsai886/brainlink`
 Branch: `feat/complete-raw-wiki-folder-flow` (current working branch; based on `origin/main`)
 Code baseline: development target `1.2.8`, with `package.json` as the canonical version source. The `v1.2.7` tag belongs to the separate `wip/v1.2.7` release line; this branch continues from the full-source `main` history and does not move or recreate that tag.
 
+### Twin memory labels on saved notes (current working tree)
+
+Twin-scoped note retrieval now treats an unclassified note as semantic and refuses unknown explicit `memory_type` labels. The note proposal API validates optional `memory_type`, writes it as frontmatter for both vault schemas, and refuses a scoped agent's proposal when that memory type is disabled. Raw-to-Wiki filing now saves the generated category in `memory_type` while keeping the separate note `type` as `note`. Fictional regression coverage checks malformed and untyped notes, disabled memory access, and saved ingestion metadata. On Windows/Node.js 24.22.1, the focused run passed 126 total (124 passed, 0 failed, 2 platform/privilege skips), the full core suite passed 629 total (621 passed, 0 failed, 8 platform/privilege skips), and UI passed 44/44. The first full core run hit one transient Windows `EPERM` in an unrelated scheduled-brief fixture; that test passed alone and the full rerun passed. Local test evidence does not prove hosted CI or live cross-client acceptance.
+
 ### Linux graph and vault-change refresh (current working tree)
 
 Fixed the Linux fallback in `startVaultChangeWatcher`: Linux does not provide recursive `fs.watch`, and the existing fingerprint-polling fallback was mistakenly disabled on that platform. Configured vault changes now trigger the same content-free `vault-changed` event and graph refresh as other platforms. The graph HTTP refresh test passed in Linux/Node.js 24.22.2. Full `npm run test:all` passed in a clean Linux container on the working tree: core 627 total (627 passed, 0 failed, 2 platform skips); UI 44/44. This is local Docker evidence, not hosted CI or GUI desktop acceptance.
