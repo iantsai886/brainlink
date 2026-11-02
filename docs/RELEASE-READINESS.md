@@ -6,11 +6,13 @@ Current working branch: `feat/complete-raw-wiki-folder-flow` (based on `origin/m
 
 ## Latest verification
 
+- **Live cross-client handoff on branch commit `4a24ba7`:** `npm run smoke:live-cross-client-handoff` passed with signed-in Claude Code and Codex CLI using temporary fictional vaults. Claude sent a scoped handoff, Codex read only the cited note and replied with the required answer, and the private canary stayed hidden. This proves one live turn; repeat reliability, customer acceptance, other AI apps, and live Ollama folder filing remain unverified.
+
 - **Current task branch `0dd1df0` (test-harness/docs follow-up `9fdd5fd`):** Windows/Node.js 24.22.1 `npm run test:all` passed: core 616 total (608 passed, 0 failed, 8 platform/privilege skips); UI 44/44. `npm run smoke:installed:win` passed with explicit checks for the scheduled-scan, auto-file, and manual-scan controls and their English labels in the installed Setup UI. The smoke used pinned Node.js 24.22.1 and Inno Setup 6.7.3, and tested only an isolated QA install, launch, Setup health/UI, temporary Hermes hook preservation, uninstall/data/PATH preservation. Folder auto-filing remains local-development code; it was not tested against a live Ollama model, a signed/public installer, or real user folders.
 
 - **Current full local suite:** exact source commit `16425b7` on Windows/Node.js 24.22.1 passed `npm run test:all` on 2026-10-31: core 609 total (601 passed, 0 failed, 8 platform/privilege skips); UI 44/44. The paired live Claude Code-to-Codex test remains unverified because Claude Code is signed out. GitHub Actions are queued and are not represented as passing.
 - **Windows packaging checks:** exact current checkout `21ebb22` passed `npm run smoke:installed:win` and `npm run smoke:upgrade:win` on 2026-10-31. The fresh 1.2.8 installer launched from its bundled runtime, both shortcuts opened Setup, and isolated uninstall preserved test user data and restored PATH. The isolated 1.2.7-to-1.2.8 upgrade preserved its data canary, passed Setup health, and uninstalled without removing user data. These are local QA checks; the installer is unsigned and was not published.
-- **Paired live handoff attempt:** exact current checkout `abe71c1` on Windows/Node.js 24.22.1 ran `npm run smoke:live-cross-client-handoff`; it stopped before creating fixtures because Claude Code is signed out. No test vault or note was created. Sign in to Claude Code, then rerun the same command to verify Claude Code-to-BrainLink-to-Codex continuation.
+- **Earlier paired live handoff attempt:** checkout `abe71c1` on Windows/Node.js 24.22.1 stopped before creating fixtures because Claude Code was signed out. The newer passing live test is listed above; a single pass does not prove repeat reliability.
 - **Hosted CI:** run `41104923366` for `abe71c1` has three matrix jobs failed before any steps ran and the remaining jobs queued at the time of this check. This is runner/account access failure, not a source test result. The full local suite and local platform smoke checks remain separate evidence.
 
 ## Product state
@@ -56,4 +58,4 @@ BrainLink's main product pieces are implemented in the development branch: local
 
 ## Release claim
 
-**Development implementation with substantial local test coverage; not yet release-ready or cross-client validated.** Do not describe the current branch as a production release. The canonical technical evidence and dated limitations are in [IMPLEMENTATION-STATUS.md](IMPLEMENTATION-STATUS.md); the open acceptance checklist is [GitHub issue #1](https://github.com/iantsai886/brainlink/issues/1).
+**Development implementation with substantial local test coverage and one successful live Claude Code-to-Codex handoff; not yet release-ready or customer-accepted.** Do not describe the current branch as a production release. The canonical technical evidence and dated limitations are in [IMPLEMENTATION-STATUS.md](IMPLEMENTATION-STATUS.md); the open acceptance checklist is [GitHub issue #1](https://github.com/iantsai886/brainlink/issues/1).
