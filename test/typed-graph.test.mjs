@@ -25,6 +25,19 @@ test('typed entity field updates preserve Markdown and relations, validate all f
   assert.throws(() => updateTypedEntityFields('---\ntype: team\ntype: workflow\n---\nBody', { type: 'team', id: 'team.support', scope: 'organisation', status: 'current' }), /duplicate type/);
 });
 
+test('workflow graph fields round-trip as bounded structured lists without changing note content', () => {
+  const raw = entity({ type: 'workflow', id: 'workflow.triage', body: 'Keep this body and [[linked note]].\n' });
+  const fields = { type: 'workflow', id: 'workflow.triage', scope: 'organisation', status: 'current', triggers: ['New ticket arrives'], inputs: ['Ticket data'], steps: ['Review, classify', 'Assign "owner"'], outputs: ['Draft response'], exception_handling: ['Escalate to team'] };
+  const next = updateTypedEntityFields(raw, fields);
+  assert.deepEqual(typedEntityFields(next), fields);
+  assert.match(next, /Keep this body and \[\[linked note\]\]\./);
+  assert.match(next, /- "Review, classify"/);
+  assert.match(next, /- "Assign \\\"owner\\\""/);
+  assert.throws(() => updateTypedEntityFields(raw, { ...fields, steps: ['two\nlines'] }), /single-line items/);
+  assert.throws(() => updateTypedEntityFields(raw, { ...fields, steps: ['x'.repeat(501)] }), /500 characters/);
+  assert.throws(() => updateTypedEntityFields(raw, { ...fields, steps: Array(41).fill('step') }), /up to 40/);
+});
+
 test('typed graph health returns structural counts only and excludes private or generated notes', () => {
   const notes = [
     { rel: 'Team.md', raw: entity({ type: 'team', id: 'team.product', relations: '  - predicate: runs\n    target: workflow.triage\n    review: verified\n    source: "Approved process map"\n    confidence: 0.9\n' }) },

@@ -263,6 +263,26 @@ test('/api/graph3d/entity/save edits only the selected public note, checks uniqu
   } finally { s.server.close(); }
 });
 
+test('/api/graph3d/entity/save stores structured workflow details in the selected writable public note', async () => {
+  const home = await tmp('graph3d-workflow-edit');
+  const vaultPath = await buildVault(path.join(home, 'vault'));
+  await writeFile(path.join(vaultPath, 'Workflow.md'), '---\ntype: workflow\nid: workflow.demo\nscope: organisation\nstatus: current\n---\n# Demo workflow\n\nKeep body and [[Beta]].\n');
+  const s = await startSetup({ env: { BRAINLINK_HOME: path.join(home, 'app'), BRAINLINK_SEMANTIC: '0' }, home, os: 'linux', port: 0, useCli: false });
+  const api = (p, body) => fetch(`http://127.0.0.1:${s.port}${p}`, { method: 'POST', headers: { 'X-BrainLink-Token': s.token, 'Content-Type': 'application/json' }, body: JSON.stringify(body || {}) }).then((r) => r.json());
+  try {
+    await api('/api/vault', { path: vaultPath, name: 'Main', pack: 'simple', scaffold: false });
+    await new Promise((resolve) => setTimeout(resolve, 250));
+    const note = await api('/api/graph3d/note', { vault: 'Main', path: 'Workflow.md' });
+    const record = { ...note.graph_record, triggers: ['New ticket'], inputs: ['Ticket data'], steps: ['Review, classify', 'Assign owner'], outputs: ['Draft response'], exception_handling: ['Escalate to team'] };
+    const saved = await api('/api/graph3d/entity/save', { vault: 'Main', path: 'Workflow.md', etag: note.etag, graph_record: record });
+    assert.equal(saved.ok, true, JSON.stringify(saved));
+    assert.deepEqual(saved.graph_record, record);
+    const reopened = await api('/api/graph3d/note', { vault: 'Main', path: 'Workflow.md' });
+    assert.deepEqual(reopened.graph_record, record);
+    assert.match(reopened.body, /Keep body and \[\[Beta\]\]/);
+  } finally { s.server.close(); }
+});
+
 test('vault graph discovery is paged, scope-safe, excludes private records, and only saves review proposals', async () => {
   const home = await tmp('graph3d-discovery');
   const vaultPath = path.join(home, 'vault');
@@ -580,6 +600,9 @@ test('installed Setup graph panel exposes structured record fields and saves onl
   for (const field of ['type','scope','status']) assert.ok(graph.includes(`graphChoices('${field}',`), `form includes ${field}`);
   assert.match(graph, /data-graph-record-field="id"/);
   assert.match(graph, /data-graph-record-field="\$\{field\}"/);
+  assert.match(graph, /workflowKeys\.map\(\(key\) =>/);
+  assert.match(graph, /data-graph-workflow-field="\$\{key\}"/);
+  for (const field of ['triggers','inputs','steps','outputs','exception_handling']) assert.ok(graph.includes(`'${field}'`), `workflow form supports ${field}`);
   assert.match(graph, /api\('\/api\/graph3d\/entity\/save'/);
   assert.match(graph, /notes3d-links'\)\.querySelectorAll\('\[data-graph-record-field\]'\)/, 'save reads only fields inside the selected note detail');
   assert.match(graph, /etag: currentDetail\.etag/, 'save is tied to the note revision currently shown');

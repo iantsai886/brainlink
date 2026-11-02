@@ -53,18 +53,25 @@ function parseRecord(raw) {
   const lines = frontmatterLines(raw);
   const meta = {};
   let inRelations = false;
+  let listKey = null;
   let current = null;
   const relations = [];
   for (const line of lines) {
     const top = line.match(/^([A-Za-z_][\w-]*):\s*(.*)$/);
     if (top) {
       if (inRelations && current) relations.push(current);
+      listKey = !top[2].trim() && ['triggers','inputs','steps','outputs','exception_handling'].includes(top[1]) ? top[1] : null;
       inRelations = top[1] === 'relations' && top[2].trim() === '';
       current = null;
-      if (!inRelations) meta[top[1]] = scalar(top[2]);
+      if (!inRelations) meta[top[1]] = listKey ? [] : scalar(top[2]);
       continue;
     }
-    if (!inRelations) continue;
+    if (!inRelations) {
+      const listItem = line.match(/^\s{2}-\s+(.*)$/);
+      if (listKey && listItem) meta[listKey].push(scalar(listItem[1]));
+      else if (line.trim() && !/^\s/.test(line)) listKey = null;
+      continue;
+    }
     const item = line.match(/^\s{2}-\s+([A-Za-z_][\w-]*):\s*(.*)$/);
     if (item) {
       if (current) relations.push(current);
@@ -82,6 +89,13 @@ export function typedEntityFields(raw) {
   const { meta } = parseRecord(raw);
   const fields = {};
   for (const key of ['type','id','scope','status']) if (typeof meta[key] === 'string' && meta[key].length <= 160) fields[key] = meta[key];
+  if (meta.type === 'workflow') {
+    for (const key of ['triggers','inputs','steps','outputs','exception_handling']) {
+      const value = meta[key];
+      if (Array.isArray(value)) fields[key] = value.filter((item) => typeof item === 'string').slice(0, 40);
+      else if (typeof value === 'string' && value.trim()) fields[key] = [value];
+    }
+  }
   return fields;
 }
 
@@ -111,6 +125,26 @@ export function updateTypedEntityFields(raw, input) {
     if (indexes.length > 1) throw new Error(`This note has duplicate ${key} frontmatter fields. Fix them in the note before editing its graph record.`);
     if (indexes.length) lines[indexes[0]] = `${key}: ${fields[key]}`;
     else lines.push(`${key}: ${fields[key]}`);
+  }
+  const workflowKeys = ['triggers','inputs','steps','outputs','exception_handling'];
+  if (fields.type === 'workflow') {
+    const workflow = {};
+    for (const key of workflowKeys) {
+      const value = input[key] ?? [];
+      if (!Array.isArray(value) || value.length > 40 || value.some((item) => typeof item !== 'string' || item.length > 500 || /[\r\n]/.test(item))) {
+        throw new Error(`Workflow ${key} must be a list of up to 40 single-line items, each no longer than 500 characters.`);
+      }
+      workflow[key] = value.map((item) => item.trim()).filter(Boolean);
+    }
+    for (const key of workflowKeys) {
+      const indexes = lines.flatMap((line, index) => new RegExp(`^${key}:\\s*`).test(line) ? [index] : []);
+      if (indexes.length > 1) throw new Error(`This note has duplicate workflow ${key} fields. Fix them in the note before editing.`);
+      if (indexes.length) lines.splice(indexes[0], 1);
+      if (workflow[key].length) {
+        lines.push(`${key}:`);
+        for (const item of workflow[key]) lines.push(`  - ${JSON.stringify(item)}`);
+      }
+    }
   }
   return `${prefix}${lines.join(newline)}${suffix}`;
 }
