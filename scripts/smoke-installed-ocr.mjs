@@ -31,7 +31,9 @@ for (const image of images) {
 const source = images.find((image) => path.basename(image) === 'ocr-sample.png');
 if (!source) throw new Error('Pass ocr-sample.png to verify scanned-PDF OCR.');
 const pdfWorkerUrl = pathToFileURL(path.join(app, 'src', 'ingestion', 'pdf-worker.mjs'));
-const pdfBytes = await scannedPdfFixture(await readFile(source));
+const canvasModule = pathToFileURL(path.join(app, 'node_modules', '@napi-rs', 'canvas', 'index.js'));
+const canvasRuntime = await import(canvasModule.href);
+const pdfBytes = await scannedPdfFixture(await readFile(source), canvasRuntime);
 const data = Uint8Array.from(pdfBytes);
 const worker = new Worker(pdfWorkerUrl, {
   workerData: data,

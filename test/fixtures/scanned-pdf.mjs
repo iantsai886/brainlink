@@ -1,6 +1,5 @@
-import { createCanvas, loadImage } from '@napi-rs/canvas';
-
-export async function scannedPdfFixture(imageBytes) {
+export async function scannedPdfFixture(imageBytes, canvasRuntime) {
+  const { createCanvas, loadImage } = canvasRuntime || await import('@napi-rs/canvas');
   const image = await loadImage(imageBytes);
   const width = image.width, height = image.height;
   const canvas = createCanvas(width, height);
