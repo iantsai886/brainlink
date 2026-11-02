@@ -1826,3 +1826,9 @@ Focused `test/git-source-state.test.mjs` and `test/rsi-ledger.test.mjs` passed 1
 ### Full-suite confirmation on the current documentation commit (2026-11-03; commit `d3ade64`)
 
 Windows/Node.js 24.22.1 `npm run test:all` passed on exact commit `d3ade6441919addebcdf3304c12016efc44ae78a`: core 638 total (628 passed, 0 failed, 10 Windows privilege/platform skips); UI 44/44. This reconfirms the current source after the documentation-only update; it does not add live local-model, hosted CI, signed-release, native macOS, or customer-acceptance evidence. The local Ollama executable and service were unavailable at the time of this check.
+
+### Structured graph record fields (2026-11-03; working tree based on `4788f43`)
+
+The Notes editor now offers ordinary form fields for typed record type, stable ID, data scope, and status instead of requiring users to edit JSON frontmatter. Values are allowlisted; malformed IDs are refused; existing custom metadata values remain visible until changed. The saved note remains canonical Markdown and uses the existing version/ETag write path. This is not full relationship CRUD, duplicate-ID enforcement, a workflow editor, or cross-client graph acceptance.
+
+Windows/Node.js 24.22.1 `npm run test:all` passed on this working tree: core 638 total (628 passed, 0 failed, 10 platform/privilege skips); UI 45/45. This tests the editor and current source together; hosted CI and live desktop usability remain separate.

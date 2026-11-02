@@ -92,6 +92,14 @@ test('memory type suggestions use only known frontmatter types and tags and neve
  assert.deepEqual(memoryTypeInfo({type:'episode',memory_type:'semantic'}),{current:'semantic',suggested:null});
  assert.deepEqual(memoryTypeInfo({type:'personal_story'}),{current:null,suggested:null});
 });
+test('graph record editor offers typed fields and saves validated entity metadata',async()=>{
+ const store=await makeStore(),api=createApi({store}),h=useNotes(api);await h.load();const id=h.get().items.find(n=>n.title==='Website relaunch').id;await h.open(id);
+ let view=notesView(h.get(),api);assert.match(view,/Graph record/);assert.match(view,/data-action="noteToggleMeta" data-arg="">Edit fields/);assert.match(view,/data-graph-field="type" disabled/);assert.match(view,/Existing: active/);assert.match(view,/Keep IDs unique within this vault/);
+ assert.equal(h.changeTypedField('id','Bad ID'),false);assert.match(h.get().error,/Graph IDs must start/);assert.equal(h.get().dirty,false);assert.equal(h.changeTypedField('scope','finance'),false);assert.match(h.get().error,/supported graph scope/);
+ assert.equal(h.changeTypedField('type','project'),true);assert.equal(h.changeTypedField('id','project.website-relaunch'),true);assert.equal(h.changeTypedField('scope','organisation'),true);assert.equal(h.changeTypedField('status','proposed'),true);
+ assert.equal(await h.save(),true);const saved=await store.read(id);assert.equal(saved.frontmatter.type,'project');assert.equal(saved.frontmatter.id,'project.website-relaunch');assert.equal(saved.frontmatter.scope,'organisation');assert.equal(saved.frontmatter.status,'proposed');
+ await h.open(id);view=notesView(h.get(),api);assert.match(view,/value="project" selected/);assert.match(view,/value="project\.website-relaunch"/);
+});
 test('search vault picker shows only accessible vaults and preserves the selected scope',async()=>{
  const store=await makeStore(),api=createApi({store,access:{vaults:['Work']}});
  const view=searchView({q:'website',scope:'Work',result:{hits:[]}},api.vaults());

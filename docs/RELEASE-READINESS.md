@@ -20,6 +20,8 @@ The macOS ZIP builder's fresh-cache path passed on source commit `3e8a603`: from
 
 ## Latest verification
 
+- **Structured graph record editor (working tree based on `4788f43`, 2026-11-03):** added structured type, stable ID, scope, and status controls to Notes; source Markdown remains canonical and uses the existing versioned save path. Windows/Node.js 24.22.1 `npm run test:all` passed: core 638 total (628 passed, 0 failed, 10 platform/privilege skips); UI 45/45. Full relation editing, duplicate-ID enforcement, workflow editing, and visual/customer acceptance remain open.
+
 - **Current pushed commit `d3ade6441919addebcdf3304c12016efc44ae78a` (2026-11-03):** Windows/Node.js 24.22.1 `npm run test:all` passed: core 638 total (628 passed, 0 failed, 10 Windows privilege/platform skips); UI 44/44. This is a full local suite on the exact current commit. Ollama was not found and `127.0.0.1:11434` did not respond, so live local-model drafting remains unverified.
 
 - **Installed Windows package smoke on source commit `a07032d` (2026-11-03):** `npm run smoke:installed:win` passed for the unsigned 1.2.8 QA installer. Bundled launch, desktop/Start Menu shortcuts, Setup and ingestion UI, three-language OCR, scanned-PDF OCR, safe HTML extraction, retry-safe filing, Hermes hook preservation, isolated uninstall, test-data preservation, and PATH restoration passed. Temporary fictional data only. This is local Windows package evidence; it does not establish signing, publication, hosted CI, macOS behavior, or customer acceptance.

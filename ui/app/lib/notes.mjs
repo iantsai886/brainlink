@@ -8,6 +8,25 @@ export function useNotes(api) {
   function setVault(selectedVault) { const allowed=new Set(api.vaults().map(v=>v.name));h.set({selectedVault:allowed.has(selectedVault)?selectedVault:''}); }
   function changeBody(body) { h.set({body,dirty:body !== (h.get().note?.body || '') || h.get().frontmatter !== JSON.stringify(h.get().note?.frontmatter||{},null,2)}); }
   function changeMeta(frontmatter) { h.set({frontmatter,dirty:frontmatter !== JSON.stringify(h.get().note?.frontmatter||{},null,2) || h.get().body !== h.get().note?.body}); }
+  function changeTypedField(field, value) {
+    const allowed = {
+      type: new Set(['person','team','workflow','dataset','artifact','project','policy','concept']),
+      scope: new Set(['personal','organisation','client']),
+      status: new Set(['proposed','current','archived']),
+    };
+    const s = h.get();
+    if (!s.note || !['type','id','scope','status'].includes(field)) return false;
+    let frontmatter;
+    try { frontmatter = JSON.parse(s.frontmatter || '{}'); } catch { h.set({error:'Fix the frontmatter JSON before editing graph fields.'}); return false; }
+    if (!frontmatter || Array.isArray(frontmatter) || typeof frontmatter !== 'object') { h.set({error:'Frontmatter must be a JSON object before editing graph fields.'}); return false; }
+    const next = String(value || '').trim();
+    if (next && field === 'id' && !/^[a-z][a-z0-9._:-]{1,127}$/.test(next)) { h.set({error:'Graph IDs must start with a lowercase letter and use only lowercase letters, numbers, dot, underscore, colon, or hyphen.'}); return false; }
+    if (next && allowed[field] && !allowed[field].has(next) && next !== frontmatter[field]) { h.set({error:`Choose a supported graph ${field}.`}); return false; }
+    if (next) frontmatter[field] = next; else delete frontmatter[field];
+    const serialized = JSON.stringify(frontmatter, null, 2);
+    h.set({frontmatter:serialized,dirty:serialized!==JSON.stringify(s.note.frontmatter||{},null,2)||s.body!==s.note.body,error:null,editingMeta:true});
+    return true;
+  }
   function changeMemoryType(memoryType) {
     const allowed = ['working', 'semantic', 'procedural', 'episodic'];
     if (!allowed.includes(memoryType)) { h.set({error:'Choose one of the four supported memory types.'}); return false; }
@@ -53,5 +72,5 @@ export function useNotes(api) {
   async function rename(path) { const s=h.get(); if(!s.note || !guard()) return false; if(!api.renameNote) {h.set({error:'Rename is not supported by this store.'});return false;} try { await api.renameNote(s.note.id,path,s.note.etag); await load(); await open(s.note.id); return true; } catch(e){h.set({error:errText(e)});return false;} }
   function close() {if(!guard())return false;h.set({note:null,dirty:false,editing:false,error:null});return true;}
   function cancel() {if(!guard())return false;const n=h.get().note;h.set({editing:false,editingMeta:false,dirty:false,body:n?.body||'',frontmatter:JSON.stringify(n?.frontmatter||{},null,2)});return true;}
-  return {...h,load,open,edit,setVault,changeBody,changeMeta,changeMemoryType,save,withdrawEpisode,create,rename,close,cancel,guard};
+  return {...h,load,open,edit,setVault,changeBody,changeMeta,changeTypedField,changeMemoryType,save,withdrawEpisode,create,rename,close,cancel,guard};
 }
