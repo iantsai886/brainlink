@@ -7,6 +7,7 @@ test('RSI experiment runner only exposes the fixed fictional suites and returns 
   const runner = createRsiExperiments({ env: { BRAINLINK_HOME: 'must-not-be-used' }, sourceState: () => source });
   assert.deepEqual(Object.keys(RSI_EXPERIMENT_SUITES), ['retrieval-rsi-v1', 'retrieval-independent-v1']);
   assert.equal(runner.suites().length, 2);
+  assert.deepEqual(runner.suites().map((suite) => suite.label_key), ['rsi.experiment.suite1', 'rsi.experiment.suite2']);
   await assert.rejects(runner.run('../private-vault'), /built-in fictional/);
   for (const suite of runner.suites()) {
     const receipt = await runner.run(suite.id);

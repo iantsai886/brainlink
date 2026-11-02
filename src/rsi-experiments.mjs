@@ -13,8 +13,8 @@ import { readGitSourceState } from './git-source-state.mjs';
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 export const RSI_EXPERIMENT_SUITES = Object.freeze({
-  'retrieval-rsi-v1': Object.freeze({ fixture: 'retrieval-rsi-v1.json', vault: 'vault', candidate_version: 'per-case-rephrasing-v1', policy: 'fixed rephrasing policy; semantic search off' }),
-  'retrieval-independent-v1': Object.freeze({ fixture: 'retrieval-independent-v1.json', vault: 'independent-vault', candidate_version: 'compact-search-v1', policy: 'lossless production MCP compact-search projection; evaluation only' }),
+  'retrieval-rsi-v1': Object.freeze({ fixture: 'retrieval-rsi-v1.json', vault: 'vault', candidate_version: 'per-case-rephrasing-v1', policy: 'fixed rephrasing policy; semantic search off', label_key: 'rsi.experiment.suite1' }),
+  'retrieval-independent-v1': Object.freeze({ fixture: 'retrieval-independent-v1.json', vault: 'independent-vault', candidate_version: 'compact-search-v1', policy: 'lossless production MCP compact-search projection; evaluation only', label_key: 'rsi.experiment.suite2' }),
 });
 
 const safeRatio = (value) => Number.isFinite(value) ? Math.max(0, Math.min(1, Number(value))) : 0;
@@ -22,7 +22,7 @@ const safeRatio = (value) => Number.isFinite(value) ? Math.max(0, Math.min(1, Nu
 export function createRsiExperiments({ root = ROOT, env = process.env, now = () => new Date(), sourceState = readGitSourceState } = {}) {
   let running = false;
   return {
-    suites: () => Object.entries(RSI_EXPERIMENT_SUITES).map(([id, suite]) => ({ id, fixture: suite.fixture, candidate_version: suite.candidate_version, candidate_policy: suite.policy })),
+    suites: () => Object.entries(RSI_EXPERIMENT_SUITES).map(([id, suite]) => ({ id, fixture: suite.fixture, candidate_version: suite.candidate_version, candidate_policy: suite.policy, label_key: suite.label_key })),
     run: async (suiteId) => {
       if (running) throw new Error('An RSI experiment is already running. Try again when it finishes.');
       const suite = RSI_EXPERIMENT_SUITES[suiteId];

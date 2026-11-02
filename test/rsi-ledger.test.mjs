@@ -249,6 +249,9 @@ test('RSI Setup panel has unique ids and one render/submit path', async () => {
   assert.match(html, /rsi\.observe\.resultSize/);
   assert.match(html, /rsi\.observe\.graphActions/);
   assert.match(html, /report\.retrieval_profiles/);
+  assert.match(html, /api\('GET', '\/api\/rsi\/experiments'\)/);
+  assert.match(html, /experimentSuites\.map\(suite/);
+  assert.match(html, /suite\.label_key/);
   assert.match(html, /rsi\.observe\.retrievalCaveat/);
   assert.match(html, /rsi\.observe\.retrievalProposalEvidence/);
   assert.match(html, /data-rsi-observe-draft/);
