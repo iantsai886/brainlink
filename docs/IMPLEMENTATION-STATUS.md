@@ -2,6 +2,12 @@
 
 Status snapshot: 2026-11-03 (Asia/Taipei).
 
+### Linux test suite and installer QA (`3a1627fa14e7424d74be2a2d33f9d82de8f1021b`; 2026-11-03)
+
+In an isolated Debian Bookworm `node:24` container cloned from this exact GitHub branch commit, `npm ci` found 0 known vulnerabilities and `npm run test:all` passed: core 657 total (655 passed, 0 failed, 2 Windows-only skips); UI 48/48. `npm ci --omit=dev && npm run build:linux` created all four unsigned QA installers; each SHA-256 sidecar matched its package. Package SHA-256: x64 tar.gz `49837f9e12369314670962c2a2274ca9f6cc193174a4cfceeff9e012a280a41b`; ARM64 tar.gz `946075af9b698bfe52f7c2f567a935712ecad067d230174f08fb933075a60e9c`; amd64 `.deb` `e06134e8b052956701c7cc5b55881da820808d767c3e4e95477a9a10f7ed8aed`; arm64 `.deb` `57731c5cb87ff70a918d4c200bdf4b3f241229e85c0bfe6d44d3c5d3ade8098f`.
+
+The staged x64 runtime passed multilingual OCR, scanned-PDF OCR, safe HTML, MCP startup and a private-note canary check. The amd64 Debian package installed, reported version 1.2.8, initialized a fictional vault and removed cleanly. The x64 per-user tar installer installed, initialized a fictional vault and uninstalled while preserving the vault and settings. The arm64 Debian package installed, reported 1.2.8, initialized a fictional vault and removed cleanly. Under Docker ARM emulation, the ARM64 tar runtime passed multilingual OCR, scanned-PDF OCR, safe HTML, MCP and private-note canary checks. These are container QA artifacts only: no package was published, graphical Linux desktop behavior and physical ARM hardware remain untested, and ARM emulation is not native hardware evidence.
+
 ### Current Windows installed-app smoke (`0e86ffd551bf8260ff0a56e393ca9249d93961df`; 2026-11-03)
 
 `npm run smoke:installed:win` rebuilt the unsigned Windows 1.2.8 QA installer from the current branch and passed. The installed app launched from its bundled Node runtime; both shortcuts opened Setup; folder-ingestion controls loaded; synthetic English, Portuguese and Traditional Chinese image OCR passed; scanned-PDF OCR passed; HTML extraction omitted scripts and hidden content; conflict retry did not duplicate the saved note; the temporary Hermes hook was preserved; the isolated sign-in launcher passed health and removed only its own entry; and uninstall removed only the QA app while preserving test data and restoring PATH. This is synthetic local Windows evidence. The package is unsigned and unpublished; it does not prove Mac/Linux behavior, user acceptance, or production readiness.
