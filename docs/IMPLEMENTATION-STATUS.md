@@ -11,7 +11,7 @@ The update screen now keeps its manual download link after the user opens the ve
 
 ### Linux packages rebuilt from latest source (commit `5f56e67`, 2026-11-02)
 
-In Docker `node:24-bookworm`, rebuilt all four unsigned 1.2.8 Linux artifacts: x64 and ARM64 portable tarballs plus amd64 and arm64 Debian packages. All four SHA-256 sidecars matched. The extracted x64 bundle passed `scripts/smoke-staged-runtime.mjs` with its bundled Node runtime, including English/Portuguese/Traditional Chinese OCR, scanned-PDF OCR, safe HTML extraction, MCP startup, fictional public-note search, and exclusion of a planted private-note canary. ARM64 artifacts were built and hash-checked but were not executed on ARM hardware. These QA artifacts are not signed or published; native Mac, graphical Linux, and customer acceptance remain unverified.
+In Docker `node:24-bookworm`, rebuilt all four unsigned 1.2.8 Linux artifacts: x64 and ARM64 portable tarballs plus amd64 and arm64 Debian packages. All four SHA-256 sidecars matched. The extracted x64 bundle passed `scripts/smoke-staged-runtime.mjs` with its bundled Node runtime, including English/Portuguese/Traditional Chinese OCR, scanned-PDF OCR, safe HTML extraction, MCP startup, fictional public-note search, and exclusion of a planted private-note canary. The amd64 `.deb` installed, reported version 1.2.8, ran its help command, and removed cleanly in a disposable Debian container. ARM64 artifacts were built and hash-checked but were not executed on ARM hardware. These QA artifacts are not signed or published; native Mac, graphical Linux, and customer acceptance remain unverified.
 
 ### Linux packages rebuilt with update keyring (exact source commit `e52e77d`, 2026-11-02)
 
