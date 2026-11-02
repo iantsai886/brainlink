@@ -3,8 +3,12 @@ import assert from 'node:assert/strict';
 import { mkdtemp, writeFile, readFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { createRsiWeekly, validateMiss } from '../src/rsi-weekly.mjs';
+import { normalize } from '../src/config.mjs';
+import { createContext } from '../src/core.mjs';
 
+const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const date = '2026-10-30T12:00:00+08:00';
 const example = { date, agent: 'Fictional Agent', question: 'Where is the fictional roadmap?', result: 'not_found', seconds: 3, fix_needed: 'add_index_entry' };
 const fixture = async () => createRsiWeekly({ home: await mkdtemp(path.join(tmpdir(), 'brainlink-rsi-weekly-')) });
@@ -56,4 +60,33 @@ test('weekly evidence accepts a validated fixture digest but still rejects secre
   const evidence = { week: '2026-W44', fixture_sha256: '0123456789abcdef'.repeat(4), evaluator_version: 'retrieval-eval-v3', case_count: 20, first_try_correct: { count: 10, total: 20, percent: 50 }, privacy_violations: 0, failed_case_ids: [] };
   assert.deepEqual(await ledger.appendRsiEvidence('weekly_benchmark', evidence, 'c'.repeat(64)), { added: true });
   await assert.rejects(ledger.appendRsiEvidence('weekly_benchmark', { ...evidence, note: 'credential sk-proj-abcdefghijklmnopqrstuvwxyz12345678901234567890' }, 'd'.repeat(64)), /sensitive or disallowed/);
+});
+
+test('weekly benchmark records source and runtime provenance and separates commits', async () => {
+  const home = await mkdtemp(path.join(tmpdir(), 'brainlink-rsi-weekly-'));
+  const fixtureBytes = await readFile(path.join(ROOT, 'samples/evaluation/rsi-weekly-fictional-20.json'));
+  const data = JSON.parse(fixtureBytes.toString('utf8'));
+  const ctx = createContext(normalize({ vaults: [{ name: data.vault, path: path.join(ROOT, 'samples/rsi-fictional-vault') }] }), {
+    env: { BRAINLINK_HOME: path.join(home, 'app'), BRAINLINK_SEMANTIC: '0' },
+  });
+  const revisions = [
+    { commit_sha: 'a'.repeat(40), clean: true }, { commit_sha: 'a'.repeat(40), clean: true },
+    { commit_sha: 'a'.repeat(40), clean: true }, { commit_sha: 'a'.repeat(40), clean: true },
+    { commit_sha: 'b'.repeat(40), clean: true }, { commit_sha: 'c'.repeat(40), clean: true },
+  ];
+  const r = createRsiWeekly({ home, sourceRoot: ROOT, sourceState: () => revisions.shift() });
+  const first = await r.runBenchmark({ ctx, fixture: data, fixtureBytes, week: '2026-W44' });
+  assert.equal(first.recorded, true);
+  assert.equal(first.source_commit_sha, 'a'.repeat(40));
+  assert.equal(first.source_stable, true);
+  assert.equal(first.software_version, '1.2.8');
+  assert.equal(first.environment.platform, process.platform);
+  const duplicate = await r.runBenchmark({ ctx, fixture: data, fixtureBytes, week: '2026-W44' });
+  assert.equal(duplicate.recorded, false, 'repeating the same week, fixture, evaluator and commit is idempotent');
+  const changed = await r.runBenchmark({ ctx, fixture: data, fixtureBytes, week: '2026-W44' });
+  assert.equal(changed.recorded, true, 'a different code commit in the same week gets a separate receipt');
+  assert.equal(changed.source_stable, false, 'a commit change during evaluation is recorded as unstable');
+  assert.equal(changed.source_commit_sha, 'b'.repeat(40));
+  const report = await r.benchmarkReport();
+  assert.equal(report[0].source_stable, false);
 });

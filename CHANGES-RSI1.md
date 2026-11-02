@@ -23,7 +23,7 @@
 
 ## Validation performed
 
-- Fixed two issues found during complete-repository verification: the weekly evidence secret scanner now permits only a well-formed `fixture_sha256` integrity fingerprint while still scanning every other field; the Agent Skill loader normalizes CRLF only for metadata parsing and preserves original source bytes.
-- Windows, Node.js `v24.22.1`: focused Agent Skill and RSI weekly tests passed **13/13**.
-- Windows, Node.js `v24.22.1`: `npm run test:all` passed on the contribution worktree: core **582 total (575 passed, 0 failed, 7 platform/privilege skips)**; UI **44/44**. Skips are Windows symlink-privilege/platform checks. This is local verification; hosted CI, Linux/macOS package behavior, and a live benchmark against a customer vault remain separate.
+- Fixed issues found during complete-repository verification: weekly evidence allows only well-formed fixture/source hashes through the secret scanner while still scanning every other field; benchmark receipts now record commit stability and runtime, and use source revision in idempotency; the Agent Skill loader normalizes CRLF only for metadata parsing and preserves original source bytes.
+- Windows, Node.js `v24.22.1`: focused RSI weekly tests passed **6/6**; focused Agent Skill and RSI tests passed **13/13** before the provenance extension.
+- Windows, Node.js `v24.22.1`: `npm run test:all` passed on the provenance-extension working tree based on `48c1b42`: core **583 total (576 passed, 0 failed, 7 platform/privilege skips)**; UI **44/44**. The seven skips require unavailable Windows symlink privilege or Linux-only behavior. Hosted CI, Linux/macOS package behavior, and a live benchmark against a customer vault remain separate.
 - `git diff --check` passed.

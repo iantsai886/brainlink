@@ -1,11 +1,15 @@
 // BrainLink RSI retrieval miss and weekly benchmark evidence; backed by the existing RSI ledger.
 import { createHash } from 'node:crypto';
 import { readFile } from 'node:fs/promises';
+import path from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { createRsiLedger } from './rsi-ledger.mjs';
 import { evaluateRetrieval } from './retrieval-eval.mjs';
 import { findSecrets } from './core.mjs';
+import { readGitSourceState } from './git-source-state.mjs';
 
 const sha = value => createHash('sha256').update(JSON.stringify(value)).digest('hex');
+const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const fixes = new Set(['file_missing_fact', 'replace_stale_note', 'add_link', 'add_index_entry', 'other']);
 const results = new Set(['found', 'not_found', 'stale']);
 const normalized = value => value.normalize('NFKC').toLowerCase().trim().replace(/\s+/g, ' ');
@@ -38,7 +42,7 @@ export function validateMiss(m) {
   if (findSecrets(JSON.stringify(out)).length || /<(?:script|iframe)\b/i.test(JSON.stringify(out))) throw new Error('Miss contains sensitive content.');
   return out;
 }
-export function createRsiWeekly({ home, now = () => new Date() }) {
+export function createRsiWeekly({ home, now = () => new Date(), sourceRoot = ROOT, sourceState = readGitSourceState }) {
   const ledger = createRsiLedger({ home, now });
   return {
     async addMiss(input) {
@@ -86,10 +90,26 @@ export function createRsiWeekly({ home, now = () => new Date() }) {
     },
     async runBenchmark({ ctx, fixture, fixtureBytes, week = taipeiWeek(now().toISOString()) }) {
       if (!/^\d{4}-W\d{2}$/.test(week) || fixture.schema !== 2 || fixture.cases?.length !== 20) throw new Error('Weekly benchmark requires a schema-2 fixture of exactly 20 cases and valid week.');
+      const startedAt = now().toISOString();
+      const sourceBefore = sourceState(sourceRoot);
       const report = await evaluateRetrieval(ctx, fixture, { fixtureBytes });
+      const sourceAfter = sourceState(sourceRoot);
+      const sourceStable = Boolean(sourceBefore?.clean && sourceAfter?.clean
+        && /^[a-f0-9]{40}$/.test(sourceBefore.commit_sha || '')
+        && sourceBefore.commit_sha === sourceAfter.commit_sha);
+      const sourceCommitSha = /^[a-f0-9]{40}$/.test(sourceBefore?.commit_sha || '') ? sourceBefore.commit_sha : null;
+      const packageJson = JSON.parse(await readFile(path.join(sourceRoot, 'package.json'), 'utf8'));
       const score = report.baseline.task_success.count / 20;
-      const evidence = { week, fixture_sha256: report.fixture_sha256, evaluator_version: report.evaluator_version, case_count: 20, first_try_correct: { count: report.baseline.task_success.count, total: 20, percent: +(100 * score).toFixed(1) }, privacy_violations: report.baseline.privacy_violations, failed_case_ids: report.baseline.failures.map(f => f.id) };
-      const saved = await ledger.appendRsiEvidence('weekly_benchmark', evidence, sha({ week, fixture_sha256: evidence.fixture_sha256, evaluator_version: evidence.evaluator_version }));
+      const evidence = {
+        week, started_at: startedAt, completed_at: now().toISOString(), fixture_sha256: report.fixture_sha256,
+        evaluator_version: report.evaluator_version, software_version: packageJson.version,
+        source_commit_sha: sourceCommitSha, source_tree_clean: Boolean(sourceBefore?.clean),
+        source_tree_clean_after: Boolean(sourceAfter?.clean), source_stable: sourceStable,
+        environment: { node: process.version, platform: process.platform, arch: process.arch },
+        case_count: 20, first_try_correct: { count: report.baseline.task_success.count, total: 20, percent: +(100 * score).toFixed(1) },
+        privacy_violations: report.baseline.privacy_violations, failed_case_ids: report.baseline.failures.map(f => f.id),
+      };
+      const saved = await ledger.appendRsiEvidence('weekly_benchmark', evidence, sha({ week, fixture_sha256: evidence.fixture_sha256, evaluator_version: evidence.evaluator_version, source_commit_sha: evidence.source_commit_sha, source_stable: evidence.source_stable }));
       return { ...evidence, recorded: saved.added };
     },
     async benchmarkReport(weeks = 8) {
