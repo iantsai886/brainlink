@@ -5,11 +5,11 @@ GitHub repository: `iantsai886/brainlink`
 Branch: `feat/complete-raw-wiki-folder-flow` (current working branch; based on `origin/main`)
 Code baseline: development target `1.2.8`, with `package.json` as the canonical version source. The `v1.2.7` tag belongs to the separate `wip/v1.2.7` release line; this branch continues from the full-source `main` history and does not move or recreate that tag.
 
-### ChatGPT Secure MCP Tunnel guidance (working tree; 2026-11-03)
+### ChatGPT Secure MCP Tunnel guidance (`fca4e4c`, 2026-11-03)
 
 Replaced the stale claim that ChatGPT requires a public HTTPS BrainLink server with the current OpenAI Secure MCP Tunnel path. Setup now labels ChatGPT **Manual setup**, links to OpenAI's ChatGPT and tunnel-client instructions, and explains that the tunnel and API key remain user-managed and that MCP requests/results pass through OpenAI. Added `docs/CHATGPT-SECURE-MCP-TUNNEL.md` with prerequisites, least-access guidance, setup outline, and the exact unverified boundary. The app does not install or configure the tunnel, handle its API key, or claim a live ChatGPT connection. English, Portuguese and Traditional Chinese copy was added.
 
-On Windows with Node.js 24.22.1, `npm run test:all` passed on the pre-commit working tree: core 647 total (637 passed, 0 failed, 10 platform/privilege skips); UI 48/48. The focused ChatGPT connector test passed 1/1, all three locale JSON files parsed, and `git diff --check` passed. No Platform tunnel, ChatGPT account, or remote MCP connection was configured or tested. This verifies local app behavior and copy only.
+On Windows with Node.js 24.22.1, `npm run test:all` passed on the code in commit `fca4e4c`: core 647 total (637 passed, 0 failed, 10 platform/privilege skips); UI 48/48. The focused ChatGPT connector test passed 1/1, all three locale JSON files parsed, and `git diff --check` passed. No Platform tunnel, ChatGPT account, or remote MCP connection was configured or tested. This verifies local app behavior and copy only.
 
 ### Local AI setup guidance (`686e60a`, 2026-11-03)
 
