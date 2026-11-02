@@ -112,11 +112,10 @@ function parseYaml(raw, file) {
   return { doc, value: value || {} };
 }
 
-// ChatGPT needs a public HTTPS MCP connector; it can't reach 127.0.0.1, so there is no config
-// file to merge-write here. Not available yet; an opt-in tunnel is a possible future option
-// (PRODUCT-SPEC §3, §7).
+// ChatGPT can reach a local BrainLink MCP server through OpenAI's Secure MCP Tunnel.
+// Tunnel provisioning is a separate, user-managed setup and is not configured by this app.
 export const UNSUPPORTED = {
-  chatgpt: { title: 'ChatGPT', note: 'Not available yet: ChatGPT needs a remote HTTPS MCP connector. Use session_log through any connected client, or Codex, in the meantime.' },
+  chatgpt: { title: 'ChatGPT', note: 'Manual setup required: use OpenAI Secure MCP Tunnel to connect to the local BrainLink MCP server. BrainLink does not create the tunnel or store its API key. MCP requests and results pass through OpenAI; do not connect private vaults unless this data flow is acceptable.' },
 };
 
 // Client is "present" when its config file or config folder exists.

@@ -204,7 +204,7 @@ test('importAll wiring: `brainlink sync` and `session_list` import Claude, Codex
 
 // ---- connectors.mjs: {ok,message} wrappers + the ChatGPT honest note ----
 
-test('connectors: detect() lists ChatGPT as unsupported; connect/disconnect/test never touch it', async () => {
+test('connectors: ChatGPT stays manual-only and explains the Secure MCP Tunnel data flow', async () => {
   const home = await tmp('connectors-home');
   const opts = { home, os: 'linux', env: {}, launch: { command: 'node', args: ['cli.mjs', 'serve'] }, useCli: false };
   const found = await detect(opts);
@@ -214,7 +214,8 @@ test('connectors: detect() lists ChatGPT as unsupported; connect/disconnect/test
   for (const fn of [connect, disconnect, testClient]) {
     const r = await fn('chatgpt', opts);
     assert.equal(r.ok, false);
-    assert.match(r.message, /remote HTTPS/);
+    assert.match(r.message, /Secure MCP Tunnel/);
+    assert.match(r.message, /pass through OpenAI/);
   }
 });
 

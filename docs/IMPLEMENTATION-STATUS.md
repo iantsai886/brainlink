@@ -5,6 +5,12 @@ GitHub repository: `iantsai886/brainlink`
 Branch: `feat/complete-raw-wiki-folder-flow` (current working branch; based on `origin/main`)
 Code baseline: development target `1.2.8`, with `package.json` as the canonical version source. The `v1.2.7` tag belongs to the separate `wip/v1.2.7` release line; this branch continues from the full-source `main` history and does not move or recreate that tag.
 
+### ChatGPT Secure MCP Tunnel guidance (working tree; 2026-11-03)
+
+Replaced the stale claim that ChatGPT requires a public HTTPS BrainLink server with the current OpenAI Secure MCP Tunnel path. Setup now labels ChatGPT **Manual setup**, links to OpenAI's ChatGPT and tunnel-client instructions, and explains that the tunnel and API key remain user-managed and that MCP requests/results pass through OpenAI. Added `docs/CHATGPT-SECURE-MCP-TUNNEL.md` with prerequisites, least-access guidance, setup outline, and the exact unverified boundary. The app does not install or configure the tunnel, handle its API key, or claim a live ChatGPT connection. English, Portuguese and Traditional Chinese copy was added.
+
+On Windows with Node.js 24.22.1, `npm run test:all` passed on the pre-commit working tree: core 647 total (637 passed, 0 failed, 10 platform/privilege skips); UI 48/48. The focused ChatGPT connector test passed 1/1, all three locale JSON files parsed, and `git diff --check` passed. No Platform tunnel, ChatGPT account, or remote MCP connection was configured or tested. This verifies local app behavior and copy only.
+
 ### Local AI setup guidance (`686e60a`, 2026-11-03)
 
 The Sessions setup now gives clear steps to enable local AI summaries and folder drafts, links to the official Ollama download page, and keeps connection results visible after checking. It reports whether Ollama is unavailable, running without a model, or ready with the selected model. English, Portuguese, and Traditional Chinese are covered. Focused UI tests passed 4/4; all three locale JSON files parsed; `git diff --check` passed. A clean `npm run test:all` on checkout `5ff1cf3` passed: core 647 total (637 passed, 0 failed, 10 Windows platform/privilege skips); UI 48/48. An earlier combined run had three transient failures; each affected test file passed alone, and the clean full rerun passed all suites. No Ollama/model installation or live inference was performed, so live analysis remains unverified on this computer.

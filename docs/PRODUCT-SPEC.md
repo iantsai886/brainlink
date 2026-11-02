@@ -35,13 +35,13 @@ The local-first product connects authorized clients to BrainLink. Data is filter
 │                                                                                │
 │  Claude / Codex / Cursor / Gemini / Antigravity / Hermes / DeepSeek Harness / Windsurf ── stdio ► core │
 │  Grok bot / custom agents ─────────── http://127.0.0.1 + bearer ──────► core  │
-│  ChatGPT connectors ── (Pro, opt-in) customer's own HTTPS tunnel ─────► core  │
+│  ChatGPT ── (manual, opt-in) OpenAI Secure MCP Tunnel ────────────────► core  │
 └────────────────────────────────────────────────────────────────────────────────┘
 ```
 
 - **Runtime:** the app and pinned production dependencies ship with their runtime, so customers do not need a separate Node installation. Windows and Linux use official Node 24.22.1. Both macOS installers use official Node 22.23.3 to preserve the advertised macOS 11 minimum; Node.js 24 prebuilt macOS binaries require macOS 13.5 or newer ([Node.js migration notes](https://nodejs.org/en/blog/migrations/v22-to-v24)). Keep the Mac runtime cache separate from the Windows/Linux runtime cache.
 - **Current build:** every implemented feature is enabled. There is no trial timer, expiration, licence key or account check. Commercial plans and limits are not implemented or approved.
-- **Local first:** no cloud relay is implied. Any remote client connection needs an explicit transport, authentication, privacy and deployment design.
+- **Local first:** no cloud relay is implied. ChatGPT can reach the local MCP server through OpenAI Secure MCP Tunnel, but this requires a separately configured tunnel client and account permissions. BrainLink does not provision it or store its API key. MCP requests and results pass through OpenAI; users must explicitly accept that data flow and limit vault access accordingly. This integration is manual and is not verified as connected by BrainLink. See [ChatGPT Secure MCP Tunnel setup](CHATGPT-SECURE-MCP-TUNNEL.md).
 
 ## 3a. Twin and memory model
 
