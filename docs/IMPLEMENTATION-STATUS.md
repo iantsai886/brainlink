@@ -5,6 +5,10 @@ GitHub repository: `iantsai886/brainlink`
 Branch: `feat/complete-raw-wiki-folder-flow` (current working branch; based on `origin/main`)
 Code baseline: development target `1.2.8`, with `package.json` as the canonical version source. The `v1.2.7` tag belongs to the separate `wip/v1.2.7` release line; this branch continues from the full-source `main` history and does not move or recreate that tag.
 
+### Folder-scan help text matches supported file types (working tree based on `212ed49`, 2026-11-02)
+
+Setup's English, Portuguese and Traditional Chinese help text now lists the supported file types, including HTML/HTM and scanned PDF OCR, instead of incorrectly saying scanned PDFs are skipped. It also states the 100-page PDF limit and that OCR runs locally. The focused Linux container test `test/ingestion-schedule.test.mjs` passed 5/5, including locale-content assertions; `git diff --check` passed on Windows. This wording change does not alter scan behavior or prove OCR quality on user documents.
+
 ### Latest Linux verification (exact source commit `cb9fdec`, 2026-11-02)
 
 In a clean Docker `node:24-bookworm` container, `npm ci` and `npm run test:all` passed: core 634 total (632 passed, 0 failed, 2 Windows-only skips), UI 44/44, and npm reported 0 vulnerabilities. The Linux x64/ARM64 portable tarballs and amd64/arm64 Debian packages rebuilt successfully; all four SHA-256 sidecars matched. The staged x64 app passed `scripts/smoke-staged-runtime.mjs` using its bundled runtime: version, shipped skills/dependencies, three-language OCR, scanned-PDF OCR, safe HTML extraction, MCP initialization, public fictional-note search and exclusion of a planted private-note canary. ARM64 artifacts were built and checksummed but not run on ARM hardware. This does not prove graphical Linux desktop use, native macOS behavior, hosted CI, signing, live model quality, or customer acceptance.

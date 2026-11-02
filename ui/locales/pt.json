@@ -638,7 +638,7 @@
   "share.clearAndReshare": "Limpar e compartilhar novamente",
   "share.confirmClearReshare": "Isso removerá tudo o que foi compartilhado anteriormente nessa pasta e começará a compartilhar novamente. Continuar?",
   "ingestion.title": "Verificações automáticas de fontes",
-  "ingestion.hint": "Adicione pastas de um vault não privado. Enquanto o BrainLink estiver aberto, ele pode verificar uma vez por dia, a cada 1–60 minutos ou quando você selecionar Verificar agora. Arquivos de texto, PDFs com texto selecionável, DOCX, XLSX, PPTX e imagens PNG, JPEG e BMP com texto são lidos com OCR local; PDFs digitalizados e outros formatos são ignorados.",
+  "ingestion.hint": "Adicione pastas de um vault não privado. Enquanto o BrainLink estiver aberto, as verificações podem ocorrer diariamente, a cada 1–60 minutos ou quando você selecionar Verificar agora. São lidos TXT, CSV/TSV, JSON, XML, YAML, LOG, HTML/HTM, PDFs de até 100 páginas (incluindo páginas digitalizadas com OCR local), DOCX, XLSX, PPTX e imagens PNG/JPEG/BMP com OCR local. Outros formatos são ignorados.",
   "ingestion.enabled": "Executar verificações em segundo plano",
   "ingestion.mode": "Modo de verificação em segundo plano",
   "ingestion.modeDaily": "Uma vez por dia",
