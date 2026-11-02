@@ -5,6 +5,12 @@ GitHub repository: `iantsai886/brainlink`
 Branch: `feat/complete-raw-wiki-folder-flow` (current working branch; based on `origin/main`)
 Code baseline: development target `1.2.8`, with `package.json` as the canonical version source. The `v1.2.7` tag belongs to the separate `wip/v1.2.7` release line; this branch continues from the full-source `main` history and does not move or recreate that tag.
 
+### Release and RSI documentation correction (`4341ec0`, 2026-11-03)
+
+Updated the release-readiness opening to use the latest dated Windows, Linux, macOS ZIP simulation, and synthetic cross-client handoff receipts, while keeping each platform's limits visible. Updated the product spec to describe scheduled RSI research discovery and all five implemented public metadata sources. No application code changed and no tests were run for this documentation-only correction; `git diff --check` passed before commit. The repository HEAD after this entry is `4341ec0`.
+
+Local-model status remains an external setup dependency: current machine inspection found no Ollama executable on PATH and no response from its local API. Folder extraction, review queues and manual operations exist, but model-generated session/source summaries cannot be live-verified on this machine until Ollama and a compatible model are available. No model or external service was installed by this documentation task.
+
 ### Current macOS ZIP build and install simulation (source commit `b64c995`; 2026-11-03)
 
 In Debian Bookworm/Node.js 24.22.2 on Docker Desktop, `npm ci` reported zero known vulnerabilities; `npm run build:mac-zip` and `npm run test:mac-zip` passed. The ZIP included checksum-verified official Node.js 22.23.3 Darwin x64 and arm64 runtimes (confirmed as Mach-O executables), the bundled BrainLink dependencies, and the app payload. The install simulation passed ZIP structure/permissions, first-run installation from a Downloads-style folder, valid per-user LaunchAgent contents, local HTTP health, uninstall, and notes-preservation checks. ZIP SHA-256: `46e81476c0af354f3081ff2b617ed314b1ddce1f35f4af4a64db424bf3714c54` (149 MB). This simulation uses Linux Node.js for its HTTP app check; it does not execute either Darwin binary or replace a real Mac install, Gatekeeper/notarization, sign-in, or upgrade test. The artifact is unsigned QA output and was not published.
