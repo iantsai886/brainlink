@@ -31,6 +31,7 @@ test('every native installer bundles all production dependencies and portable Br
   assert.ok(pkg.dependencies.yaml, 'YAML connector dependency must remain a production dependency');
   assert.ok(pkg.dependencies['pdfjs-dist'], 'local PDF text extraction must remain a production dependency');
   assert.ok(pkg.dependencies.mammoth, 'local DOCX text extraction must remain a production dependency');
+  assert.ok(pkg.dependencies.fflate, 'local XLSX and PPTX archive extraction must remain a production dependency');
   assert.match(await read('packaging/windows/build-portable-zip.sh'), /npm install/, 'Windows source preview installs its declared production dependencies');
 
   const linuxBuilder = await read('packaging/linux/build-linux.sh');
@@ -92,6 +93,8 @@ test('every native installer bundles all production dependencies and portable Br
   assert.match(macZipTest, /app\/node_modules\/pdfjs-dist\/legacy\/build\/pdf\.mjs/, 'the macOS package smoke test must check the PDF parser');
   assert.match(macZipTest, /app\/node_modules\/mammoth\/package\.json/, 'the macOS package smoke test must check the DOCX parser');
   assert.match(macZipTest, /app\/src\/ingestion\/docx-worker\.mjs/, 'the macOS package smoke test must check the isolated DOCX worker');
+  assert.match(macZipTest, /app\/src\/ingestion\/office-worker\.mjs/, 'the macOS package smoke test must check the isolated Office worker');
+  assert.match(macZipTest, /app\/node_modules\/fflate\/package\.json/, 'the macOS package smoke test must check the Office ZIP dependency');
   assert.match(macZipTest, /app\/skills\/brainlink-session-closeout\/SKILL\.md/, 'the macOS package smoke test must check a shipped skill');
   assert.match(macZipTest, /app\/skills\/brainlink-graph-curation\/SKILL\.md/, 'the macOS package smoke test must check the graph-curation skill');
   assert.match(macZipTest, /app\/ui\/app\/test/, 'the macOS package smoke test must reject development UI tests');
@@ -135,14 +138,14 @@ test('every native installer bundles all production dependencies and portable Br
   assert.match(workflow, /test ! -e "\$XDG_DATA_HOME\/brainlink"/, 'Linux CI must verify tarball uninstall removes the application only');
 });
 
-test('runtime dependency staging copies the locked Mammoth tree and it imports without the checkout', async () => {
+test('runtime dependency staging copies locked Office extractors and they import without the checkout', async () => {
   const stage = await mkdtemp(path.join(tmpdir(), 'brainlink-runtime-deps-'));
   try {
     const modules = path.join(stage, 'node_modules');
     const child = spawnSync(process.execPath, ['scripts/stage-runtime-dependencies.mjs', modules], { cwd: ROOT, encoding: 'utf8', timeout: 20_000 });
     assert.equal(child.status, 0, child.stderr || child.stdout || child.error);
-    for (const name of ['mammoth', 'jszip', 'pdfjs-dist', 'yaml']) await access(path.join(modules, name, 'package.json'));
-    const importCheck = spawnSync(process.execPath, ['--input-type=module', '-e', "const mammoth = await import('mammoth'); const pdf = await import('pdfjs-dist/legacy/build/pdf.mjs'); if (typeof mammoth.default.extractRawText !== 'function' || typeof pdf.getDocument !== 'function') process.exit(2);"], {
+    for (const name of ['mammoth', 'jszip', 'fflate', 'pdfjs-dist', 'yaml']) await access(path.join(modules, name, 'package.json'));
+    const importCheck = spawnSync(process.execPath, ['--input-type=module', '-e', "const mammoth = await import('mammoth'); const pdf = await import('pdfjs-dist/legacy/build/pdf.mjs'); const zip = await import('fflate'); if (typeof mammoth.default.extractRawText !== 'function' || typeof pdf.getDocument !== 'function' || typeof zip.unzipSync !== 'function') process.exit(2);"], {
       cwd: stage, encoding: 'utf8', timeout: 20_000,
     });
     assert.equal(importCheck.status, 0, importCheck.stderr || importCheck.stdout || importCheck.error);

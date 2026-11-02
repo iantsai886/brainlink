@@ -60,13 +60,14 @@ test('portable Raw-to-Wiki Skill is identical for Claude Code and Codex and requ
   const contents = await Promise.all(skillPaths.map((file) => readFile(path.join(ROOT, file), 'utf8')));
   assert.equal(new Set(contents).size, 1, 'canonical skill and client copies must stay byte-identical');
   const { fields, body } = parseSkill(contents[0], skillPaths[0]);
-  assert.equal(fields.metadata.version, '1.2.1');
+  assert.equal(fields.metadata.version, '1.3.0');
   assert.match(fields.metadata['applicable-clients'], /Any AI client/);
   for (const tool of ['brainlink_guide', 'ingestion_queue', 'ingestion_read_source', 'vault_search', 'propose_note', 'ingestion_record']) assert.ok(fields.compatibility.includes(tool) || fields.metadata['required-tools'].includes(tool), tool);
   assert.match(body, /single folder/);
-  assert.match(body, /TXT, CSV\/TSV, JSON, XML, YAML, LOG, selectable-text PDF up to 100 pages, and DOCX/);
+  assert.match(body, /TXT, CSV\/TSV, JSON, XML, YAML, LOG, selectable-text PDF up to 100 pages, DOCX, XLSX and PPTX/);
   assert.match(body, /selectable-text PDF up to 100 pages/);
-  assert.match(body, /external-file access/);
+  assert.match(body, /selected non-private vault folder/);
+  assert.match(body, /Markdown frontmatter privacy flags/);
   assert.match(body, /Scanned-image PDFs require OCR/);
   assert.match(body, /ingestion_read_source/);
   assert.match(body, /confirm=false/);

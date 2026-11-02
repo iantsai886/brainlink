@@ -634,7 +634,7 @@
   "share.clearAndReshare": "清除並重新分享",
   "share.confirmClearReshare": "這會移除該資料夾中先前分享的所有檔案，並重新開始分享。要繼續嗎？",
   "ingestion.title": "自動檢查新資料",
-  "ingestion.hint": "可從非私人 vault 加入資料夾。BrainLink 開啟時，可每天掃描、每 1–60 分鐘檢查，或按下「立即掃描」。支援文字檔、可選取文字的 PDF 和 DOCX；其他格式會略過。",
+  "ingestion.hint": "可從非私人 vault 加入資料夾。BrainLink 開啟時，可每天掃描、每 1–60 分鐘檢查，或按下「立即掃描」。支援文字檔、可選取文字的 PDF、DOCX、XLSX 和 PPTX；其他格式會略過。",
   "ingestion.enabled": "在背景執行掃描",
   "ingestion.mode": "背景掃描方式",
   "ingestion.modeDaily": "每天一次",

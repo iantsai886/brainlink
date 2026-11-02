@@ -52,6 +52,23 @@ async function docxFixture(text = '') {
   zip.file('word/document.xml', `<w:document xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main"><w:body><w:p><w:r><w:t>${text}</w:t></w:r></w:p><w:sectPr/></w:body></w:document>`);
   return zip.generateAsync({ type: 'nodebuffer', compression: 'DEFLATE' });
 }
+async function xlsxFixture({ unsafeXml = false } = {}) {
+  const zip = new JSZip();
+  zip.file('xl/workbook.xml', `${unsafeXml ? '<!DOCTYPE workbook [<!ENTITY secret "DTD_ENTITY_CANARY">]>' : ''}<workbook xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships"><sheets><sheet name="Summary" sheetId="1" r:id="rId1"/><sheet name="Hidden" sheetId="2" state="hidden" r:id="rId2"/></sheets></workbook>`);
+  zip.file('xl/_rels/workbook.xml.rels', '<Relationships><Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/worksheet" Target="/xl/worksheets/sheet1.xml"/><Relationship Id="rId2" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/worksheet" Target="worksheets/sheet2.xml"/><Relationship Id="rId3" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/sharedStrings" Target="sharedStrings.xml"/></Relationships>');
+  zip.file('xl/sharedStrings.xml', '<sst><si><t>Quarter</t></si><si><t>REVENUE_XLSX_CANARY</t></si><si><t>HIDDEN_XLSX_CANARY</t></si><si><t>PRIVATE_COLUMN_XLSX_CANARY</t></si></sst>');
+  zip.file('xl/worksheets/sheet1.xml', '<worksheet><cols><col min="4" max="4" hidden="1"/></cols><sheetData><row r="1"><c r="A1" t="s"><v>0</v></c></row><row r="2"><c r="A2" t="s"><v>1</v></c><c r="B2"><v>125</v></c><c r="D2" t="s"><v>3</v></c></row><row r="3" hidden="1"><c r="A3" t="s"><v>2</v></c></row></sheetData></worksheet>');
+  zip.file('xl/worksheets/sheet2.xml', '<worksheet><sheetData><row><c r="A1" t="s"><v>2</v></c></row></sheetData></worksheet>');
+  return zip.generateAsync({ type: 'nodebuffer', compression: 'DEFLATE' });
+}
+async function pptxFixture() {
+  const zip = new JSZip();
+  zip.file('ppt/presentation.xml', '<p:presentation xmlns:p="urn:p" xmlns:r="urn:r"><p:sldIdLst><p:sldId id="256" r:id="rId1"/><p:sldId id="257" show="0" r:id="rId2"/></p:sldIdLst></p:presentation>');
+  zip.file('ppt/_rels/presentation.xml.rels', '<Relationships><Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/slide" Target="slides/slide1.xml"/><Relationship Id="rId2" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/slide" Target="slides/slide2.xml"/></Relationships>');
+  zip.file('ppt/slides/slide1.xml', '<p:sld xmlns:p="urn:p" xmlns:a="urn:a"><a:p><a:r><a:t>Quarterly </a:t></a:r><a:r><a:t>STRATEGY_PPTX_CANARY</a:t></a:r></a:p></p:sld>');
+  zip.file('ppt/slides/slide2.xml', '<p:sld xmlns:p="urn:p" xmlns:a="urn:a"><a:p><a:r><a:t>HIDDEN_PPTX_CANARY</a:t></a:r></a:p></p:sld>');
+  return zip.generateAsync({ type: 'nodebuffer', compression: 'DEFLATE' });
+}
 test('runtime version comes from the canonical package manifest', async () => {
   const pkg = JSON.parse(await readFile(path.join(ROOT, 'package.json'), 'utf8'));
   assert.equal(VERSION, pkg.version);
@@ -241,6 +258,9 @@ test('ingestion reads only supported text files from the selected folder and rej
   await writeFile(path.join(raw, 'brief.pdf'), pdfFixture('FICTIONAL_PDF_CANARY'));
   await writeFile(path.join(raw, 'scan.pdf'), pdfFixture());
   await writeFile(path.join(raw, 'brief.docx'), await docxFixture('FICTIONAL_DOCX_CANARY'));
+  await writeFile(path.join(raw, 'finance.xlsx'), await xlsxFixture());
+  await writeFile(path.join(raw, 'unsafe.xlsx'), await xlsxFixture({ unsafeXml: true }));
+  await writeFile(path.join(raw, 'slides.pptx'), await pptxFixture());
   const oversizedDocx = await docxFixture('ZIP_BOMB_CANARY');
   const centralHeader = oversizedDocx.indexOf(Buffer.from([0x50, 0x4b, 0x01, 0x02]));
   assert.ok(centralHeader >= 0);
@@ -252,7 +272,7 @@ test('ingestion reads only supported text files from the selected folder and rej
   await writeFile(path.join(raw, 'Blocked', 'hidden.txt'), 'EXCLUDED_TEXT_CANARY');
   const ctx = ctxOf(cfg, { BRAINLINK_HOME: path.join(base, 'app') });
   const queue = await ingestionQueue(ctx, 'Acme Studio', 'Raw');
-  assert.deepEqual(queue.candidates.map((item) => item.path).sort(), ['Raw/brief.docx', 'Raw/brief.pdf', 'Raw/brief.txt', 'Raw/data.json', 'Raw/scan.pdf', 'Raw/table.csv']);
+  assert.deepEqual(queue.candidates.map((item) => item.path).sort(), ['Raw/brief.docx', 'Raw/brief.pdf', 'Raw/brief.txt', 'Raw/data.json', 'Raw/finance.xlsx', 'Raw/scan.pdf', 'Raw/slides.pptx', 'Raw/table.csv', 'Raw/unsafe.xlsx']);
   assert.ok(queue.skipped >= 5, 'unsupported, malformed, unsafe, binary, and excluded inputs are counted as skipped');
   const item = queue.candidates.find((candidate) => candidate.path === 'Raw/brief.txt');
   const source = await readIngestionSource(ctx, 'Acme Studio', 'Raw', item);
@@ -268,9 +288,22 @@ test('ingestion reads only supported text files from the selected folder and rej
   assert.equal(docxSource.format, 'docx');
   assert.match(docxSource.body, /FICTIONAL_DOCX_CANARY/);
   assert.equal(docxSource.body_truncated, false);
+  const workbookItem = queue.candidates.find((candidate) => candidate.path === 'Raw/finance.xlsx');
+  const workbookSource = await readIngestionSource(ctx, 'Acme Studio', 'Raw', workbookItem);
+  assert.equal(workbookSource.format, 'xlsx');
+  assert.match(workbookSource.body, /REVENUE_XLSX_CANARY/);
+  assert.match(workbookSource.body, /A2=REVENUE_XLSX_CANARY/);
+  assert.doesNotMatch(workbookSource.body, /HIDDEN_XLSX_CANARY|PRIVATE_COLUMN_XLSX_CANARY/);
+  const unsafeWorkbook = queue.candidates.find((candidate) => candidate.path === 'Raw/unsafe.xlsx');
+  await assert.rejects(readIngestionSource(ctx, 'Acme Studio', 'Raw', unsafeWorkbook), /safely extracted/i);
+  const presentationItem = queue.candidates.find((candidate) => candidate.path === 'Raw/slides.pptx');
+  const presentationSource = await readIngestionSource(ctx, 'Acme Studio', 'Raw', presentationItem);
+  assert.equal(presentationSource.format, 'pptx');
+  assert.match(presentationSource.body, /Quarterly STRATEGY_PPTX_CANARY/);
+  assert.doesNotMatch(presentationSource.body, /HIDDEN_PPTX_CANARY/);
   const scannedPdf = queue.candidates.find((candidate) => candidate.path === 'Raw/scan.pdf');
   await assert.rejects(readIngestionSource(ctx, 'Acme Studio', 'Raw', scannedPdf), /scanned PDF OCR is not available/i);
-  assert.doesNotMatch(JSON.stringify(queue), /FICTIONAL_TEXT_CANARY|JSON_CANARY|FICTIONAL_DOCX_CANARY|ZIP_BOMB_CANARY|EXCLUDED_TEXT_CANARY/);
+  assert.doesNotMatch(JSON.stringify(queue), /FICTIONAL_TEXT_CANARY|JSON_CANARY|FICTIONAL_DOCX_CANARY|REVENUE_XLSX_CANARY|STRATEGY_PPTX_CANARY|ZIP_BOMB_CANARY|EXCLUDED_TEXT_CANARY/);
   await writeFile(path.join(raw, 'brief.txt'), 'CHANGED_TEXT_CANARY');
   await assert.rejects(readIngestionSource(ctx, 'Acme Studio', 'Raw', item), /changed|Refresh/i);
   await assert.rejects(readIngestionSource(ctx, 'Acme Studio', 'Raw', { ...item, source_id: 'a'.repeat(64) }), /changed|no longer available/i);

@@ -634,7 +634,7 @@
   "share.clearAndReshare": "Clear and re-share",
   "share.confirmClearReshare": "This will remove everything previously shared in that folder and start sharing fresh. Continue?",
   "ingestion.title": "Automatic source scans",
-  "ingestion.hint": "Add folders from a non-private vault. While BrainLink is open, it can scan once a day, check every 1–60 minutes, or run when you press Scan now. Supported text files, selectable-text PDFs and DOCX files are checked; other file types are skipped.",
+  "ingestion.hint": "Add folders from a non-private vault. While BrainLink is open, it can scan once a day, check every 1–60 minutes, or run when you press Scan now. Supported text files, selectable-text PDFs, DOCX, XLSX and PPTX files are checked; other file types are skipped.",
   "ingestion.enabled": "Run scans in the background",
   "ingestion.mode": "Background scan mode",
   "ingestion.modeDaily": "Once a day",

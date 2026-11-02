@@ -31,13 +31,20 @@ await assert.rejects(access(path.join(app, 'ui', 'app', 'test')), 'development U
 await access(path.join(app, 'src', 'ingestion', 'pdf-worker.mjs'));
 await access(path.join(app, 'node_modules', 'pdfjs-dist', 'legacy', 'build', 'pdf.mjs'));
 await access(path.join(app, 'src', 'ingestion', 'docx-worker.mjs'));
+await access(path.join(app, 'src', 'ingestion', 'office-worker.mjs'));
 await access(path.join(app, 'node_modules', 'mammoth', 'package.json'));
+await access(path.join(app, 'node_modules', 'fflate', 'package.json'));
 execFileSync(node, ['--input-type=module', '-e', "await import('./src/connectors.mjs'); await import('./src/update-manifest.mjs')"], {
   cwd: app,
   encoding: 'utf8',
   timeout: 20_000,
 });
 execFileSync(node, ['--input-type=module', '-e', "const mammoth = await import('mammoth'); if (typeof mammoth.default.extractRawText !== 'function') process.exit(2)"], {
+  cwd: app,
+  encoding: 'utf8',
+  timeout: 20_000,
+});
+execFileSync(node, ['--input-type=module', '-e', "const zip = await import('fflate'); if (typeof zip.unzipSync !== 'function') process.exit(2)"], {
   cwd: app,
   encoding: 'utf8',
   timeout: 20_000,
