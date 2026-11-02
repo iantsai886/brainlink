@@ -6,7 +6,7 @@ import path from 'node:path';
 import { normalize } from '../src/config.mjs';
 import { createContext, loadVault } from '../src/core.mjs';
 import { buildGraph3D, noteDetail3D } from '../src/graph3d.mjs';
-import { deriveTypedRelations, deriveRejectedTypedRelations, discoverTypedRelationshipCandidates, discoverTypedRelationshipCandidatesForSources, appendTypedRelationProposal, approveTypedRelation, rejectTypedRelation, reopenTypedRelation, typedGraphHealth, typedEntityFields, updateTypedEntityFields } from '../src/typed-graph.mjs';
+import { deriveTypedRelations, deriveProposedTypedRelations, deriveRejectedTypedRelations, deriveWithdrawnTypedRelations, discoverTypedRelationshipCandidates, discoverTypedRelationshipCandidatesForSources, appendTypedRelationProposal, approveTypedRelation, rejectTypedRelation, reopenTypedRelation, withdrawTypedRelation, typedGraphHealth, typedEntityFields, updateTypedEntityFields } from '../src/typed-graph.mjs';
 import { proposeNote } from '../src/writes.mjs';
 import { createMcp } from '../src/server.mjs';
 
@@ -112,6 +112,21 @@ test('reopening a rejected relation explicitly changes only its review marker', 
   assert.match(reopened, /^status: current$/m);
   assert.match(reopened, /^    review: proposed$/m);
   assert.match(reopened, /^    source: "Operations handbook section 2"$/m);
+});
+
+test('withdrawing a relation hides it from graph and review while retaining evidence for restoration', () => {
+  const raw = `---\ntype: team\nid: team.product\nscope: organisation\nstatus: current\nrelations:\n  - predicate: runs\n    target: workflow.collect\n    review: verified\n    source: "Operations handbook section 2"\n    confidence: 0.8\n---\n# Product team\n`;
+  const withdrawn = withdrawTypedRelation(raw, 0, 'verified');
+  assert.match(withdrawn, /^    review: withdrawn$/m);
+  assert.match(withdrawn, /^    source: "Operations handbook section 2"$/m);
+  const notes = [{ rel: 'Team.md', raw: withdrawn }, { rel: 'Workflow.md', raw: entity({ type: 'workflow', id: 'workflow.collect' }) }];
+  assert.deepEqual(deriveTypedRelations(notes), []);
+  assert.deepEqual(deriveWithdrawnTypedRelations(notes).map((edge) => edge.relation_index), [0]);
+  const restored = reopenTypedRelation(withdrawn, 0, 'withdrawn');
+  assert.match(restored, /^    review: proposed$/m);
+  assert.match(restored, /^    source: "Operations handbook section 2"$/m);
+  assert.deepEqual(deriveWithdrawnTypedRelations([{ rel: 'Team.md', raw: restored }, notes[1]]), []);
+  assert.equal(deriveProposedTypedRelations([{ rel: 'Team.md', raw: restored }, notes[1]]).length, 1);
 });
 
 test('typed graph relationship suggestions are saved as proposed and become edges only after explicit review', async () => {

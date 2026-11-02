@@ -420,6 +420,49 @@ test('typed relationship rejection is revision-checked, keeps evidence, and remo
   } finally { s.server.close(); }
 });
 
+test('typed relationship archive is revision-checked, hidden from the graph, and reversible from note detail', async () => {
+  const home = await tmp('graph3d-archive-home');
+  const vaultPath = path.join(home, 'vault');
+  await mkdir(vaultPath, { recursive: true });
+  const env = { BRAINLINK_HOME: path.join(home, 'app'), BRAINLINK_SEMANTIC: '0' };
+  const s = await startSetup({ env, home, os: 'linux', port: 0, useCli: false });
+  const base = `http://127.0.0.1:${s.port}`;
+  const api = (p, body) => fetch(base + p, { method: 'POST', headers: { 'X-BrainLink-Token': s.token, 'Content-Type': 'application/json' }, body: JSON.stringify(body || {}) }).then((r) => r.json());
+  try {
+    assert.equal((await api('/api/vault', { path: vaultPath, name: 'Main', pack: 'simple', scaffold: false })).ok, true);
+    await new Promise((resolve) => setTimeout(resolve, 350));
+    const fs = await import('node:fs/promises');
+    await fs.writeFile(path.join(vaultPath, 'Workflow.md'), '---\ntype: workflow\nid: workflow.collect\nscope: organisation\nstatus: current\n---\n# Collect questions\n');
+    const original = '---\ntype: team\nid: team.product\nscope: organisation\nstatus: current\nrelations:\n  - predicate: runs\n    target: workflow.collect\n    review: verified\n    source: "Operations handbook section 2"\n    confidence: 0.9\n---\n# Product team\n';
+    await fs.writeFile(path.join(vaultPath, 'Team.md'), original);
+    const detail = await api('/api/graph3d/note', { vault: 'Main', path: 'Team.md' });
+    assert.equal(detail.relationships.length, 1);
+    assert.equal((await api('/api/graph3d', {})).links.some((link) => link.predicate === 'runs'), true);
+    const stale = await api('/api/graph3d/relationship/archive', { vault: 'Main', path: 'Team.md', etag: 'stale', relation_index: 0 });
+    assert.match(stale.error, /changed since it was opened/i);
+    const archived = await api('/api/graph3d/relationship/archive', { vault: 'Main', path: 'Team.md', etag: detail.etag, relation_index: 0 });
+    assert.equal(archived.ok, true, JSON.stringify(archived));
+    const graph = await api('/api/graph3d', {});
+    assert.equal(graph.links.some((link) => link.predicate === 'runs'), false);
+    const archivedDetail = await api('/api/graph3d/note', { vault: 'Main', path: 'Team.md' });
+    assert.equal(archivedDetail.relationships.length, 0);
+    assert.equal(archivedDetail.withdrawn_relationships.length, 1);
+    const archivedRaw = await fs.readFile(path.join(vaultPath, 'Team.md'), 'utf8');
+    assert.match(archivedRaw, /^    review: withdrawn$/m);
+    assert.match(archivedRaw, /^    source: "Operations handbook section 2"$/m);
+    const restored = await api('/api/graph3d/relationship/reopen', { vault: 'Main', path: 'Team.md', etag: archivedDetail.etag, relation_index: 0 });
+    assert.equal(restored.ok, true, JSON.stringify(restored));
+    const restoredDetail = await api('/api/graph3d/note', { vault: 'Main', path: 'Team.md' });
+    assert.equal(restoredDetail.withdrawn_relationships.length, 0);
+    assert.equal(restoredDetail.proposed_relationships.length, 1);
+    assert.equal((await api('/api/graph3d', {})).links.some((link) => link.predicate === 'runs'), false, 'restoring returns the relation to review, not straight to the graph');
+    const activity = (await fs.readFile(path.join(home, 'app', 'activity.log'), 'utf8')).trim().split(/\r?\n/).map(JSON.parse)
+      .filter((entry) => entry.tool === 'graph_relationship_review');
+    assert.deepEqual(activity.map((entry) => entry.action), ['archived', 'reopened']);
+    assert.doesNotMatch(JSON.stringify(activity), /Team\.md|Operations handbook section 2|team\.product/);
+  } finally { s.server.close(); }
+});
+
 test('graph review queue returns bounded public proposals and excludes private notes and vaults', async () => {
   const home = await tmp('graph3d-review-queue');
   const main = path.join(home, 'main');
@@ -542,6 +585,10 @@ test('graph UI exposes a confirmation-gated action for reviewing a suggested rel
   assert.match(src, /api\('\/api\/graph3d\/relationship\/reopen'/);
   assert.match(src, /data-reopen-relation/);
   assert.match(src, /data-reopen-rejected/);
+  assert.match(src, /data-archive-relation/);
+  assert.match(src, /api\('\/api\/graph3d\/relationship\/archive'/);
+  assert.match(src, /withdrawn_relationships/);
+  assert.match(src, /data-restore-withdrawn/);
   assert.match(src, /rejected_relationships/);
   assert.match(src, /data-reject-queued/);
   assert.match(src, /api\('\/api\/graph3d\/relationship\/propose'/);

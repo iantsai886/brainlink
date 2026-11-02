@@ -184,6 +184,7 @@ function deriveTypedRelationsWithReview(notes, reviewStatus) {
 
 export function deriveProposedTypedRelations(notes) { return deriveTypedRelationsWithReview(notes, 'proposed'); }
 export function deriveRejectedTypedRelations(notes) { return deriveTypedRelationsWithReview(notes, 'rejected'); }
+export function deriveWithdrawnTypedRelations(notes) { return deriveTypedRelationsWithReview(notes, 'withdrawn'); }
 
 // Privacy-safe structural counts for RSI. Only aggregate numbers leave this function: no note
 // titles, IDs, evidence, paths, or relation text. Private/generated notes cannot affect totals.
@@ -309,7 +310,7 @@ function pathTitle(rel) { return String(rel || '').split(/[\\/]/).pop()?.replace
 // The caller must first revalidate the target and compare a content hash.
 function resolveTypedRelation(raw, relationIndex, decision, expectedReview = 'proposed') {
   if (!Number.isInteger(relationIndex) || relationIndex < 0) throw new Error('Invalid relationship selection.');
-  if (!['verified', 'rejected', 'proposed'].includes(decision) || !['proposed', 'verified', 'rejected'].includes(expectedReview)) throw new Error('Invalid relationship decision.');
+  if (!['verified', 'rejected', 'proposed', 'withdrawn'].includes(decision) || !['proposed', 'verified', 'rejected', 'withdrawn'].includes(expectedReview)) throw new Error('Invalid relationship decision.');
   const match = String(raw || '').match(/^(\uFEFF?---[^\S\r\n]*\r?\n)([\s\S]*?)(\r?\n---[^\S\r\n]*(?:\r?\n|$))/);
   if (!match) throw new Error('This note has no valid frontmatter.');
   const lines = match[2].split(/\r?\n/);
@@ -339,6 +340,7 @@ function resolveTypedRelation(raw, relationIndex, decision, expectedReview = 'pr
 export function approveTypedRelation(raw, relationIndex) { return resolveTypedRelation(raw, relationIndex, 'verified'); }
 export function rejectTypedRelation(raw, relationIndex) { return resolveTypedRelation(raw, relationIndex, 'rejected'); }
 export function reopenTypedRelation(raw, relationIndex, expectedReview = 'verified') { return resolveTypedRelation(raw, relationIndex, 'proposed', expectedReview); }
+export function withdrawTypedRelation(raw, relationIndex, expectedReview) { return resolveTypedRelation(raw, relationIndex, 'withdrawn', expectedReview); }
 
 export function appendTypedRelationProposal(raw, proposal) {
   if (!PREDICATES.has(proposal?.predicate) || !ID.test(String(proposal?.target_id || '')) ||
