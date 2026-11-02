@@ -55,19 +55,28 @@ test('relationship suggestions require existing same-scope typed endpoints, vali
 
 test('image drafts send the selected image only to local vision analysis and save only an unverified description', async () => {
   const image = Buffer.from('fictional-image-bytes').toString('base64');
-  let requestBody;
+  let requestBody, calls = 0;
   const draft = await generateLocalIngestionDraft({ title: 'Photo', rel: 'Raw/Photo.png', body: '', image_base64: image, source_id: 'c'.repeat(64), revision: 'd'.repeat(64), vault: 'Fictional Company', folder: 'Raw' }, 'llava:7b', {
     fetchImpl: async (url, options) => {
       assert.equal(url, 'http://127.0.0.1:11434/api/chat');
+      calls++;
       requestBody = JSON.parse(options.body);
-      return { ok: true, json: async () => ({ message: { content: JSON.stringify({ title: 'Fictional photo', memory_type: 'episodic', summary: 'A fictional image for a test.', visual_description: 'A blue cup on a table.', key_points: [] }) } }) };
+      const response = calls === 1
+        ? { title: 'Fictional photo', memory_type: 'episodic', summary: 'A fictional image for a test.', key_points: [] }
+        : { visual_description: 'A blue cup on a table.' };
+      return { ok: true, json: async () => ({ message: { content: JSON.stringify(response) } }) };
     },
   });
-  assert.deepEqual(requestBody.messages[1].images, [image]);
+  assert.equal(calls, 2, 'one corrective retry is made when a vision model omits its required description');
+  assert.deepEqual(requestBody.messages[2].images, [image]);
   assert.match(requestBody.messages[0].content, /visible text.*untrusted data/i);
+  assert.match(requestBody.messages[1].content, /prior response omitted the image description/i);
   assert.match(draft.body, /Image description \(AI draft; unverified\)/);
   assert.match(draft.body, /A blue cup on a table/);
   assert.doesNotMatch(JSON.stringify(draft), new RegExp(image));
+  await assert.rejects(generateLocalIngestionDraft({ title: 'Photo', rel: 'Raw/Photo.png', body: '', image_base64: image, source_id: 'c'.repeat(64), revision: 'd'.repeat(64), vault: 'Fictional Company', folder: 'Raw' }, 'vision-model', {
+    fetchImpl: async () => ({ ok: true, json: async () => ({ message: { content: JSON.stringify({ title: 'Fictional photo', summary: 'No description returned.' }) } }) }),
+  }), /Try again or choose another vision-capable model/i);
   await assert.rejects(generateLocalIngestionDraft({ title: 'bad', rel: 'Raw/bad.png', body: '', image_base64: 'not base64!' }, 'llava:7b', { fetchImpl: async () => { throw new Error('must not call Ollama'); } }), /too large or invalid/i);
 });
 
