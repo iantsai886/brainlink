@@ -1,6 +1,13 @@
 # BrainLink implementation status
 
 Status snapshot: 2026-11-03 (Asia/Taipei).
+### Real Windows Ollama inference check (source commit `efb42bbd7616ab4d2c641a5926c9ebefa97eb40f`; 2026-11-03)
+
+Installed the signed per-user Ollama Windows app and pulled `qwen3.5:2b` (2.7 GB; model digest `0689d44085e06d165161a8a9a1731344278cfb5aade63a3c3dbdb48ab54b130a`). Windows 11 Pro, Node.js 24.22.1, NVIDIA RTX 2060 with 4 GB reported VRAM, driver `32.0.15.8142`. The model reported `completion`, `vision`, `tools`, and `thinking` capabilities and loaded onto the GPU.
+
+BrainLink `generateLocalSessionSummary` completed on a fictional Maple Desk session in 132 seconds and returned a structured, source-bounded summary with the expected goal, draft outcome, decision, and next action. It also added two plausible but unsupported open questions; therefore the output correctly remains `local_model_unverified` and is not quality evidence. A direct loopback Ollama JSON request also succeeded. `generateLocalIngestionDraft` completed on fictional text in 3.2 seconds after model warm-up and produced a source-linked `unverified_draft`. These checks establish that local text inference works through the current BrainLink code on this computer, but performance is slow on this GPU.
+
+The synthetic PNG vision-draft check did not pass: Ollama reported vision capability, but the generated response omitted the required `visual_description`, so BrainLink rejected it without saving an incomplete draft. Image understanding is therefore not verified for this model and path. No real vault or personal content was used. Focused automated local-summary, ingestion-draft, and local-summary-setup tests passed 16/16 on the same checkout. The attempted name-filtered full-suite command was mis-scoped and one test file failed at file level; it was stopped, and the focused test files were rerun directly and passed. No application source code changed in this check. Hosted CI, different hardware, image quality, and customer acceptance remain unverified.
 GitHub repository: `iantsai886/brainlink`
 Branch: `feat/complete-raw-wiki-folder-flow` (current working branch; based on `origin/main`)
 Code baseline: development target `1.2.8`, with `package.json` as the canonical version source. The `v1.2.7` tag belongs to the separate `wip/v1.2.7` release line; this branch continues from the full-source `main` history and does not move or recreate that tag.
