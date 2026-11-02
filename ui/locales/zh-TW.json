@@ -1178,5 +1178,6 @@
   "rsi.experiment.source.changed": "程式碼有變更或工作目錄不乾淨",
   "rsi.experiment.useForReview": "用這次測試作為審查依據",
   "rsi.experiment.evidencePrefilled": "已將測試執行、commit 和 fixture 填入審查欄位。",
-  "rsi.experiment.reranker": "本機重排序測試集（虛構筆記）"
+  "rsi.experiment.reranker": "本機重排序測試集（虛構筆記）",
+  "rsi.experiment.rerankerIndependent": "本機重排序獨立測試集（虛構筆記）"
 }

@@ -1178,5 +1178,6 @@
   "rsi.experiment.source.changed": "código alterado ou com mudanças locais",
   "rsi.experiment.useForReview": "Usar este teste na revisão",
   "rsi.experiment.evidencePrefilled": "A execução, o commit e a fixture foram copiados para os campos de revisão.",
-  "rsi.experiment.reranker": "Teste do reranker local (notas fictícias)"
+  "rsi.experiment.reranker": "Teste do reranker local (notas fictícias)",
+  "rsi.experiment.rerankerIndependent": "Teste independente do reranker local (notas fictícias)"
 }

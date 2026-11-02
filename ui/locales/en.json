@@ -1178,5 +1178,6 @@
   "rsi.experiment.source.changed": "source changed or dirty",
   "rsi.experiment.useForReview": "Use this test for review",
   "rsi.experiment.evidencePrefilled": "Test run, commit and fixture are copied into the review fields.",
-  "rsi.experiment.reranker": "Local reranker test set (fictional notes)"
+  "rsi.experiment.reranker": "Local reranker test set (fictional notes)",
+  "rsi.experiment.rerankerIndependent": "Local reranker independent test set (fictional notes)"
 }

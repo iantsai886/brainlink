@@ -133,6 +133,13 @@ test('RSI experiment receipts are aggregate-only, append-only, and require a fre
   const compactRecorded = await ledger.recordExperiment({ id: compactIdea.id, expected_revision: compactIdea.revision, receipt: compactReceipt });
   assert.equal(compactRecorded.experiments[0].evaluator_version, 'retrieval-eval-v3');
   assert.equal(compactRecorded.experiments[0].candidate_version, 'compact-search-v1');
+  let rerankerIdea = await ledger.create({ ...validIdea, title: 'Independent reranker evaluation' });
+  for (const status of ['triaged', 'proposed']) rerankerIdea = await ledger.update({ id: rerankerIdea.id, expected_revision: rerankerIdea.revision, status });
+  rerankerIdea = await ledger.update({ id: rerankerIdea.id, expected_revision: rerankerIdea.revision, status: 'testing', fields: { candidate_version: 'local-reranker-independent-v1' } });
+  const rerankerReceipt = { ...receipt, run_id: 'BL-RSI-RUN-20261103-abcdef02', suite: 'local-reranker-independent-v1', evaluator_version: 'retrieval-eval-v4', candidate_version: 'local-reranker-independent-v1', candidate_policy: '30 synthetic independent tasks; source rank and privacy measured', sample_count: 30, decision: 'no_demonstrated_gain' };
+  const rerankerRecorded = await ledger.recordExperiment({ id: rerankerIdea.id, expected_revision: rerankerIdea.revision, receipt: rerankerReceipt });
+  assert.equal(rerankerRecorded.experiments[0].suite, 'local-reranker-independent-v1');
+  assert.equal(rerankerRecorded.experiments[0].secondary_metric.name, 'mean_reciprocal_rank');
 });
 
 test('ledger still reads existing schema-1 experiment history without treating it as bound proof', async () => {

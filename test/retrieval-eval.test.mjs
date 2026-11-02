@@ -103,7 +103,7 @@ test('independent frozen retrieval set reports quality, abstention, context, lat
   assert.equal(report.schema, 2);
   assert.equal(report.case_count, 30);
   assert.equal(report.fixture_sha256, createHashForTest(fixtureBytes));
-  assert.equal(report.evaluator_version, 'retrieval-eval-v3');
+  assert.equal(report.evaluator_version, 'retrieval-eval-v4');
   assert.equal(report.source_commit, 'fixture-test-commit');
   assert.equal(report.baseline.privacy_violations, 0);
   assert.equal(report.candidate.privacy_violations, 0);
@@ -118,6 +118,9 @@ test('independent frozen retrieval set reports quality, abstention, context, lat
   assert.ok(report.baseline.abstention.expected >= 5);
   assert.equal(report.baseline.source_correctness.source_recall, 1);
   assert.equal(report.candidate.source_correctness.source_recall, 1);
+  assert.equal(report.baseline.ranking.answerable_cases, report.baseline.source_correctness.answerable_cases);
+  assert.ok(report.baseline.ranking.mean_reciprocal_rank > 0);
+  assert.ok(report.candidate.ranking.mean_reciprocal_rank > 0);
   assert.equal(report.candidate.task_success.count, report.baseline.task_success.count);
   assert.ok(report.candidate.abstention.false <= report.baseline.abstention.false);
   assert.ok(report.candidate.abstention.missed <= report.baseline.abstention.missed);
@@ -208,7 +211,7 @@ test('independent retrieval CLI accepts an explicit fictional vault and emits an
   });
   const report = JSON.parse(stdout);
   assert.equal(report.fixture_sha256, createHashForTest(fixtureBytes));
-  assert.equal(report.evaluator_version, 'retrieval-eval-v3');
+  assert.equal(report.evaluator_version, 'retrieval-eval-v4');
   assert.equal(report.case_count, 30);
   assert.equal(report.environment.node, process.version);
   assert.equal(report.source_commit, execFileSync('git', ['rev-parse', 'HEAD'], { encoding: 'utf8' }).trim());
