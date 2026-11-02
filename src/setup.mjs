@@ -2253,6 +2253,24 @@ export async function startSetup(opts = {}) {
       } catch { return { available: false, models: [] }; }
       finally { clearTimeout(timer); }
     },
+    'POST /api/sessions/local-summary/model-capabilities': async (b) => {
+      const model = typeof b.model === 'string' ? b.model.trim() : '';
+      if (!validLocalModelName(model)) throw new Error('Enter a valid local Ollama model name.');
+      const controller = new AbortController();
+      const timer = setTimeout(() => controller.abort(), 4000);
+      timer.unref?.();
+      try {
+        const response = await (opts.localSummaryModelInfoFetch || fetch)(`${LOCAL_OLLAMA_URL}/api/show`, {
+          method: 'POST', headers: { 'Content-Type': 'application/json' }, signal: controller.signal,
+          body: JSON.stringify({ model }),
+        });
+        if (!response?.ok) return { available: false, model, vision: null };
+        const payload = await response.json();
+        const capabilities = Array.isArray(payload?.capabilities) ? payload.capabilities.filter((item) => typeof item === 'string') : null;
+        return { available: true, model, vision: capabilities ? capabilities.includes('vision') : null };
+      } catch { return { available: false, model, vision: null }; }
+      finally { clearTimeout(timer); }
+    },
     'POST /api/sessions/local-summary/generate': async (b) => {
       const cfg = await loadConfig(file);
       if (!cfg.sessions.localSummary.enabled) throw new Error('Turn on local summaries in Sessions settings first.');

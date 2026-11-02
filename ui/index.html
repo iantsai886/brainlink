@@ -260,7 +260,8 @@ main #ready, main #ask-panel, main #brain-panel, main #sessions-panel, main #s-c
       <label class="muted" style="display:flex;flex-direction:row;gap:6px;align-items:center;margin-top:6px"><input type="checkbox" id="sess-local-summary-auto" style="width:auto"><span data-i18n="sessions.localSummaryAuto"></span></label>
       <label class="muted" style="display:flex;flex-direction:row;gap:6px;align-items:center;margin-top:6px"><input type="checkbox" id="sess-local-summary-auto-file" style="width:auto"><span data-i18n="sessions.localSummaryAutoFile"></span></label>
       <p class="muted" data-i18n="sessions.localSummaryAutoFileHint"></p>
-      <div class="row" style="margin-top:6px"><label><span data-i18n="sessions.localSummaryModel"></span><input id="sess-local-summary-model" list="sess-local-summary-model-options" maxlength="160" placeholder="qwen2.5:3b"><datalist id="sess-local-summary-model-options"></datalist></label><button class="secondary" id="sess-local-summary-find" data-i18n="sessions.localSummaryFind"></button><button class="secondary" id="sess-local-summary-save" data-i18n="sessions.localSummarySave"></button></div>
+      <div class="row" style="margin-top:6px"><label><span data-i18n="sessions.localSummaryModel"></span><input id="sess-local-summary-model" list="sess-local-summary-model-options" maxlength="160" placeholder="qwen2.5:3b"><datalist id="sess-local-summary-model-options"></datalist></label><button class="secondary" id="sess-local-summary-find" data-i18n="sessions.localSummaryFind"></button><button class="secondary" id="sess-local-summary-check-vision" data-i18n="sessions.localSummaryCheckVision"></button><button class="secondary" id="sess-local-summary-save" data-i18n="sessions.localSummarySave"></button></div>
+      <p id="sess-local-summary-vision-status" class="muted" role="status" aria-live="polite"></p>
     </div>
     <div class="row" style="margin-bottom:10px"><label class="muted" style="display:flex;flex-direction:row;gap:6px;align-items:center"><input type="checkbox" id="sess-private" style="width:auto"><span data-i18n="sessions.showPrivate"></span></label></div>
     <div id="session-hook-settings" class="cards"></div>
@@ -2065,6 +2066,16 @@ $('sess-local-summary-find').onclick = () => act(async () => {
   if (!result.models.length) { toast(t('sessions.localSummaryNone')); return; }
   if (!result.models.includes($('sess-local-summary-model').value)) $('sess-local-summary-model').value = result.models[0];
   toast(t('sessions.localSummaryFound', { count: result.models.length }));
+});
+$('sess-local-summary-check-vision').onclick = () => act(async () => {
+  const model = $('sess-local-summary-model').value.trim();
+  const result = await api('POST', '/api/sessions/local-summary/model-capabilities', { model });
+  const status = $('sess-local-summary-vision-status');
+  status.textContent = !result.available ? t('sessions.localSummaryUnavailable')
+    : result.vision === true ? t('sessions.localSummaryVisionSupported', { model: result.model })
+      : result.vision === false ? t('sessions.localSummaryVisionUnsupported', { model: result.model })
+        : t('sessions.localSummaryVisionUnknown', { model: result.model });
+  status.className = result.available && result.vision === true ? 'muted pill on' : 'muted';
 });
 $('sess-local-summary-save').onclick = () => act(async () => {
   const result = await api('POST', '/api/sessions/local-summary/settings', { enabled: $('sess-local-summary-enabled').checked, model: $('sess-local-summary-model').value, autoDraftOnEnd: $('sess-local-summary-enabled').checked && $('sess-local-summary-auto').checked, autoFileOnEnd: $('sess-local-summary-enabled').checked && $('sess-local-summary-auto').checked && $('sess-local-summary-auto-file').checked });

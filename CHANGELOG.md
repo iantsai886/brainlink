@@ -2,6 +2,11 @@
 
 This log covers the development branch. Entries marked **unreleased** are not published product releases. See [release readiness](docs/RELEASE-READINESS.md) for the current evidence and remaining release gates.
 
+## 2026-11-02 — Development, unreleased
+
+- Added a local Ollama image-support check in Sessions settings. It queries only the local `/api/show` endpoint and shows whether the selected model reports vision support; it sends no note or image. English, Portuguese, and Traditional Chinese labels are included. On Windows/Node.js 24.22.1, `npm run test:all` passed: core 625 total (617 passed, 0 failed, 8 platform/privilege skips); UI 44/44. The live Ollama/model check remains unverified because Ollama is not installed on this machine.
+- Rebuilt all four unsigned Linux 1.2.8 packages from source commit `586aaa8`; all SHA-256 sidecars matched. The extracted x64 Debian package passed the bundled-runtime MCP, OCR, scanned-PDF, HTML, and private-note-canary smoke. ARM64 artifacts were not run on ARM hardware, and no package was published.
+
 ## 2026-10-31 — Development, unreleased
 
 - Improved Claude Desktop connection diagnosis: on Windows, the BrainLink access check now detects when Claude was already running before its BrainLink settings changed and gives a specific full-quit/reopen instruction; if Claude is closed, it says to open it. It checks process start times and config time only; it does not claim Claude loaded or called the tools. Final Windows/Node.js 24.22.1 `npm run test:all` passed on the pre-commit working tree based on `eb08162`: core 609 total (601 passed, 0 failed, 8 platform/privilege skips), UI 44/44. A live local check detected the current Claude process predates the saved config.

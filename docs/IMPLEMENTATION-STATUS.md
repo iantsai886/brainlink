@@ -5,6 +5,10 @@ GitHub repository: `iantsai886/brainlink`
 Branch: `feat/complete-raw-wiki-folder-flow` (current working branch; based on `origin/main`)
 Code baseline: development target `1.2.8`, with `package.json` as the canonical version source. The `v1.2.7` tag belongs to the separate `wip/v1.2.7` release line; this branch continues from the full-source `main` history and does not move or recreate that tag.
 
+### Ollama vision capability check (working tree based on `a4fc9bc`, 2026-11-02)
+
+Added an authenticated Setup check for whether the selected local Ollama model reports image support. BrainLink queries only `http://127.0.0.1:11434/api/show`, returns only the model name and `vision` capability, and reports unknown when Ollama does not provide capability metadata. The Sessions UI has a status message in English, Portuguese and Traditional Chinese. Focused API tests passed 8/8, local-summary UI tests passed, and the full UI suite passed 44/44; locale JSON parsing and `git diff --check` passed. Ollama is not installed or running on this computer, so live model inference and picture-description quality are still unverified.
+
 ### macOS package runtime compatibility (source commit `08b332c`, 2026-11-02)
 
 The macOS `.pkg` builder now uses the same Node.js 22.23.3 runtime as the macOS zip, cached separately from the Node 24 Windows/Linux runtime. This keeps the package runtime consistent with the `.pkg` minimum of macOS 11; official Node.js 24 prebuilt macOS binaries require macOS 13.5 or newer. On the source tree committed as `08b332c`, `npm run test:all` passed on Windows/Node.js 24.22.1: core 623 total (615 passed, 0 failed, 8 platform/privilege skips); UI 44/44. The focused package tests passed 3/3 and both Mac builder scripts passed `bash -n` in a disposable Linux container. The `.pkg` was not built or run on macOS because native Apple packaging tools and a Mac runtime are required. This is local verification, not a signed release or customer acceptance.
