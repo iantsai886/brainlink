@@ -641,7 +641,7 @@
   "ingestion.modeWatch": "定期檢查資料夾",
   "ingestion.interval": "檢查間隔（分鐘）",
   "ingestion.autoDrafts": "使用本機 AI 自動分析新檔案",
-  "ingestion.autoDraftsHint": "僅在這台電腦使用 Ollama，每次最多分析 5 個新檔案。草稿尚未驗證，預設會留在這裡等待檢查；自動歸檔需另外開啟。",
+  "ingestion.autoDraftsHint": "僅在這台電腦使用 Ollama，每次最多分析 5 個新檔案。啟用後，PNG/JPEG 圖片會傳給這台電腦上的 Ollama 描述畫面內容；需要支援視覺的模型。草稿尚未驗證，預設會留在這裡等待檢查；自動歸檔需另外開啟。",
   "ingestion.autoFile": "自動將新筆記存成待審核提案",
   "ingestion.autoFileHint": "請在下方為每個掃描資料夾選擇存放位置。BrainLink 只新增有來源連結且標記為 proposed 的筆記，不會改寫既有筆記，也不會把 AI 內容標成已驗證。",
   "ingestion.scanFiled": "掃描完成。{count} 篇新筆記已存入你選擇的資料夾，並標記為待審核提案。",

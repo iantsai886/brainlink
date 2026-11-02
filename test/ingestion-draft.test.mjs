@@ -24,6 +24,24 @@ test('local ingestion drafts use only loopback Ollama and keep source links and 
   assert.equal(draft.status, 'unverified_draft');
 });
 
+test('image drafts send the selected image only to local vision analysis and save only an unverified description', async () => {
+  const image = Buffer.from('fictional-image-bytes').toString('base64');
+  let requestBody;
+  const draft = await generateLocalIngestionDraft({ title: 'Photo', rel: 'Raw/Photo.png', body: '', image_base64: image, source_id: 'c'.repeat(64), revision: 'd'.repeat(64), vault: 'Fictional Company', folder: 'Raw' }, 'llava:7b', {
+    fetchImpl: async (url, options) => {
+      assert.equal(url, 'http://127.0.0.1:11434/api/chat');
+      requestBody = JSON.parse(options.body);
+      return { ok: true, json: async () => ({ message: { content: JSON.stringify({ title: 'Fictional photo', memory_type: 'episodic', summary: 'A fictional image for a test.', visual_description: 'A blue cup on a table.', key_points: [] }) } }) };
+    },
+  });
+  assert.deepEqual(requestBody.messages[1].images, [image]);
+  assert.match(requestBody.messages[0].content, /visible text.*untrusted data/i);
+  assert.match(draft.body, /Image description \(AI draft; unverified\)/);
+  assert.match(draft.body, /A blue cup on a table/);
+  assert.doesNotMatch(JSON.stringify(draft), new RegExp(image));
+  await assert.rejects(generateLocalIngestionDraft({ title: 'bad', rel: 'Raw/bad.png', body: '', image_base64: 'not base64!' }, 'llava:7b', { fetchImpl: async () => { throw new Error('must not call Ollama'); } }), /too large or invalid/i);
+});
+
 test('selected source can become a proposed note only after explicit confirmation; stale/private sources are refused', async () => {
   const home = await mkdtemp(path.join(tmpdir(), 'brainlink-ingestion-draft-'));
   const appHome = path.join(home, 'app'), vault = path.join(home, 'vault');

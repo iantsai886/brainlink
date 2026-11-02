@@ -297,7 +297,8 @@ async function readEligible(full, root, realRoot, rel, { includeBody = false } =
       if (isPrivateMeta(meta) || fmSaysPrivate(frontmatter) || meta.generated_by === 'brainlink') return null;
       body = markdownBody;
     }
-    return { rel, title: path.posix.basename(rel).slice(0, -extension.length), format: extension.slice(1), revision: hash(bytes), updated_at: new Date(after.mtimeMs).toISOString(), ...(includeBody ? { body, body_truncated: raw.truncated === true } : {}) };
+    const imageBase64 = includeBody && ['.png', '.jpg', '.jpeg'].includes(extension) ? bytes.toString('base64') : undefined;
+    return { rel, title: path.posix.basename(rel).slice(0, -extension.length), format: extension.slice(1), revision: hash(bytes), updated_at: new Date(after.mtimeMs).toISOString(), ...(includeBody ? { body, body_truncated: raw.truncated === true, ...(imageBase64 ? { image_base64: imageBase64 } : {}) } : {}) };
   } finally { await fh.close(); }
 }
 

@@ -369,6 +369,9 @@ test('ingestion reads only supported text files from the selected folder and rej
   const imageSource = await readIngestionSource(ctx, 'Acme Studio', 'Raw', imageItem);
   assert.equal(imageSource.format, 'png');
   assert.match(imageSource.body, /BRAINLINK OCR TEST 123/);
+  assert.deepEqual(Buffer.from(imageSource.image_base64, 'base64').subarray(0, 8), Buffer.from([137, 80, 78, 71, 13, 10, 26, 10]));
+  const agentImageRead = await createMcp(ctx).tools.find((tool) => tool.name === 'ingestion_read_source').run({ vault: 'Acme Studio', folder: 'Raw', source_id: imageItem.source_id, revision: imageItem.revision });
+  assert.equal(Object.hasOwn(agentImageRead, 'image_base64'), false);
   const scannedPdf = queue.candidates.find((candidate) => candidate.path === 'Raw/scan.pdf');
   const scannedPdfSource = await readIngestionSource(ctx, 'Acme Studio', 'Raw', scannedPdf);
   assert.match(scannedPdfSource.body, /BRAINLINK OCR TEST 123/i);
