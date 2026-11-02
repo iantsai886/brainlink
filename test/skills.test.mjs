@@ -60,10 +60,12 @@ test('portable Raw-to-Wiki Skill is identical for Claude Code and Codex and requ
   const contents = await Promise.all(skillPaths.map((file) => readFile(path.join(ROOT, file), 'utf8')));
   assert.equal(new Set(contents).size, 1, 'canonical skill and client copies must stay byte-identical');
   const { fields, body } = parseSkill(contents[0], skillPaths[0]);
-  assert.equal(fields.metadata.version, '1.0.0');
+  assert.equal(fields.metadata.version, '1.1.0');
   assert.match(fields.metadata['applicable-clients'], /Any AI client/);
-  for (const tool of ['brainlink_guide', 'ingestion_queue', 'vault_read_note', 'vault_search', 'propose_note', 'ingestion_record']) assert.ok(fields.compatibility.includes(tool) || fields.metadata['required-tools'].includes(tool), tool);
+  for (const tool of ['brainlink_guide', 'ingestion_queue', 'ingestion_read_source', 'vault_search', 'propose_note', 'ingestion_record']) assert.ok(fields.compatibility.includes(tool) || fields.metadata['required-tools'].includes(tool), tool);
   assert.match(body, /single folder/);
+  assert.match(body, /TXT, CSV\/TSV, JSON, XML, YAML and LOG/);
+  assert.match(body, /ingestion_read_source/);
   assert.match(body, /confirm=false/);
   assert.match(body, /clearly approves/);
   assert.match(body, /After BrainLink confirms the note was actually saved/);

@@ -15,6 +15,19 @@ const MAX_DEPTH = 32;
 const MAX_NOTE_BYTES = 5 * 1024 * 1024;
 const MAX_HEADER_BYTES = 64 * 1024;
 const MAX_DRAFT_SOURCE_CHARS = 24_000;
+const TEXT_SOURCE_FORMATS = new Set(['.md', '.txt', '.csv', '.tsv', '.json', '.xml', '.yaml', '.yml', '.log']);
+
+function sourceExtension(rel) { return path.posix.extname(String(rel || '')).toLowerCase(); }
+
+function isSupportedSource(rel) { return TEXT_SOURCE_FORMATS.has(sourceExtension(rel)); }
+
+function decodeSourceText(bytes, extension) {
+  let text;
+  try { text = new TextDecoder('utf-8', { fatal: true }).decode(bytes).replace(/^\uFEFF/, ''); }
+  catch { throw new Error('This source is not valid UTF-8 text.'); }
+  if (text.includes('\0')) throw new Error('This source contains binary data and cannot be read as text.');
+  return text;
+}
 
 function selectedFolder(value) {
   const folder = String(value || '').replace(/\\/g, '/').replace(/^\/+|\/+$/g, '');
@@ -57,7 +70,8 @@ async function readEligible(full, root, realRoot, rel, { includeBody = false } =
   if (await isExcludedPath(root, rel)) return null;
   const before = await lstat(full);
   if (before.isSymbolicLink() || !before.isFile() || before.size > MAX_NOTE_BYTES) return null;
-  if (!/\.md$/i.test(rel)) return null;
+  const extension = sourceExtension(rel);
+  if (!isSupportedSource(rel)) return null;
   const real = await realpath(full);
   const relReal = path.relative(realRoot, real);
   if (relReal === '..' || relReal.startsWith(`..${path.sep}`) || path.isAbsolute(relReal) || await isExcludedPath(root, relReal.split(path.sep).join('/'))) return null;
@@ -66,17 +80,25 @@ async function readEligible(full, root, realRoot, rel, { includeBody = false } =
   try {
     const opened = await fh.stat();
     if (!opened.isFile() || opened.size !== before.size || (opened.ino && before.ino && opened.ino !== before.ino) || (opened.dev && before.dev && opened.dev !== before.dev)) return null;
-    const header = Buffer.alloc(Math.min(opened.size, MAX_HEADER_BYTES));
-    const { bytesRead } = await fh.read(header, 0, header.length, 0);
-    if (!indexableHeader(header.subarray(0, bytesRead).toString('utf8'), opened.size, bytesRead)) return null;
-    // Privacy was checked from the bounded header. Only now read the body.
-    const raw = await fh.readFile('utf8');
+    if (extension === '.md') {
+      const header = Buffer.alloc(Math.min(opened.size, MAX_HEADER_BYTES));
+      const { bytesRead } = await fh.read(header, 0, header.length, 0);
+      if (!indexableHeader(header.subarray(0, bytesRead).toString('utf8'), opened.size, bytesRead)) return null;
+    }
+    // Scope and .brainlinkignore exclusions were checked before opening the source. Markdown
+    // additionally requires a bounded frontmatter privacy check before its body is read.
+    const bytes = await fh.readFile();
+    const raw = decodeSourceText(bytes, extension);
     const after = await fh.stat();
     const pathAfter = await lstat(full);
     if (after.size !== opened.size || after.mtimeMs !== opened.mtimeMs || pathAfter.isSymbolicLink() || (pathAfter.ino && opened.ino && pathAfter.ino !== opened.ino)) return null;
-    const { meta, body, frontmatter } = parseFrontmatter(raw);
-    if (isPrivateMeta(meta) || fmSaysPrivate(frontmatter) || meta.generated_by === 'brainlink') return null;
-    return { rel, title: path.posix.basename(rel).replace(/\.md$/i, ''), revision: hash(raw), updated_at: new Date(after.mtimeMs).toISOString(), ...(includeBody ? { body } : {}) };
+    let body = raw;
+    if (extension === '.md') {
+      const { meta, body: markdownBody, frontmatter } = parseFrontmatter(raw);
+      if (isPrivateMeta(meta) || fmSaysPrivate(frontmatter) || meta.generated_by === 'brainlink') return null;
+      body = markdownBody;
+    }
+    return { rel, title: path.posix.basename(rel).slice(0, -extension.length), format: extension.slice(1), revision: hash(bytes), updated_at: new Date(after.mtimeMs).toISOString(), ...(includeBody ? { body } : {}) };
   } finally { await fh.close(); }
 }
 
@@ -97,7 +119,8 @@ async function sourcesInFolder(ctx, vaultName, folderInfo) {
       const st = await lstat(full).catch(() => null);
       if (!st || st.isSymbolicLink()) { skipped++; continue; }
       if (st.isDirectory()) { await visit(full, rel, depth + 1); continue; }
-      if (!st.isFile() || !/\.md$/i.test(entry.name)) continue;
+      if (!st.isFile()) continue;
+      if (!isSupportedSource(rel)) { skipped++; continue; }
       const source = await readEligible(full, folderInfo.root, folderInfo.realRoot, rel).catch(() => null);
       if (source) out.push(source); else skipped++;
     }
@@ -128,7 +151,7 @@ export async function ingestionQueue(ctx, vaultName, folder, { limit = 50 } = {}
   const cap = Math.max(1, Math.min(100, Number(limit) || 50));
   const candidates = pending.slice(0, cap)
     .map((s) => ({ source_id: sourceId(scope, s.rel), revision: s.revision, path: s.rel, title: s.title, updated_at: s.updated_at }));
-  return { ok: true, vault: vaultName, folder: folderInfo.folder, candidates, queued_total: pending.length, scanned, skipped, truncated, limited: pending.length > cap, next: 'Read each selected source with vault_read_note. Draft linked knowledge with propose_note and show its preview. After a linked note is saved, record filed; otherwise record skipped. Source files are never changed.' };
+  return { ok: true, vault: vaultName, folder: folderInfo.folder, candidates, queued_total: pending.length, scanned, skipped, truncated, limited: pending.length > cap, next: 'Read each selected source with ingestion_read_source. Draft linked knowledge with propose_note and show its preview. After a linked note is saved, record filed; otherwise record skipped. Source files are never changed.' };
 }
 
 // Re-read one exact queue item only after the same folder, vault and privacy checks pass.

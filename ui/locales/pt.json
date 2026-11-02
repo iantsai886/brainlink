@@ -634,7 +634,7 @@
   "share.clearAndReshare": "Limpar e compartilhar novamente",
   "share.confirmClearReshare": "Isso removerá tudo o que foi compartilhado anteriormente nessa pasta e começará a compartilhar novamente. Continuar?",
   "ingestion.title": "Verificações automáticas de fontes",
-  "ingestion.hint": "Adicione pastas de um vault não privado. Enquanto estiver aberto, o BrainLink verifica notas Markdown diariamente no horário escolhido ou quando você clica em Verificar agora.",
+  "ingestion.hint": "Adicione pastas de um vault não privado. Enquanto estiver aberto, o BrainLink verifica arquivos Markdown, TXT, CSV/TSV, JSON, XML, YAML e LOG diariamente ou quando você clica em Verificar agora. Outros formatos são ignorados.",
   "ingestion.enabled": "Executar verificação diária em segundo plano",
   "ingestion.autoDrafts": "Também criar rascunhos locais de IA para até 5 notas novas",
   "ingestion.autoDraftsHint": "Usa o Ollama somente neste computador. As notas novas continuam não verificadas; por padrão, ficam aqui para revisão.",

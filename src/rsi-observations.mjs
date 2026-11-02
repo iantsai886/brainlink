@@ -5,7 +5,7 @@ const WINDOWS = Object.freeze({ current: 30, previous: 30 });
 const TOOL_GROUPS = Object.freeze({
   retrieval: new Set(['brainlink_guide', 'vault_search', 'vault_related', 'vault_recent', 'vault_read_note', 'search', 'fetch', 'open_loops', 'brain_brief']),
   sessions: new Set(['session_list', 'session_read', 'session_close', 'session_filing_folders']),
-  filing: new Set(['ingestion_queue', 'ingestion_record', 'propose_note', 'source_scan']),
+  filing: new Set(['ingestion_queue', 'ingestion_read_source', 'ingestion_record', 'propose_note', 'source_scan']),
   handoff: new Set(['list_handoffs', 'send_handoff']),
   recovery: new Set(['backup', 'backup_restore']),
   graph_review: new Set(['graph_relationship_review']),

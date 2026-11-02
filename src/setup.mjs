@@ -594,7 +594,7 @@ export async function startSetup(opts = {}) {
         try {
           const source = await readIngestionSource(ctx, candidate.vault, candidate.folder, { source_id: candidate.source_id, revision: candidate.revision });
           const draft = await generateLocalIngestionDraft(source, cfg.sessions.localSummary.model, { fetchImpl: opts.ingestionDraftFetch || fetch });
-          const related = await relatedNotes(ctx, draft.vault, source.rel);
+          const related = source.format === 'md' ? await relatedNotes(ctx, draft.vault, source.rel) : { suggested: [] };
           draft.related_notes = related.suggested
             .filter((item) => typeof item.path === 'string' && !/[\[\]]/.test(item.path) && Array.isArray(item.shared_terms))
             .slice(0, 8)
@@ -2386,7 +2386,7 @@ export async function startSetup(opts = {}) {
       const ctx = localContext(cfg, { ...env, BRAINLINK_SEMANTIC: '0' });
       const source = await readIngestionSource(ctx, String(b.vault || ''), String(b.folder || ''), { source_id: b.source_id, revision: b.revision });
       const draft = await generateLocalIngestionDraft(source, local.model, { fetchImpl: opts.ingestionDraftFetch || fetch });
-      const related = await relatedNotes(ctx, draft.vault, source.rel);
+      const related = source.format === 'md' ? await relatedNotes(ctx, draft.vault, source.rel) : { suggested: [] };
       draft.related_notes = related.suggested
         .filter((item) => typeof item.path === 'string' && !/[[\]]/.test(item.path) && Array.isArray(item.shared_terms))
         .slice(0, 8)

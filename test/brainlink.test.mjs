@@ -17,7 +17,7 @@ import { createMcp, serveHttp, VERSION } from '../src/server.mjs';
 import { buildPack, scaffold, mergePack } from '../src/packs.mjs';
 import { connectClient, disconnectClient, detect, codexToml, readClientAgentToken } from '../src/connectors.mjs';
 import { startSetup } from '../src/setup.mjs';
-import { ingestionQueue, recordIngestion } from '../src/ingestion.mjs';
+import { ingestionQueue, readIngestionSource, recordIngestion } from '../src/ingestion.mjs';
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const SAMPLE = path.join(ROOT, 'samples', 'acme-studio');
@@ -201,6 +201,31 @@ test('ingestion queue scans only a chosen folder and filters private, excluded, 
   await assert.rejects(ingestionQueue(ctxOf(cfg, env), 'Journal', 'Raw'), /private vault/i);
 });
 
+test('ingestion reads only supported UTF-8 text files from the selected folder and rejects stale items', async () => {
+  const { base, company, cfg } = await fixture();
+  const raw = path.join(company, 'Raw');
+  await mkdir(path.join(raw, 'Blocked'), { recursive: true });
+  await writeFile(path.join(raw, '.brainlinkignore'), 'Blocked/\n');
+  await writeFile(path.join(raw, 'brief.txt'), 'FICTIONAL_TEXT_CANARY');
+  await writeFile(path.join(raw, 'table.csv'), 'name,value\nfictional,7');
+  await writeFile(path.join(raw, 'data.json'), '{"fictional":"JSON_CANARY"}');
+  await writeFile(path.join(raw, 'page.html'), '<p>HTML_UNSUPPORTED_CANARY</p>');
+  await writeFile(path.join(raw, 'binary.log'), Buffer.from([0, 1, 2, 3]));
+  await writeFile(path.join(raw, 'Blocked', 'hidden.txt'), 'EXCLUDED_TEXT_CANARY');
+  const ctx = ctxOf(cfg, { BRAINLINK_HOME: path.join(base, 'app') });
+  const queue = await ingestionQueue(ctx, 'Acme Studio', 'Raw');
+  assert.deepEqual(queue.candidates.map((item) => item.path).sort(), ['Raw/brief.txt', 'Raw/data.json', 'Raw/table.csv']);
+  assert.ok(queue.skipped >= 3, 'unsupported, binary, and excluded inputs are counted as skipped');
+  const item = queue.candidates.find((candidate) => candidate.path === 'Raw/brief.txt');
+  const source = await readIngestionSource(ctx, 'Acme Studio', 'Raw', item);
+  assert.equal(source.format, 'txt');
+  assert.equal(source.body, 'FICTIONAL_TEXT_CANARY');
+  assert.doesNotMatch(JSON.stringify(queue), /FICTIONAL_TEXT_CANARY|JSON_CANARY|EXCLUDED_TEXT_CANARY/);
+  await writeFile(path.join(raw, 'brief.txt'), 'CHANGED_TEXT_CANARY');
+  await assert.rejects(readIngestionSource(ctx, 'Acme Studio', 'Raw', item), /changed|Refresh/i);
+  await assert.rejects(readIngestionSource(ctx, 'Acme Studio', 'Raw', { ...item, source_id: 'a'.repeat(64) }), /changed|no longer available/i);
+});
+
 test('ingestion receipts are local and content-free; changed sources return to the queue', async () => {
   const { base, company, cfg } = await fixture();
   const raw = path.join(company, 'Raw');
@@ -246,12 +271,15 @@ test('ingestion MCP tools are exposed with explicit folder and review instructio
   const mcp = createMcp(ctxOf(normalize({})));
   const names = mcp.tools.map((t) => t.name);
   assert.ok(names.includes('ingestion_queue'));
+  assert.ok(names.includes('ingestion_read_source'));
   assert.ok(names.includes('ingestion_record'));
   assert.match(mcp.instructions, /daily schedule while BrainLink is running/i);
   assert.match(mcp.instructions, /do not ask an AI to read, summarize, or file notes/i);
   assert.match(mcp.instructions, /never scan the whole vault/i);
+  assert.match(mcp.instructions, /ingestion_read_source/);
+  assert.match(mcp.instructions, /TXT, CSV\/TSV, JSON, XML, YAML and LOG/);
   const queue = mcp.tools.find((tool) => tool.name === 'ingestion_queue');
-  assert.match(queue.description, /does not read source bodies/i);
+  assert.match(queue.description, /does not return source bodies/i);
   assert.match(queue.description, /does not .* change the Setup background-scan schedule/i);
 });
 
