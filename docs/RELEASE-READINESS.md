@@ -12,6 +12,8 @@ On source commit `9abbfd8`, both `npm audit` and `npm audit --omit=dev` reported
 
 Linux package rebuild on source commit `af4f68d` (2026-11-03): all four x64/arm64 tar and Debian artifacts built and passed SHA-256 verification. The x64 portable smoke and amd64 install/version/remove passed in Debian; the arm64 portable smoke and `.deb` install/version/remove passed under Docker emulation. Physical ARM and graphical Linux desktop launch remain unverified. The QA packages were not signed or published; full hashes and commands/evidence are in [IMPLEMENTATION-STATUS.md](IMPLEMENTATION-STATUS.md).
 
+macOS ZIP rebuild on source commit `5c83178` (2026-11-03): the official Node.js 22.23.3 Darwin x64/arm64 runtimes passed SHA-256 verification; `npm run test:mac-zip` passed the simulated install, LaunchAgent, app HTTP, uninstall, and notes-preservation checks. ZIP SHA-256 is `077f5d91d498a3c95f373018dc833adc5847ec194fee2162db6dd57b5f78d0d2`. A real Mac, native Gatekeeper behavior, and the `.pkg` installer remain untested; this artifact is unsigned and unpublished.
+
 ## Latest verification
 
 - **Dependency audit (current source tree `a3eb985`, 2026-11-02):** both `npm audit` and `npm audit --omit=dev` completed with 0 known vulnerabilities. This is the advisory database result at the time of the check, not a security certification or substitute for code review.
