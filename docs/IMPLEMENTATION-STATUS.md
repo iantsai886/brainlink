@@ -1822,3 +1822,7 @@ Focused `test/git-source-state.test.mjs` and `test/rsi-ledger.test.mjs` passed 1
 ### Installed Windows package smoke (2026-11-03; source commit `a07032d`)
 
 `npm run smoke:installed:win` passed on Windows. The unsigned 1.2.8 QA installer launched with its bundled runtime, desktop and Start Menu shortcuts opened Setup and the ingestion UI, English/Portuguese/Traditional Chinese OCR and scanned-PDF OCR worked, safe HTML extraction and retry-safe filing passed, and Hermes hook enable/disable preserved an unrelated hook. Isolated uninstall preserved test data and restored PATH. This used temporary fictional data, not the user's vault or Hermes profile. It does not verify signing, public distribution, hosted CI, native macOS behavior, or customer acceptance.
+
+### Full-suite confirmation on the current documentation commit (2026-11-03; commit `d3ade64`)
+
+Windows/Node.js 24.22.1 `npm run test:all` passed on exact commit `d3ade6441919addebcdf3304c12016efc44ae78a`: core 638 total (628 passed, 0 failed, 10 Windows privilege/platform skips); UI 44/44. This reconfirms the current source after the documentation-only update; it does not add live local-model, hosted CI, signed-release, native macOS, or customer-acceptance evidence. The local Ollama executable and service were unavailable at the time of this check.
