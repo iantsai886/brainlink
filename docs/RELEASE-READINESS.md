@@ -1,8 +1,10 @@
 # BrainLink implementation and release status
 
-Status checked: 2026-11-02 (Asia/Taipei)
+Status checked: 2026-11-03 (Asia/Taipei)
 Repository: `iantsai886/brainlink`  
 Current working branch: `feat/complete-raw-wiki-folder-flow` (based on `origin/main`)
+
+Current worktree note (2026-11-03): the vault-count timing fix passes 4/4 focused tests and a clean Windows/Node.js 24.22.1 full suite (core 628 passed, 0 failed, 10 platform/privilege skips; UI 44/44). Browser visual review remains outstanding because the computer-use session stopped at its URL safety check.
 
 ## Latest verification
 

@@ -1,9 +1,13 @@
 # BrainLink implementation status
 
-Status snapshot: 2026-11-02 (Asia/Taipei).
+Status snapshot: 2026-11-03 (Asia/Taipei).
 GitHub repository: `iantsai886/brainlink`
 Branch: `feat/complete-raw-wiki-folder-flow` (current working branch; based on `origin/main`)
 Code baseline: development target `1.2.8`, with `package.json` as the canonical version source. The `v1.2.7` tag belongs to the separate `wip/v1.2.7` release line; this branch continues from the full-source `main` history and does not move or recreate that tag.
+
+### Vault note count timing fix (working tree based on `32fe33b`, 2026-11-03)
+
+Setup now sends completed vault note counts to browsers that connect after the background scan, and buffers early count events until vault state loads. This addresses a visible race where the page could stay on “Counting notes…” even though the count was ready. Removed a duplicate `/api/events` handler. Focused tests passed 4/4. A first full Windows suite run had two non-reproducing failures; both passed individually. A clean rerun on Windows/Node.js 24.22.1 passed: core 638 total (628 passed, 0 failed, 10 platform/privilege skips), UI 44/44. Browser visual recheck was not completed because the computer-use session stopped at its URL safety check.
 
 ### Verified update fallback recovery (working tree based on `626bca5e`, 2026-11-02)
 

@@ -2692,14 +2692,9 @@ export async function startSetup(opts = {}) {
       if (given.length !== want.length || !timingSafeEqual(given, want)) { res.writeHead(401).end(); return; }
       res.writeHead(200, { 'Content-Type': 'text/event-stream; charset=utf-8', 'Cache-Control': 'no-store', Connection: 'keep-alive', 'X-Accel-Buffering': 'no' });
       res.write(': connected\n\n'); eventClients.add(res);
-      res.on('close', () => eventClients.delete(res));
-      return;
-    }
-    if (req.method === 'GET' && url.pathname === '/api/events') {
-      const given = Buffer.from(url.searchParams.get('t') || ''); const want = Buffer.from(token);
-      if (given.length !== want.length || !timingSafeEqual(given, want)) { res.writeHead(401).end(); return; }
-      res.writeHead(200, { 'Content-Type': 'text/event-stream; charset=utf-8', 'Cache-Control': 'no-store', Connection: 'keep-alive', 'X-Accel-Buffering': 'no' });
-      res.write(': connected\n\n'); eventClients.add(res);
+      for (const [name, result] of vaultNoteCounts) {
+        if (result.status !== 'scanning') res.write(`event: vault-counts-updated\ndata: ${JSON.stringify({ vault: name, ...result })}\n\n`);
+      }
       res.on('close', () => eventClients.delete(res));
       return;
     }

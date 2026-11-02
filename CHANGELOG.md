@@ -2,6 +2,10 @@
 
 This log covers the development branch. Entries marked **unreleased** are not published product releases. See [release readiness](docs/RELEASE-READINESS.md) for the current evidence and remaining release gates.
 
+## 2026-11-03 — Development, unreleased
+
+- Fixed a vault-count timing race in Setup: browsers connecting after the background count finishes now receive the latest count, and the UI buffers count events that arrive before vault state loads. Removed a duplicate `/api/events` route. Focused tests passed 4/4. After one transient full-suite run with two non-reproducing failures, a clean Windows/Node.js 24.22.1 `npm run test:all` passed: core 638 total (628 passed, 0 failed, 10 platform/privilege skips); UI 44/44. The browser visual recheck could not be completed because the computer-use session stopped at its URL safety check. Unreleased; visual review remains outstanding.
+
 ## 2026-11-02 — Development, unreleased
 
 - Fixed the verified updater fallback: the manual download link stays available after opening the installer, and one open plus one manual download are allowed in either order. Both actions recheck the staged package's path, size and SHA-256; overlapping clicks are rejected. The package is retained for up to 24 hours after the first action, with translated expiry and fallback guidance. Focused updater API tests passed 2/2; full Windows/Node.js 24.22.1 `npm run test:all` passed (core 636 total: 626 passed, 0 failed, 10 platform/privilege skips; UI 44/44). The isolated unsigned Windows install smoke passed. This is not a production signed update; the publisher key is still not configured.

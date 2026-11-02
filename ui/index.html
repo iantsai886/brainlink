@@ -593,11 +593,13 @@ main #ready, main #ask-panel, main #brain-panel, main #sessions-panel, main #s-c
 <div id="toast" role="status" aria-live="polite"></div>
 <script>
 const T = new URLSearchParams(location.search).get('t') || '';
+const latestVaultNoteCounts = new Map();
 const vaultEvents = new EventSource('/api/events?t=' + encodeURIComponent(T));
 vaultEvents.addEventListener('vault-changed', () => window.dispatchEvent(new Event('brainlink:vault-changed')));
 vaultEvents.addEventListener('vault-counts-updated', (event) => {
   try {
     const result = JSON.parse(event.data);
+    latestVaultNoteCounts.set(result.vault, result);
     const label = result.status === 'ready' ? t('vault.notesCount', { n: result.notes }) : t('vault.countUnavailable');
     for (const el of document.querySelectorAll('[data-vault-note-count]')) if (el.dataset.vaultNoteCount === result.vault) el.textContent = label;
     const vault = S?.vaults?.find((v) => v.name === result.vault);
@@ -1504,6 +1506,13 @@ document.addEventListener('click', (e) => {
 
 async function load() {
   S = await api('GET', '/api/state');
+  for (const [name, result] of latestVaultNoteCounts) {
+    const vault = S.vaults.find((item) => item.name === name);
+    if (vault) {
+      vault.notes = result.status === 'ready' ? result.notes : null;
+      vault.notes_status = result.status;
+    }
+  }
   await ensureLocale(S.locale);
   $('app-version').textContent = t('header.version', { version: S.version });
   const hasVault = S.vaults.length > 0;
