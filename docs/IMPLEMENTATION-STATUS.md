@@ -5,6 +5,10 @@ GitHub repository: `iantsai886/brainlink`
 Branch: `feat/complete-raw-wiki-folder-flow` (current working branch; based on `origin/main`)
 Code baseline: development target `1.2.8`, with `package.json` as the canonical version source. The `v1.2.7` tag belongs to the separate `wip/v1.2.7` release line; this branch continues from the full-source `main` history and does not move or recreate that tag.
 
+### Raw-to-Wiki metadata filter full-suite verification (2026-11-02; code commit `f396055`)
+
+On Windows with Node.js 24.22.1, `npm run test:all` passed on commit `f396055e09d2050b4e5d93c3ba75e81798748577`: core 623 total (615 passed, 0 failed, 8 platform/privilege skips); UI 44/44. `npm run smoke:installed:win` also passed from that code: the isolated 1.2.8 QA app's bundled runtime OCR-read all three language fixtures, launch/shortcuts/Setup folder controls worked, and isolated uninstall preserved its user data and restored PATH. This includes the new queue and direct-read rejection for OS/editor metadata plus full local core/UI checks. The eight core skips are platform or unavailable Windows symlink-privilege cases. This is local evidence; hosted CI remains unavailable under the GitHub billing gate, and native macOS/Linux desktop behavior, signed publication, and customer acceptance remain separate gates.
+
 ### Raw-to-Wiki OS metadata filtering (2026-11-02; current branch follow-up)
 
 Selected-folder intake now skips hidden paths, common OS metadata (`.DS_Store`, `Thumbs.db`, `desktop.ini`, `._*`) and Office temporary files (`~$*`) before opening file contents. The same check runs again in the exact-source read path, so a direct or stale request cannot bypass the queue filter. The canonical Raw-to-Wiki Skill and its Claude/Codex copies describe the exclusions. Focused Windows/Node.js verification: ingestion tests 3/3 and portable skill tests 4/4; `git diff --check` passed. This is a focused local regression check, not a full-suite run or release validation.
