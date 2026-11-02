@@ -6,7 +6,7 @@ import path from 'node:path';
 import { normalize } from '../src/config.mjs';
 import { createContext, loadVault } from '../src/core.mjs';
 import { buildGraph3D, noteDetail3D } from '../src/graph3d.mjs';
-import { deriveTypedRelations, deriveProposedTypedRelations, deriveRejectedTypedRelations, deriveWithdrawnTypedRelations, discoverTypedRelationshipCandidates, discoverTypedRelationshipCandidatesForSources, appendTypedRelationProposal, approveTypedRelation, rejectTypedRelation, reopenTypedRelation, withdrawTypedRelation, typedGraphHealth, typedEntityFields, updateTypedEntityFields } from '../src/typed-graph.mjs';
+import { deriveTypedRelations, deriveProposedTypedRelations, deriveRejectedTypedRelations, deriveWithdrawnTypedRelations, discoverTypedRelationshipCandidates, discoverTypedRelationshipCandidatesForSources, appendTypedRelationProposal, approveTypedRelation, rejectTypedRelation, reopenTypedRelation, withdrawTypedRelation, updateTypedRelation, typedGraphHealth, typedEntityFields, updateTypedEntityFields } from '../src/typed-graph.mjs';
 import { proposeNote } from '../src/writes.mjs';
 import { createMcp } from '../src/server.mjs';
 
@@ -127,6 +127,26 @@ test('withdrawing a relation hides it from graph and review while retaining evid
   assert.match(restored, /^    source: "Operations handbook section 2"$/m);
   assert.deepEqual(deriveWithdrawnTypedRelations([{ rel: 'Team.md', raw: restored }, notes[1]]), []);
   assert.equal(deriveProposedTypedRelations([{ rel: 'Team.md', raw: restored }, notes[1]]).length, 1);
+});
+
+test('editing a relationship preserves Markdown and returns material changes to review', () => {
+  const raw = `---\ntype: workflow\nid: workflow.collect\nscope: organisation\nstatus: current\nrelations:\n  - predicate: consumes\n    target: dataset.tickets\n    review: verified\n    source: "Reads ticket records each morning."\n    confidence: 0.8\n---\n# Collect questions\n\nReads ticket records each morning.\n`;
+  const unchanged = updateTypedRelation(raw, 0, { predicate: 'consumes', target_id: 'dataset.tickets', evidence: 'Reads ticket records each morning.', confidence: 0.8 }, 'verified');
+  assert.match(unchanged, /^    review: verified$/m, 'a no-op edit does not unapprove the edge');
+  const changed = updateTypedRelation(raw, 0, { predicate: 'consumes', target_id: 'dataset.answers', evidence: 'Reads ticket records each morning.', confidence: 0.9 }, 'verified');
+  assert.match(changed, /^    target: dataset\.answers$/m);
+  assert.match(changed, /^    review: proposed$/m, 'a material edit must be reviewed again');
+  assert.match(changed, /^    source: "Reads ticket records each morning\."$/m);
+  assert.match(changed, /# Collect questions[\s\S]*Reads ticket records each morning\./);
+  const quotedEvidence = 'Reads "ticket" records each morning.';
+  const rawWithQuotes = raw.replaceAll('Reads ticket records each morning.', quotedEvidence);
+  const withQuotedEvidence = updateTypedRelation(rawWithQuotes, 0, { predicate: 'consumes', target_id: 'dataset.tickets', evidence: quotedEvidence, confidence: 0.81 }, 'verified');
+  assert.equal(deriveProposedTypedRelations([{ rel: 'Workflow.md', raw: withQuotedEvidence }, { rel: 'Tickets.md', raw: entity({ type: 'dataset', id: 'dataset.tickets' }) }])[0].evidence, quotedEvidence, 'escaped quote characters round-trip through Markdown frontmatter');
+  assert.throws(() => updateTypedRelation(raw, 0, { predicate: 'unknown', target_id: 'dataset.answers', evidence: 'quote', confidence: 0.9 }, 'verified'), /valid relationship/i);
+  assert.throws(() => updateTypedRelation(raw, 0, { predicate: 'consumes', target_id: 'dataset.answers', evidence: 'quote', confidence: '' }, 'verified'), /valid relationship/i);
+  assert.throws(() => updateTypedRelation(raw, 0, { predicate: 'consumes', target_id: 'dataset.answers', evidence: 'quote', confidence: 0.9 }, 'rejected'), /no longer active/i);
+  const duplicate = raw.replace('---\n# Collect questions', '  - predicate: consumes\n    target: dataset.answers\n    review: proposed\n    source: "Reads ticket records each morning."\n    confidence: 0.5\n---\n# Collect questions');
+  assert.throws(() => updateTypedRelation(duplicate, 0, { predicate: 'consumes', target_id: 'dataset.answers', evidence: 'Reads ticket records each morning.', confidence: 0.9 }, 'verified'), /duplicate another saved connection/i);
 });
 
 test('typed graph relationship suggestions are saved as proposed and become edges only after explicit review', async () => {

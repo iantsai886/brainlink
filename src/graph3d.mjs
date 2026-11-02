@@ -147,21 +147,21 @@ export async function noteDetail3D(ctx, vaultName, rel) {
   if (isPrivateNote(n)) throw new Error('This note is private and cannot be shown in the graph.');
   const visible = (j) => !index.notes[j].generated && !isPrivateNote(index.notes[j]);
   const relationships = index.typedRelations.flatMap((edge) => {
-    if (edge.source === i && visible(edge.target)) return [{ direction: 'outgoing', relation_index: edge.relation_index, predicate: edge.predicate, evidence: edge.evidence, confidence: edge.confidence, note: summarize(index, edge.target) }];
+    if (edge.source === i && visible(edge.target)) return [{ direction: 'outgoing', relation_index: edge.relation_index, target_id: index.notes[edge.target].meta.id, predicate: edge.predicate, evidence: edge.evidence, confidence: edge.confidence, note: summarize(index, edge.target) }];
     if (edge.target === i && visible(edge.source)) return [{ direction: 'incoming', predicate: edge.predicate, evidence: edge.evidence, confidence: edge.confidence, note: summarize(index, edge.source) }];
     return [];
   });
   const proposedRelationships = deriveProposedTypedRelations(index.notes).flatMap((edge) => {
     if (edge.source !== i || !visible(edge.target)) return [];
-    return [{ relation_index: edge.relation_index, predicate: edge.predicate, evidence: edge.evidence, confidence: edge.confidence, note: summarize(index, edge.target) }];
+    return [{ relation_index: edge.relation_index, target_id: index.notes[edge.target].meta.id, predicate: edge.predicate, evidence: edge.evidence, confidence: edge.confidence, note: summarize(index, edge.target) }];
   });
   const rejectedRelationships = deriveRejectedTypedRelations(index.notes).flatMap((edge) => {
     if (edge.source !== i || !visible(edge.target)) return [];
-    return [{ relation_index: edge.relation_index, predicate: edge.predicate, evidence: edge.evidence, confidence: edge.confidence, note: summarize(index, edge.target) }];
+    return [{ relation_index: edge.relation_index, target_id: index.notes[edge.target].meta.id, predicate: edge.predicate, evidence: edge.evidence, confidence: edge.confidence, note: summarize(index, edge.target) }];
   });
   const withdrawnRelationships = deriveWithdrawnTypedRelations(index.notes).flatMap((edge) => {
     if (edge.source !== i || !visible(edge.target)) return [];
-    return [{ relation_index: edge.relation_index, predicate: edge.predicate, evidence: edge.evidence, confidence: edge.confidence, note: summarize(index, edge.target) }];
+    return [{ relation_index: edge.relation_index, target_id: index.notes[edge.target].meta.id, predicate: edge.predicate, evidence: edge.evidence, confidence: edge.confidence, note: summarize(index, edge.target) }];
   });
   const discoveredRelationships = discoverTypedRelationshipCandidates(index.notes, i).map(({ target_index, ...candidate }) => ({ ...candidate, note: summarize(index, target_index) }));
   return {

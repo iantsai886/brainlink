@@ -32,7 +32,7 @@ import { sessionsService } from './host.mjs';
 import { addAgent, renameAgent, removeAgent, revokeAgent, markConnected, findAgentByToken, publicAgent, localAgentSnippet, remoteAgentSnippet, generateAgentToken, hashToken } from './mcp-agents.mjs';
 import { analyzeActivitySignals, attachRetrievalObservationSignals } from './rsi-observations.mjs';
 import { buildGraph3D, noteDetail3D, listProposedTypedRelations, discoverVaultRelationshipCandidates, listGraphVaults } from './graph3d.mjs';
-import { deriveTypedRelations, deriveProposedTypedRelations, deriveRejectedTypedRelations, deriveWithdrawnTypedRelations, discoverTypedRelationshipCandidates, typedEntityFields, typedEntityMetadataMap, typedRelationAllowed, updateTypedEntityFields, appendTypedRelationProposal, approveTypedRelation, rejectTypedRelation, reopenTypedRelation, withdrawTypedRelation } from './typed-graph.mjs';
+import { deriveTypedRelations, deriveProposedTypedRelations, deriveRejectedTypedRelations, deriveWithdrawnTypedRelations, discoverTypedRelationshipCandidates, typedEntityFields, typedEntityMetadataMap, typedRelationAllowed, updateTypedEntityFields, updateTypedRelation, appendTypedRelationProposal, approveTypedRelation, rejectTypedRelation, reopenTypedRelation, withdrawTypedRelation } from './typed-graph.mjs';
 import { snapshotSettings, chooseSnapshot, suggestSnapshotFolder, clearSnapshot, startSnapshotWatcher, writeSnapshotOnce, loadSnapshotStatus, saveSnapshotStatus } from './snapshot.mjs';
 import { listHandoffs, proposeNote } from './writes.mjs';
 import { backupOnce, verifyBackup, restoreBackupToEmpty, loadBackupStatus, saveBackupStatus, pruneBackups, listVerifiedBackups } from './backup.mjs';
@@ -72,6 +72,7 @@ const GRAPH_NOTE_MUTATIONS = new Set([
   '/api/graph3d/relationship/reject',
   '/api/graph3d/relationship/reopen',
   '/api/graph3d/relationship/archive',
+  '/api/graph3d/relationship/edit',
   '/api/graph3d/relationship/propose',
   '/api/graph3d/relationship/propose-manual',
 ]);
@@ -2180,6 +2181,47 @@ export async function startSetup(opts = {}) {
       try { await writeFile(tmp, next, 'utf8'); await rename(tmp, full); }
       catch (e) { try { await unlink(tmp); } catch {} throw e; }
       await logActivity(env, { tool: 'graph_relationship_review', ok: true, action: 'archived' });
+      return { ok: true, etag: createHash('sha256').update(next).digest('hex') };
+    },
+    'POST /api/graph3d/relationship/edit': async (b) => {
+      const cfg = await loadConfig(file);
+      const ctx = localContext(cfg, { ...env, BRAINLINK_SEMANTIC: '0' });
+      if (!b.vault || !ctx.enabled.includes(b.vault)) throw new Error('Unknown vault.');
+      const vault = ctx.byName.get(b.vault);
+      if (vault.private) throw new Error('Relationships in a private vault cannot be changed in the shared graph.');
+      if (ctx.readOnly || vault.writes !== 'on') throw new Error('This vault does not allow relationship changes.');
+      const current = await readNote(ctx, b.vault, String(b.path || ''));
+      const index = await loadVault(ctx, b.vault);
+      const sourceIndex = index.byRel.get(current.path);
+      if (sourceIndex === undefined || index.notes[sourceIndex].generated) throw new Error('This record cannot be changed.');
+      if (!Number.isSafeInteger(b.relation_index) || b.relation_index < 0) throw new Error('Invalid relationship selection.');
+      const relationIndex = b.relation_index;
+      const matches = [
+        ['verified', deriveTypedRelations(index.notes)],
+        ['proposed', deriveProposedTypedRelations(index.notes)],
+        ['rejected', deriveRejectedTypedRelations(index.notes)],
+      ];
+      const expectedReview = matches.find(([, edges]) => edges.some((edge) => edge.source === sourceIndex && edge.relation_index === relationIndex))?.[0];
+      if (!expectedReview) throw new Error('That relationship is no longer active. Reload the note and review it again.');
+      const full = safeJoin(vaultRoot(ctx, b.vault), current.path);
+      const raw = await readFile(full, 'utf8');
+      const etag = createHash('sha256').update(raw).digest('hex');
+      if (typeof b.etag !== 'string' || b.etag !== etag) throw new Error('This note changed since it was opened. Reload it before editing the relationship.');
+      const entityMap = typedEntityMetadataMap(index.notes);
+      const sourceNote = index.notes[sourceIndex];
+      const sourceMeta = entityMap.get(sourceNote);
+      const targetId = String(b.target_id || '').trim();
+      const targetEntry = [...entityMap.entries()].find(([, meta]) => meta.entity_id === targetId);
+      const targetMeta = targetEntry?.[1];
+      const evidence = String(b.evidence || '').trim();
+      if (!sourceMeta || !targetMeta || targetEntry[0] === sourceNote || sourceMeta.scope !== targetMeta.scope) throw new Error('Choose a current visible record in the same Twin scope.');
+      if (!evidence || evidence.length > 300 || !String(sourceNote.body || '').includes(evidence)) throw new Error('Evidence must be an exact excerpt of up to 300 characters from this note.');
+      if (!typedRelationAllowed(String(b.predicate || ''), sourceMeta.type, targetMeta.type)) throw new Error('Choose a relationship type that matches both record types.');
+      const next = updateTypedRelation(raw, relationIndex, { predicate: b.predicate, target_id: targetId, evidence, confidence: b.confidence }, expectedReview);
+      const tmp = `${full}.brainlink-${randomBytes(6).toString('hex')}.tmp`;
+      try { await writeFile(tmp, next, 'utf8'); await rename(tmp, full); }
+      catch (e) { try { await unlink(tmp); } catch {} throw e; }
+      await logActivity(env, { tool: 'graph_relationship_review', ok: true, action: 'edited' });
       return { ok: true, etag: createHash('sha256').update(next).digest('hex') };
     },
     'POST /api/graph3d/relationship/propose': async (b) => {

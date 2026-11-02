@@ -35,7 +35,11 @@ export function typedRelationAllowed(predicate, sourceType, targetType) {
 
 function scalar(value) {
   const s = String(value || '').trim();
-  if (s.length >= 2 && ((s.startsWith('"') && s.endsWith('"')) || (s.startsWith("'") && s.endsWith("'")))) return s.slice(1, -1).trim();
+  if (s.length >= 2 && s.startsWith('"') && s.endsWith('"')) {
+    try { const parsed = JSON.parse(s); if (typeof parsed === 'string') return parsed.trim(); } catch {}
+    return s.slice(1, -1).trim();
+  }
+  if (s.length >= 2 && s.startsWith("'") && s.endsWith("'")) return s.slice(1, -1).trim();
   return s;
 }
 
@@ -341,6 +345,49 @@ export function approveTypedRelation(raw, relationIndex) { return resolveTypedRe
 export function rejectTypedRelation(raw, relationIndex) { return resolveTypedRelation(raw, relationIndex, 'rejected'); }
 export function reopenTypedRelation(raw, relationIndex, expectedReview = 'verified') { return resolveTypedRelation(raw, relationIndex, 'proposed', expectedReview); }
 export function withdrawTypedRelation(raw, relationIndex, expectedReview) { return resolveTypedRelation(raw, relationIndex, 'withdrawn', expectedReview); }
+
+export function updateTypedRelation(raw, relationIndex, input, expectedReview) {
+  if (!Number.isInteger(relationIndex) || relationIndex < 0 || !['verified', 'proposed', 'rejected'].includes(expectedReview)) throw new Error('Invalid relationship selection.');
+  const predicate = String(input?.predicate || '').trim();
+  const target = String(input?.target_id || '').trim();
+  const evidence = String(input?.evidence || '').trim();
+  const confidenceText = String(input?.confidence ?? '').trim();
+  const confidence = Number(confidenceText);
+  if (!PREDICATES.has(predicate) || !ID.test(target) || !evidence || evidence.length > 300 || !/^(?:0(?:\.\d+)?|1(?:\.0+)?)$/.test(confidenceText) || !Number.isFinite(confidence) || confidence < 0 || confidence > 1) throw new Error('Enter a valid relationship, target, evidence excerpt, and confidence from 0 to 1.');
+  const source = String(raw || '');
+  const match = source.match(/^(\uFEFF?---[^\S\r\n]*\r?\n)([\s\S]*?)(\r?\n---[^\S\r\n]*(?:\r?\n|$))/);
+  if (!match) throw new Error('This note has no valid frontmatter.');
+  const lines = match[2].split(/\r?\n/);
+  if (lines.filter((line) => /^type:\s*/.test(line)).length !== 1) throw new Error('This record must have one valid type field before its relationship can be edited.');
+  const sourceType = typedEntityFields(source).type;
+  if (!typedRelationSourceAllowed(predicate, sourceType)) throw new Error('This relationship type is not allowed for this record type.');
+  const section = lines.findIndex((line) => /^relations:\s*$/.test(line));
+  if (section < 0) throw new Error('This note has no relationships to edit.');
+  const starts = [];
+  for (let i = section + 1; i < lines.length && !/^[A-Za-z_][\w-]*:\s*/.test(lines[i]); i++) if (/^\s{2}-\s+/.test(lines[i])) starts.push(i);
+  const start = starts[relationIndex];
+  if (start === undefined) throw new Error('The selected relationship no longer exists.');
+  const nextStart = starts[relationIndex + 1];
+  const nextField = lines.findIndex((line, i) => i > start && /^[A-Za-z_][\w-]*:\s*/.test(line));
+  const end = nextStart ?? (nextField < 0 ? lines.length : nextField);
+  const block = lines.slice(start, end);
+  const reviewLine = block.findIndex((line, i) => i > 0 && /^\s{4}review:\s*/.test(line));
+  if (reviewLine < 0 || scalar(block[reviewLine].replace(/^\s{4}review:\s*/, '')) !== expectedReview) throw new Error('This relationship is no longer active.');
+  const current = parseRecord(source).relations[relationIndex];
+  if (!current || parseRecord(source).relations.some((relation, i) => i !== relationIndex && relation.predicate === predicate && relation.target === target)) throw new Error('This relationship would duplicate another saved connection.');
+  const changed = current.predicate !== predicate || current.target !== target || current.source !== evidence || Number(current.confidence) !== confidence;
+  block[0] = `  - predicate: ${predicate}`;
+  const values = { target, source: JSON.stringify(evidence), confidence: String(confidence) };
+  for (const key of Object.keys(values)) {
+    if (block.filter((line, i) => i > 0 && new RegExp(`^\\s{4}${key}:\\s*`).test(line)).length > 1) throw new Error(`This relationship has duplicate ${key} fields. Fix it in the note before editing.`);
+    const at = block.findIndex((line, i) => i > 0 && new RegExp(`^\\s{4}${key}:\\s*`).test(line));
+    const line = `    ${key}: ${values[key]}`;
+    if (at < 0) block.push(line); else block[at] = line;
+  }
+  if (changed) block[reviewLine] = '    review: proposed';
+  lines.splice(start, end - start, ...block);
+  return `${match[1]}${lines.join(source.includes('\r\n') ? '\r\n' : '\n')}${match[3]}${source.slice(match[0].length)}`;
+}
 
 export function appendTypedRelationProposal(raw, proposal) {
   if (!PREDICATES.has(proposal?.predicate) || !ID.test(String(proposal?.target_id || '')) ||
