@@ -17,6 +17,16 @@ const payload = {
 const bytes = Buffer.from(JSON.stringify(payload));
 const envelope = { schema: 1, key_id: keyId, payload: bytes.toString('base64url'), signature: sign(null, bytes, privateKey).toString('base64url') };
 
+async function removeTempTree(root) {
+  for (let attempt = 0; ; attempt++) {
+    try { await rm(root, { recursive: true, force: true }); return; }
+    catch (error) {
+      if (!['EBUSY', 'EPERM'].includes(error.code) || process.platform !== 'win32' || attempt >= 7) throw error;
+      await new Promise((resolve) => setTimeout(resolve, 50 * (attempt + 1)));
+    }
+  }
+}
+
 test('Setup update check requires its local token and returns only signed release metadata', async () => {
   const home = await mkdtemp(path.join(tmpdir(), 'brainlink-update-api-'));
   let launched;
@@ -96,7 +106,7 @@ test('Setup update check requires its local token and returns only signed releas
     assert.deepEqual(await readFile(launched.file), packageBytes, 'an installer handoff stays available if BrainLink exits during installation');
   } finally {
     if (!serverClosed) await new Promise((resolve) => app.server.close(resolve));
-    await rm(home, { recursive: true, force: true });
+    await removeTempTree(home);
   }
 });
 
@@ -133,6 +143,6 @@ test('verified update open and manual download reject overlapping actions but al
   } finally {
     finishLaunch();
     await new Promise((resolve) => app.server.close(resolve));
-    await rm(home, { recursive: true, force: true });
+    await removeTempTree(home);
   }
 });
