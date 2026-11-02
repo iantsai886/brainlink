@@ -75,6 +75,7 @@ try {
   $InstalledApp = Join-Path $InstallDir 'app'
   $InstalledNode = Join-Path $InstallDir 'node\node.exe'
   $OcrSmoke = Join-Path $Root 'scripts\smoke-installed-ocr.mjs'
+  $HtmlSmoke = Join-Path $Root 'scripts\smoke-installed-html.mjs'
   $HermesHome = Join-Path $TestRoot 'hermes-profile'
   New-Item -ItemType Directory -Path $HermesHome -Force | Out-Null
   $HermesConfig = Join-Path $HermesHome 'config.yaml'
@@ -116,6 +117,8 @@ try {
   $OcrFixtures = @('ocr-sample.png', 'ocr-portuguese.png', 'ocr-traditional-chinese.png') | ForEach-Object { Join-Path $Root "test\fixtures\$_" }
   & $InstalledNode $OcrSmoke $InstalledApp @OcrFixtures | Out-Host
   if ($LASTEXITCODE -ne 0) { throw 'The installed OCR runtime could not read its local image fixture.' }
+  & $InstalledNode $HtmlSmoke $InstalledApp | Out-Host
+  if ($LASTEXITCODE -ne 0) { throw 'The installed HTML parser could not safely extract its fictional fixture.' }
   $englishLocale = Invoke-RestMethod "http://127.0.0.1:$($instance.port)/locales/en.json" -TimeoutSec 5
   foreach ($key in @('ingestion.enabled', 'ingestion.autoFile', 'ingestion.run', 'ingestion.destination')) {
     if (-not $englishLocale.PSObject.Properties[$key].Value) { throw "Installed Setup is missing the folder-ingestion label: $key" }

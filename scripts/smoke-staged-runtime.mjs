@@ -34,12 +34,14 @@ await access(path.join(app, 'node_modules', 'pdfjs-dist', 'legacy', 'build', 'pd
 await access(path.join(app, 'node_modules', '@napi-rs', 'canvas', 'package.json'));
 await access(path.join(app, 'src', 'ingestion', 'docx-worker.mjs'));
 await access(path.join(app, 'src', 'ingestion', 'office-worker.mjs'));
+await access(path.join(app, 'src', 'ingestion', 'html-worker.mjs'));
 await access(path.join(app, 'src', 'ingestion', 'image-ocr.mjs'));
 for (const lang of ['eng', 'por', 'chi_tra']) await access(path.join(app, 'src', 'ingestion', 'tessdata', `${lang}.traineddata.gz`));
 await access(path.join(app, 'node_modules', 'mammoth', 'package.json'));
 await access(path.join(app, 'node_modules', 'fflate', 'package.json'));
 await access(path.join(app, 'node_modules', 'tesseract.js', 'package.json'));
 await access(path.join(app, 'node_modules', 'tesseract.js-core', 'package.json'));
+await access(path.join(app, 'node_modules', 'parse5', 'package.json'));
 execFileSync(node, ['--input-type=module', '-e', "await import('./src/connectors.mjs'); await import('./src/update-manifest.mjs')"], {
   cwd: app,
   encoding: 'utf8',
@@ -74,6 +76,8 @@ const ocrResult = execFileSync(node, [ocrSmoke, app, ...ocrFixtures], {
   timeout: 180_000,
 });
 process.stdout.write(ocrResult);
+const htmlSmoke = path.join(root, 'scripts', 'smoke-installed-html.mjs');
+process.stdout.write(execFileSync(node, [htmlSmoke, app], { cwd: root, encoding: 'utf8', timeout: 30_000 }));
 
 const smokeDataRoot = await mkdtemp(path.join(tmpdir(), 'brainlink-staged-smoke-'));
 const resolvedRoot = path.resolve(smokeDataRoot);

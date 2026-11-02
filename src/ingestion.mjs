@@ -17,10 +17,11 @@ const MAX_DEPTH = 32;
 const MAX_NOTE_BYTES = 5 * 1024 * 1024;
 const MAX_HEADER_BYTES = 64 * 1024;
 const MAX_DRAFT_SOURCE_CHARS = 24_000;
-const TEXT_SOURCE_FORMATS = new Set(['.md', '.txt', '.csv', '.tsv', '.json', '.xml', '.yaml', '.yml', '.log', '.pdf', '.docx', '.xlsx', '.pptx', '.png', '.jpg', '.jpeg', '.bmp']);
+const TEXT_SOURCE_FORMATS = new Set(['.md', '.txt', '.csv', '.tsv', '.json', '.xml', '.yaml', '.yml', '.log', '.html', '.htm', '.pdf', '.docx', '.xlsx', '.pptx', '.png', '.jpg', '.jpeg', '.bmp']);
 const PDF_WORKER_TIMEOUT_MS = 90_000;
 const DOCX_WORKER_TIMEOUT_MS = 15_000;
 const OFFICE_WORKER_TIMEOUT_MS = 15_000;
+const HTML_WORKER_TIMEOUT_MS = 15_000;
 
 function sourceExtension(rel) { return path.posix.extname(String(rel || '')).toLowerCase(); }
 
@@ -182,6 +183,28 @@ function extractOfficeText(bytes, extension) {
   });
 }
 
+function extractHtmlText(bytes) {
+  const data = Uint8Array.from(bytes);
+  const worker = new Worker(new URL('./ingestion/html-worker.mjs', import.meta.url), {
+    workerData: data, transferList: [data.buffer],
+    resourceLimits: { maxOldGenerationSizeMb: 96, maxYoungGenerationSizeMb: 24, stackSizeMb: 4 },
+  });
+  return new Promise((resolve, reject) => {
+    let settled = false;
+    const finish = (fn, value) => { if (settled) return; settled = true; clearTimeout(timer); fn(value); };
+    const timer = setTimeout(() => { void worker.terminate(); finish(reject, new Error('HTML extraction exceeded its time limit.')); }, HTML_WORKER_TIMEOUT_MS);
+    timer.unref?.();
+    worker.once('message', (result) => {
+      if (result?.ok && typeof result.text === 'string') finish(resolve, result);
+      else finish(reject, new Error(result?.reason === 'no_text' ? 'This HTML file has no readable text.' : 'This HTML file could not be safely extracted.'));
+    });
+    worker.once('error', () => finish(reject, new Error('This HTML file could not be safely extracted.')));
+    worker.once('exit', (code) => {
+      if (!settled) finish(reject, new Error(code === 0 ? 'HTML extraction ended without a result.' : 'This HTML file could not be safely extracted.'));
+    });
+  });
+}
+
 function selectedFolder(value) {
   const folder = String(value || '').replace(/\\/g, '/').replace(/^\/+|\/+$/g, '');
   const parts = folder.split('/');
@@ -259,6 +282,7 @@ async function readEligible(full, root, realRoot, rel, { includeBody = false } =
       validateDocxArchive(bytes);
       raw = includeBody ? await extractDocxText(bytes) : { text: '' };
     } else if (extension === '.xlsx' || extension === '.pptx') raw = includeBody ? await extractOfficeText(bytes, extension) : { text: '' };
+    else if (extension === '.html' || extension === '.htm') raw = includeBody ? await extractHtmlText(bytes) : { text: '' };
     else if (['.png', '.jpg', '.jpeg', '.bmp'].includes(extension)) {
       imageDimensions(bytes, extension);
       raw = includeBody ? await extractImageText(bytes) : { text: '' };

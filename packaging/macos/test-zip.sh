@@ -65,6 +65,7 @@ REQUIRED=(
   "app/src/ingestion/image-ocr.mjs" "app/src/ingestion/tessdata/eng.traineddata.gz" "app/src/ingestion/tessdata/por.traineddata.gz" "app/src/ingestion/tessdata/chi_tra.traineddata.gz"
   "app/src/ingestion/docx-worker.mjs"
   "app/src/ingestion/office-worker.mjs"
+  "app/src/ingestion/html-worker.mjs" "app/node_modules/parse5/package.json"
   "runtime/arm64/bin/node" "runtime/arm64/LICENSE" "runtime/x64/bin/node" "runtime/x64/LICENSE"
   "Install BrainLink.command" "Uninstall BrainLink.command" "READ ME FIRST.txt"
   "BrainLink.app/Contents/Info.plist" "BrainLink.app/Contents/MacOS/BrainLink"

@@ -36,6 +36,7 @@ test('every native installer bundles all production dependencies and portable Br
   assert.ok(pkg.dependencies.mammoth, 'local DOCX text extraction must remain a production dependency');
   assert.ok(pkg.dependencies.fflate, 'local XLSX and PPTX archive extraction must remain a production dependency');
   assert.ok(pkg.dependencies['tesseract.js'], 'offline local OCR must remain a production dependency');
+  assert.ok(pkg.dependencies.parse5, 'local HTML text extraction must remain a production dependency');
   for (const lang of ['eng', 'por', 'chi_tra']) assert.ok(pkg.dependencies[`@tesseract.js-data/${lang}`], `${lang} OCR data must remain version locked`);
   assert.match(await read('packaging/windows/build-portable-zip.sh'), /npm install/, 'Windows source preview installs its declared production dependencies');
 
@@ -49,9 +50,13 @@ test('every native installer bundles all production dependencies and portable Br
   const windowsInstaller = await read('packaging/windows/BrainLink.iss');
   const installedWindowsSmoke = await read('scripts/smoke-installed-windows.ps1');
   const installedOcrSmoke = await read('scripts/smoke-installed-ocr.mjs');
+  const installedHtmlSmoke = await read('scripts/smoke-installed-html.mjs');
   assert.match(installedWindowsSmoke, /smoke-installed-ocr\.mjs/);
   assert.match(installedOcrSmoke, /BRAINLINK OCR TEST 123/);
   assert.match(installedOcrSmoke, /installed PDF OCR should recognize text inside a scanned page/);
+  assert.match(installedHtmlSmoke, /HTML_SCRIPT_CANARY/);
+  assert.match(installedHtmlSmoke, /HTML_HIDDEN_CANARY/);
+  assert.match(installedWindowsSmoke, /smoke-installed-html\.mjs/);
   assert.match(installedWindowsSmoke, /OCR runtime could not read its local image fixture/);
   const windowsLauncher = await read('packaging/windows/BrainLink.vbs');
   assert.match(pkg.scripts['smoke:installed:win'], /smoke-installed-windows\.ps1/, 'Windows installed-app acceptance must have a repeatable command');
@@ -104,6 +109,8 @@ test('every native installer bundles all production dependencies and portable Br
   assert.match(macZipTest, /app\/node_modules\/mammoth\/package\.json/, 'the macOS package smoke test must check the DOCX parser');
   assert.match(macZipTest, /app\/src\/ingestion\/docx-worker\.mjs/, 'the macOS package smoke test must check the isolated DOCX worker');
   assert.match(macZipTest, /app\/src\/ingestion\/office-worker\.mjs/, 'the macOS package smoke test must check the isolated Office worker');
+  assert.match(macZipTest, /app\/src\/ingestion\/html-worker\.mjs/, 'the macOS package smoke test must check the isolated HTML worker');
+  assert.match(macZipTest, /app\/node_modules\/parse5\/package\.json/, 'the macOS package smoke test must check the HTML parser');
   assert.match(macZipTest, /app\/node_modules\/fflate\/package\.json/, 'the macOS package smoke test must check the Office ZIP dependency');
   assert.match(macZipTest, /app\/src\/ingestion\/tessdata\/chi_tra\.traineddata\.gz/, 'the macOS package smoke test must check offline Traditional Chinese OCR data');
   assert.match(macZipTest, /app\/skills\/brainlink-session-closeout\/SKILL\.md/, 'the macOS package smoke test must check a shipped skill');
@@ -158,6 +165,7 @@ test('runtime dependency staging copies locked Office/OCR engines without bundli
     const child = spawnSync(process.execPath, ['scripts/stage-runtime-dependencies.mjs', modules], { cwd: ROOT, encoding: 'utf8', timeout: 20_000 });
     assert.equal(child.status, 0, child.stderr || child.stdout || child.error);
     for (const name of ['mammoth', 'jszip', 'fflate', 'pdfjs-dist', 'tesseract.js', 'tesseract.js-core', 'yaml']) await access(path.join(modules, name, 'package.json'));
+    await access(path.join(modules, 'parse5', 'package.json'));
     await assert.rejects(access(path.join(modules, '@tesseract.js-data', 'eng', 'package.json')));
     const importCheck = spawnSync(process.execPath, ['--input-type=module', '-e', "const mammoth = await import('mammoth'); const pdf = await import('pdfjs-dist/legacy/build/pdf.mjs'); const zip = await import('fflate'); const ocr = await import('tesseract.js'); const canvas = await import('@napi-rs/canvas'); if (typeof mammoth.default.extractRawText !== 'function' || typeof pdf.getDocument !== 'function' || typeof zip.unzipSync !== 'function' || typeof ocr.createWorker !== 'function' || typeof canvas.createCanvas !== 'function') process.exit(2); canvas.createCanvas(2,2);"], {
       cwd: app, encoding: 'utf8', timeout: 20_000,
