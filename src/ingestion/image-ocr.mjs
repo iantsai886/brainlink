@@ -11,6 +11,7 @@ const LANGUAGE_CODES = ['eng', 'por', 'chi_tra'];
 const MAX_PIXELS = 24_000_000;
 const MAX_DIMENSION = 10_000;
 const MAX_OUTPUT = 24_000;
+const MAX_BATCH_IMAGES = 10;
 const OCR_TIMEOUT_MS = 60_000;
 const SOURCE_DIR = path.dirname(fileURLToPath(import.meta.url));
 let preparedData;
@@ -81,7 +82,13 @@ async function languageDirectory() {
   return preparedData;
 }
 
-export async function extractImageText(bytes) {
+export async function extractImageTexts(images) {
+  if (!Array.isArray(images) || images.length < 1 || images.length > MAX_BATCH_IMAGES) throw new Error('This OCR batch is outside its supported limits.');
+  const buffers = images.map((bytes) => {
+    const buffer = Buffer.from(bytes);
+    imageDimensions(buffer, '.png');
+    return buffer;
+  });
   let worker;
   let timedOut = false;
   let timer;
@@ -90,10 +97,14 @@ export async function extractImageText(bytes) {
     const operation = (async () => {
       worker = await createWorker(languages, 1, { langPath: await languageDirectory(), gzip: true, cacheMethod: 'none' });
       if (timedOut) { await worker.terminate(); worker = undefined; throw new Error('Image OCR exceeded its time limit.'); }
-      const result = await worker.recognize(Buffer.from(bytes));
-      const text = String(result?.data?.text || '').trim();
-      if (!text) throw new Error('This image has no readable text.');
-      return { text: text.slice(0, MAX_OUTPUT), truncated: text.length > MAX_OUTPUT };
+      const results = [];
+      for (const buffer of buffers) {
+        const result = await worker.recognize(buffer);
+        const text = String(result?.data?.text || '').trim();
+        results.push({ text: text.slice(0, MAX_OUTPUT), truncated: text.length > MAX_OUTPUT });
+        if (timedOut) throw new Error('Image OCR exceeded its time limit.');
+      }
+      return results;
     })();
     const timeout = new Promise((_, reject) => {
       timer = setTimeout(() => {
@@ -108,4 +119,10 @@ export async function extractImageText(bytes) {
     clearTimeout(timer);
     await worker?.terminate().catch(() => {});
   }
+}
+
+export async function extractImageText(bytes) {
+  const [result] = await extractImageTexts([bytes]);
+  if (!result.text) throw new Error('This image has no readable text.');
+  return result;
 }

@@ -21,6 +21,7 @@ import { connectClient, disconnectClient, detect, codexToml, readClientAgentToke
 import { startSetup } from '../src/setup.mjs';
 import { ingestionQueue, readIngestionSource, recordIngestion } from '../src/ingestion.mjs';
 import { extractImageText, imageDimensions } from '../src/ingestion/image-ocr.mjs';
+import { scannedPdfFixture } from './fixtures/scanned-pdf.mjs';
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const SAMPLE = path.join(ROOT, 'samples', 'acme-studio');
@@ -303,7 +304,8 @@ test('ingestion reads only supported text files from the selected folder and rej
   await writeFile(path.join(raw, 'table.csv'), 'name,value\nfictional,7');
   await writeFile(path.join(raw, 'data.json'), '{"fictional":"JSON_CANARY"}');
   await writeFile(path.join(raw, 'brief.pdf'), pdfFixture('FICTIONAL_PDF_CANARY'));
-  await writeFile(path.join(raw, 'scan.pdf'), pdfFixture());
+  await writeFile(path.join(raw, 'scan.pdf'), await scannedPdfFixture(await readFile(path.join(ROOT, 'test', 'fixtures', 'ocr-sample.png'))));
+  await writeFile(path.join(raw, 'blank.pdf'), pdfFixture());
   await writeFile(path.join(raw, 'brief.docx'), await docxFixture('FICTIONAL_DOCX_CANARY'));
   await writeFile(path.join(raw, 'finance.xlsx'), await xlsxFixture());
   await writeFile(path.join(raw, 'unsafe.xlsx'), await xlsxFixture({ unsafeXml: true }));
@@ -321,7 +323,7 @@ test('ingestion reads only supported text files from the selected folder and rej
   await writeFile(path.join(raw, 'Blocked', 'hidden.txt'), 'EXCLUDED_TEXT_CANARY');
   const ctx = ctxOf(cfg, { BRAINLINK_HOME: path.join(base, 'app') });
   const queue = await ingestionQueue(ctx, 'Acme Studio', 'Raw');
-  assert.deepEqual(queue.candidates.map((item) => item.path).sort(), ['Raw/brief.docx', 'Raw/brief.pdf', 'Raw/brief.txt', 'Raw/data.json', 'Raw/finance.xlsx', 'Raw/image.png', 'Raw/scan.pdf', 'Raw/slides.pptx', 'Raw/table.csv', 'Raw/unsafe.xlsx']);
+  assert.deepEqual(queue.candidates.map((item) => item.path).sort(), ['Raw/blank.pdf', 'Raw/brief.docx', 'Raw/brief.pdf', 'Raw/brief.txt', 'Raw/data.json', 'Raw/finance.xlsx', 'Raw/image.png', 'Raw/scan.pdf', 'Raw/slides.pptx', 'Raw/table.csv', 'Raw/unsafe.xlsx']);
   assert.ok(queue.skipped >= 5, 'unsupported, malformed, unsafe, binary, and excluded inputs are counted as skipped');
   const item = queue.candidates.find((candidate) => candidate.path === 'Raw/brief.txt');
   const source = await readIngestionSource(ctx, 'Acme Studio', 'Raw', item);
@@ -355,7 +357,11 @@ test('ingestion reads only supported text files from the selected folder and rej
   assert.equal(imageSource.format, 'png');
   assert.match(imageSource.body, /BRAINLINK OCR TEST 123/);
   const scannedPdf = queue.candidates.find((candidate) => candidate.path === 'Raw/scan.pdf');
-  await assert.rejects(readIngestionSource(ctx, 'Acme Studio', 'Raw', scannedPdf), /scanned PDF OCR is not available/i);
+  const scannedPdfSource = await readIngestionSource(ctx, 'Acme Studio', 'Raw', scannedPdf);
+  assert.match(scannedPdfSource.body, /BRAINLINK OCR TEST 123/i);
+  assert.equal(scannedPdfSource.body_truncated, false);
+  const blankPdf = queue.candidates.find((candidate) => candidate.path === 'Raw/blank.pdf');
+  await assert.rejects(readIngestionSource(ctx, 'Acme Studio', 'Raw', blankPdf), /no readable text/i);
   assert.doesNotMatch(JSON.stringify(queue), /FICTIONAL_TEXT_CANARY|JSON_CANARY|FICTIONAL_DOCX_CANARY|REVENUE_XLSX_CANARY|STRATEGY_PPTX_CANARY|BRAINLINK OCR TEST|ZIP_BOMB_CANARY|EXCLUDED_TEXT_CANARY/);
   await writeFile(path.join(raw, 'brief.txt'), 'CHANGED_TEXT_CANARY');
   await assert.rejects(readIngestionSource(ctx, 'Acme Studio', 'Raw', item), /changed|Refresh/i);
@@ -413,18 +419,18 @@ test('ingestion MCP tools are exposed with explicit folder and review instructio
   assert.match(mcp.instructions, /do not ask an AI to read, summarize, or file notes/i);
   assert.match(mcp.instructions, /never scan the whole vault/i);
   assert.match(mcp.instructions, /ingestion_read_source/);
-  assert.match(mcp.instructions, /selectable-text PDF up to 100 pages, DOCX, XLSX, PPTX, and PNG\/JPEG\/BMP images/);
+  assert.match(mcp.instructions, /PDFs up to 100 pages, DOCX, XLSX, PPTX, and PNG\/JPEG\/BMP images/);
   assert.match(mcp.instructions, /image OCR extracts text only/);
-  assert.match(mcp.instructions, /Scanned-image PDFs.*not supported/);
+  assert.match(mcp.instructions, /OCR-processed up to 10 pages per PDF/);
   const queue = mcp.tools.find((tool) => tool.name === 'ingestion_queue');
   assert.match(queue.description, /does not return source bodies/i);
   assert.match(queue.description, /does not .* change the Setup background-scan schedule/i);
   assert.match(queue.description, /DOCX, XLSX, PPTX and PNG\/JPEG\/BMP images/);
-  assert.match(queue.description, /Scanned-image PDFs.*unsupported/);
+  assert.match(queue.description, /local OCR on up to 10 scanned pages per PDF/);
   const read = mcp.tools.find((tool) => tool.name === 'ingestion_read_source');
-  assert.match(read.description, /DOCX, XLSX, and PPTX text locally/);
+  assert.match(read.description, /DOCX, XLSX, and PPTX extraction also runs locally/);
   assert.match(read.description, /OCR reads text.*not image meaning/);
-  assert.match(read.description, /Scanned-image PDFs.*refused/);
+  assert.match(read.description, /locally OCRs pages without text \(up to 10 scanned pages per PDF\)/);
 });
 
 test('parseFrontmatter: a leading UTF-8 BOM or blank lines before --- still detect private: true', () => {

@@ -4,6 +4,7 @@ import { execFileSync, spawn } from 'node:child_process';
 import { access, mkdtemp, mkdir, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
+import { fileURLToPath } from 'node:url';
 
 function argument(name) {
   const index = process.argv.indexOf(name);
@@ -30,6 +31,7 @@ for (const skill of ['brainlink-cross-ai-handoff', 'brainlink-session-closeout',
 await assert.rejects(access(path.join(app, 'ui', 'app', 'test')), 'development UI tests must not ship');
 await access(path.join(app, 'src', 'ingestion', 'pdf-worker.mjs'));
 await access(path.join(app, 'node_modules', 'pdfjs-dist', 'legacy', 'build', 'pdf.mjs'));
+await access(path.join(app, 'node_modules', '@napi-rs', 'canvas', 'package.json'));
 await access(path.join(app, 'src', 'ingestion', 'docx-worker.mjs'));
 await access(path.join(app, 'src', 'ingestion', 'office-worker.mjs'));
 await access(path.join(app, 'src', 'ingestion', 'image-ocr.mjs'));
@@ -53,19 +55,33 @@ execFileSync(node, ['--input-type=module', '-e', "const zip = await import('ffla
   encoding: 'utf8',
   timeout: 20_000,
 });
+execFileSync(node, ['--input-type=module', '-e', "const canvas = await import('@napi-rs/canvas'); if (typeof canvas.createCanvas !== 'function' || canvas.createCanvas(2, 2).width !== 2) process.exit(2)"], {
+  cwd: app,
+  encoding: 'utf8',
+  timeout: 20_000,
+});
 execFileSync(node, ['--input-type=module', '-e', "const ocr = await import('tesseract.js'); if (typeof ocr.createWorker !== 'function') process.exit(2)"], {
   cwd: app,
   encoding: 'utf8',
   timeout: 20_000,
 });
+const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
+const ocrSmoke = path.join(root, 'scripts', 'smoke-installed-ocr.mjs');
+const ocrFixtures = ['ocr-sample.png', 'ocr-portuguese.png', 'ocr-traditional-chinese.png'].map((file) => path.join(root, 'test', 'fixtures', file));
+const ocrResult = execFileSync(node, [ocrSmoke, app, ...ocrFixtures], {
+  cwd: root,
+  encoding: 'utf8',
+  timeout: 180_000,
+});
+process.stdout.write(ocrResult);
 
-const root = await mkdtemp(path.join(tmpdir(), 'brainlink-staged-smoke-'));
-const resolvedRoot = path.resolve(root);
+const smokeDataRoot = await mkdtemp(path.join(tmpdir(), 'brainlink-staged-smoke-'));
+const resolvedRoot = path.resolve(smokeDataRoot);
 const resolvedTemp = path.resolve(tmpdir()) + path.sep;
 if (!resolvedRoot.startsWith(resolvedTemp)) throw new Error('Refusing to use a smoke-test folder outside the system temp directory.');
 try {
-const home = path.join(root, 'home');
-const vault = path.join(root, 'vault');
+const home = path.join(smokeDataRoot, 'home');
+const vault = path.join(smokeDataRoot, 'vault');
 await mkdir(path.join(vault, 'Private'), { recursive: true });
 await writeFile(path.join(vault, 'Public.md'), '---\ntitle: Bluebird Public Roadmap\n---\nProject Bluebird migration budget: 420 credits. PUBLIC_CANARY_56381\n');
 await writeFile(path.join(vault, 'Private', 'Hidden.md'), '---\ntitle: Bluebird Confidential Budget\nprivate: true\n---\nProject Bluebird migration budget: 900 credits. PRIVATE_CANARY_88420\n');
@@ -130,9 +146,9 @@ try {
 } finally {
   child.kill();
   if (!childClosed) await new Promise((resolve) => child.once('close', resolve));
-  await rm(root, { recursive: true, force: true });
+  await rm(smokeDataRoot, { recursive: true, force: true });
 }
 } catch (error) {
-  await rm(root, { recursive: true, force: true });
+  await rm(smokeDataRoot, { recursive: true, force: true });
   throw error;
 }

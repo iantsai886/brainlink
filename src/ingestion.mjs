@@ -18,7 +18,7 @@ const MAX_NOTE_BYTES = 5 * 1024 * 1024;
 const MAX_HEADER_BYTES = 64 * 1024;
 const MAX_DRAFT_SOURCE_CHARS = 24_000;
 const TEXT_SOURCE_FORMATS = new Set(['.md', '.txt', '.csv', '.tsv', '.json', '.xml', '.yaml', '.yml', '.log', '.pdf', '.docx', '.xlsx', '.pptx', '.png', '.jpg', '.jpeg', '.bmp']);
-const PDF_WORKER_TIMEOUT_MS = 15_000;
+const PDF_WORKER_TIMEOUT_MS = 90_000;
 const DOCX_WORKER_TIMEOUT_MS = 15_000;
 const OFFICE_WORKER_TIMEOUT_MS = 15_000;
 
@@ -59,7 +59,7 @@ function extractPdfText(bytes) {
       if (result?.ok && typeof result.text === 'string') finish(resolve, result);
       else {
         const reason = result?.reason === 'no_text'
-          ? 'This PDF has no selectable text; scanned PDF OCR is not available yet.'
+          ? 'This PDF has no readable text. If it is scanned, its pages may be blank, too faint, or outside the OCR page limit.'
           : result?.reason === 'page_limit'
             ? 'This PDF is over the 100-page extraction limit.'
             : 'This PDF could not be safely extracted.';

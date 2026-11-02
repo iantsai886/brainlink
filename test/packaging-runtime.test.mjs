@@ -22,6 +22,7 @@ test('every native installer bundles all production dependencies and portable Br
     const source = await read(file);
     assert.match(source, /skills/, `${label} must ship the versioned SKILL.md files`);
     assert.match(source, /stage-runtime-dependencies/, `${label} must stage every locked runtime dependency`);
+    assert.match(source, /stage:canvas-platforms/, `${label} must stage native PDF rendering binaries for its target platform`);
     assert.match(source, /stage-ocr-data/, `${label} must stage offline OCR language files`);
     assert.match(source, /brainlink-store/, `${label} must bundle the local store dependency`);
     assert.match(source, /ui[\\/]app[\\/]test/, `${label} must exclude development UI tests from the package`);
@@ -31,6 +32,7 @@ test('every native installer bundles all production dependencies and portable Br
   assert.match(windowsPreview, /ui[\\/]app[\\/]test/, 'Windows portable preview must exclude development UI tests');
   assert.ok(pkg.dependencies.yaml, 'YAML connector dependency must remain a production dependency');
   assert.ok(pkg.dependencies['pdfjs-dist'], 'local PDF text extraction must remain a production dependency');
+  assert.ok(pkg.dependencies['@napi-rs/canvas'], 'scanned PDF rendering must use the pinned local canvas runtime');
   assert.ok(pkg.dependencies.mammoth, 'local DOCX text extraction must remain a production dependency');
   assert.ok(pkg.dependencies.fflate, 'local XLSX and PPTX archive extraction must remain a production dependency');
   assert.ok(pkg.dependencies['tesseract.js'], 'offline local OCR must remain a production dependency');
@@ -49,6 +51,7 @@ test('every native installer bundles all production dependencies and portable Br
   const installedOcrSmoke = await read('scripts/smoke-installed-ocr.mjs');
   assert.match(installedWindowsSmoke, /smoke-installed-ocr\.mjs/);
   assert.match(installedOcrSmoke, /BRAINLINK OCR TEST 123/);
+  assert.match(installedOcrSmoke, /installed PDF OCR should recognize text inside a scanned page/);
   assert.match(installedWindowsSmoke, /OCR runtime could not read its local image fixture/);
   const windowsLauncher = await read('packaging/windows/BrainLink.vbs');
   assert.match(pkg.scripts['smoke:installed:win'], /smoke-installed-windows\.ps1/, 'Windows installed-app acceptance must have a repeatable command');
@@ -156,7 +159,7 @@ test('runtime dependency staging copies locked Office/OCR engines without bundli
     assert.equal(child.status, 0, child.stderr || child.stdout || child.error);
     for (const name of ['mammoth', 'jszip', 'fflate', 'pdfjs-dist', 'tesseract.js', 'tesseract.js-core', 'yaml']) await access(path.join(modules, name, 'package.json'));
     await assert.rejects(access(path.join(modules, '@tesseract.js-data', 'eng', 'package.json')));
-    const importCheck = spawnSync(process.execPath, ['--input-type=module', '-e', "const mammoth = await import('mammoth'); const pdf = await import('pdfjs-dist/legacy/build/pdf.mjs'); const zip = await import('fflate'); const ocr = await import('tesseract.js'); if (typeof mammoth.default.extractRawText !== 'function' || typeof pdf.getDocument !== 'function' || typeof zip.unzipSync !== 'function' || typeof ocr.createWorker !== 'function') process.exit(2);"], {
+    const importCheck = spawnSync(process.execPath, ['--input-type=module', '-e', "const mammoth = await import('mammoth'); const pdf = await import('pdfjs-dist/legacy/build/pdf.mjs'); const zip = await import('fflate'); const ocr = await import('tesseract.js'); const canvas = await import('@napi-rs/canvas'); if (typeof mammoth.default.extractRawText !== 'function' || typeof pdf.getDocument !== 'function' || typeof zip.unzipSync !== 'function' || typeof ocr.createWorker !== 'function' || typeof canvas.createCanvas !== 'function') process.exit(2); canvas.createCanvas(2,2);"], {
       cwd: app, encoding: 'utf8', timeout: 20_000,
     });
     assert.equal(importCheck.status, 0, importCheck.stderr || importCheck.stdout || importCheck.error);
@@ -164,6 +167,7 @@ test('runtime dependency staging copies locked Office/OCR engines without bundli
     await mkdir(ingestion, { recursive: true });
     await cp(path.join(ROOT, 'src', 'app-home.mjs'), path.join(app, 'src', 'app-home.mjs'));
     await cp(path.join(ROOT, 'src', 'ingestion', 'image-ocr.mjs'), path.join(ingestion, 'image-ocr.mjs'));
+    await cp(path.join(ROOT, 'src', 'ingestion', 'pdf-worker.mjs'), path.join(ingestion, 'pdf-worker.mjs'));
     const data = path.join(ingestion, 'tessdata');
     const stagedData = spawnSync(process.execPath, ['scripts/stage-ocr-data.mjs', data], { cwd: ROOT, encoding: 'utf8', timeout: 20_000 });
     assert.equal(stagedData.status, 0, stagedData.stderr || stagedData.stdout || stagedData.error);

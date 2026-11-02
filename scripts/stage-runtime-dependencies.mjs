@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-import { cp, mkdir, readFile, rm } from 'node:fs/promises';
+import { access, cp, mkdir, readFile, rm } from 'node:fs/promises';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
@@ -38,6 +38,13 @@ while (pending.length) {
   for (const name of Object.keys(record.dependencies || {})) {
     const resolved = findPackage(name, relative);
     if (!resolved) throw new Error(`Locked runtime dependency cannot be resolved: ${name} from ${relative}`);
+    pending.push(resolved);
+  }
+  for (const name of Object.keys(record.optionalDependencies || {})) {
+    const resolved = findPackage(name, relative);
+    if (!resolved) continue;
+    try { await access(path.join(root, resolved, 'package.json')); }
+    catch { continue; } // Platform-specific optional packages are staged separately when needed.
     pending.push(resolved);
   }
 }

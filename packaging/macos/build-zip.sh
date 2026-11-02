@@ -48,6 +48,7 @@ mkdir -p "$STAGE/app/node_modules/brainlink-store"
 cp "$STORE_SRC/memory-store.mjs" "$STORE_SRC/errors.mjs" "$STORE_SRC/interface.d.ts" \
    "$STORE_SRC/package.json" "$STORE_SRC/README.md" "$STAGE/app/node_modules/brainlink-store/"
 node "$ROOT/scripts/stage-runtime-dependencies.mjs" "$STAGE/app/node_modules"
+npm --prefix "$ROOT" run stage:canvas-platforms -- "$STAGE/app/node_modules" darwin-x64 darwin-arm64
 mkdir -p "$STAGE/app/src/ingestion"
 cp "$ROOT/src/ingestion/image-ocr.mjs" "$STAGE/app/src/ingestion/image-ocr.mjs"
 node "$ROOT/scripts/stage-ocr-data.mjs" "$STAGE/app/src/ingestion/tessdata"

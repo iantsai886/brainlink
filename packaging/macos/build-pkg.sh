@@ -40,6 +40,7 @@ rm -rf "$APP/Contents/Resources/app/ui/app/test"
 mkdir -p "$APP/Contents/Resources/app/node_modules/brainlink-store"
 cp "$ROOT/vendor/brainlink-store/memory-store.mjs" "$ROOT/vendor/brainlink-store/errors.mjs" "$ROOT/vendor/brainlink-store/package.json" "$APP/Contents/Resources/app/node_modules/brainlink-store/"
 node "$ROOT/scripts/stage-runtime-dependencies.mjs" "$APP/Contents/Resources/app/node_modules"
+npm --prefix "$ROOT" run stage:canvas-platforms -- "$APP/Contents/Resources/app/node_modules" darwin-x64 darwin-arm64
 mkdir -p "$APP/Contents/Resources/app/src/ingestion"
 cp "$ROOT/src/ingestion/image-ocr.mjs" "$APP/Contents/Resources/app/src/ingestion/image-ocr.mjs"
 node "$ROOT/scripts/stage-ocr-data.mjs" "$APP/Contents/Resources/app/src/ingestion/tessdata"

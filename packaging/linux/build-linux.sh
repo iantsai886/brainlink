@@ -45,6 +45,7 @@ for ARCH in x64 arm64; do
   mkdir -p "$S/app/node_modules/brainlink-store"
   cp "$ROOT/vendor/brainlink-store/memory-store.mjs" "$ROOT/vendor/brainlink-store/errors.mjs" "$ROOT/vendor/brainlink-store/package.json" "$S/app/node_modules/brainlink-store/"
   node "$ROOT/scripts/stage-runtime-dependencies.mjs" "$S/app/node_modules"
+  npm --prefix "$ROOT" run stage:canvas-platforms -- "$S/app/node_modules" "linux-$ARCH-gnu"
   mkdir -p "$S/app/src/ingestion"
   cp "$ROOT/src/ingestion/image-ocr.mjs" "$S/app/src/ingestion/image-ocr.mjs"
   node "$ROOT/scripts/stage-ocr-data.mjs" "$S/app/src/ingestion/tessdata"
