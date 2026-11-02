@@ -40,6 +40,19 @@ The `Raw` and `Wiki` labels should be optional logical areas or profile-selected
 
 The reel suggests a file-drop hook or overnight schedule. BrainLink has an opt-in **daily scan** or a repeated background check every 1, 5, 15, 30, or 60 minutes for up to 20 selected folders, plus a manual **Scan now** action. Polling checks only the selected folder targets, not the whole vault. Scope and exclusions are checked before source text is read. Supported files are Markdown, TXT, CSV/TSV, JSON, XML, YAML, LOG, HTML/HTM, PDF up to 100 pages, DOCX, XLSX, PPTX, PNG, JPEG, and BMP. HTML title/body text is parsed locally in a bounded worker without executing scripts or fetching linked resources; script/style/template/embedded content and explicit hidden markup are omitted, while external CSS is not evaluated. PDF and Office document extraction and image OCR are performed locally; PDF pages without selectable text are OCR-processed up to 10 pages per PDF, and image OCR uses bundled English, Portuguese, and Traditional Chinese language data. OCR reads text only. If local Ollama drafts are enabled, PNG/JPEG bytes for a selected source may also be sent to loopback Ollama for visual description, requiring a vision-capable local model; BMP remains OCR-only. These image bytes are request-only and are not saved with drafts. All extracted output is capped at 24,000 characters and may be marked truncated. Office archives are checked for malformed, duplicate, encrypted, oversized, and path-traversing entries. XML parts containing DTD or entity declarations are refused. Hidden spreadsheet sheets, rows and columns, and hidden presentation slides are omitted from extracted text. Non-Markdown files have no frontmatter privacy marker and are covered by the selected non-private vault/folder and exclusions. With local Ollama enabled, each run can analyze up to five changed supported sources. Auto-filing is a separate opt-in; each scan folder needs an existing destination in the same vault. Saved notes are new, linked, `proposed`, and unverified. Scans run only while BrainLink is open; enable launch at sign-in if they should resume after login. A failed background scan is retried twice, 15 minutes apart, then waits until the next interval or day. Turning background scans off pauses future runs, and a manual scan remains available. OS event-based watching, legacy Word, other image formats, and other unsupported formats remain unsupported.
 
+### Live local-model check
+
+On 2026-11-03, `npm run smoke:live-ingestion` passed twice on Windows/Node.js 24.22.1 with local Ollama model `qwen3.5:2b`. Each run used a temporary fictional vault and the actual timed watch-mode scheduler. One ordinary source was analyzed and filed as a source-linked proposal; a private note in the same scan folder was skipped; the planted private canary and source text were absent from the generated note, scan status, and activity log. No real vault was read or changed. The proposal remained unverified and was removed with the temporary vault. This proves the local execution path for this model on this machine, not broad model accuracy, user acceptance, provider token savings, or behavior on other operating systems.
+
+Repeat with an installed local Ollama model:
+
+```powershell
+$env:BRAINLINK_TEST_OLLAMA_MODEL = 'qwen3.5:2b'
+npm run smoke:live-ingestion
+```
+
+The script uses only fictional temporary data and fails if Ollama is unavailable or the selected model does not complete the scheduled flow.
+
 ## How to prove it helps
 
 Use fictional Personal, Organisation, and Client data, including planted private notes. Compare a baseline search flow with Raw-to-Wiki processing on frozen questions. Report:

@@ -28,6 +28,7 @@
     "smoke:claude-code": "node scripts/smoke-claude-code.mjs",
     "smoke:live-claude-handoff": "node scripts/smoke-live-claude-handoff.mjs --live",
     "smoke:live-cross-client-handoff": "node scripts/smoke-live-cross-client-handoff.mjs --live",
+    "smoke:live-ingestion": "node scripts/smoke-live-ingestion.mjs",
     "smoke:backup-recovery": "node scripts/smoke-backup-recovery.mjs",
     "updates:sign-manifest": "node scripts/sign-update-manifest.mjs",
     "updates:create-payload": "node scripts/create-update-payload.mjs",
