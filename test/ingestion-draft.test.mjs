@@ -4,6 +4,7 @@ import path from 'node:path';
 import { mkdtemp, mkdir, readFile, readdir, unlink, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { normalize, saveConfig } from '../src/config.mjs';
+import { LOCAL_MODEL_TIMEOUT_MS } from '../src/sessions/local-summary.mjs';
 import { formatIngestionDraft, generateLocalIngestionDraft } from '../src/ingestion-draft.mjs';
 import { ingestionScheduleDue, localDateAndTime, validateIngestionSchedule } from '../src/ingestion-schedule.mjs';
 import { startSetup } from '../src/setup.mjs';
@@ -22,6 +23,10 @@ test('local ingestion drafts use only loopback Ollama and keep source links and 
   assert.match(draft.body, /AI draft; unverified/);
   assert.equal(draft.memory_type, 'procedural');
   assert.equal(draft.status, 'unverified_draft');
+});
+
+test('local source drafts share the five-minute model deadline', () => {
+  assert.equal(LOCAL_MODEL_TIMEOUT_MS, 300_000);
 });
 
 test('entity suggestions are bounded to supported types and exact quotes in the redacted source', () => {

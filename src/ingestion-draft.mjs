@@ -1,5 +1,5 @@
 // Local-only Raw-to-Wiki drafts. Source text is untrusted and is sent only to loopback Ollama.
-import { LOCAL_OLLAMA_URL, validLocalModelName } from './sessions/local-summary.mjs';
+import { LOCAL_MODEL_TIMEOUT_MS, LOCAL_OLLAMA_URL, validLocalModelName } from './sessions/local-summary.mjs';
 import { redactText } from './sessions/redact.mjs';
 import { typedRelationAllowed } from './typed-graph.mjs';
 
@@ -58,7 +58,7 @@ export function formatIngestionDraft(data, source) {
   return { title, summary, memory_type: memoryType, body, entities, relationships, source_id: source.source_id, revision: source.revision, source_path: source.rel, source_title: source.title, vault: source.vault, folder: source.folder, generated_at: new Date().toISOString(), model: source.model, confidence: 'reported', status: 'unverified_draft' };
 }
 
-export async function generateLocalIngestionDraft(source, model, { fetchImpl = fetch, timeoutMs = 120_000 } = {}) {
+export async function generateLocalIngestionDraft(source, model, { fetchImpl = fetch, timeoutMs = LOCAL_MODEL_TIMEOUT_MS } = {}) {
   if (!validLocalModelName(model)) throw new Error('Choose a valid local Ollama model name.');
   const imageBase64 = typeof source?.image_base64 === 'string' ? source.image_base64 : '';
   const typedEntities = Array.isArray(source?.typed_entities) ? source.typed_entities.slice(0, 100) : [];

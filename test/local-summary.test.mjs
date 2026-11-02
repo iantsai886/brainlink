@@ -5,11 +5,16 @@ import os from 'node:os';
 import path from 'node:path';
 import {
   AUTO_SUMMARY_MAX_CHARS,
+  LOCAL_MODEL_TIMEOUT_MS,
   generateLocalSessionSummary,
   readLocalSummaryDraft,
   saveLocalSummaryDraft,
   selectSummaryTurns,
 } from '../src/sessions/local-summary.mjs';
+
+test('local model requests allow up to five minutes for slower devices but remain time-bounded', () => {
+  assert.equal(LOCAL_MODEL_TIMEOUT_MS, 300_000);
+});
 
 const sessionId = 's_0123456789abcdef';
 

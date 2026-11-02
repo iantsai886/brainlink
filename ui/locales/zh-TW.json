@@ -125,7 +125,7 @@
   "sessions.shareSummariesLabel": "允許已連接的 AI 應用程式查看我匯入的 AI 對話摘要",
   "sessions.shareFullTextLabel": "也允許已連接的 AI 應用程式讀取完整對話內容（不只是摘要）",
   "sessions.localSummaryTitle": "私密本機摘要",
-  "sessions.localSummaryHint": "BrainLink 可在這台電腦上使用 Ollama 建立私密工作階段和來源筆記草稿。草稿尚未驗證，只有經你檢查並確認後才會寫入 vault。",
+  "sessions.localSummaryHint": "BrainLink 可在這台電腦上使用 Ollama 建立私密工作階段和來源筆記草稿。較慢的電腦可能需要幾分鐘。草稿尚未驗證，只有經你檢查並確認後才會寫入 vault。",
   "sessions.localSummarySetupGuide": "要使用 AI 摘要和資料夾草稿：先在這台電腦安裝 Ollama，再於 Ollama 安裝至少一個模型，然後按下方按鈕檢查連線。BrainLink 使用這台電腦上的本機服務，不會把檔案傳給雲端 AI。",
   "sessions.localSummaryDownload": "取得 Ollama",
   "sessions.localSummaryChecking": "正在檢查本機 Ollama 連線…",

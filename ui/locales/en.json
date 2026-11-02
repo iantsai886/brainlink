@@ -125,7 +125,7 @@
   "sessions.shareSummariesLabel": "Let connected AI apps see summaries of my imported AI sessions",
   "sessions.shareFullTextLabel": "Also let connected AI apps read full message text (not just summaries)",
   "sessions.localSummaryTitle": "Private local summaries",
-  "sessions.localSummaryHint": "BrainLink can prepare private session and source-note drafts on this computer with Ollama. Drafts are unverified and are written to a vault only after your review and confirmation.",
+  "sessions.localSummaryHint": "BrainLink can prepare private session and source-note drafts on this computer with Ollama. Slower computers may take a few minutes. Drafts are unverified and are written to a vault only after your review and confirmation.",
   "sessions.localSummarySetupGuide": "To use AI summaries and folder drafts: install Ollama on this computer, install at least one model in Ollama, then check the connection below. BrainLink uses the local service on this computer; it does not send your files to a cloud AI.",
   "sessions.localSummaryDownload": "Get Ollama",
   "sessions.localSummaryChecking": "Checking the local Ollama connection…",
