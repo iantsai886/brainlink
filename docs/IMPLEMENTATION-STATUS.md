@@ -5,6 +5,10 @@ GitHub repository: `iantsai886/brainlink`
 Branch: `feat/complete-raw-wiki-folder-flow` (current working branch; based on `origin/main`)
 Code baseline: development target `1.2.8`, with `package.json` as the canonical version source. The `v1.2.7` tag belongs to the separate `wip/v1.2.7` release line; this branch continues from the full-source `main` history and does not move or recreate that tag.
 
+### Local AI setup guidance (`686e60a`, 2026-11-03)
+
+The Sessions setup now gives four clear steps to enable local AI summaries and folder drafts, links to the official Ollama download page, and keeps connection results visible after checking. It reports whether Ollama is unavailable, running without a model, or ready with the selected model. English, Portuguese, and Traditional Chinese are covered. Focused UI tests passed 4/4; all three locale JSON files parsed; `git diff --check` passed. No Ollama/model installation or live inference was performed, so live analysis remains unverified on this computer.
+
 ### Release and RSI documentation correction (`4341ec0`, 2026-11-03)
 
 Updated the release-readiness opening to use the latest dated Windows, Linux, macOS ZIP simulation, and synthetic cross-client handoff receipts, while keeping each platform's limits visible. Updated the product spec to describe scheduled RSI research discovery and all five implemented public metadata sources. No application code changed and no tests were run for this documentation-only correction; `git diff --check` passed before commit. The repository HEAD after this entry is `4341ec0`.
