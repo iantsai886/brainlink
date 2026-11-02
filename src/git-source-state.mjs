@@ -13,3 +13,13 @@ export function readGitSourceState(cwd) {
   if (status.error || status.status !== 0) return { commit_sha: head.stdout.trim().toLowerCase(), clean: false };
   return { commit_sha: head.stdout.trim().toLowerCase(), clean: status.stdout === '' };
 }
+
+// Confirm that a full SHA names a commit object in this local repository. This does not
+// prove the commit exists on GitHub, passed CI, or is deployed.
+export function hasGitCommit(cwd, sha) {
+  if (typeof sha !== 'string' || !/^[a-f0-9]{40}$/i.test(sha)) return false;
+  const result = spawnSync('git', ['cat-file', '-e', `${sha.toLowerCase()}^{commit}`], {
+    cwd, encoding: 'utf8', windowsHide: true, stdio: ['ignore', 'ignore', 'ignore'],
+  });
+  return !result.error && result.status === 0;
+}

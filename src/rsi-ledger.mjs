@@ -180,7 +180,7 @@ function project(events) {
   return [...records.values()].sort((a, b) => b.updated_at.localeCompare(a.updated_at));
 }
 
-export function createRsiLedger({ home, now = () => new Date() }) {
+export function createRsiLedger({ home, now = () => new Date(), verifyCommit = () => false }) {
   const file = path.join(home, 'rsi', 'ledger.jsonl');
   const lockFile = file + '.lock';
   let queue = Promise.resolve();
@@ -348,6 +348,7 @@ export function createRsiLedger({ home, now = () => new Date() }) {
         if (experiment.candidate_version !== merged.candidate_version) throw new Error('The experiment candidate does not match the candidate being accepted.');
         if (experiment.fixture_sha256 !== merged.test_set_version) throw new Error('The test-set field must match the selected run fixture SHA-256.');
         if (experiment.source_commit_sha !== merged.promotion_commit_sha.toLowerCase()) throw new Error('The promotion commit must exactly match the commit tested by the selected experiment.');
+        if (!verifyCommit(merged.promotion_commit_sha.toLowerCase())) throw new Error('The promotion commit was not found in the local BrainLink Git repository; acceptance is blocked.');
       }
       const safeNote = clean(note, 500);
       if (status === 'rolled_back' && !safeNote) throw new Error('Record why the accepted change was rolled back.');
@@ -430,6 +431,7 @@ export function createRsiLedger({ home, now = () => new Date() }) {
       const restoredSha = clean(input.restored_commit_sha, 40).toLowerCase();
       const promotedSha = String(row.fields.promotion_commit_sha || '').toLowerCase();
       if (!/^[a-f0-9]{40}$/.test(restoredSha) || restoredSha === promotedSha) throw new Error('Enter a full commit SHA for the restored version; it must differ from the accepted commit.');
+      if (!verifyCommit(restoredSha)) throw new Error('The restored commit was not found in the local BrainLink Git repository; rollback evidence is blocked.');
       const restoredVersion = clean(input.restored_version, 160), reason = clean(input.reason, 500), reviewer = clean(input.reviewer, 160), evidenceRef = clean(input.evidence_ref, 500);
       if (!restoredVersion || !reason || !reviewer) throw new Error('Rollback needs the restored version, reason, and reviewer.');
       const scanned = JSON.stringify({ restoredVersion, reason, reviewer, evidenceRef });

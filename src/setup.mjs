@@ -51,7 +51,7 @@ import { createRsiDiscovery } from './rsi-discovery.mjs';
 import { createRsiObservationSchedule } from './rsi-observation-schedule.mjs';
 import { createRsiWeekly, taipeiWeek } from './rsi-weekly.mjs';
 import { validateWeeklyBenchmarkSchedule, weeklyBenchmarkScheduleDue, weeklyScheduleWeek } from './rsi-weekly-schedule.mjs';
-import { readGitSourceState } from './git-source-state.mjs';
+import { hasGitCommit, readGitSourceState } from './git-source-state.mjs';
 import { inspectAgentSkills, installAgentSkills, removeAgentSkills, skillClientRoot } from './agent-skills.mjs';
 import { ingestionQueue, readIngestionSource, recordIngestion } from './ingestion.mjs';
 import { generateLocalIngestionDraft } from './ingestion-draft.mjs';
@@ -275,7 +275,7 @@ export async function startSetup(opts = {}) {
   // health checks intentionally use createContext() without this bypass.
   const localContext = (cfg, contextEnv = env) => createContext(cfg, { env: contextEnv, trustedLocal: true });
   const sessions = sessionsService(env, home); // src/host.mjs: imports only from this Setup user's home
-  const rsiLedger = createRsiLedger({ home: appHome(env) });
+  const rsiLedger = createRsiLedger({ home: appHome(env), verifyCommit: opts.rsiVerifyCommit || ((sha) => hasGitCommit(ROOT, sha)) });
   const rsiWeekly = createRsiWeekly({ home: appHome(env) });
   const rsiExperiments = createRsiExperiments({ env, ...(opts.rsiSourceState ? { sourceState: opts.rsiSourceState } : {}) });
   // Opt-in research discovery: off until the user enables it; runs only while this process is open.
