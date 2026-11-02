@@ -8,6 +8,8 @@ Current worktree note (2026-11-03): the vault-count timing fix passes 4/4 focuse
 
 The current branch's Windows package also passed `npm run smoke:installed:win` on 2026-11-03: bundled launch, shortcuts, Setup/folder controls, multilingual OCR, scanned-PDF OCR, safe HTML extraction, retry-safe filing, Hermes hook preservation, isolated uninstall, test data preservation, and PATH restoration. The package is unsigned and unpublished.
 
+On source commit `9abbfd8`, both `npm audit` and `npm audit --omit=dev` reported zero known vulnerabilities. This check reflects the current npm advisory database only; it is not a security certification.
+
 ## Latest verification
 
 - **Dependency audit (current source tree `a3eb985`, 2026-11-02):** both `npm audit` and `npm audit --omit=dev` completed with 0 known vulnerabilities. This is the advisory database result at the time of the check, not a security certification or substitute for code review.
