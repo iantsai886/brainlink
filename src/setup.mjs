@@ -509,7 +509,7 @@ export async function startSetup(opts = {}) {
   let backupTickRunning = false;
   let backupStatus = await loadBackupStatus(backupStateFile);
   const ingestionStateFile = path.join(appHome(env), 'ingestion-state.json');
-  let ingestionStatus = await readFile(ingestionStateFile, 'utf8').then((raw) => JSON.parse(raw)).catch(() => ({ ok: null, at: null, trigger: null, queued_total: 0, scanned: 0, skipped: 0, error: null }));
+  let ingestionStatus = await readFile(ingestionStateFile, 'utf8').then((raw) => JSON.parse(raw)).catch(() => ({ ok: null, at: null, trigger: null, queued_total: 0, scanned: 0, skipped: 0, unsupported_count: 0, unsupported_formats: [], error: null }));
   let ingestionRunning = false;
   const ingestionDraftsDir = path.join(appHome(env), 'ingestion', 'drafts');
   const ingestionDraftStatusFile = path.join(appHome(env), 'ingestion-draft-state.json');
@@ -586,13 +586,19 @@ export async function startSetup(opts = {}) {
     try {
       const ctx = localContext(cfg, { ...env, BRAINLINK_SEMANTIC: '0' });
       const candidates = [], folders = [];
-      let queued_total = 0, scanned = 0, skipped = 0, truncated = false;
+      let queued_total = 0, scanned = 0, skipped = 0, unsupported_count = 0, truncated = false;
+      const unsupportedCounts = new Map();
       for (const target of selected) {
         try {
           const remaining = Math.max(0, 100 - candidates.length);
           const queue = await ingestionQueue(ctx, target.vault, target.folder, { limit: Math.max(1, remaining) });
-          queued_total += queue.queued_total; scanned += queue.scanned; skipped += queue.skipped; truncated ||= queue.truncated;
-          folders.push({ vault: target.vault, folder: queue.folder, ok: true, queued_total: queue.queued_total, scanned: queue.scanned, skipped: queue.skipped, truncated: queue.truncated });
+          queued_total += queue.queued_total; scanned += queue.scanned; skipped += queue.skipped; unsupported_count += queue.unsupported_count || 0; truncated ||= queue.truncated;
+          for (const item of queue.unsupported_formats || []) {
+            const extension = String(item.extension || '');
+            const key = unsupportedCounts.has(extension) || unsupportedCounts.size < 19 ? extension : 'other';
+            unsupportedCounts.set(key, (unsupportedCounts.get(key) || 0) + Math.max(0, Number(item.count) || 0));
+          }
+          folders.push({ vault: target.vault, folder: queue.folder, ok: true, queued_total: queue.queued_total, scanned: queue.scanned, skipped: queue.skipped, unsupported_count: queue.unsupported_count || 0, unsupported_formats: queue.unsupported_formats || [], truncated: queue.truncated });
           const destinations = (await listSessionFilingFolders(ctx, target.vault))
             .map((entry) => entry.path)
             .filter((folder) => folder && folder !== target.folder && !folder.startsWith(`${target.folder}/`)
@@ -605,12 +611,13 @@ export async function startSetup(opts = {}) {
         }
       }
       const failures = folders.filter((entry) => !entry.ok);
-      const status = { ok: failures.length === 0, at: new Date().toISOString(), trigger, vault: selected.length === 1 ? selected[0].vault : null, folder: selected.length === 1 ? selected[0].folder : null, targets: folders, queued_total, scanned, skipped, truncated, error: failures.length ? failures.map((entry) => `${entry.vault}: ${entry.error}`).join('; ').slice(0, 500) : null };
+      const unsupported_formats = [...unsupportedCounts.entries()].map(([extension, count]) => ({ extension, count })).sort((a, b) => a.extension.localeCompare(b.extension));
+      const status = { ok: failures.length === 0, at: new Date().toISOString(), trigger, vault: selected.length === 1 ? selected[0].vault : null, folder: selected.length === 1 ? selected[0].folder : null, targets: folders, queued_total, scanned, skipped, unsupported_count, unsupported_formats, truncated, error: failures.length ? failures.map((entry) => `${entry.vault}: ${entry.error}`).join('; ').slice(0, 500) : null };
       await saveIngestionStatus(status);
       await logActivity(env, { tool: 'source_scan', ok: status.ok });
       return { ...status, candidates, limited: queued_total > candidates.length };
     } catch (error) {
-      const status = { ok: false, at: new Date().toISOString(), trigger, vault: null, folder: null, queued_total: 0, scanned: 0, skipped: 0, error: error.message || String(error) };
+      const status = { ok: false, at: new Date().toISOString(), trigger, vault: null, folder: null, queued_total: 0, scanned: 0, skipped: 0, unsupported_count: 0, unsupported_formats: [], error: error.message || String(error) };
       await saveIngestionStatus(status).catch(() => {});
       await logActivity(env, { tool: 'source_scan', ok: false });
       throw error;

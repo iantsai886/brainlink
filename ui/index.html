@@ -757,6 +757,14 @@ function refreshIngestionModeControls() {
   $('ingestion-time-wrap').hidden = watching;
   $('ingestion-interval-wrap').hidden = !watching;
 }
+function ingestionUnsupportedText(result) {
+  const count = Math.max(0, Number(result?.unsupported_count) || 0);
+  if (!count) return '';
+  const types = (Array.isArray(result.unsupported_formats) ? result.unsupported_formats : [])
+    .map((item) => `${item.extension ? String(item.extension) : t('ingestion.noExtension')} (${Math.max(0, Number(item.count) || 0)})`)
+    .join(', ');
+  return [t('ingestion.unsupportedSummary', { count }), types ? t('ingestion.unsupportedTypes', { types }) : ''].filter(Boolean).join(' ');
+}
 let ingestionFolderRequest = 0;
 async function refreshIngestionFolders(preferred = '') {
   const select = $('ingestion-folder');
@@ -1735,9 +1743,11 @@ async function load() {
   await refreshIngestionFolders(selectedTarget?.folder || (S.ingestion?.vault === $('ingestion-vault').value ? S.ingestion?.folder : '') || '');
   renderIngestionTargets();
   $('ingestion-time').value = S.ingestion?.time || '02:00';
-  $('ingestion-status').textContent = S.ingestion?.status?.at
-    ? (S.ingestion.status.ok ? t('ingestion.lastRun', { count: S.ingestion.status.queued_total, at: new Date(S.ingestion.status.at).toLocaleString(LOCALE), trigger: t('ingestion.trigger.' + S.ingestion.status.trigger) }) : S.ingestion.status.retry_after ? t('ingestion.retryScheduled', { attempt: S.ingestion.status.attempt, at: new Date(S.ingestion.status.retry_after).toLocaleString(LOCALE), error: S.ingestion.status.error || '' }) : t('ingestion.failed', { error: S.ingestion.status.error || '' }))
+  const ingestionStatus = S.ingestion?.status;
+  const ingestionStatusText = ingestionStatus?.at
+    ? (ingestionStatus.ok ? t('ingestion.lastRun', { count: ingestionStatus.queued_total, at: new Date(ingestionStatus.at).toLocaleString(LOCALE), trigger: t('ingestion.trigger.' + ingestionStatus.trigger) }) : ingestionStatus.retry_after ? t('ingestion.retryScheduled', { attempt: ingestionStatus.attempt, at: new Date(ingestionStatus.retry_after).toLocaleString(LOCALE), error: ingestionStatus.error || '' }) : t('ingestion.failed', { error: ingestionStatus.error || '' }))
     : t('ingestion.never');
+  $('ingestion-status').textContent = [ingestionStatusText, ingestionUnsupportedText(ingestionStatus)].filter(Boolean).join(' ');
   if (S.ingestion?.status?.running) $('ingestion-status').textContent = t('ingestion.running');
   const draftStatus = S.ingestion_drafts?.status;
   $('ingestion-draft-status').textContent = draftStatus?.at ? t('ingestion.autoDraftStatus', { trigger: t(`ingestion.trigger.${draftStatus.trigger || 'schedule'}`), created: draftStatus.created || 0, filed: draftStatus.filed || 0, attempted: draftStatus.attempted || 0, at: new Date(draftStatus.at).toLocaleString(LOCALE), failed: draftStatus.failed || 0 }) : '';
@@ -2616,7 +2626,9 @@ $('ingestion-save').onclick = () => act(async () => {
 });
 $('ingestion-run').onclick = () => act(async () => {
   const r = await api('POST', '/api/ingestion/run', { targets: currentIngestionTargets() });
-  $('ingestion-queue').innerHTML = r.candidates.length ? `${r.limited ? `<p class="muted">${esc(t('ingestion.limited', { shown: r.candidates.length, total: r.queued_total }))}</p>` : ''}${r.candidates.map((item) => `<div class="card"><button class="link" data-open-note="${esc(item.vault || r.vault)}::${esc(item.path)}"><b>${esc(item.title)}</b></button><span class="mono muted">${esc(item.vault || r.vault)} · ${esc(item.path)}</span><small class="muted">${esc(item.updated_at)}</small>${S.sessions_local_summary?.enabled ? `<button class="secondary" type="button" data-ingestion-draft data-vault="${esc(item.vault || r.vault)}" data-folder="${esc(item.folder)}" data-source-id="${esc(item.source_id)}" data-revision="${esc(item.revision)}">${esc(t('ingestion.makeLocalDraft'))}</button>` : ''}<div id="ingestion-draft-${esc(item.source_id.slice(0, 12))}"></div></div>`).join('')}` : `<p class="muted">${esc(t('ingestion.empty'))}</p>`;
+  const unsupported = ingestionUnsupportedText(r);
+  const unsupportedCard = unsupported ? `<div class="card"><small class="muted">${esc(unsupported)}</small></div>` : '';
+  $('ingestion-queue').innerHTML = `${unsupportedCard}${r.candidates.length ? `${r.limited ? `<p class="muted">${esc(t('ingestion.limited', { shown: r.candidates.length, total: r.queued_total }))}</p>` : ''}${r.candidates.map((item) => `<div class="card"><button class="link" data-open-note="${esc(item.vault || r.vault)}::${esc(item.path)}"><b>${esc(item.title)}</b></button><span class="mono muted">${esc(item.vault || r.vault)} · ${esc(item.path)}</span><small class="muted">${esc(item.updated_at)}</small>${S.sessions_local_summary?.enabled ? `<button class="secondary" type="button" data-ingestion-draft data-vault="${esc(item.vault || r.vault)}" data-folder="${esc(item.folder)}" data-source-id="${esc(item.source_id)}" data-revision="${esc(item.revision)}">${esc(t('ingestion.makeLocalDraft'))}</button>` : ''}<div id="ingestion-draft-${esc(item.source_id.slice(0, 12))}"></div></div>`).join('')}` : `<p class="muted">${esc(t('ingestion.empty'))}</p>`}`;
   toast(r.ok ? (r.processing?.filed ? t('ingestion.scanFiled', { count: r.processing.filed }) : t('ingestion.scanDone', { count: r.queued_total })) : (r.error || t('ingestion.failed', { error: '' })), !r.ok);
 });
 $('brief-save').onclick = () => act(async () => {

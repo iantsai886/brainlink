@@ -126,6 +126,7 @@ test('Setup offers authenticated manual scans and runs an enabled daily scan in 
   const privateVault = path.join(home, 'private-vault');
   await mkdir(path.join(vault, 'Raw'), { recursive: true });
   await writeFile(path.join(vault, 'Raw', 'Source.md'), '# Source\n\nFictional intake item.');
+  await writeFile(path.join(vault, 'Raw', 'Unsupported.mp4'), 'UNSUPPORTED_MEDIA_BODY_CANARY');
   await mkdir(path.join(secondVault, 'Incoming'), { recursive: true });
   await writeFile(path.join(secondVault, 'Incoming', 'Second.md'), '# Second\n\nAnother fictional intake item.');
   await mkdir(path.join(privateVault, 'Raw'), { recursive: true });
@@ -157,15 +158,20 @@ test('Setup offers authenticated manual scans and runs an enabled daily scan in 
     }
     assert.equal(status.ingestion.status.trigger, 'schedule', `the background timer scans at the configured local time: ${JSON.stringify(status.ingestion)}`);
     assert.equal(status.ingestion.status.queued_total, 2);
+    assert.equal(status.ingestion.status.unsupported_count, 1);
+    assert.deepEqual(status.ingestion.status.unsupported_formats, [{ extension: '.mp4', count: 1 }]);
     assert.equal(status.ingestion.status.targets.length, 2);
     for (let i = 0; i < 100 && status.ingestion.running; i++) { await delay(10); status = await get('/api/state').then((r) => r.json()); }
     assert.equal(status.ingestion.running, false, 'scheduled work finishes before the manual run starts');
     assert.equal((await readFile(path.join(appHome, 'ingestion-state.json'), 'utf8')).includes('Fictional intake item'), false, 'saved scan status contains no note body');
+    assert.doesNotMatch(await readFile(path.join(appHome, 'ingestion-state.json'), 'utf8'), /UNSUPPORTED_MEDIA_BODY_CANARY|Unsupported\.mp4/);
     const manual = await post('/api/ingestion/run', { vault: 'Fictional Team', folder: 'Raw' });
     assert.equal(manual.status, 200, await manual.clone().text());
     const manualResult = await manual.json();
     assert.equal(manualResult.trigger, 'manual');
     assert.equal(manualResult.queued_total, 1);
+    assert.equal(manualResult.unsupported_count, 1);
+    assert.deepEqual(manualResult.unsupported_formats, [{ extension: '.mp4', count: 1 }]);
     assert.equal(manualResult.candidates[0].path, 'Raw/Source.md');
     const scanEvents = (await readFile(path.join(appHome, 'activity.log'), 'utf8')).trim().split(/\r?\n/).map(JSON.parse).filter((entry) => entry.tool === 'source_scan');
     assert.ok(scanEvents.length >= 2, 'scheduled and manual scans are observed');
@@ -206,6 +212,8 @@ test('ingestion scan UI has manual, scheduled and startup guidance controls in e
   assert.match(html, /intervalMinutes: Number\(\$\('ingestion-interval'\)\.value\)/);
   assert.match(html, /#ingestion-time-wrap\[hidden\], #ingestion-interval-wrap\[hidden\] \{ display: none; \}/, 'daily and repeated-scan controls hide the inactive input');
   assert.match(html, /api\('POST', '\/api\/ingestion\/run', \{ targets: currentIngestionTargets\(\) \}\)/);
+  assert.match(html, /function ingestionUnsupportedText\(result\)[\s\S]*?unsupported_formats/);
+  assert.match(html, /const unsupportedCard = unsupported \? /, 'manual scan results show skipped format counts even when no supported files remain');
   assert.match(html, /api\('POST', '\/api\/ingestion\/draft'/, 'the selected source can be summarized by the local draft route');
   assert.match(html, /api\('POST', '\/api\/ingestion\/save-draft'.*confirm: true/, 'saving requires a separate confirmation action');
   assert.match(html, /api\('GET', '\/api\/ingestion\/drafts'\)/, 'local drafts reload from private app data');
@@ -221,7 +229,7 @@ test('ingestion scan UI has manual, scheduled and startup guidance controls in e
   assert.match(html, /currentIngestionTargets\(\)\.push\(target\)/);
   for (const locale of ['en', 'zh-TW', 'pt']) {
     const catalog = JSON.parse(await readFile(new URL(`../ui/locales/${locale}.json`, import.meta.url), 'utf8'));
-    for (const key of ['ingestion.title', 'ingestion.hint', 'ingestion.enabled', 'ingestion.startupWarning', 'ingestion.startupLink', 'ingestion.mode', 'ingestion.modeDaily', 'ingestion.modeWatch', 'ingestion.interval', 'ingestion.autoDrafts', 'ingestion.autoDraftsHint', 'ingestion.autoFile', 'ingestion.autoFileHint', 'ingestion.scanFiled', 'ingestion.pendingDrafts', 'ingestion.noPendingDrafts', 'ingestion.localDraftReady', 'ingestion.autoDraftStatus', 'ingestion.vault', 'ingestion.folder', 'ingestion.chooseFolder', 'ingestion.addTarget', 'ingestion.targets', 'ingestion.removeTarget', 'ingestion.emptyTargets', 'ingestion.targetRequired', 'ingestion.maxTargets', 'ingestion.duplicateTarget', 'ingestion.time', 'ingestion.save', 'ingestion.run', 'ingestion.never', 'ingestion.running', 'ingestion.lastRun', 'ingestion.failed', 'ingestion.retryScheduled', 'ingestion.saved', 'ingestion.disabled', 'ingestion.scanDone', 'ingestion.empty', 'ingestion.limited', 'ingestion.trigger.manual', 'ingestion.trigger.schedule', 'ingestion.trigger.watch', 'ingestion.makeLocalDraft', 'ingestion.localDraftNeedsModel', 'ingestion.localDraftUnverified', 'ingestion.memoryType', 'ingestion.reviewDraft', 'ingestion.destination', 'ingestion.chooseDestination', 'ingestion.noDestination', 'ingestion.saveProposal', 'ingestion.retryProposal', 'ingestion.partialFiling', 'ingestion.discardDraft', 'ingestion.confirmDiscardDraft', 'ingestion.confirmSaveProposal', 'ingestion.confirmRetryProposal', 'ingestion.proposalSaved', 'ingestion.proposalUnverified', 'ingestion.proposalNeedsReview']) assert.ok(catalog[key], `${locale} ${key}`);
+    for (const key of ['ingestion.title', 'ingestion.hint', 'ingestion.enabled', 'ingestion.startupWarning', 'ingestion.startupLink', 'ingestion.mode', 'ingestion.modeDaily', 'ingestion.modeWatch', 'ingestion.interval', 'ingestion.autoDrafts', 'ingestion.autoDraftsHint', 'ingestion.autoFile', 'ingestion.autoFileHint', 'ingestion.scanFiled', 'ingestion.pendingDrafts', 'ingestion.noPendingDrafts', 'ingestion.localDraftReady', 'ingestion.autoDraftStatus', 'ingestion.vault', 'ingestion.folder', 'ingestion.chooseFolder', 'ingestion.addTarget', 'ingestion.targets', 'ingestion.removeTarget', 'ingestion.emptyTargets', 'ingestion.targetRequired', 'ingestion.maxTargets', 'ingestion.duplicateTarget', 'ingestion.time', 'ingestion.save', 'ingestion.run', 'ingestion.never', 'ingestion.running', 'ingestion.lastRun', 'ingestion.failed', 'ingestion.retryScheduled', 'ingestion.saved', 'ingestion.disabled', 'ingestion.scanDone', 'ingestion.empty', 'ingestion.unsupportedSummary', 'ingestion.unsupportedTypes', 'ingestion.noExtension', 'ingestion.limited', 'ingestion.trigger.manual', 'ingestion.trigger.schedule', 'ingestion.trigger.watch', 'ingestion.makeLocalDraft', 'ingestion.localDraftNeedsModel', 'ingestion.localDraftUnverified', 'ingestion.memoryType', 'ingestion.reviewDraft', 'ingestion.destination', 'ingestion.chooseDestination', 'ingestion.noDestination', 'ingestion.saveProposal', 'ingestion.retryProposal', 'ingestion.partialFiling', 'ingestion.discardDraft', 'ingestion.confirmDiscardDraft', 'ingestion.confirmSaveProposal', 'ingestion.confirmRetryProposal', 'ingestion.proposalSaved', 'ingestion.proposalUnverified', 'ingestion.proposalNeedsReview']) assert.ok(catalog[key], `${locale} ${key}`);
     assert.match(catalog['ingestion.hint'], /HTML\/HTM/iu, `${locale} describes supported HTML files`);
     assert.doesNotMatch(catalog['ingestion.hint'], /scanned PDFs? (and )?other formats (are )?(skipped|ignored)/iu, `${locale} does not claim scanned PDFs are skipped`);
     if (locale === 'en') assert.match(catalog['ingestion.hint'], /PDFs up to 100 pages.*scanned pages with local OCR/iu);

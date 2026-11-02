@@ -304,7 +304,16 @@ async function readEligible(full, root, realRoot, rel, { includeBody = false } =
 
 async function sourcesInFolder(ctx, vaultName, folderInfo) {
   const out = [];
+  const unsupportedCounts = new Map();
+  let unsupportedCount = 0;
   let visited = 0, skipped = 0, truncated = false;
+  function noteUnsupported(rel) {
+    unsupportedCount++;
+    const extension = sourceExtension(rel);
+    const key = extension && /^\.[a-z0-9]{1,12}$/i.test(extension) ? extension : extension ? 'other' : '';
+    const boundedKey = unsupportedCounts.has(key) || unsupportedCounts.size < 19 ? key : 'other';
+    unsupportedCounts.set(boundedKey, (unsupportedCounts.get(boundedKey) || 0) + 1);
+  }
   async function visit(dir, relDir, depth = 0) {
     if (truncated) return;
     if (depth > MAX_DEPTH) { skipped++; return; }
@@ -320,13 +329,16 @@ async function sourcesInFolder(ctx, vaultName, folderInfo) {
       if (!st || st.isSymbolicLink()) { skipped++; continue; }
       if (st.isDirectory()) { await visit(full, rel, depth + 1); continue; }
       if (!st.isFile()) continue;
-      if (!isSupportedSource(rel)) { skipped++; continue; }
+      if (!isSupportedSource(rel)) { skipped++; noteUnsupported(rel); continue; }
       const source = await readEligible(full, folderInfo.root, folderInfo.realRoot, rel).catch(() => null);
       if (source) out.push(source); else skipped++;
     }
   }
   await visit(folderInfo.full, folderInfo.folder);
-  return { sources: out, scanned: visited, skipped, truncated };
+  const unsupported_formats = [...unsupportedCounts.entries()]
+    .map(([extension, count]) => ({ extension, count }))
+    .sort((a, b) => a.extension.localeCompare(b.extension));
+  return { sources: out, scanned: visited, skipped, truncated, unsupported_count: unsupportedCount, unsupported_formats };
 }
 
 function journalPath(ctx, scope) { return path.join(appHome(ctx.env), 'ingestion', `${scope}.jsonl`); }
@@ -344,14 +356,14 @@ async function latestEvents(file) {
 export async function ingestionQueue(ctx, vaultName, folder, { limit = 50 } = {}) {
   const folderInfo = await checkedFolder(ctx, vaultName, folder);
   const scope = scopeId(ctx, vaultName, folderInfo.root);
-  const { sources, scanned, skipped, truncated } = await sourcesInFolder(ctx, vaultName, folderInfo);
+  const { sources, scanned, skipped, truncated, unsupported_count, unsupported_formats } = await sourcesInFolder(ctx, vaultName, folderInfo);
   const events = await latestEvents(journalPath(ctx, scope));
   const pending = sources.filter((s) => events.get(sourceId(scope, s.rel))?.revision !== s.revision)
     .sort((a, b) => b.updated_at.localeCompare(a.updated_at));
   const cap = Math.max(1, Math.min(100, Number(limit) || 50));
   const candidates = pending.slice(0, cap)
     .map((s) => ({ source_id: sourceId(scope, s.rel), revision: s.revision, path: s.rel, title: s.title, updated_at: s.updated_at }));
-  return { ok: true, vault: vaultName, folder: folderInfo.folder, candidates, queued_total: pending.length, scanned, skipped, truncated, limited: pending.length > cap, next: 'Read each selected source with ingestion_read_source. Draft linked knowledge with propose_note and show its preview. After a linked note is saved, record filed; otherwise record skipped. Source files are never changed.' };
+  return { ok: true, vault: vaultName, folder: folderInfo.folder, candidates, queued_total: pending.length, scanned, skipped, truncated, unsupported_count, unsupported_formats, limited: pending.length > cap, next: 'Read each selected source with ingestion_read_source. Draft linked knowledge with propose_note and show its preview. After a linked note is saved, record filed; otherwise record skipped. Unsupported regular files are reported by extension and count only; they are not read. Source files are never changed.' };
 }
 
 // Re-read one exact queue item only after the same folder, vault and privacy checks pass.

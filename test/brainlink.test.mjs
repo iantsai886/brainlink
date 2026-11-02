@@ -249,6 +249,27 @@ test('ingestion queue scans only a chosen folder and filters private, excluded, 
   await assert.rejects(ingestionQueue(ctxOf(cfg, env), 'Journal', 'Raw'), /private vault/i);
 });
 
+test('ingestion reports unsupported file types without exposing names, paths, or contents', async () => {
+  const { base, company, cfg } = await fixture();
+  const raw = path.join(company, 'Raw');
+  await mkdir(path.join(raw, 'Blocked'), { recursive: true });
+  await writeFile(path.join(raw, '.brainlinkignore'), 'Blocked/\n');
+  await writeFile(path.join(raw, 'Legacy.doc'), 'UNSUPPORTED_DOC_BODY_CANARY');
+  await writeFile(path.join(raw, 'Trip.mp4'), 'UNSUPPORTED_VIDEO_BODY_CANARY');
+  await writeFile(path.join(raw, 'README'), 'UNSUPPORTED_NO_EXTENSION_BODY_CANARY');
+  await writeFile(path.join(raw, 'Blocked', 'Hidden.mov'), 'EXCLUDED_UNSUPPORTED_CANARY');
+  const queue = await ingestionQueue(ctxOf(cfg, { BRAINLINK_HOME: path.join(base, 'app') }), 'Acme Studio', 'Raw');
+  assert.equal(queue.unsupported_count, 3);
+  assert.deepEqual(queue.unsupported_formats, [
+    { extension: '', count: 1 },
+    { extension: '.doc', count: 1 },
+    { extension: '.mp4', count: 1 },
+  ]);
+  assert.deepEqual(queue.candidates, []);
+  assert.doesNotMatch(JSON.stringify(queue), /Legacy\.doc|Trip\.mp4|README|Hidden\.mov|UNSUPPORTED_.*CANARY|EXCLUDED_UNSUPPORTED_CANARY/);
+  assert.match(queue.next, /Unsupported regular files are reported by extension and count only; they are not read/);
+});
+
 test('ingestion ignores OS metadata and temporary files before listing or reading them', async () => {
   const { base, company, cfg } = await fixture();
   const raw = path.join(company, 'Raw');
