@@ -4,6 +4,7 @@ import { mkdir, readFile, readdir, rename, unlink, writeFile } from 'node:fs/pro
 import path from 'node:path';
 
 const ID_RE = /^[a-f0-9]{64}$/;
+const SOURCE_EXTENSIONS = new Set(['.md', '.txt', '.csv', '.tsv', '.json', '.xml', '.yaml', '.yml', '.log', '.html', '.htm', '.pdf', '.docx', '.xlsx', '.pptx', '.png', '.jpg', '.jpeg', '.bmp']);
 
 export function ingestionDraftId(draft) {
   return createHash('sha256').update(`${draft.vault}\0${draft.source_id}\0${draft.revision}`).digest('hex');
@@ -21,11 +22,12 @@ function validRecord(record, id) {
     && ID_RE.test(draft.revision) && record.id === ingestionDraftId(draft)
     && typeof draft.vault === 'string' && draft.vault.length > 0 && draft.vault.length <= 200
     && typeof draft.folder === 'string' && safeFolder(draft.folder)
-    && typeof draft.source_path === 'string' && safeNotePath(draft.source_path)
+    && typeof draft.source_path === 'string' && safeSourcePath(draft.source_path)
     && typeof draft.title === 'string' && draft.title.length > 0 && draft.title.length <= 120
     && typeof draft.summary === 'string' && draft.summary.length > 0 && draft.summary.length <= 2400
     && typeof draft.body === 'string' && draft.body.length <= 12_000
     && ['working', 'semantic', 'procedural', 'episodic'].includes(draft.memory_type)
+    && (draft.related_basis === undefined || draft.related_basis === 'source_and_draft')
     && (draft.related_notes === undefined || (Array.isArray(draft.related_notes) && draft.related_notes.length <= 8 && draft.related_notes.every((item) => item
       && safeNotePath(item.path) && !/[\[\]]/.test(item.path)
       && typeof item.title === 'string' && item.title.length > 0 && item.title.length <= 160
@@ -40,6 +42,7 @@ function safeFolder(value) {
 }
 
 function safeNotePath(value) { return safeFolder(value) && /\.md$/i.test(value); }
+function safeSourcePath(value) { return safeFolder(value) && SOURCE_EXTENSIONS.has(path.posix.extname(value).toLowerCase()); }
 
 export async function saveIngestionDraft(dir, draft) {
   const id = ingestionDraftId(draft), file = fileFor(dir, id);

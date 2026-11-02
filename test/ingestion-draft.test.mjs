@@ -57,7 +57,9 @@ test('selected source can become a proposed note only after explicit confirmatio
   let modelCalls = 0, sentBody = '';
   const app = await startSetup({ env, home, os: 'win32', port: 0, useCli: false, ingestionDraftFetch: async (url, options) => {
     modelCalls++; assert.equal(url, 'http://127.0.0.1:11434/api/chat'); sentBody = options.body;
-    return { ok: true, json: async () => ({ message: { content: JSON.stringify({ title: 'Checklist process', memory_type: 'procedural', summary: 'The fictional team uses a short checklist.', key_points: ['The source is unverified.'] }) } }) };
+    const sourcePath = JSON.parse(JSON.parse(sentBody).messages[1].content).source_path;
+    const title = sourcePath.endsWith('.txt') ? 'Checklist from text' : 'Checklist process';
+    return { ok: true, json: async () => ({ message: { content: JSON.stringify({ title, memory_type: 'procedural', summary: 'The fictional team uses a short checklist.', key_points: ['The source is unverified.'] }) } }) };
   } });
   const api = (route, body = {}, token = app.token) => fetch(`http://127.0.0.1:${app.port}${route}`, {
     method: 'POST', headers: { 'Content-Type': 'application/json', 'X-BrainLink-Token': token }, body: JSON.stringify(body),
@@ -108,6 +110,23 @@ test('selected source can become a proposed note only after explicit confirmatio
     await writeFile(path.join(vault, 'Raw', 'Private.md'), '---\nprivate: true\n---\nZQX_PRIVATE_NOTE_MUST_NOT_BE_READ');
     const privateScan = await (await api('/api/ingestion/run', { targets: [{ vault: 'Fictional Company', folder: 'Raw' }] })).json();
     assert.equal(privateScan.candidates.some((item) => item.path.endsWith('Private.md')), false);
+
+    await writeFile(path.join(vault, 'Raw', 'Process notes.txt'), 'The fictional team runs a short checklist for each internal request.');
+    const textScan = await (await api('/api/ingestion/run', { targets: [{ vault: 'Fictional Company', folder: 'Raw' }] })).json();
+    assert.deepEqual(textScan.candidates.map((item) => item.path), ['Raw/Process notes.txt']);
+    const textSource = textScan.candidates[0];
+    const textDraftResponse = await api('/api/ingestion/draft', { vault: 'Fictional Company', folder: 'Raw', source_id: textSource.source_id, revision: textSource.revision });
+    assert.equal(textDraftResponse.status, 200, await textDraftResponse.clone().text());
+    const textDraft = await textDraftResponse.json();
+    assert.ok(textDraft.draft.related_notes.some((item) => item.path === 'Knowledge/Team checklist.md'), 'non-Markdown sources get same-vault links from their generated summary');
+    assert.doesNotMatch(JSON.stringify(textDraft.draft.related_notes), /Secret|ZQX_PRIVATE_NOTE_MUST_NOT_BE_READ/);
+    const textSavedResponse = await api('/api/ingestion/save-draft', { draft_id: textDraft.draft_id, destination: 'Knowledge', related_note_paths: ['Knowledge/Team checklist.md'], confirm: true });
+    assert.equal(textSavedResponse.status, 200, await textSavedResponse.clone().text());
+    const textSaved = await textSavedResponse.json();
+    assert.equal(textSaved.saved_as_proposal, true);
+    const textNote = await readFile(path.join(vault, textSaved.path.slice('Fictional Company/'.length)), 'utf8');
+    assert.match(textNote, /\[\[Raw\/Process notes\.txt\]\]/);
+    assert.match(textNote, /\[\[Knowledge\/Team checklist\]\]/);
   } finally { await new Promise((resolve) => app.server.close(resolve)); }
 });
 
@@ -191,6 +210,7 @@ test('manual scan auto-files a linked proposed note only into its selected same-
   await mkdir(path.join(vault, 'Raw'), { recursive: true });
   await mkdir(path.join(vault, 'Knowledge'), { recursive: true });
   await writeFile(path.join(vault, 'Raw', 'Source.md'), '# Fictional source\n\nA fictional team uses a checklist.');
+  await writeFile(path.join(vault, 'Knowledge', 'Team checklist.md'), '# Team checklist\n\nA fictional team uses a short checklist for internal requests and records each result so the process can be reused later. This is a synthetic reference note for automatic link tests.');
   await writeFile(path.join(vault, 'Raw', 'Private.md'), '---\nprivate: true\n---\nPRIVATE_AUTO_FILE_CANARY must not be read.');
   const env = { BRAINLINK_HOME: appHome, HOME: home, BRAINLINK_SEMANTIC: '0' };
   const local = localDateAndTime(new Date(), 'UTC');
@@ -227,11 +247,15 @@ test('manual scan auto-files a linked proposed note only into its selected same-
     assert.equal(scan.processing.failed, 0);
     assert.doesNotMatch(sent, /PRIVATE_AUTO_FILE_CANARY/);
     const files = await readdir(path.join(vault, 'Knowledge'));
-    assert.equal(files.length, 1);
-    const note = await readFile(path.join(vault, 'Knowledge', files[0]), 'utf8');
+    assert.equal(files.length, 2);
+    const notePath = files.find((file) => file.endsWith('Auto proposal.md'));
+    assert.ok(notePath);
+    const note = await readFile(path.join(vault, 'Knowledge', notePath), 'utf8');
     assert.match(note, /status: proposed/);
     assert.match(note, /confidence: "reported"/);
     assert.match(note, /\[\[Raw\/Source\]\]/);
+    assert.match(note, /automatic shared-term suggestions; unverified/);
+    assert.match(note, /\[\[Knowledge\/Team checklist\]\]/);
     assert.match(note, /AI draft; unverified/);
     const pending = await fetch(base + '/api/ingestion/drafts', { headers }).then((r) => r.json());
     assert.equal(pending.drafts.length, 0, 'saved proposals are removed from the local draft queue');

@@ -709,6 +709,27 @@ export async function related(ctx, name, rel) {
   };
 }
 
+// Suggest same-vault links for a draft or a source that is not itself a Markdown note.
+// The vault index already applies privacy and profile-scope rules; this reuses the same
+// shared-term ranking and candidate filters as related().
+export async function relatedText(ctx, name, text, { excludePath = '' } = {}) {
+  const index = await loadVault(ctx, name);
+  const { termSets, df } = noteTerms(index);
+  const exclude = new Set();
+  const sourceIndex = excludePath ? index.byRel.get(excludePath) : undefined;
+  if (sourceIndex !== undefined) {
+    if (index.notes[sourceIndex].private) throw new Error(`Note not found in ${name}: ${excludePath}`);
+    exclude.add(sourceIndex);
+    for (const j of index.outlinks[sourceIndex] || []) exclude.add(j);
+    for (const j of index.backlinks[sourceIndex] || []) exclude.add(j);
+  }
+  const notPrivate = (j) => !index.notes[j].private;
+  return {
+    suggested: suggestRelated(terms(text), termSets, df, { exclude, eligible: (j) => eligibleFor(index)(j) && notPrivate(j) })
+      .map((s) => ({ ...summarize(index, s.j), score: +s.score.toFixed(3), shared_terms: s.shared })),
+  };
+}
+
 export { eligibleFor };
 
 export async function fileInfo(full) {

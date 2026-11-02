@@ -643,7 +643,7 @@
   "ingestion.autoDrafts": "Analisar automaticamente arquivos novos com IA local",
   "ingestion.autoDraftsHint": "Usa o Ollama somente neste computador e analisa até 5 arquivos novos por verificação. Quando ativado, imagens PNG/JPEG são enviadas ao Ollama neste computador para descrição visual; é necessário um modelo com visão. Os rascunhos ficam não verificados e aguardam revisão, a menos que o arquivamento automático seja ativado separadamente.",
   "ingestion.autoFile": "Salvar automaticamente novas notas como propostas",
-  "ingestion.autoFileHint": "Escolha abaixo uma pasta de destino para cada pasta monitorada. O BrainLink salva apenas notas novas, com link para a fonte e marcadas como propostas; nunca altera notas existentes nem marca conteúdo de IA como verificado.",
+  "ingestion.autoFileHint": "Escolha uma pasta de destino para cada pasta monitorada. O BrainLink salva apenas notas novas marcadas como propostas e nunca altera notas existentes. Pode adicionar até 3 links no mesmo vault com base em palavras compartilhadas; são sugestões não verificadas, não fatos.",
   "ingestion.scanFiled": "Verificação concluída. {count} novas notas foram salvas como propostas nas pastas escolhidas.",
   "ingestion.autoDraftsNeedsModel": "Primeiro, ative os rascunhos de resumo local e escolha um modelo Ollama em Sessions.",
   "ingestion.pendingDrafts": "Rascunhos locais de IA para revisar",

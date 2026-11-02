@@ -13,7 +13,7 @@ import path from 'node:path';
 import { loadConfig, saveConfig, configPath, normalize, validate, LOCALES, appHome, emptyConfig } from './config.mjs';
 import { PACKS, buildPack, scaffold, mergePack } from './packs.mjs';
 import { CLIENTS, resolveClient, detect, connectClient, disconnectClient, readClientAgentToken, test, deepSeekSessionCueStatus, setDeepSeekSessionCue } from './connectors.mjs';
-import { createContext, search, searchWithVerdict, readNote, related as relatedNotes, ensureDefaultIgnore, readExcludedFolders, writeExcludedFolders, DEFAULT_EXCLUDED_FOLDERS, SUGGESTED_EXCLUDED_FOLDERS, safeJoin, vaultRoot, countVisibleNotes } from './core.mjs';
+import { createContext, search, searchWithVerdict, readNote, related as relatedNotes, relatedText, ensureDefaultIgnore, readExcludedFolders, writeExcludedFolders, DEFAULT_EXCLUDED_FOLDERS, SUGGESTED_EXCLUDED_FOLDERS, safeJoin, vaultRoot, countVisibleNotes } from './core.mjs';
 import { ROOT, launchSpec, readActivity, refreshMap, logActivity } from './runtime.mjs';
 import { detectEmbedder } from './embed.mjs';
 import { vaultHealth, brief as createBrief } from './insights.mjs';
@@ -55,6 +55,7 @@ import { readGitSourceState } from './git-source-state.mjs';
 import { inspectAgentSkills, installAgentSkills, removeAgentSkills, skillClientRoot } from './agent-skills.mjs';
 import { ingestionQueue, readIngestionSource, recordIngestion } from './ingestion.mjs';
 import { generateLocalIngestionDraft } from './ingestion-draft.mjs';
+import { redactText } from './sessions/redact.mjs';
 import { ingestionDraftId, listIngestionDrafts, readIngestionDraft, removeIngestionDraft, saveIngestionDraft } from './ingestion-drafts-store.mjs';
 import { INGESTION_MAX_ATTEMPTS, INGESTION_RETRY_DELAY_MS, ingestionScheduleDue, localDateAndTime, normalizeIngestionTargets, validateIngestionSchedule } from './ingestion-schedule.mjs';
 import { briefScheduleDue, validateBriefSchedule } from './brief-schedule.mjs';
@@ -594,7 +595,8 @@ export async function startSetup(opts = {}) {
         try {
           const source = await readIngestionSource(ctx, candidate.vault, candidate.folder, { source_id: candidate.source_id, revision: candidate.revision });
           const draft = await generateLocalIngestionDraft(source, cfg.sessions.localSummary.model, { fetchImpl: opts.ingestionDraftFetch || fetch });
-          const related = source.format === 'md' ? await relatedNotes(ctx, draft.vault, source.rel) : { suggested: [] };
+          const related = await relatedText(ctx, draft.vault, `${draft.title}\n${draft.body}\n${redactText(source.body)}`, { excludePath: source.rel });
+          draft.related_basis = 'source_and_draft';
           draft.related_notes = related.suggested
             .filter((item) => typeof item.path === 'string' && !/[\[\]]/.test(item.path) && Array.isArray(item.shared_terms))
             .slice(0, 8)
@@ -620,24 +622,27 @@ export async function startSetup(opts = {}) {
     await logActivity(env, { tool: 'source_auto_draft', ok: record.ok });
     return record;
   }
-  async function saveIngestionDraftRecord(cfg, id, destination, requestedRelated = []) {
+  async function saveIngestionDraftRecord(cfg, id, destination, requestedRelated = null) {
     const stored = await readIngestionDraft(ingestionDraftsDir, id);
     const draft = stored?.draft;
     if (!draft) throw new Error('This local draft is missing or damaged. Prepare it again from the source queue.');
     const chosen = String(destination || '').trim().replace(/\\/g, '/').replace(/^\/+|\/+$/g, '');
     if (!chosen || !Array.isArray(draft.destinations) || !draft.destinations.includes(chosen)) throw new Error('Choose an existing knowledge folder outside the selected source folder.');
     const ctx = localContext(cfg, { ...env, BRAINLINK_SEMANTIC: '0' });
-    await readIngestionSource(ctx, draft.vault, draft.folder, { source_id: draft.source_id, revision: draft.revision });
+    const source = await readIngestionSource(ctx, draft.vault, draft.folder, { source_id: draft.source_id, revision: draft.revision });
     const availableFolders = new Set((await listSessionFilingFolders(ctx, draft.vault)).map((entry) => entry.path));
     if (!availableFolders.has(chosen)) throw new Error('The selected knowledge folder is no longer available in this vault.');
-    if (!Array.isArray(requestedRelated) || requestedRelated.length > 5 || requestedRelated.some((item) => typeof item !== 'string')) throw new Error('Choose up to five related-note suggestions from this draft.');
-    const selectedPaths = [...new Set(requestedRelated)];
-    if (selectedPaths.length !== requestedRelated.length) throw new Error('A related-note suggestion was selected more than once.');
     const originalCandidates = new Set((draft.related_notes || []).map((item) => item.path));
-    const currentCandidates = new Set((await relatedNotes(ctx, draft.vault, draft.source_path)).suggested.map((item) => item.path));
+    if (requestedRelated !== null && (!Array.isArray(requestedRelated) || requestedRelated.length > 5 || requestedRelated.some((item) => typeof item !== 'string'))) throw new Error('Choose up to five related-note suggestions from this draft.');
+    const selectedPaths = requestedRelated === null ? [...originalCandidates].slice(0, 3) : [...new Set(requestedRelated)];
+    if (requestedRelated !== null && selectedPaths.length !== requestedRelated.length) throw new Error('A related-note suggestion was selected more than once.');
+    const relatedNow = draft.related_basis === 'source_and_draft'
+      ? await relatedText(ctx, draft.vault, `${draft.title}\n${draft.body}\n${redactText(source.body)}`, { excludePath: draft.source_path })
+      : await relatedNotes(ctx, draft.vault, draft.source_path);
+    const currentCandidates = new Set(relatedNow.suggested.map((item) => item.path));
     if (selectedPaths.some((item) => !originalCandidates.has(item) || !currentCandidates.has(item))) throw new Error('A related-note suggestion is no longer visible. Review the source and prepare the draft again.');
     const relatedSection = selectedPaths.length
-      ? `\n\n## Related notes (selected similarity suggestions; not verified facts)\n${selectedPaths.map((item) => `- [[${item.replace(/\.md$/i, '')}]]`).join('\n')}`
+      ? `\n\n## Related notes (${requestedRelated === null ? 'automatic shared-term suggestions; unverified' : 'selected similarity suggestions; not verified facts'})\n${selectedPaths.map((item) => `- [[${item.replace(/\.md$/i, '')}]]`).join('\n')}`
       : '';
     const result = await proposeNote(ctx, {
       vault: draft.vault, folder: chosen, title: draft.title, body: `${draft.body}${relatedSection}`,
@@ -2409,7 +2414,8 @@ export async function startSetup(opts = {}) {
       const ctx = localContext(cfg, { ...env, BRAINLINK_SEMANTIC: '0' });
       const source = await readIngestionSource(ctx, String(b.vault || ''), String(b.folder || ''), { source_id: b.source_id, revision: b.revision });
       const draft = await generateLocalIngestionDraft(source, local.model, { fetchImpl: opts.ingestionDraftFetch || fetch });
-      const related = source.format === 'md' ? await relatedNotes(ctx, draft.vault, source.rel) : { suggested: [] };
+      const related = await relatedText(ctx, draft.vault, `${draft.title}\n${draft.body}\n${redactText(source.body)}`, { excludePath: source.rel });
+      draft.related_basis = 'source_and_draft';
       draft.related_notes = related.suggested
         .filter((item) => typeof item.path === 'string' && !/[[\]]/.test(item.path) && Array.isArray(item.shared_terms))
         .slice(0, 8)
