@@ -487,6 +487,7 @@ main #ready, main #ask-panel, main #brain-panel, main #sessions-panel, main #s-c
   <section id="s-ingestion">
     <h2 data-i18n="ingestion.title"></h2>
     <p class="hint" data-i18n="ingestion.hint"></p>
+    <p id="ingestion-startup-warning" class="notice" role="status" hidden><span data-i18n="ingestion.startupWarning"></span> <a href="#s-background" data-main-nav="s-background" data-i18n="ingestion.startupLink"></a></p>
     <label class="muted" style="display:flex;flex-direction:row;gap:6px;align-items:center"><input type="checkbox" id="ingestion-enabled" style="width:auto"><span data-i18n="ingestion.enabled"></span></label>
     <label class="muted" style="display:flex;flex-direction:row;gap:6px;align-items:center;margin-top:6px"><input type="checkbox" id="ingestion-auto-drafts" style="width:auto"><span data-i18n="ingestion.autoDrafts"></span></label>
     <p class="muted" data-i18n="ingestion.autoDraftsHint"></p>
@@ -1677,6 +1678,7 @@ async function load() {
   ].join('\n') : '';
   $('backup-enabled').checked = Boolean(S.backup?.enabled);
   $('ingestion-enabled').checked = Boolean(S.ingestion?.enabled);
+  $('ingestion-startup-warning').hidden = !S.ingestion?.enabled || Boolean(S.startup_at_login);
   $('ingestion-mode').value = S.ingestion?.mode === 'watch' ? 'watch' : 'daily';
   $('ingestion-interval').value = String(S.ingestion?.intervalMinutes || 5);
   refreshIngestionModeControls();

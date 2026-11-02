@@ -119,7 +119,7 @@ try {
   $page = Invoke-WebRequest "http://127.0.0.1:$($instance.port)/?t=$token" -Headers @{ 'X-BrainLink-Token' = $token } -TimeoutSec 5
   if ($page.StatusCode -ne 200 -or $page.Content -notmatch 'BrainLink Setup') { throw 'Installed Setup UI did not load with its local session token.' }
   if ($page.Content -notmatch 'href="#s-ingestion" data-main-nav="s-ingestion" data-i18n="nav.sources"') { throw 'Installed Setup is missing direct Sources navigation to folder scanning.' }
-  if ($page.Content -notmatch 'id="ingestion-enabled"' -or $page.Content -notmatch 'id="ingestion-auto-file"' -or $page.Content -notmatch 'id="ingestion-run"') { throw 'Installed Setup is missing the scheduled scan, auto-file, or manual scan control.' }
+  if ($page.Content -notmatch 'id="ingestion-enabled"' -or $page.Content -notmatch 'id="ingestion-auto-file"' -or $page.Content -notmatch 'id="ingestion-run"' -or $page.Content -notmatch 'id="ingestion-startup-warning"') { throw 'Installed Setup is missing the scheduled scan, auto-file, manual scan, or sign-in startup guidance control.' }
   $OcrFixtures = @('ocr-sample.png', 'ocr-portuguese.png', 'ocr-traditional-chinese.png') | ForEach-Object { Join-Path $Root "test\fixtures\$_" }
   & $InstalledNode $OcrSmoke $InstalledApp @OcrFixtures | Out-Host
   if ($LASTEXITCODE -ne 0) { throw 'The installed OCR runtime could not read its local image fixture.' }

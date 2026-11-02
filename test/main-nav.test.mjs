@@ -11,7 +11,8 @@ const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 test('main navigation links to visible product sections and has labels in every locale', async () => {
   const page = await readFile(path.join(ROOT, 'ui', 'index.html'), 'utf8');
   const ids = new Set([...page.matchAll(/\bid="([^"]+)"/g)].map((match) => match[1]));
-  const links = [...page.matchAll(/<a\b[^>]*data-main-nav="([^"]+)"[^>]*data-i18n="([^"]+)"[^>]*>/g)];
+  const nav = page.match(/<nav id="main-nav"[\s\S]*?<\/nav>/)?.[0] || '';
+  const links = [...nav.matchAll(/<a\b[^>]*data-main-nav="([^"]+)"[^>]*data-i18n="([^"]+)"[^>]*>/g)];
 
   assert.equal(links.length, 8, 'expected the eight top-level destinations');
   assert.ok(links.some(([, target, key]) => target === 's-ingestion' && key === 'nav.sources'), 'source scanning should be directly reachable');

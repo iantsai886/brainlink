@@ -671,6 +671,8 @@
   "ingestion.title": "自動檢查新資料",
   "ingestion.hint": "可從非私人 vault 加入資料夾。BrainLink 開啟時，可每天掃描、每 1–60 分鐘檢查，或按「立即掃描」。支援 TXT、CSV/TSV、JSON、XML、YAML、LOG、HTML/HTM、最多 100 頁的 PDF（含以本機 OCR 辨識掃描頁）、DOCX、XLSX、PPTX，以及以本機 OCR 辨識的 PNG/JPEG/BMP 圖片。其他格式會略過。",
   "ingestion.enabled": "在背景執行掃描",
+  "ingestion.startupWarning": "BrainLink 開啟時才會執行掃描。若未啟用登入時啟動，重新登入後不會自動繼續。",
+  "ingestion.startupLink": "前往啟用登入時啟動",
   "ingestion.mode": "背景掃描方式",
   "ingestion.modeDaily": "每天一次",
   "ingestion.modeWatch": "定期檢查資料夾",
