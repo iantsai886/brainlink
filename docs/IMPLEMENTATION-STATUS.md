@@ -1803,6 +1803,12 @@ Raw-to-Wiki can now offer typed relationship proposals alongside entity proposal
 
 Windows/Node.js 24.22.1 `npm run test:all` passed on this working tree: core 631 total (623 passed, 0 failed, 8 platform/privilege skips); UI 44/44. Local automated test evidence only. Live Ollama quality, GUI acceptance, hosted GitHub Actions, cross-client acceptance, and customer acceptance are not verified by this run. The proposal logic does not infer links to entities absent from the source, and image-only sources do not produce evidence-backed links.
 
+### Fix manual Raw-to-Wiki scan button eligibility (2026-11-03; commit `2a53005`)
+
+The Setup page previously re-enabled **Scan now** whenever any public vault existed, even if the user had not selected a scan folder. The button now uses one shared eligibility check: at least one selected folder must belong to an existing, non-private vault, and a scan must not already be running. The folder-selection render and state refresh both use this check.
+
+Focused `test/ingestion-schedule.test.mjs` passed 5/5; full Windows/Node.js 24.22.1 `npm run test:all` passed on the exact pushed commit: core 638 total (628 passed, 0 failed, 10 platform/privilege skips), UI 44/44. The fix prevents an avoidable invalid manual-scan request; it does not change background scan behavior. Native visual interaction and customer acceptance remain unverified.
+
 ### Protect an existing macOS CLI command during package install (2026-11-02; working tree based on `6d9e13f`)
 
 The macOS package post-install no longer uses `ln -sf` for `/usr/local/bin/brainlink`. A bundled helper makes the link only when the path is free or already targets this BrainLink app, and refuses to overwrite unrelated files or symlinks. The helper is installed executable in the app bundle. `.gitattributes` now forces LF for extensionless macOS package scripts; a Windows checkout had converted `postinstall` to CRLF, which fails Bash parsing when mounted into Linux. In Node.js 24 Debian Bookworm Docker, `bash -n` and the helper behavior tests passed 3/3, including idempotent reinstall and preservation of unrelated files and links. The full Windows/Node.js 24.22.1 `npm run test:all` passed on the working tree: core 634 total (624 passed, 0 failed, 10 platform/privilege skips); UI 44/44. This does not verify a native macOS `.pkg` build, install, upgrade or uninstall.
