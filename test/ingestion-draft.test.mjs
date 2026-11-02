@@ -46,7 +46,7 @@ test('relationship suggestions require existing same-scope typed endpoints, vali
     { subject_id: 'team.product', predicate: 'runs', target_id: 'workflow.collect-questions', evidence: source.body },
     { subject_id: 'team.product', predicate: 'consumes', target_id: 'workflow.collect-questions', evidence: source.body },
     { subject_id: 'team.product', predicate: 'runs', target_id: 'workflow.private', evidence: source.body },
-    { subject_id: 'team.product', predicate: 'runs', target_id: 'workflow.collect-questions', evidence: 'The product team also runs this.' },
+    { subject_id: 'team.product', predicate: 'runs', target_id: 'workflow.collect-questions', evidence: source.body },
     { subject_id: 'team.unknown', predicate: 'runs', target_id: 'workflow.collect-questions', evidence: source.body },
   ];
   const draft = formatIngestionDraft({ title: 'Run workflow', summary: 'A source.', memory_type: 'semantic', relationships }, source);

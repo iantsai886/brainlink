@@ -33,11 +33,15 @@ export function formatIngestionDraft(data, source) {
   const typedCounts = new Map();
   for (const item of typedEntities) if (item && typeof item.id === 'string') typedCounts.set(item.id, (typedCounts.get(item.id) || 0) + 1);
   const typedById = new Map(typedEntities.filter((item) => item && ENTITY_TYPES.has(item.type) && /^[a-z][a-z0-9._:-]{1,127}$/.test(item.id || '') && ['personal', 'organisation', 'client'].includes(item.scope) && typeof item.title === 'string' && item.title.length <= 160 && typedCounts.get(item.id) === 1).map((item) => [item.id, item]));
+  const relationshipKeys = new Set();
   const relationships = Array.isArray(data.relationships) ? data.relationships.slice(0, 12).flatMap((item) => {
     if (!item || typeof item !== 'object' || !PREDICATES.has(item.predicate)) return [];
     const subject = typedById.get(item.subject_id), target = typedById.get(item.target_id);
     const evidence = cleanText(item.evidence, 240);
     if (!subject || !target || subject.id === target.id || subject.scope !== target.scope || !typedRelationAllowed(item.predicate, subject.type, target.type) || !evidence || !sourceText.includes(evidence)) return [];
+    const key = `${subject.id}\0${item.predicate}\0${target.id}`;
+    if (relationshipKeys.has(key)) return [];
+    relationshipKeys.add(key);
     return [{ subject_id: subject.id, subject_title: subject.title, predicate: item.predicate, target_id: target.id, target_title: target.title, scope: subject.scope, evidence }];
   }) : [];
   if (!title || !summary) throw new Error('The local model returned an incomplete knowledge draft.');
