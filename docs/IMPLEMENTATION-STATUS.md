@@ -2,7 +2,7 @@
 
 Status snapshot: 2026-11-03 (Asia/Taipei).
 
-### Local reranker RSI experiment (working tree based on `4ee2feb`; 2026-11-03)
+### Local reranker RSI experiment (commit `08c2732`; 2026-11-03)
 
 Added a third fixed RSI experiment, visible only when the user has enabled the local loopback reranker. It runs on the bundled 21-case fictional vault, sends only synthetic queries and already-authorized synthetic snippets to that local service, and aborts if the reranker fails instead of scoring fallback search. A candidate with lower hit@k or reciprocal rank is marked `quality_regression`; only a non-regressing candidate can be eligible for human review. It never changes live search settings or promotes itself. This small development set is not held-out or independent model-quality evidence, and no token savings or real-model gain is claimed.
 
