@@ -123,6 +123,65 @@ try {
   foreach ($key in @('ingestion.enabled', 'ingestion.autoFile', 'ingestion.run', 'ingestion.destination')) {
     if (-not $englishLocale.PSObject.Properties[$key].Value) { throw "Installed Setup is missing the folder-ingestion label: $key" }
   }
+  foreach ($key in @('ingestion.retryProposal', 'ingestion.partialFiling', 'ingestion.confirmRetryProposal')) {
+    if (-not $englishLocale.PSObject.Properties[$key].Value) { throw "Installed Setup is missing the partial-filing recovery label: $key" }
+  }
+  # Exercise the installed local API with a fictional vault: force an entity-note
+  # collision, confirm the existing file is preserved and retry is available, then
+  # remove only the fixture collision and verify the main note is not duplicated.
+  $vaultPath = Join-Path $TestRoot 'fictional-vault'
+  $rawFolder = Join-Path $vaultPath 'Raw'
+  $knowledgeFolder = Join-Path $vaultPath 'Knowledge'
+  New-Item -ItemType Directory -Path $rawFolder -Force | Out-Null
+  New-Item -ItemType Directory -Path $knowledgeFolder -Force | Out-Null
+  Set-Content -LiteralPath (Join-Path $rawFolder 'Source.md') -Value "# Fictional source`n`nA fictional Quality team runs a short checklist." -NoNewline
+  $vaultBody = @{ name = 'Fictional QA'; path = $vaultPath } | ConvertTo-Json -Compress
+  $headers = @{ 'X-BrainLink-Token' = $token }
+  $connect = Invoke-RestMethod -Uri "http://127.0.0.1:$($instance.port)/api/vault" -Method Post -Headers $headers -ContentType 'application/json' -Body $vaultBody -TimeoutSec 5
+  if (-not $connect.ok) { throw 'Could not connect the isolated fictional vault to installed Setup.' }
+  $scanBody = @{ targets = @(@{ vault = 'Fictional QA'; folder = 'Raw' }) } | ConvertTo-Json -Depth 5 -Compress
+  $scan = Invoke-RestMethod -Uri "http://127.0.0.1:$($instance.port)/api/ingestion/run" -Method Post -Headers $headers -ContentType 'application/json' -Body $scanBody -TimeoutSec 10
+  if (@($scan.candidates).Count -ne 1) { throw 'Installed folder scan did not find exactly the fictional source.' }
+  # Seed a valid local draft from the scanned source revision. This exercises the
+  # installed filing path without requiring Ollama or sending fixture data anywhere.
+  $sourceId = [string]$scan.candidates[0].source_id
+  $revision = [string]$scan.candidates[0].revision
+  $draftIdentity = [Text.Encoding]::UTF8.GetBytes("Fictional QA`0$sourceId`0$revision")
+  $sha = [Security.Cryptography.SHA256]::HashData($draftIdentity)
+  $draftId = [Convert]::ToHexString($sha).ToLowerInvariant()
+  $now = [DateTime]::UtcNow.ToString('o')
+  $draftRecord = [ordered]@{
+    schema = 1; id = $draftId; status = 'pending'; created_at = $now
+    draft = [ordered]@{
+      status = 'unverified_draft'; source_id = $sourceId; revision = $revision
+      vault = 'Fictional QA'; folder = 'Raw'; source_path = 'Raw/Source.md'
+      title = 'Fictional filing retry'; summary = 'A fictional installer recovery test.'
+      body = "# Fictional filing retry`n`nThis fixture tests safe retry behavior.`n`n## Source`n[[Raw/Source]]"
+      memory_type = 'episodic'; entities = @(@{ type = 'team'; title = 'Fictional quality team'; description = 'A fictional team for the installer retry smoke.'; evidence = 'A fictional Quality team runs a short checklist.' })
+      relationships = @(); related_notes = @(); related_basis = 'source_and_draft'; destinations = @('Knowledge'); model = 'fixture'; generated_at = $now
+    }
+  }
+  $draftDir = Join-Path $BrainLinkHome 'ingestion\drafts'
+  New-Item -ItemType Directory -Path $draftDir -Force | Out-Null
+  $draftFile = Join-Path $draftDir "$draftId.json"
+  $draftRecord | ConvertTo-Json -Depth 12 | Set-Content -LiteralPath $draftFile -NoNewline
+  $localDate = Get-Date -Format 'yyyy-MM-dd'
+  $conflictPath = Join-Path $knowledgeFolder "$localDate — Fictional quality team.md"
+  Set-Content -LiteralPath $conflictPath -Value "# Existing user file`n`nKeep this exact content." -NoNewline
+  $saveBody = @{ draft_id = $draftId; destination = 'Knowledge'; related_note_paths = @(); entity_choices = @(@{ index = 0; scope = 'organisation' }); relationship_indexes = @(); confirm = $true } | ConvertTo-Json -Depth 5 -Compress
+  $partial = Invoke-RestMethod -Uri "http://127.0.0.1:$($instance.port)/api/ingestion/save-draft" -Method Post -Headers $headers -ContentType 'application/json' -Body $saveBody -TimeoutSec 10
+  if (-not $partial.partial -or -not $partial.written) { throw 'Installed filing did not report the expected recoverable entity-name conflict.' }
+  if ((Get-Content -LiteralPath $conflictPath -Raw) -ne "# Existing user file`n`nKeep this exact content.") { throw 'Installed filing changed the existing conflict file.' }
+  $pending = Invoke-RestMethod -Uri "http://127.0.0.1:$($instance.port)/api/ingestion/drafts" -Method Get -Headers $headers -TimeoutSec 5
+  if (@($pending.drafts).Count -ne 1 -or -not $pending.drafts[0].filing) { throw 'Installed UI does not retain the partial draft for retry.' }
+  Remove-Item -LiteralPath $conflictPath
+  $retryBody = @{ draft_id = $draftId; destination = 'Knowledge'; confirm = $true } | ConvertTo-Json -Compress
+  $retried = Invoke-RestMethod -Uri "http://127.0.0.1:$($instance.port)/api/ingestion/save-draft" -Method Post -Headers $headers -ContentType 'application/json' -Body $retryBody -TimeoutSec 10
+  if ($retried.partial -or $retried.path -ne $partial.path) { throw 'Installed retry did not finish using the already-saved main note.' }
+  $savedRelative = [string]$partial.path -replace '^Fictional QA/', ''
+  if (-not $savedRelative -or (Get-Content -LiteralPath (Join-Path $vaultPath $savedRelative) -Raw).Length -eq 0) { throw 'Installed retry lost the already-saved main note.' }
+  $pendingAfterRetry = Invoke-RestMethod -Uri "http://127.0.0.1:$($instance.port)/api/ingestion/drafts" -Method Get -Headers $headers -TimeoutSec 5
+  if (@($pendingAfterRetry.drafts).Count -ne 0) { throw 'Installed retry left a completed draft in the pending list.' }
   $headers = @{ 'X-BrainLink-Token' = $token }
   $hooksUrl = "http://127.0.0.1:$($instance.port)/api/sessions/hooks"
   $hookSetUrl = "http://127.0.0.1:$($instance.port)/api/sessions/hooks/set"
@@ -139,7 +198,7 @@ try {
   $restoredYaml = Get-Content -LiteralPath $HermesConfig -Raw
   if ($disabledHook.configured -or $restoredYaml -notmatch 'echo preserve-user-hook' -or $restoredYaml -match 'session-end-cue') { throw 'Installed Hermes setup did not remove only its own hook.' }
   if ($page.Content -notmatch 'sessions\.hookHermesConfirm|user permissions') { throw 'Installed UI is missing the Hermes shell-hook permission warning.' }
-  Write-Output "PASS: installed BrainLink $Version starts from its bundled runtime; both shortcuts work; Setup and folder-ingestion controls load; and Hermes hook enable/disable preserves only the temporary profile settings."
+  Write-Output "PASS: installed BrainLink $Version starts from its bundled runtime; both shortcuts work; Setup and folder-ingestion controls load; partial filing preserves a conflict and retries without duplicating the main note; and Hermes hook enable/disable preserves only the temporary profile settings."
   $Success = $true
 } finally {
   try {
