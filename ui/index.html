@@ -709,6 +709,10 @@ function currentIngestionTargets() {
   }
   return ingestionTargetsDraft;
 }
+function canRunIngestionNow() {
+  const publicVaults = new Set((S?.vaults || []).filter((vault) => !vault.private && vault.exists).map((vault) => vault.name));
+  return !S?.ingestion?.running && currentIngestionTargets().some((target) => publicVaults.has(target.vault) && target.folder);
+}
 function refreshIngestionModeControls() {
   const watching = $('ingestion-mode').value === 'watch';
   $('ingestion-time-wrap').hidden = watching;
@@ -748,7 +752,7 @@ async function renderIngestionTargets() {
     const destinations = (folderLists.get(target.vault) || []).filter((folder) => folder !== target.folder && !folder.startsWith(`${target.folder}/`));
     return `<div class="card"><div style="display:flex;align-items:center;justify-content:space-between;gap:12px"><span><b>${esc(target.vault)}</b><br><span class="mono muted">${esc(target.folder)}</span></span><button type="button" data-ingestion-remove="${index}">${esc(t('ingestion.removeTarget'))}</button></div><label style="margin-top:8px"><span>${esc(t('ingestion.destination'))}</span><select data-ingestion-destination="${index}"><option value="">${esc(t('ingestion.chooseDestination'))}</option>${destinations.map((folder) => `<option value="${esc(folder)}" ${folder === target.destination ? 'selected' : ''}>${esc(folder)}</option>`).join('')}</select></label></div>`;
   }).join('') : `<p class="muted">${esc(t('ingestion.emptyTargets'))}</p>`;
-  $('ingestion-run').disabled = !targets.length;
+  $('ingestion-run').disabled = !canRunIngestionNow();
 }
 async function renderIngestionDraftList() {
   const host = $('ingestion-draft-list');
@@ -1696,7 +1700,7 @@ async function load() {
   const draftStatus = S.ingestion_drafts?.status;
   $('ingestion-draft-status').textContent = draftStatus?.at ? t('ingestion.autoDraftStatus', { trigger: t(`ingestion.trigger.${draftStatus.trigger || 'schedule'}`), created: draftStatus.created || 0, filed: draftStatus.filed || 0, attempted: draftStatus.attempted || 0, at: new Date(draftStatus.at).toLocaleString(LOCALE), failed: draftStatus.failed || 0 }) : '';
   await renderIngestionDraftList().catch(() => {});
-  $('ingestion-run').disabled = !S.vaults.some((v) => !v.private && v.exists);
+  $('ingestion-run').disabled = !canRunIngestionNow();
   $('brief-enabled').checked = Boolean(S.brief?.enabled);
   $('brief-vault').innerHTML = `<option value="">${esc(t('brief.chooseVault'))}</option>` + S.vaults.filter((v) => v.exists).map((v) => `<option value="${esc(v.name)}" ${v.name === S.brief?.vault ? 'selected' : ''}>${esc(v.name)}${v.private ? ` (${esc(t('vault.private'))})` : ''}</option>`).join('');
   $('brief-time').value = S.brief?.time || '08:00';

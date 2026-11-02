@@ -197,6 +197,8 @@ test('ingestion scan UI has manual, daily and repeated background controls in ev
   assert.match(html, /<select id="ingestion-folder"><\/select>/, 'folder target is selected from existing directories, not typed as a path');
   assert.match(html, /api\('POST', '\/api\/ingestion\/folders', \{ vault \}\)/, 'folder options come from the authenticated vault-scoped endpoint');
   assert.match(html, /destinationOnly: true/, 'automatic filing destinations use the existing same-vault folder picker');
+  assert.match(html, /function canRunIngestionNow\(\)[\s\S]*?return !S\?\.ingestion\?\.running && currentIngestionTargets\(\)\.some\(\(target\) => publicVaults\.has\(target\.vault\) && target\.folder\)/, 'manual scans require a selected folder in an existing non-private vault and are disabled while scanning');
+  assert.equal((html.match(/\$\('ingestion-run'\)\.disabled = !canRunIngestionNow\(\);/g) || []).length, 2, 'both target rendering and state refresh use the same manual-scan eligibility check');
   assert.match(html, /mode: \$\('ingestion-mode'\)\.value/);
   assert.match(html, /intervalMinutes: Number\(\$\('ingestion-interval'\)\.value\)/);
   assert.match(html, /#ingestion-time-wrap\[hidden\], #ingestion-interval-wrap\[hidden\] \{ display: none; \}/, 'daily and repeated-scan controls hide the inactive input');
