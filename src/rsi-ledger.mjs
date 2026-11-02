@@ -415,7 +415,7 @@ export function createRsiLedger({ home, now = () => new Date() }) {
     // RSI miss and weekly benchmark evidence share the existing verified hash-chain and lock.
     // These events do not change idea status, experiment acceptance, or monitoring rules.
     appendRsiEvidence: (kind, data, key) => locked(async () => {
-      if (!['retrieval_miss', 'weekly_benchmark'].includes(kind)) throw new Error('Unsupported RSI evidence kind.');
+      if (!['retrieval_miss', 'retrieval_observation', 'weekly_benchmark'].includes(kind)) throw new Error('Unsupported RSI evidence kind.');
       if (typeof key !== 'string' || !/^[a-f0-9]{64}$/.test(key)) throw new Error('Invalid RSI evidence key.');
       if (!data || typeof data !== 'object' || Array.isArray(data)) throw new Error('Invalid RSI evidence.');
       const serial = JSON.stringify(data);
@@ -426,7 +426,7 @@ export function createRsiLedger({ home, now = () => new Date() }) {
       return { added: true };
     }),
     listRsiEvidence: (kind) => locked(async () => {
-      if (!['retrieval_miss', 'weekly_benchmark'].includes(kind)) throw new Error('Unsupported RSI evidence kind.');
+      if (!['retrieval_miss', 'retrieval_observation', 'weekly_benchmark'].includes(kind)) throw new Error('Unsupported RSI evidence kind.');
       return (await readEvents(file)).filter(e => e.kind === kind).map(e => ({ ...e.data, key: e.key, recorded_at: e.at }));
     }),
     file,

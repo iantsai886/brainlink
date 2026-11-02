@@ -49,6 +49,25 @@ test('aggregation groups normalized questions and week/fix type', async () => {
   assert.equal(a.by_week['2026-W45'], 1);
   assert.equal(a.by_fix_needed.add_link, 1);
 });
+test('automatic retrieval observations keep only coarse outcomes and separate Twin profiles', async () => {
+  const home = await mkdtemp(path.join(tmpdir(), 'brainlink-rsi-observations-'));
+  const r = createRsiWeekly({ home, now: () => new Date('2026-10-30T04:00:00.000Z') });
+  assert.deepEqual(await r.recordRetrievalObservation({ profileId: null, tool: 'vault_search', status: 'not_in_brain', durationMs: 400 }), { recorded: false, reason: 'unscoped' });
+  assert.deepEqual(await r.recordRetrievalObservation({ profileId: 'fictional_org', tool: 'vault_search', status: 'not_in_brain', durationMs: 389 }), { recorded: true });
+  await r.recordRetrievalObservation({ profileId: 'fictional_org', tool: 'context_packet', status: 'hits', durationMs: 741 });
+  await r.recordRetrievalObservation({ profileId: 'fictional_personal', tool: 'vault_search', status: 'weak', durationMs: 525 });
+  const report = await r.retrievalObservationReport('fictional_org');
+  assert.equal(report.total, 2);
+  assert.deepEqual(report.by_status, { not_in_brain: 1, hits: 1 });
+  assert.deepEqual(report.by_tool, { vault_search: 1, context_packet: 1 });
+  assert.equal((await r.retrievalObservationReport('fictional_personal')).total, 1);
+  const { createRsiLedger } = await import('../src/rsi-ledger.mjs');
+  const ledger = await readFile(createRsiLedger({ home }).file, 'utf8');
+  assert.doesNotMatch(ledger, /question|query|note content|private-folder|secret-note/i);
+  assert.match(ledger, /\"profile_id\":\"fictional_org\"/);
+  assert.match(ledger, /\"duration_bucket_ms\":500/);
+  assert.doesNotMatch(ledger, /389|389 milliseconds/);
+});
 test('week-on-week delta and applied fix type', async () => {
   const home = await mkdtemp(path.join(tmpdir(), 'brainlink-rsi-weekly-'));
   const r = createRsiWeekly({ home });

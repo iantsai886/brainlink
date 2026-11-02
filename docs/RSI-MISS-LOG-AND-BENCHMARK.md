@@ -18,6 +18,12 @@ brainlink miss list --profile "Fictional Organisation" --week 2026-W44
 brainlink miss import --file "Brain Miss Log.md"
 ```
 
+## Automatic, content-free retrieval observations
+
+For a registered, profile-scoped AI only, successful `vault_search` and `context_packet` calls automatically append a `retrieval_observation` event to the same ledger. It stores the opaque Twin profile ID, tool name, returned status (`hits`, `weak`, or `not_in_brain`), timestamp, and a 250 ms duration bucket (capped at 120 seconds). It never stores the question, a question hash, vault name, note path, excerpt, or answer. Unassigned and legacy connections are not recorded. This is an operational signal, not proof that the answer was correct or that a `not_in_brain` result was a system failure.
+
+Review aggregate counts for one profile with `brainlink miss observations --profile PROFILE_ID [--week YYYY-Www]`. The report exposes totals by week, tool, and status plus the rounded mean duration bucket. It does not identify individual requests. Records are append-only and are covered by the RSI ledger's existing backup/restore path.
+
 The importer expects exactly eight Markdown table headers, including `profile`, accepts day-only dates as midnight in Taipei, and reads `fixed by` as `agent; YYYY-MM-DD; note`. It validates every row, rejects sensitive fields, and uses a stable content key to avoid re-importing the same event. After verifying the imported row count and backup, mark the interim Markdown document **SUPERSEDED**, keeping it for provenance without further appends.
 
 ## Weekly fixed 20-case benchmark
@@ -33,4 +39,4 @@ Setup's **Run benchmark** button and its optional local schedule run only BrainL
 
 ## Friday review
 
-Review the week's score and `delta_pp` against the preceding recorded week. A score change is not causal proof: compare the fixture, code revision and environment before recommending a standing rule. A human approves standing rules, investigates regressions, and uses the existing reviewed rollback process for accepted changes; a benchmark score by itself never triggers rollback. Re-importing identical rows and rerunning the same week, fixture, evaluator and source interval does not duplicate evidence. Each distinct run of a week can exist in the append-only ledger, but the report selects the last recorded version for that week. Automatic retrieval-miss capture and automated answer-quality evaluation remain unimplemented.
+Review the week's score and `delta_pp` against the preceding recorded week. A score change is not causal proof: compare the fixture, code revision and environment before recommending a standing rule. A human approves standing rules, investigates regressions, and uses the existing reviewed rollback process for accepted changes; a benchmark score by itself never triggers rollback. Re-importing identical rows and rerunning the same week, fixture, evaluator and source interval does not duplicate evidence. Each distinct run of a week can exist in the append-only ledger, but the report selects the last recorded version for that week. Automatic capture of content-free retrieval status and timing is implemented for profile-scoped AI calls; automatic answer-quality evaluation remains unimplemented.

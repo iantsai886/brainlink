@@ -5,6 +5,10 @@ GitHub repository: `iantsai886/brainlink`
 Branch: `feat/complete-raw-wiki-folder-flow` (current working branch; based on `origin/main`)
 Code baseline: development target `1.2.8`, with `package.json` as the canonical version source. The `v1.2.7` tag belongs to the separate `wip/v1.2.7` release line; this branch continues from the full-source `main` history and does not move or recreate that tag.
 
+### Profile-scoped automatic retrieval feedback (current working tree)
+
+Successful `vault_search` and `context_packet` calls from a named, profile-scoped AI now add content-free retrieval observations to the existing RSI ledger. The record contains only the Twin profile ID, tool, search verdict, timestamp, and a coarse response-time bucket. It never records the question, question hash, vault name, note path, excerpt, or answer; legacy and unassigned connections are not recorded. `brainlink miss observations --profile PROFILE_ID` reports profile-separated aggregates. This gives RSI a signal to investigate; it does not establish answer quality or trigger changes. On Windows/Node.js 24.22.1, the full suite passed: core 627 total (619 passed, 0 failed, 8 platform/privilege skips); UI 44/44. Focused RSI/Twin tests passed 37/37, and `git diff --check` passed. These are local tests, not hosted CI or live customer evidence.
+
 ### Ollama vision capability check (working tree based on `a4fc9bc`, 2026-11-02)
 
 Added an authenticated Setup check for whether the selected local Ollama model reports image support. BrainLink queries only `http://127.0.0.1:11434/api/show`, returns only the model name and `vision` capability, and reports unknown when Ollama does not provide capability metadata. The Sessions UI has a status message in English, Portuguese and Traditional Chinese. Focused API tests passed 8/8, local-summary UI tests passed, and the full UI suite passed 44/44; locale JSON parsing and `git diff --check` passed. Ollama is not installed or running on this computer, so live model inference and picture-description quality are still unverified.

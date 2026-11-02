@@ -88,6 +88,7 @@ const HELP = `BrainLink MCP ${VERSION} — one Markdown brain for every AI
   brainlink brief [--vault V] [--days 7]  what changed and what is open
   brainlink miss add --profile NAME --agent NAME --question TEXT --result found|not_found|stale --seconds N --fix-needed TYPE [--date ISO]
   brainlink miss import --file FILE | miss list --profile NAME [--week YYYY-Www]
+  brainlink miss observations --profile TWIN_ID [--week YYYY-Www] (content-free automatic totals)
   brainlink bench run --fixture FILE [--vault-root DIR --vault-name NAME] [--week YYYY-Www]
   brainlink bench report [--weeks N]
   brainlink eval --fixture FILE [--vault-root DIR --vault-name NAME]  compare labelled retrieval (read-only)
@@ -239,7 +240,8 @@ async function main() {
       }
       if (argv[1] === 'import') { if (!opt('file')) fail('--file required'); out(JSON.stringify(await rsi.importMarkdown(path.resolve(opt('file'))))); return; }
       if (argv[1] === 'list') { if (!opt('profile')) fail('--profile required'); out(JSON.stringify({ misses: await rsi.listMisses(opt('profile'), opt('week')), summary: await rsi.aggregateMisses(opt('profile'), opt('week')) }, null, 2)); return; }
-      fail('use miss add, import or list');
+      if (argv[1] === 'observations') { if (!opt('profile')) fail('--profile required'); out(JSON.stringify(await rsi.retrievalObservationReport(opt('profile'), opt('week')), null, 2)); return; }
+      fail('use miss add, import, list or observations');
     }
     case 'bench': {
       const rsi = createRsiWeekly({ home: appHome() });

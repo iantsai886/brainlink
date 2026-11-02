@@ -20,6 +20,7 @@ import { listSessionFilingFolders } from './sessions/folders.mjs';
 import { twinMemoryAllowed, twinToolAuthorization, twinToolListed, twinToolVaultChoices } from './twin-profiles.mjs';
 import { ingestionQueue, readIngestionSource, recordIngestion } from './ingestion.mjs';
 import { estimateReadResponseTokens } from './response-metrics.mjs';
+import { createRsiWeekly } from './rsi-weekly.mjs';
 
 const require = createRequire(import.meta.url);
 export const VERSION = require('../package.json').version;
@@ -30,6 +31,7 @@ const WR = { readOnlyHint: false, destructiveHint: false, idempotentHint: false,
 const obsidianUrl = (v, p) => `obsidian://open?vault=${encodeURIComponent(v)}&file=${encodeURIComponent(p.replace(/\.md$/, ''))}`;
 export function createMcp(ctx, { onCall = () => {} } = {}) {
   const { cfg } = ctx;
+  const rsiEvidence = ctx.dataDir ? createRsiWeekly({ home: ctx.dataDir }) : null;
   const connectorVaults = ctx.enabled.filter((v) => !ctx.byName.get(v).private || ctx.connectorPrivate);
   const agents = twinMemoryAllowed(ctx, 'procedural') ? ctx.agents : [];
   const agentSlug = (agent) => agent.name.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '') || 'agent';
@@ -431,7 +433,11 @@ This prompt does not change permissions, write sources, or run unattended AI pro
             const args = params.arguments || {};
             const authorization = twinToolAuthorization(ctx, tool.name, args);
             if (!authorization.allowed) throw new Error(authorization.reason);
+            const retrievalStarted = performance.now();
             const out = await tool.run(args);
+            if (rsiEvidence && ctx.twinScope?.mode === 'scoped' && ['vault_search', 'context_packet'].includes(tool.name) && typeof out?.status === 'string') {
+              await rsiEvidence.recordRetrievalObservation({ profileId: ctx.twinScope.profile_id, tool: tool.name, status: out.status, durationMs: performance.now() - retrievalStarted }).catch(() => {});
+            }
             const failed = out?.ok === false;
             const serialized = JSON.stringify(out, null, 1);
             const resultTokenEstimate = failed ? null : estimateReadResponseTokens(tool.name, serialized);

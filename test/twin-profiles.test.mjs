@@ -64,6 +64,23 @@ test('Twin profile declarations validate references and prevent permission escal
   assert.match(validate(escalatedMemory).join('; '), /cannot exceed the Twin profile policy/);
 });
 
+test('scoped retrieval automatically records only a content-free, profile-owned RSI observation', async () => {
+  const root = await mkdtemp(path.join(tmpdir(), 'brainlink-twin-rsi-observation-'));
+  const vaultPath = path.join(root, 'vault');
+  await mkdir(vaultPath);
+  const appHome = path.join(root, 'app');
+  const env = { BRAINLINK_HOME: appHome, HOME: root, BRAINLINK_AGENT_TOKEN: 'fictional-agent-token', BRAINLINK_AI_PLATFORM: 'Fictional Codex', BRAINLINK_SEMANTIC: '0' };
+  const mcp = createMcp(createContext(fixture(vaultPath), { env }));
+  const response = await mcp.handle({ jsonrpc: '2.0', id: 1, method: 'tools/call', params: { name: 'vault_search', arguments: { vault: 'Fictional Org', query: 'QUESTION_CANARY fictional missing roadmap' } } });
+  assert.equal(response.result.structuredContent.status, 'not_in_brain');
+  const { createRsiLedger } = await import('../src/rsi-ledger.mjs');
+  const ledger = await readFile(createRsiLedger({ home: appHome }).file, 'utf8');
+  assert.match(ledger, /retrieval_observation/);
+  assert.match(ledger, /org_twin_1/);
+  assert.match(ledger, /not_in_brain/);
+  assert.doesNotMatch(ledger, /QUESTION_CANARY|fictional missing roadmap|Fictional Org|path|excerpt|answer/i);
+});
+
 test('Twin source policy keeps proposed notes private and requires source confidence and a stable task id', async () => {
   const root = await mkdtemp(path.join(tmpdir(), 'brainlink-twin-source-policy-'));
   const vaultPath = path.join(root, 'vault');

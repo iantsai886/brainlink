@@ -1,5 +1,5 @@
 // BrainLink RSI retrieval miss and weekly benchmark evidence; backed by the existing RSI ledger.
-import { createHash } from 'node:crypto';
+import { createHash, randomUUID } from 'node:crypto';
 import { readFile } from 'node:fs/promises';
 import { createRsiLedger } from './rsi-ledger.mjs';
 import { evaluateRetrieval } from './retrieval-eval.mjs';
@@ -49,6 +49,37 @@ export function validateMiss(m) {
 export function createRsiWeekly({ home, now = () => new Date() }) {
   const ledger = createRsiLedger({ home, now });
   return {
+    // Content-free retrieval telemetry. Only registered Twin profiles are recorded;
+    // legacy/unassigned connections produce no persistent observation.
+    async recordRetrievalObservation({ profileId, tool, status, durationMs }) {
+      if (typeof profileId !== 'string' || !profileId.trim() || profileId.length > 100) return { recorded: false, reason: 'unscoped' };
+      if (!['vault_search', 'context_packet'].includes(tool) || !['hits', 'weak', 'not_in_brain'].includes(status)) return { recorded: false, reason: 'invalid_observation' };
+      if (!Number.isFinite(durationMs) || durationMs < 0) return { recorded: false, reason: 'invalid_duration' };
+      const at = now();
+      const observation = {
+        date: at.toISOString(), profile_id: profileId.trim(), tool, status,
+        // Keep timing coarse and bounded; do not retain exact request-level timings.
+        duration_bucket_ms: Math.min(120000, Math.round(durationMs / 250) * 250),
+      };
+      const key = sha({ ...observation, nonce: randomUUID() });
+      await ledger.appendRsiEvidence('retrieval_observation', observation, key);
+      return { recorded: true };
+    },
+    async retrievalObservationReport(profileId, week) {
+      if (typeof profileId !== 'string' || !profileId.trim()) throw new Error('A profile is required to keep Personal, Organisation and Client evidence separate.');
+      const all = await ledger.listRsiEvidence('retrieval_observation');
+      const selected = all.filter(item => item.profile_id === profileId && (!week || taipeiWeek(item.date) === week));
+      const by_week = {}, by_tool = {}, by_status = {}, durations = [];
+      for (const item of selected) {
+        const itemWeek = taipeiWeek(item.date);
+        by_week[itemWeek] = (by_week[itemWeek] || 0) + 1;
+        by_tool[item.tool] = (by_tool[item.tool] || 0) + 1;
+        by_status[item.status] = (by_status[item.status] || 0) + 1;
+        durations.push(item.duration_bucket_ms);
+      }
+      return { profile_id: profileId, total: selected.length, by_week, by_tool, by_status,
+        average_duration_bucket_ms: durations.length ? Math.round(durations.reduce((sum, value) => sum + value, 0) / durations.length) : null };
+    },
     async addMiss(input) {
       const miss = validateMiss(input);
       const key = sha(miss);
