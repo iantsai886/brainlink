@@ -24,7 +24,7 @@ const clean = (v, max = MAX_TEXT) => typeof v === 'string' ? v.trim().slice(0, m
 const canonical = (v) => JSON.stringify(v);
 const digest = (v) => createHash('sha256').update(canonical(v)).digest('hex');
 const OBSERVATION_CATEGORIES = Object.freeze({
-  retrieval: 'Search and reading', sessions: 'Session capture', filing: 'Filing and organization',
+  retrieval: 'Search and reading', retrieval_match: 'Retrieval matching', sessions: 'Session capture', filing: 'Filing and organization',
   handoff: 'AI handoffs', recovery: 'Backup and restore', graph_review: 'Graph review',
 });
 
@@ -274,10 +274,38 @@ export function createRsiLedger({ home, now = () => new Date() }) {
     // Scheduled observations may open a review item from fixed aggregate signals only.
     // No note text, paths, tool arguments, or caller-supplied proposal copy is accepted.
     appendObservationSignals: (findings) => locked(async () => {
-      if (!Array.isArray(findings) || findings.length > Object.keys(OBSERVATION_CATEGORIES).length) throw new Error('Observation findings are invalid.');
+      if (!Array.isArray(findings) || findings.length > 200) throw new Error('Observation findings are invalid.');
       const created = [], duplicates = [];
       const rows = project(await readEvents(file));
       for (const finding of findings) {
+        if (finding?.category === 'retrieval_match') {
+          const { profile_id, signal, current_calls, weak_calls, current_weak_match_rate, previous_calls, previous_weak_match_rate } = finding;
+          if (!/^[a-zA-Z0-9_-]{1,64}$/.test(profile_id || '') || !['review_weak_match_rate', 'review_retrieval_increase'].includes(signal)
+            || !Number.isInteger(current_calls) || current_calls < 20 || current_calls > 20000
+            || !Number.isInteger(weak_calls) || weak_calls < 0 || weak_calls > current_calls
+            || typeof current_weak_match_rate !== 'number' || Math.abs(current_weak_match_rate - weak_calls / current_calls) > 0.001
+            || !Number.isInteger(previous_calls) || previous_calls < 0 || previous_calls > 20000
+            || !(previous_weak_match_rate === null || (typeof previous_weak_match_rate === 'number' && previous_weak_match_rate >= 0 && previous_weak_match_rate <= 1))) continue;
+          if (signal === 'review_weak_match_rate' && current_weak_match_rate < 0.5) continue;
+          if (signal === 'review_retrieval_increase' && (previous_calls < 20 || typeof previous_weak_match_rate !== 'number' || current_weak_match_rate - previous_weak_match_rate < 0.2)) continue;
+          const existing = rows.find(row => row.origin === 'observation' && row.observation?.category === finding.category
+            && row.observation?.profile_id === profile_id && !['rejected', 'deferred'].includes(row.status));
+          if (existing) { duplicates.push({ category: finding.category, profile_id, existing_id: existing.id }); continue; }
+          const fields = validatePayload({
+            title: 'Review weak retrieval matches',
+            user_problem: `For one scoped Twin profile, ${weak_calls} of ${current_calls} recent searches returned weak or empty matches (${Math.round(current_weak_match_rate * 100)}%). This may be correct abstention; the aggregate signal does not show answer quality or the cause.`,
+            hypothesis: 'Review fictional search cases for missing aliases, links, or source coverage. Propose a retrieval change only if a fixed test shows better task success without reducing correct abstention or privacy.',
+            memory_types: ['semantic'], sources: [], metrics: ['Task success on fixed retrieval cases', 'Correct abstention rate', 'Privacy violations'],
+            guardrails: ['Keep the profile boundary unchanged', 'No query text, note content, or paths in RSI evidence', 'No automatic ranking or vault changes'],
+            privacy_scope: 'Aggregate retrieval-status counts for one opaque Twin profile only.',
+          });
+          const observation = { schema: 1, category: finding.category, profile_id, signal, current_calls, weak_calls, current_weak_match_rate, previous_calls, previous_weak_match_rate };
+          const id = newId(), at = now().toISOString();
+          await append({ kind: 'created', idea_id: id, at, origin: 'observation', observation, fields });
+          rows.push({ id, status: 'discovered', origin: 'observation', observation, fields });
+          created.push(id);
+          continue;
+        }
         if (!finding || !Object.hasOwn(OBSERVATION_CATEGORIES, finding.category) || !['review_failures', 'review_increase'].includes(finding.signal)) continue;
         const calls = finding.current_calls, failures = finding.current_failures;
         if (!Number.isInteger(calls) || calls < 5 || calls > 20000 || !Number.isInteger(failures) || failures < 2 || failures > calls) continue;

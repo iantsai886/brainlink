@@ -3,7 +3,7 @@
 import { mkdir, readFile, rename, unlink, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import { randomUUID } from 'node:crypto';
-import { analyzeActivitySignals, compareVaultHealth, sanitizeVaultHealthSnapshot } from './rsi-observations.mjs';
+import { analyzeActivitySignals, attachRetrievalObservationSignals, compareVaultHealth, sanitizeVaultHealthSnapshot } from './rsi-observations.mjs';
 
 export const DEFAULT_OBSERVATION_SETTINGS = Object.freeze({ enabled: false, interval_hours: 168, vault_health_enabled: false, vault_health_vault: '' });
 
@@ -31,7 +31,7 @@ export function validateObservationSettings(input, previous = DEFAULT_OBSERVATIO
   return next;
 }
 
-export function createRsiObservationSchedule({ home, readEntries, readVaultHealth, ledger, now = () => new Date() }) {
+export function createRsiObservationSchedule({ home, readEntries, readRetrievalObservations, readVaultHealth, ledger, now = () => new Date() }) {
   const file = path.join(home, 'rsi', 'observations.json');
   let running = null;
   let writes = Promise.resolve();
@@ -89,6 +89,10 @@ export function createRsiObservationSchedule({ home, readEntries, readVaultHealt
       try {
         const entries = await readEntries();
         const report = analyzeActivitySignals(entries, { now: started });
+        if (typeof readRetrievalObservations === 'function') {
+          const since = new Date(started.getTime() - 60 * 86400000).toISOString();
+          attachRetrievalObservationSignals(report, await readRetrievalObservations({ since }), { now: started });
+        }
         const stateBeforeSave = await load();
         if (stateBeforeSave.settings.vault_health_enabled) {
           if (typeof readVaultHealth !== 'function') throw new Error('Selected-vault health observation is unavailable.');

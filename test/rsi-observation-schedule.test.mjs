@@ -5,6 +5,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { createRsiObservationSchedule, validateObservationSettings } from '../src/rsi-observation-schedule.mjs';
 import { createRsiLedger } from '../src/rsi-ledger.mjs';
+import { createRsiWeekly } from '../src/rsi-weekly.mjs';
 
 test('scheduled RSI observation is off by default and only stores aggregate, content-free reports', async (t) => {
   const home = await mkdtemp(path.join(os.tmpdir(), 'brainlink-rsi-observe-'));
@@ -63,6 +64,42 @@ test('scheduled aggregate findings enter the review ledger while manual observat
   assert.doesNotMatch(JSON.stringify(scheduled), /PRIVATE_(?:NOTE|PATH)_CANARY/);
   assert.doesNotMatch(await readFile(service.file, 'utf8'), /PRIVATE_(?:NOTE|PATH)_CANARY/);
   assert.doesNotMatch(await readFile(ledger.file, 'utf8'), /PRIVATE_(?:NOTE|PATH)_CANARY/);
+});
+
+test('scheduled RSI reviews weak retrieval rates per Twin and opens a review-only proposal', async (t) => {
+  const home = await mkdtemp(path.join(os.tmpdir(), 'brainlink-rsi-retrieval-proposal-'));
+  t.after(() => rm(home, { recursive: true, force: true }));
+  let now = new Date('2026-10-27T12:00:00.000Z');
+  const weekly = createRsiWeekly({ home, now: () => now });
+  const record = (date, status) => weekly.recordRetrievalObservation({ profileId: 'fictional_org', tool: 'vault_search', status, durationMs: 500 });
+  // Seed a synthetic previous window directly; the public recorder always uses its current clock.
+  const { createHash } = await import('node:crypto');
+  const digest = (value) => createHash('sha256').update(JSON.stringify(value)).digest('hex');
+  const ledger = createRsiLedger({ home, now: () => now });
+  for (let i = 0; i < 20; i++) {
+    const data = { date: new Date(now.getTime() - 45 * 86400000).toISOString(), profile_id: 'fictional_org', tool: 'vault_search', status: 'hits', duration_bucket_ms: 500 };
+    await ledger.appendRsiEvidence('retrieval_observation', data, digest({ ...data, index: i }));
+  }
+  for (let i = 0; i < 20; i++) await record(now.toISOString(), i < 12 ? 'not_in_brain' : i < 16 ? 'weak' : 'hits');
+  const service = createRsiObservationSchedule({
+    home, now: () => now,
+    readEntries: async () => [{ at: now.toISOString(), tool: 'vault_search', ok: true, query: 'QUESTION_CANARY', path: 'PRIVATE_PATH_CANARY', note: 'PRIVATE_NOTE_CANARY' }],
+    readRetrievalObservations: ({ since } = {}) => weekly.listRetrievalObservations({ since }), ledger,
+  });
+  const manual = await service.run('manual');
+  assert.equal(manual.report.retrieval_profiles[0].signal, 'review_retrieval_increase');
+  assert.equal(manual.report.proposal_intake, undefined);
+  assert.equal((await ledger.list()).length, 0);
+  await service.configure({ enabled: true });
+  const scheduled = await service.run('schedule');
+  assert.equal(scheduled.report.proposal_intake.created_count, 1);
+  const proposals = await ledger.list();
+  assert.equal(proposals.length, 1);
+  assert.equal(proposals[0].observation.profile_id, 'fictional_org');
+  assert.equal(proposals[0].status, 'discovered');
+  const serialized = JSON.stringify({ report: scheduled.report, proposals });
+  assert.doesNotMatch(serialized, /QUESTION_CANARY|PRIVATE_PATH_CANARY|PRIVATE_NOTE_CANARY/);
+  assert.match(serialized, /correct abstention/);
 });
 
 test('optional health snapshots are per-vault, local aggregates and compare only with the same vault', async (t) => {

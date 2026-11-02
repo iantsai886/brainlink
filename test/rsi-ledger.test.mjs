@@ -5,6 +5,7 @@ import { createHash } from 'node:crypto';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { createRsiLedger } from '../src/rsi-ledger.mjs';
+import { createRsiWeekly } from '../src/rsi-weekly.mjs';
 import { findSecrets } from '../src/core.mjs';
 import { normalize, saveConfig } from '../src/config.mjs';
 import { startSetup } from '../src/setup.mjs';
@@ -239,13 +240,16 @@ test('RSI Setup panel has unique ids and one render/submit path', async () => {
   assert.match(html, /current_result_tokens/);
   assert.match(html, /rsi\.observe\.resultSize/);
   assert.match(html, /rsi\.observe\.graphActions/);
+  assert.match(html, /report\.retrieval_profiles/);
+  assert.match(html, /rsi\.observe\.retrievalCaveat/);
+  assert.match(html, /rsi\.observe\.retrievalProposalEvidence/);
   assert.match(html, /data-rsi-observe-draft/);
   assert.match(html, /form\.elements\.namedItem\('hypothesis'\)\.value/);
   for (const locale of ['en', 'zh-TW', 'pt']) {
     const catalog = JSON.parse(await readFile(new URL(`../ui/locales/${locale}.json`, import.meta.url), 'utf8'));
     assert.ok(catalog['rsi.promotionCommit'], `${locale} promotion commit label`);
     assert.ok(catalog['rsi.promotionCommitHint'], `${locale} promotion commit limitation`);
-    for (const key of ['rsi.rollback.title', 'rsi.rollback.hint', 'rsi.rollback.restoredVersion', 'rsi.rollback.commit', 'rsi.rollback.reviewer', 'rsi.rollback.evidence', 'rsi.rollback.reason', 'rsi.rollback.record', 'rsi.rollback.confirm', 'rsi.rollback.saved', 'rsi.rollback.history', 'rsi.observe.title', 'rsi.observe.hint', 'rsi.observe.scheduleEnabled', 'rsi.observe.interval', 'rsi.observe.daily', 'rsi.observe.weekly', 'rsi.observe.fortnightly', 'rsi.observe.monthly', 'rsi.observe.saveSchedule', 'rsi.observe.scheduleSaved', 'rsi.observe.scheduleOff', 'rsi.observe.firstRunDue', 'rsi.observe.lastRun', 'rsi.observe.lastFailed', 'rsi.observe.nextRun', 'rsi.observe.run', 'rsi.observe.window', 'rsi.observe.stats', 'rsi.observe.noRate', 'rsi.observe.resultSize', 'rsi.observe.graphActions', 'rsi.observe.findings', 'rsi.observe.noFindings', 'rsi.observe.generated', 'rsi.observe.vaultHealthEnabled', 'rsi.observe.vaultHealthVault', 'rsi.observe.vaultHealthNone', 'rsi.observe.vaultHealthPrivate', 'rsi.observe.vaultHealthHint', 'rsi.observe.vaultHealthSummary', 'rsi.observe.vaultHealthSignal.baseline_unavailable', 'rsi.observe.vaultHealthSignal.stable', 'rsi.observe.vaultHealthSignal.improved', 'rsi.observe.vaultHealthSignal.regressed', 'rsi.observe.vaultHealthSignal.mixed', 'rsi.observe.group.retrieval', 'rsi.observe.group.sessions', 'rsi.observe.group.filing', 'rsi.observe.group.handoff', 'rsi.observe.group.recovery', 'rsi.observe.group.graph_review', 'rsi.observe.signal.insufficient_data', 'rsi.observe.signal.stable', 'rsi.observe.signal.review_failures', 'rsi.observe.signal.review_increase', 'rsi.observe.draft', 'rsi.observe.draft.title', 'rsi.observe.draft.problem', 'rsi.observe.draft.hypothesis', 'rsi.observe.proposalBadge', 'rsi.observe.proposalEvidence', 'rsi.observe.proposalHistory', 'rsi.observe.proposalIntake']) assert.ok(catalog[key], `${locale} ${key}`);
+    for (const key of ['rsi.rollback.title', 'rsi.rollback.hint', 'rsi.rollback.restoredVersion', 'rsi.rollback.commit', 'rsi.rollback.reviewer', 'rsi.rollback.evidence', 'rsi.rollback.reason', 'rsi.rollback.record', 'rsi.rollback.confirm', 'rsi.rollback.saved', 'rsi.rollback.history', 'rsi.observe.title', 'rsi.observe.hint', 'rsi.observe.scheduleEnabled', 'rsi.observe.interval', 'rsi.observe.daily', 'rsi.observe.weekly', 'rsi.observe.fortnightly', 'rsi.observe.monthly', 'rsi.observe.saveSchedule', 'rsi.observe.scheduleSaved', 'rsi.observe.scheduleOff', 'rsi.observe.firstRunDue', 'rsi.observe.lastRun', 'rsi.observe.lastFailed', 'rsi.observe.nextRun', 'rsi.observe.run', 'rsi.observe.window', 'rsi.observe.stats', 'rsi.observe.noRate', 'rsi.observe.resultSize', 'rsi.observe.graphActions', 'rsi.observe.findings', 'rsi.observe.noFindings', 'rsi.observe.generated', 'rsi.observe.vaultHealthEnabled', 'rsi.observe.vaultHealthVault', 'rsi.observe.vaultHealthNone', 'rsi.observe.vaultHealthPrivate', 'rsi.observe.vaultHealthHint', 'rsi.observe.vaultHealthSummary', 'rsi.observe.vaultHealthSignal.baseline_unavailable', 'rsi.observe.vaultHealthSignal.stable', 'rsi.observe.vaultHealthSignal.improved', 'rsi.observe.vaultHealthSignal.regressed', 'rsi.observe.vaultHealthSignal.mixed', 'rsi.observe.group.retrieval', 'rsi.observe.group.retrieval_match', 'rsi.observe.group.sessions', 'rsi.observe.group.filing', 'rsi.observe.group.handoff', 'rsi.observe.group.recovery', 'rsi.observe.group.graph_review', 'rsi.observe.signal.insufficient_data', 'rsi.observe.signal.stable', 'rsi.observe.signal.review_failures', 'rsi.observe.signal.review_increase', 'rsi.observe.signal.review_weak_match_rate', 'rsi.observe.signal.review_retrieval_increase', 'rsi.observe.retrievalProfile', 'rsi.observe.retrievalStats', 'rsi.observe.retrievalCaveat', 'rsi.observe.retrievalProposalEvidence', 'rsi.observe.draft', 'rsi.observe.draft.title', 'rsi.observe.draft.problem', 'rsi.observe.draft.hypothesis', 'rsi.observe.proposalBadge', 'rsi.observe.proposalEvidence', 'rsi.observe.proposalHistory', 'rsi.observe.proposalIntake']) assert.ok(catalog[key], `${locale} ${key}`);
     for (const key of ['rsi.monitor.title', 'rsi.monitor.hint', 'rsi.monitor.start', 'rsi.monitor.end', 'rsi.monitor.testSet', 'rsi.monitor.samples', 'rsi.monitor.decision.stable', 'rsi.monitor.decision.regression', 'rsi.monitor.decision.inconclusive', 'rsi.monitor.guardrail.pass', 'rsi.monitor.guardrail.fail', 'rsi.monitor.guardrail.unknown', 'rsi.monitor.metricName', 'rsi.monitor.baseline', 'rsi.monitor.observed', 'rsi.monitor.reviewer', 'rsi.monitor.guardrails', 'rsi.monitor.results', 'rsi.monitor.evidenceRef', 'rsi.monitor.save', 'rsi.monitor.saved', 'rsi.monitor.history']) assert.ok(catalog[key], `${locale} ${key}`);
   }
   assert.equal((html.match(/async function loadRsi\(\)/g) || []).length, 1);
@@ -270,10 +274,15 @@ test('Setup exposes the RSI ledger only through authenticated local APIs', async
     assert.equal((await post('/api/rsi/observations/run', {}, 'wrong-token')).status, 401);
     assert.equal((await post('/api/rsi/observations/analyze', {}, 'wrong-token')).status, 401);
     for (let i = 0; i < 5; i++) await logActivity(env, { tool: 'vault_search', ok: false, platform: 'PRIVATE_ACTIVITY_CANARY', message: 'PRIVATE_NOTE_CANARY' });
+    const feedback = createRsiWeekly({ home: env.BRAINLINK_HOME });
+    for (let i = 0; i < 20; i++) await feedback.recordRetrievalObservation({ profileId: 'fictional_org', tool: 'vault_search', status: 'not_in_brain', durationMs: 500 });
     const observation = await post('/api/rsi/observations/analyze', {}).then(r => r.json());
     const retrievalSignal = observation.report.categories.find(item => item.id === 'retrieval');
     assert.equal(retrievalSignal.signal, 'review_failures');
     assert.equal(retrievalSignal.current.failures, 5);
+    assert.equal(observation.report.retrieval_profiles[0].profile_id, 'fictional_org');
+    assert.equal(observation.report.retrieval_profiles[0].current.weak_match_rate, 1);
+    assert.equal(observation.report.retrieval_profiles[0].signal, 'review_weak_match_rate');
     assert.doesNotMatch(JSON.stringify(observation), /PRIVATE_ACTIVITY_CANARY|PRIVATE_NOTE_CANARY/);
     assert.equal(observation.report.privacy.report_saved, false);
     const savedObservation = await post('/api/rsi/observations/run', {}).then(r => r.json());

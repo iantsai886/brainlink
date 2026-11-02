@@ -80,6 +80,13 @@ export function createRsiWeekly({ home, now = () => new Date() }) {
       return { profile_id: profileId, total: selected.length, by_week, by_tool, by_status,
         average_duration_bucket_ms: durations.length ? Math.round(durations.reduce((sum, value) => sum + value, 0) / durations.length) : null };
     },
+    async listRetrievalObservations({ since } = {}) {
+      const cutoff = since === undefined ? -Infinity : Date.parse(since);
+      if (since !== undefined && !Number.isFinite(cutoff)) throw new Error('since must be a valid timestamp.');
+      const all = await ledger.listRsiEvidence('retrieval_observation');
+      return all.filter(item => Date.parse(item.date) >= cutoff)
+        .map(({ date, profile_id, tool, status, duration_bucket_ms }) => ({ date, profile_id, tool, status, duration_bucket_ms }));
+    },
     async addMiss(input) {
       const miss = validateMiss(input);
       const key = sha(miss);

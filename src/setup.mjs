@@ -30,7 +30,7 @@ import { githubAssignmentProjection } from './sync/github-assignment.mjs';
 import { runGitHubAutoSync } from './sync/github-auto-sync.mjs';
 import { sessionsService } from './host.mjs';
 import { addAgent, renameAgent, removeAgent, revokeAgent, markConnected, findAgentByToken, publicAgent, localAgentSnippet, remoteAgentSnippet, generateAgentToken, hashToken } from './mcp-agents.mjs';
-import { analyzeActivitySignals } from './rsi-observations.mjs';
+import { analyzeActivitySignals, attachRetrievalObservationSignals } from './rsi-observations.mjs';
 import { buildGraph3D, noteDetail3D, listProposedTypedRelations, discoverVaultRelationshipCandidates, listGraphVaults } from './graph3d.mjs';
 import { deriveTypedRelations, deriveProposedTypedRelations, deriveRejectedTypedRelations, discoverTypedRelationshipCandidates, typedEntityMetadataMap, typedRelationAllowed, appendTypedRelationProposal, approveTypedRelation, rejectTypedRelation, reopenTypedRelation } from './typed-graph.mjs';
 import { snapshotSettings, chooseSnapshot, suggestSnapshotFolder, clearSnapshot, startSnapshotWatcher, writeSnapshotOnce, loadSnapshotStatus, saveSnapshotStatus } from './snapshot.mjs';
@@ -258,6 +258,7 @@ export async function startSetup(opts = {}) {
   let discoveryKeepsAlive = Boolean(initialDiscoveryStatus?.settings.enabled && !initialDiscoveryStatus.settings.paused);
   const rsiObservationSchedule = createRsiObservationSchedule({
     home: appHome(env), readEntries: () => readActivity(env, 20000),
+    readRetrievalObservations: ({ since } = {}) => rsiWeekly.listRetrievalObservations({ since }),
     ledger: rsiLedger,
     readVaultHealth: async (name) => {
       const cfg = await loadConfig(file);
@@ -1437,7 +1438,13 @@ export async function startSetup(opts = {}) {
       const record = { schema: 1, exported_at: new Date().toISOString(), ideas: await rsiLedger.list() };
       return { ...record, sha256: createHash('sha256').update(JSON.stringify(record)).digest('hex') };
     },
-    'POST /api/rsi/observations/analyze': async () => ({ report: analyzeActivitySignals(await readActivity(env, 20000)) }),
+    'POST /api/rsi/observations/analyze': async () => {
+      const now = new Date();
+      const report = analyzeActivitySignals(await readActivity(env, 20000), { now });
+      const since = new Date(now.getTime() - 60 * 86400000).toISOString();
+      attachRetrievalObservationSignals(report, await rsiWeekly.listRetrievalObservations({ since }), { now });
+      return { report };
+    },
     'GET /api/rsi/experiments': async () => ({ suites: rsiExperiments.suites() }),
     'POST /api/rsi/experiments/run': async (b) => {
       const ideas = await rsiLedger.list();

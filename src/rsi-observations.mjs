@@ -117,3 +117,53 @@ export function analyzeActivitySignals(entries, { now = new Date() } = {}) {
     limitations: ['Activity logs contain only observed tool calls and graph-review decisions; they do not show whether an answer was useful or why a person rejected a suggestion.', 'Graph approval/rejection/reopen counts are feedback signals, not standalone quality scores; review choices are not linked to note content.', 'Response token counts are rough estimates for selected read-only BrainLink tool results, not all conversation context or provider billing; averages can change when the tool mix changes.', 'The activity log rotates, so older calls may be missing from a 60-day comparison.', 'A scheduled run may create a discovered review proposal from aggregate counts only. No code, permissions, vault content, or live behavior is changed or approved automatically.'],
   };
 }
+
+// Summarize retrieval outcomes without retaining the query or any vault-derived text.
+// A weak/empty result may be a correct abstention, so findings ask for review only.
+export function analyzeRetrievalObservations(entries, { now = new Date() } = {}) {
+  const end = now instanceof Date ? now.getTime() : Date.parse(now);
+  const currentStart = end - 30 * 86400000, previousStart = currentStart - 30 * 86400000;
+  const profiles = new Map();
+  for (const entry of Array.isArray(entries) ? entries.slice(-20000) : []) {
+    if (!entry || !/^[a-zA-Z0-9_-]{1,64}$/.test(entry.profile_id || '') || !['hits', 'weak', 'not_in_brain'].includes(entry.status)) continue;
+    if (!['vault_search', 'context_packet'].includes(entry.tool)) continue;
+    const at = Date.parse(entry.date);
+    if (!Number.isFinite(at) || at < previousStart || at > end) continue;
+    const period = at >= currentStart ? 'current' : 'previous';
+    const profile = profiles.get(entry.profile_id) || { current: { hits: 0, weak: 0, not_in_brain: 0 }, previous: { hits: 0, weak: 0, not_in_brain: 0 } };
+    profile[period][entry.status]++;
+    profiles.set(entry.profile_id, profile);
+  }
+  const summaries = [...profiles.entries()].sort(([a], [b]) => a.localeCompare(b)).map(([profile_id, data]) => {
+    const total = (counts) => counts.hits + counts.weak + counts.not_in_brain;
+    const weakRate = (counts) => total(counts) ? Number(((counts.weak + counts.not_in_brain) / total(counts)).toFixed(3)) : null;
+    const currentTotal = total(data.current), previousTotal = total(data.previous);
+    const currentWeakRate = weakRate(data.current), previousWeakRate = weakRate(data.previous);
+    let signal = 'insufficient_data';
+    if (currentTotal >= 20) {
+      signal = 'stable';
+      if (currentWeakRate >= 0.5) signal = 'review_weak_match_rate';
+      if (previousTotal >= 20 && currentWeakRate - previousWeakRate >= 0.2) signal = 'review_retrieval_increase';
+    }
+    return { profile_id, current: { ...data.current, total: currentTotal, weak_match_rate: currentWeakRate }, previous: { ...data.previous, total: previousTotal, weak_match_rate: previousWeakRate }, signal };
+  });
+  const findings = summaries.filter(item => item.signal.startsWith('review_')).map(item => ({
+    category: 'retrieval_match', profile_id: item.profile_id, signal: item.signal,
+    current_calls: item.current.total, weak_calls: item.current.weak + item.current.not_in_brain,
+    current_weak_match_rate: item.current.weak_match_rate, previous_calls: item.previous.total,
+    previous_weak_match_rate: item.previous.weak_match_rate,
+  }));
+  return { profiles: summaries, findings };
+}
+
+export function attachRetrievalObservationSignals(report, entries, { now = new Date() } = {}) {
+  if (!report || !Array.isArray(report.findings) || !report.privacy) throw new Error('RSI observation report is invalid.');
+  const retrieval = analyzeRetrievalObservations(entries, { now });
+  report.retrieval_profiles = retrieval.profiles;
+  report.findings.push(...retrieval.findings);
+  report.privacy.retrieval_observation_content_read = false;
+  report.privacy.retrieval_queries_persisted = false;
+  const caveat = 'Profile-scoped retrieval status counts are operational signals, not answer-quality scores. Weak or empty results may be correct abstentions. A scheduled proposal asks a person to investigate; it never changes ranking or vault content.';
+  if (!report.limitations.includes(caveat)) report.limitations.push(caveat);
+  return report;
+}
