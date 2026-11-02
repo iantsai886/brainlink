@@ -62,7 +62,7 @@ import { briefScheduleDue, validateBriefSchedule } from './brief-schedule.mjs';
 import { defaultRoot as hermesDefaultRoot } from './sessions/hermes.mjs';
 import { checkForUpdate, downloadVerifiedUpdate } from './update-client.mjs';
 import { openUpdatePackage } from './update-launcher.mjs';
-import { UPDATE_PUBLIC_KEY } from './update-trust.mjs';
+import { UPDATE_PUBLIC_KEYS } from './update-trust.mjs';
 import { inspectClaudeDesktopRuntime } from './client-runtime.mjs';
 
 const GRAPH_NOTE_MUTATIONS = new Set([
@@ -1469,7 +1469,7 @@ export async function startSetup(opts = {}) {
   const routes = {
     'GET /api/state': () => state(),
     'GET /api/updates/check': async () => checkForUpdate({
-      publicKey: opts.updatePublicKey ?? UPDATE_PUBLIC_KEY,
+      publicKey: opts.updatePublicKey ?? UPDATE_PUBLIC_KEYS,
       currentVersion: VERSION,
       platform: os,
       arch: opts.arch || process.arch,
@@ -1477,7 +1477,7 @@ export async function startSetup(opts = {}) {
     }),
     'POST /api/updates/download': async () => {
       const download = await downloadVerifiedUpdate({
-        publicKey: opts.updatePublicKey ?? UPDATE_PUBLIC_KEY,
+        publicKey: opts.updatePublicKey ?? UPDATE_PUBLIC_KEYS,
         currentVersion: VERSION,
         platform: os,
         arch: opts.arch || process.arch,

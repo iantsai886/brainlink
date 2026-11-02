@@ -5,6 +5,7 @@ const HASH = /^[a-f0-9]{64}$/i;
 const KEY_ID = /^[a-f0-9]{16}$/;
 const MAX_ENVELOPE_BYTES = 96 * 1024;
 const MAX_ASSET_BYTES = 2 * 1024 * 1024 * 1024;
+const MAX_TRUSTED_UPDATE_KEYS = 4;
 const RELEASE_HOSTS = new Set(['github.com']);
 const PLATFORMS = new Set(['win32', 'darwin', 'linux']);
 const ARCHES = new Set(['x64', 'arm64']);
@@ -106,11 +107,20 @@ export function verifyUpdateManifest(envelope, publicKeyInput, options = {}) {
   if (!envelope || typeof envelope !== 'object' || Array.isArray(envelope) || envelope.schema !== 1) fail('unsupported envelope');
   onlyKeys(envelope, ['schema', 'key_id', 'payload', 'signature'], 'envelope');
 
-  let publicKey;
-  try { publicKey = createPublicKey(publicKeyInput); } catch { fail('pinned public key is invalid'); }
-  if (publicKey.asymmetricKeyType !== 'ed25519') fail('pinned key must be Ed25519');
-  const keyId = createHash('sha256').update(publicKey.export({ type: 'spki', format: 'der' })).digest('hex').slice(0, 16);
-  if (!KEY_ID.test(String(envelope.key_id || '')) || envelope.key_id !== keyId) fail('signing key ID does not match the pinned public key');
+  const configuredKeys = Array.isArray(publicKeyInput) ? publicKeyInput : [publicKeyInput];
+  if (!configuredKeys.length || configuredKeys.length > MAX_TRUSTED_UPDATE_KEYS) fail(`pinned keyring must contain 1 to ${MAX_TRUSTED_UPDATE_KEYS} public keys`);
+  const trustedKeys = new Map();
+  for (const input of configuredKeys) {
+    let publicKey;
+    try { publicKey = createPublicKey(input); } catch { fail('pinned public key is invalid'); }
+    if (publicKey.asymmetricKeyType !== 'ed25519') fail('pinned keys must be Ed25519');
+    const keyId = createHash('sha256').update(publicKey.export({ type: 'spki', format: 'der' })).digest('hex').slice(0, 16);
+    if (trustedKeys.has(keyId)) fail('pinned keyring contains a duplicate public key');
+    trustedKeys.set(keyId, publicKey);
+  }
+  if (!KEY_ID.test(String(envelope.key_id || ''))) fail('signing key ID is invalid');
+  const publicKey = trustedKeys.get(envelope.key_id);
+  if (!publicKey) fail('signing key ID is not in the pinned keyring');
 
   const bytes = decodeBase64Url(envelope.payload, 'payload');
   if (bytes.length > MAX_ENVELOPE_BYTES) fail('signed payload is too large');
@@ -123,4 +133,4 @@ export function verifyUpdateManifest(envelope, publicKeyInput, options = {}) {
   return validatePayload(payload, { currentVersion, channel, platform, arch, now });
 }
 
-export const UPDATE_MANIFEST_LIMITS = Object.freeze({ maxEnvelopeBytes: MAX_ENVELOPE_BYTES, maxAssetBytes: MAX_ASSET_BYTES, releaseHosts: [...RELEASE_HOSTS] });
+export const UPDATE_MANIFEST_LIMITS = Object.freeze({ maxEnvelopeBytes: MAX_ENVELOPE_BYTES, maxAssetBytes: MAX_ASSET_BYTES, maxTrustedKeys: MAX_TRUSTED_UPDATE_KEYS, releaseHosts: [...RELEASE_HOSTS] });

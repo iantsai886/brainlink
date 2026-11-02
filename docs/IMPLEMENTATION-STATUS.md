@@ -5,6 +5,10 @@ GitHub repository: `iantsai886/brainlink`
 Branch: `feat/complete-raw-wiki-folder-flow` (current working branch; based on `origin/main`)
 Code baseline: development target `1.2.8`, with `package.json` as the canonical version source. The `v1.2.7` tag belongs to the separate `wip/v1.2.7` release line; this branch continues from the full-source `main` history and does not move or recreate that tag.
 
+### Signed-update key rotation overlap support (working tree based on `7c570e0`, 2026-11-02)
+
+The update verifier now accepts a fixed keyring of up to four pinned Ed25519 public keys. During a planned rotation, an app can temporarily trust both the old and new keys; signature key IDs select only a matching compiled key. Empty keyrings still disable update network checks, and duplicate, unpinned, invalid, or oversized keyrings fail closed. Focused updater tests passed 15/15 and the full Linux/Node.js 24.22.2 `npm run test:all` passed on this working tree: core 635 total (633 passed, 0 failed, 2 Windows-only skips); UI 44/44. This does not create a production key or verify a real signed release, key migration across installed machines, publication, hosted CI, or customer acceptance.
+
 ### Folder-scan help text matches supported file types (working tree based on `212ed49`, 2026-11-02)
 
 Setup's English, Portuguese and Traditional Chinese help text now lists the supported file types, including HTML/HTM and scanned PDF OCR, instead of incorrectly saying scanned PDFs are skipped. It also states the 100-page PDF limit and that OCR runs locally. In a clean Docker `node:24-bookworm` container, `npm ci`, the focused `test/ingestion-schedule.test.mjs` (5/5), and full `npm run test:all` passed on this working tree based on `1009941`: core 634 total (632 passed, 0 failed, 2 Windows-only skips); UI 44/44. `git diff --check` passed on Windows. This wording change does not alter scan behavior or prove OCR quality on user documents.
