@@ -219,7 +219,19 @@ function scopeId(ctx, vaultName, root) {
 
 function sourceId(scope, rel) { return hash(`${scope}\0${rel}`); }
 
+// Common OS/editor metadata and temporary files are never useful knowledge sources.
+// Keep this list explicit so we do not accidentally exclude user dotfiles wholesale.
+function isOsMetadataPath(rel) {
+  return rel.split(/[\\/]/).some((name) =>
+    name.startsWith('.') ||
+    name.startsWith('._') ||
+    name.startsWith('~$') ||
+    /^(?:\.DS_Store|Thumbs\.db|ehthumbs\.db|desktop\.ini|Icon\r)$/i.test(name)
+  );
+}
+
 async function readEligible(full, root, realRoot, rel, { includeBody = false } = {}) {
+  if (isOsMetadataPath(rel)) return null;
   if (await isExcludedPath(root, rel)) return null;
   const before = await lstat(full);
   if (before.isSymbolicLink() || !before.isFile() || before.size > MAX_NOTE_BYTES) return null;
@@ -275,8 +287,8 @@ async function sourcesInFolder(ctx, vaultName, folderInfo) {
     for (const entry of entries) {
       if (truncated) return;
       if (++visited > MAX_NOTES) { truncated = true; return; }
-      if (entry.name.startsWith('.')) { skipped++; continue; }
       const rel = `${relDir}/${entry.name}`;
+      if (isOsMetadataPath(rel)) { skipped++; continue; }
       if (await isExcludedPath(folderInfo.root, rel)) { skipped++; continue; }
       const full = path.join(dir, entry.name);
       const st = await lstat(full).catch(() => null);

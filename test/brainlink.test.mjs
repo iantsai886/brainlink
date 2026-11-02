@@ -5,6 +5,7 @@ import { tmpdir } from 'node:os';
 import { spawn } from 'node:child_process';
 import { request } from 'node:http';
 import path from 'node:path';
+import { createHash } from 'node:crypto';
 import { fileURLToPath } from 'node:url';
 import JSZip from 'jszip';
 
@@ -266,6 +267,31 @@ test('ingestion queue scans only a chosen folder and filters private, excluded, 
   assert.ok(indexableHeader('---\nprivate: true\n---\n# private', 30) === false);
   await assert.rejects(ingestionQueue(ctxOf(cfg, env), 'Acme Studio', '../Raw'), /folder/i);
   await assert.rejects(ingestionQueue(ctxOf(cfg, env), 'Journal', 'Raw'), /private vault/i);
+});
+
+test('ingestion ignores OS metadata and temporary files before listing or reading them', async () => {
+  const { base, company, cfg } = await fixture();
+  const raw = path.join(company, 'Raw');
+  await mkdir(path.join(raw, '._metadata'), { recursive: true });
+  const blocked = [
+    ['Thumbs.db', 'WINDOWS_THUMBS_CANARY'],
+    ['desktop.ini', 'WINDOWS_DESKTOP_CANARY'],
+    ['.DS_Store', 'MACOS_STORE_CANARY'],
+    ['._Photo.txt', 'MACOS_RESOURCE_FORK_CANARY'],
+    ['~$Budget.docx', 'OFFICE_TEMP_CANARY'],
+    ['._metadata/notes.txt', 'HIDDEN_METADATA_DIR_CANARY'],
+  ];
+  for (const [name, body] of blocked) await writeFile(path.join(raw, name), body);
+  await writeFile(path.join(raw, 'Keep.txt'), 'ELIGIBLE_SOURCE_CANARY');
+  const ctx = ctxOf(cfg, { BRAINLINK_HOME: path.join(base, 'app') });
+  const queue = await ingestionQueue(ctx, 'Acme Studio', 'Raw');
+  assert.deepEqual(queue.candidates.map((item) => item.path), ['Raw/Keep.txt']);
+  assert.ok(queue.skipped >= blocked.length);
+  assert.doesNotMatch(JSON.stringify(queue), /WINDOWS_THUMBS_CANARY|WINDOWS_DESKTOP_CANARY|MACOS_STORE_CANARY|MACOS_RESOURCE_FORK_CANARY|OFFICE_TEMP_CANARY|HIDDEN_METADATA_DIR_CANARY/);
+  const digest = (value) => createHash('sha256').update(value).digest('hex');
+  const scope = digest(`${path.resolve(company)}\0Acme Studio\0unscoped`);
+  const directRead = { source_id: digest(`${scope}\0Raw/Thumbs.db`), revision: digest('WINDOWS_THUMBS_CANARY') };
+  await assert.rejects(readIngestionSource(ctx, 'Acme Studio', 'Raw', directRead), /changed or is no longer available/i);
 });
 
 test('ingestion reads only supported text files from the selected folder and rejects stale items', async () => {

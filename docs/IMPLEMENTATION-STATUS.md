@@ -5,6 +5,10 @@ GitHub repository: `iantsai886/brainlink`
 Branch: `feat/complete-raw-wiki-folder-flow` (current working branch; based on `origin/main`)
 Code baseline: development target `1.2.8`, with `package.json` as the canonical version source. The `v1.2.7` tag belongs to the separate `wip/v1.2.7` release line; this branch continues from the full-source `main` history and does not move or recreate that tag.
 
+### Raw-to-Wiki OS metadata filtering (2026-11-02; current branch follow-up)
+
+Selected-folder intake now skips hidden paths, common OS metadata (`.DS_Store`, `Thumbs.db`, `desktop.ini`, `._*`) and Office temporary files (`~$*`) before opening file contents. The same check runs again in the exact-source read path, so a direct or stale request cannot bypass the queue filter. The canonical Raw-to-Wiki Skill and its Claude/Codex copies describe the exclusions. Focused Windows/Node.js verification: ingestion tests 3/3 and portable skill tests 4/4; `git diff --check` passed. This is a focused local regression check, not a full-suite run or release validation.
+
 ### Local image OCR package verification (code commit `404e602` and follow-up checks, 2026-11-02)
 
 The full Windows/Node.js 24.22.1 `npm run test:all` passed after this quality-test addition: core 622 total (614 passed, 0 failed, 8 platform/privilege skips); UI 44/44. Three generated fictional fixtures cover English, accented Portuguese, and Traditional Chinese recognition in source and staged-package tests. `npm run smoke:installed:win` passed with all three fixtures from the installed 1.2.8 QA app, plus launch, shortcuts, folder controls, isolated uninstall, user-data preservation, and PATH restoration. In `node:24-bookworm`, the 1.2.8 Linux builder produced all four x64/ARM64 tar and Debian packages; all four SHA-256 checks passed. The extracted x64 Debian app reported version 1.2.8 and OCR-read all three fixtures with its bundled runtime and local data. ARM64 was built and checksum-checked, not run on ARM hardware. These checks use synthetic images, not real-world OCR data. Scanned PDFs, macOS installed OCR, hosted CI, signed release, and customer acceptance remain unverified.
