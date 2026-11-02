@@ -153,23 +153,25 @@ test('Setup offers authenticated manual scans and runs an enabled daily scan in 
 
 test('ingestion scan UI has manual and scheduled controls with all locale strings', async () => {
   const html = await readFile(new URL('../ui/index.html', import.meta.url), 'utf8');
-  for (const id of ['ingestion-enabled', 'ingestion-auto-drafts', 'ingestion-vault', 'ingestion-folder', 'ingestion-add', 'ingestion-target-list', 'ingestion-time', 'ingestion-save', 'ingestion-run', 'ingestion-status', 'ingestion-queue', 'ingestion-draft-status', 'ingestion-draft-list']) {
+  for (const id of ['ingestion-enabled', 'ingestion-auto-drafts', 'ingestion-auto-file', 'ingestion-vault', 'ingestion-folder', 'ingestion-add', 'ingestion-target-list', 'ingestion-time', 'ingestion-save', 'ingestion-run', 'ingestion-status', 'ingestion-queue', 'ingestion-draft-status', 'ingestion-draft-list']) {
     assert.equal((html.match(new RegExp(`id="${id}"`, 'g')) || []).length, 1, id);
   }
   assert.match(html, /<select id="ingestion-folder"><\/select>/, 'folder target is selected from existing directories, not typed as a path');
   assert.match(html, /api\('POST', '\/api\/ingestion\/folders', \{ vault \}\)/, 'folder options come from the authenticated vault-scoped endpoint');
+  assert.match(html, /destinationOnly: true/, 'automatic filing destinations use the existing same-vault folder picker');
   assert.match(html, /api\('POST', '\/api\/ingestion\/run', \{ targets: currentIngestionTargets\(\) \}\)/);
   assert.match(html, /api\('POST', '\/api\/ingestion\/draft'/, 'the selected source can be summarized by the local draft route');
   assert.match(html, /api\('POST', '\/api\/ingestion\/save-draft'.*confirm: true/, 'saving requires a separate confirmation action');
   assert.match(html, /api\('GET', '\/api\/ingestion\/drafts'\)/, 'local drafts reload from private app data');
   assert.match(html, /api\('POST', '\/api\/ingestion\/discard-draft'/, 'stale or unwanted local drafts can be removed');
   assert.match(html, /autoDrafts: \$\('ingestion-auto-drafts'\)\.checked/, 'scheduled local draft processing is a separate opt-in');
+  assert.match(html, /autoFile: \$\('ingestion-auto-file'\)\.checked/, 'saving proposed notes is a separate opt-in');
   assert.match(html, /window\.confirm\(t\('ingestion\.confirmSaveProposal'\)\)/);
   assert.match(html, /data-open-note="\$\{esc\(item\.vault \|\| r\.vault\)\}::\$\{esc\(item\.path\)\}"/, 'queue entries open each source note in its own vault');
   assert.match(html, /document\.addEventListener\('click', async \(event\) => \{\s*const removeIngestionTarget/);
   assert.match(html, /currentIngestionTargets\(\)\.push\(target\)/);
   for (const locale of ['en', 'zh-TW', 'pt']) {
     const catalog = JSON.parse(await readFile(new URL(`../ui/locales/${locale}.json`, import.meta.url), 'utf8'));
-    for (const key of ['ingestion.title', 'ingestion.hint', 'ingestion.enabled', 'ingestion.autoDrafts', 'ingestion.autoDraftsHint', 'ingestion.pendingDrafts', 'ingestion.noPendingDrafts', 'ingestion.localDraftReady', 'ingestion.autoDraftStatus', 'ingestion.vault', 'ingestion.folder', 'ingestion.chooseFolder', 'ingestion.addTarget', 'ingestion.targets', 'ingestion.removeTarget', 'ingestion.emptyTargets', 'ingestion.targetRequired', 'ingestion.maxTargets', 'ingestion.duplicateTarget', 'ingestion.time', 'ingestion.save', 'ingestion.run', 'ingestion.never', 'ingestion.running', 'ingestion.lastRun', 'ingestion.failed', 'ingestion.retryScheduled', 'ingestion.saved', 'ingestion.disabled', 'ingestion.scanDone', 'ingestion.empty', 'ingestion.limited', 'ingestion.trigger.manual', 'ingestion.trigger.schedule', 'ingestion.makeLocalDraft', 'ingestion.localDraftNeedsModel', 'ingestion.localDraftUnverified', 'ingestion.memoryType', 'ingestion.reviewDraft', 'ingestion.destination', 'ingestion.chooseDestination', 'ingestion.noDestination', 'ingestion.saveProposal', 'ingestion.discardDraft', 'ingestion.confirmDiscardDraft', 'ingestion.confirmSaveProposal', 'ingestion.proposalSaved', 'ingestion.proposalUnverified', 'ingestion.proposalNeedsReview']) assert.ok(catalog[key], `${locale} ${key}`);
+    for (const key of ['ingestion.title', 'ingestion.hint', 'ingestion.enabled', 'ingestion.autoDrafts', 'ingestion.autoDraftsHint', 'ingestion.autoFile', 'ingestion.autoFileHint', 'ingestion.scanFiled', 'ingestion.pendingDrafts', 'ingestion.noPendingDrafts', 'ingestion.localDraftReady', 'ingestion.autoDraftStatus', 'ingestion.vault', 'ingestion.folder', 'ingestion.chooseFolder', 'ingestion.addTarget', 'ingestion.targets', 'ingestion.removeTarget', 'ingestion.emptyTargets', 'ingestion.targetRequired', 'ingestion.maxTargets', 'ingestion.duplicateTarget', 'ingestion.time', 'ingestion.save', 'ingestion.run', 'ingestion.never', 'ingestion.running', 'ingestion.lastRun', 'ingestion.failed', 'ingestion.retryScheduled', 'ingestion.saved', 'ingestion.disabled', 'ingestion.scanDone', 'ingestion.empty', 'ingestion.limited', 'ingestion.trigger.manual', 'ingestion.trigger.schedule', 'ingestion.makeLocalDraft', 'ingestion.localDraftNeedsModel', 'ingestion.localDraftUnverified', 'ingestion.memoryType', 'ingestion.reviewDraft', 'ingestion.destination', 'ingestion.chooseDestination', 'ingestion.noDestination', 'ingestion.saveProposal', 'ingestion.discardDraft', 'ingestion.confirmDiscardDraft', 'ingestion.confirmSaveProposal', 'ingestion.proposalSaved', 'ingestion.proposalUnverified', 'ingestion.proposalNeedsReview']) assert.ok(catalog[key], `${locale} ${key}`);
   }
 });

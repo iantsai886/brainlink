@@ -154,11 +154,158 @@ test('opt-in scheduled scan creates bounded, private local drafts that survive a
 });
 
 test('scheduled AI drafts are disabled by default and limited to the explicitly enabled daily scan', () => {
+  assert.equal(normalize({}).ingestion.autoFile, false, 'automatic filing is off by default');
   assert.equal(validateIngestionSchedule({ enabled: false, autoDrafts: true, targets: [], time: '02:00' }).autoDrafts, false);
+  assert.equal(validateIngestionSchedule({ enabled: false, autoDrafts: true, autoFile: true, targets: [], time: '02:00' }).autoFile, false);
+  const destination = validateIngestionSchedule({ enabled: true, autoDrafts: true, autoFile: true, targets: [{ vault: 'Team', folder: 'Raw', destination: 'Knowledge' }], time: '12:00' });
+  assert.equal(destination.autoFile, true);
+  assert.equal(destination.targets[0].destination, 'Knowledge');
+  assert.throws(() => validateIngestionSchedule({ enabled: true, autoDrafts: true, autoFile: true, targets: [{ vault: 'Team', folder: 'Raw', destination: 'Raw/Out' }], time: '12:00' }), /outside its scan folder/i);
   const schedule = { enabled: true, autoDrafts: true, targets: [{ vault: 'Team', folder: 'Raw' }], time: '12:00' };
   assert.equal(ingestionScheduleDue(schedule, new Date('2026-10-30T12:30:00Z'), 'UTC'), true);
   const changed = validateIngestionSchedule({ ...schedule, autoDrafts: false }, { ...schedule, last_scheduled_date: '2026-10-30' });
   assert.equal(changed.last_scheduled_date, null, 'changing AI draft behavior resets the previous schedule receipt');
+});
+
+test('manual scan auto-files a linked proposed note only into its selected same-vault destination', async () => {
+  const home = await mkdtemp(path.join(tmpdir(), 'brainlink-ingestion-auto-file-'));
+  const appHome = path.join(home, 'app'), vault = path.join(home, 'vault');
+  await mkdir(path.join(vault, 'Raw'), { recursive: true });
+  await mkdir(path.join(vault, 'Knowledge'), { recursive: true });
+  await writeFile(path.join(vault, 'Raw', 'Source.md'), '# Fictional source\n\nA fictional team uses a checklist.');
+  await writeFile(path.join(vault, 'Raw', 'Private.md'), '---\nprivate: true\n---\nPRIVATE_AUTO_FILE_CANARY must not be read.');
+  const env = { BRAINLINK_HOME: appHome, HOME: home, BRAINLINK_SEMANTIC: '0' };
+  const local = localDateAndTime(new Date(), 'UTC');
+  const futureTime = localDateAndTime(new Date(Date.now() + 30 * 60 * 1000), 'UTC').time;
+  const config = normalize({ timezone: 'UTC', vaults: [{ name: 'Fictional Company', path: vault }], ingestion: {
+    enabled: true, autoDrafts: true, autoFile: false, targets: [{ vault: 'Fictional Company', folder: 'Raw' }],
+    time: '00:00', last_scheduled_date: local.date,
+  } });
+  config.sessions.localSummary = { enabled: true, model: 'qwen2.5:3b', autoDraftOnEnd: false, autoFileOnEnd: false };
+  await saveConfig(config, path.join(appHome, 'config.json'));
+  let modelCalls = 0, sent;
+  const app = await startSetup({ env, home, os: 'win32', port: 0, useCli: false, ingestionTickMs: 20,
+    ingestionDraftFetch: async (url, options) => {
+      modelCalls++; sent = options.body;
+      assert.equal(url, 'http://127.0.0.1:11434/api/chat');
+      return { ok: true, json: async () => ({ message: { content: JSON.stringify({ title: 'Auto proposal', memory_type: 'semantic', summary: 'A fictional checklist workflow.', key_points: ['The result is unverified.'] }) } }) };
+    },
+  });
+  const base = `http://127.0.0.1:${app.port}`;
+  const headers = { 'Content-Type': 'application/json', 'X-BrainLink-Token': app.token };
+  const post = (route, body) => fetch(base + route, { method: 'POST', headers, body: JSON.stringify(body) });
+  try {
+    const invalid = await post('/api/ingestion/settings', { enabled: true, autoDrafts: true, autoFile: true, targets: [{ vault: 'Fictional Company', folder: 'Raw', destination: 'Raw/Output' }], time: '23:59' });
+    assert.notEqual(invalid.status, 200, 'a destination inside the source folder is refused');
+    const setting = await post('/api/ingestion/settings', { enabled: true, autoDrafts: true, autoFile: true, targets: [{ vault: 'Fictional Company', folder: 'Raw', destination: 'Knowledge' }], time: futureTime });
+    assert.equal(setting.status, 200, await setting.clone().text());
+    const scanResponse = await post('/api/ingestion/run', { targets: [{ vault: 'Fictional Company', folder: 'Raw', destination: 'Knowledge' }] });
+    assert.equal(scanResponse.status, 200, await scanResponse.clone().text());
+    const scan = await scanResponse.json();
+    assert.equal(scan.processing.trigger, 'manual');
+    assert.equal(scan.processing.attempted, 1, 'the private source never enters the local model queue');
+    assert.equal(scan.processing.created, 1);
+    assert.equal(scan.processing.filed, 1);
+    assert.equal(scan.processing.failed, 0);
+    assert.doesNotMatch(sent, /PRIVATE_AUTO_FILE_CANARY/);
+    const files = await readdir(path.join(vault, 'Knowledge'));
+    assert.equal(files.length, 1);
+    const note = await readFile(path.join(vault, 'Knowledge', files[0]), 'utf8');
+    assert.match(note, /status: proposed/);
+    assert.match(note, /confidence: "reported"/);
+    assert.match(note, /\[\[Raw\/Source\]\]/);
+    assert.match(note, /AI draft; unverified/);
+    const pending = await fetch(base + '/api/ingestion/drafts', { headers }).then((r) => r.json());
+    assert.equal(pending.drafts.length, 0, 'saved proposals are removed from the local draft queue');
+    const nextScan = await post('/api/ingestion/run', { targets: [{ vault: 'Fictional Company', folder: 'Raw' }] }).then((r) => r.json());
+    assert.equal(nextScan.queued_total, 0, 'the exact source revision is receipted only after the linked note is saved');
+    const activity = await readFile(path.join(appHome, 'activity.log'), 'utf8');
+    assert.match(activity, /source_proposal_saved/);
+    assert.doesNotMatch(activity, /fictional checklist workflow|PRIVATE_AUTO_FILE_CANARY/i);
+    assert.equal(modelCalls, 1);
+  } finally { await new Promise((resolve) => app.server.close(resolve)); }
+});
+
+test('auto-file conflict keeps the existing note intact and leaves the generated draft for review', async () => {
+  const home = await mkdtemp(path.join(tmpdir(), 'brainlink-ingestion-auto-file-conflict-'));
+  const appHome = path.join(home, 'app'), vault = path.join(home, 'vault');
+  await mkdir(path.join(vault, 'Raw'), { recursive: true });
+  await mkdir(path.join(vault, 'Knowledge'), { recursive: true });
+  await writeFile(path.join(vault, 'Raw', 'Source.md'), '# Fictional source\n\nA fictional rule.');
+  const local = localDateAndTime(new Date(), 'UTC');
+  const collisionPath = path.join(vault, 'Knowledge', `${local.date} — Existing note.md`);
+  await writeFile(collisionPath, '# User-authored note\n\nKeep this exact content.');
+  const env = { BRAINLINK_HOME: appHome, HOME: home, BRAINLINK_SEMANTIC: '0' };
+  const config = normalize({ timezone: 'UTC', vaults: [{ name: 'Fictional Company', path: vault }], ingestion: {
+    enabled: true, autoDrafts: true, autoFile: true, targets: [{ vault: 'Fictional Company', folder: 'Raw', destination: 'Knowledge' }],
+    time: '00:00', last_scheduled_date: local.date,
+  } });
+  config.sessions.localSummary = { enabled: true, model: 'qwen2.5:3b', autoDraftOnEnd: false, autoFileOnEnd: false };
+  await saveConfig(config, path.join(appHome, 'config.json'));
+  const app = await startSetup({ env, home, os: 'win32', port: 0, useCli: false, ingestionTickMs: 20,
+    ingestionDraftFetch: async () => ({ ok: true, json: async () => ({ message: { content: JSON.stringify({ title: 'Existing note', memory_type: 'semantic', summary: 'A generated replacement must not overwrite.', key_points: [] }) } }) }),
+  });
+  const base = `http://127.0.0.1:${app.port}`;
+  const headers = { 'Content-Type': 'application/json', 'X-BrainLink-Token': app.token };
+  try {
+    const scan = await fetch(base + '/api/ingestion/run', { method: 'POST', headers, body: JSON.stringify({ targets: [{ vault: 'Fictional Company', folder: 'Raw', destination: 'Knowledge' }] }) }).then((r) => r.json());
+    assert.equal(scan.processing.filed, 0);
+    assert.equal(scan.processing.waiting_review, 1);
+    assert.equal(await readFile(collisionPath, 'utf8'), '# User-authored note\n\nKeep this exact content.');
+    assert.equal((await fetch(base + '/api/ingestion/drafts', { headers }).then((r) => r.json())).drafts.length, 1);
+    assert.equal((await fetch(base + '/api/ingestion/run', { method: 'POST', headers, body: JSON.stringify({ targets: [{ vault: 'Fictional Company', folder: 'Raw' }] }) }).then((r) => r.json())).queued_total, 1, 'a conflict is not marked filed');
+  } finally { await new Promise((resolve) => app.server.close(resolve)); }
+});
+
+test('scheduled scan automatically files a source-linked proposal and records the exact successful revision', async () => {
+  const home = await mkdtemp(path.join(tmpdir(), 'brainlink-ingestion-scheduled-auto-file-'));
+  const appHome = path.join(home, 'app'), vault = path.join(home, 'vault');
+  await mkdir(path.join(vault, 'Raw'), { recursive: true });
+  await mkdir(path.join(vault, 'Knowledge'), { recursive: true });
+  await writeFile(path.join(vault, 'Raw', 'Source.md'), '# Fictional source\n\nA fictional team records decisions.');
+  await writeFile(path.join(vault, 'Raw', 'Private.md'), '---\nprivate: true\n---\nSCHEDULE_PRIVATE_CANARY must not reach Ollama.');
+  const local = localDateAndTime(new Date(), 'UTC');
+  const yesterday = new Date(`${local.date}T00:00:00.000Z`);
+  yesterday.setUTCDate(yesterday.getUTCDate() - 1);
+  const env = { BRAINLINK_HOME: appHome, HOME: home, BRAINLINK_SEMANTIC: '0' };
+  const config = normalize({ timezone: 'UTC', vaults: [{ name: 'Fictional Team', path: vault }], ingestion: {
+    enabled: true, autoDrafts: true, autoFile: true, targets: [{ vault: 'Fictional Team', folder: 'Raw', destination: 'Knowledge' }],
+    time: '00:00', last_scheduled_date: yesterday.toISOString().slice(0, 10),
+  } });
+  config.sessions.localSummary = { enabled: true, model: 'qwen2.5:3b', autoDraftOnEnd: false, autoFileOnEnd: false };
+  await saveConfig(config, path.join(appHome, 'config.json'));
+  let modelCalls = 0, sent = '';
+  const app = await startSetup({ env, home, os: 'linux', port: 0, useCli: false, ingestionTickMs: 20,
+    ingestionDraftFetch: async (_url, options) => {
+      modelCalls++; sent = options.body;
+      return { ok: true, json: async () => ({ message: { content: JSON.stringify({ title: 'Decision workflow', memory_type: 'procedural', summary: 'The fictional team records decisions.', key_points: [] }) } }) };
+    },
+  });
+  const base = `http://127.0.0.1:${app.port}`;
+  const headers = { 'X-BrainLink-Token': app.token };
+  try {
+    const deadline = Date.now() + 5000;
+    let state;
+    while (Date.now() < deadline) {
+      state = await fetch(base + '/api/state', { headers }).then((r) => r.json());
+      if (state.ingestion_drafts?.status?.filed === 1) break;
+      await new Promise((resolve) => setTimeout(resolve, 15));
+    }
+    assert.equal(state.ingestion_drafts.status.trigger, 'schedule');
+    assert.equal(state.ingestion_drafts.status.attempted, 1);
+    assert.equal(state.ingestion_drafts.status.filed, 1);
+    assert.equal(state.ingestion_drafts.status.failed, 0);
+    assert.equal(modelCalls, 1);
+    assert.doesNotMatch(sent, /SCHEDULE_PRIVATE_CANARY/);
+    const files = await readdir(path.join(vault, 'Knowledge'));
+    assert.equal(files.length, 1);
+    const note = await readFile(path.join(vault, 'Knowledge', files[0]), 'utf8');
+    assert.match(note, /status: proposed/);
+    assert.match(note, /\[\[Raw\/Source\]\]/);
+    assert.equal((await fetch(base + '/api/ingestion/drafts', { headers }).then((r) => r.json())).drafts.length, 0);
+    const next = await fetch(base + '/api/ingestion/run', { method: 'POST', headers: { ...headers, 'Content-Type': 'application/json' }, body: JSON.stringify({ targets: [{ vault: 'Fictional Team', folder: 'Raw' }] }) }).then((r) => r.json());
+    assert.equal(next.queued_total, 0, 'a successful scheduled filing records its current source revision');
+  } finally { await new Promise((resolve) => app.server.close(resolve)); }
 });
 
 test('scheduled local draft failures use bounded schedule retries and do not repeat successful drafts', async () => {
