@@ -13,7 +13,8 @@ test('main navigation links to visible product sections and has labels in every 
   const ids = new Set([...page.matchAll(/\bid="([^"]+)"/g)].map((match) => match[1]));
   const links = [...page.matchAll(/<a\b[^>]*data-main-nav="([^"]+)"[^>]*data-i18n="([^"]+)"[^>]*>/g)];
 
-  assert.equal(links.length, 7, 'expected the seven top-level destinations');
+  assert.equal(links.length, 8, 'expected the eight top-level destinations');
+  assert.ok(links.some(([, target, key]) => target === 's-ingestion' && key === 'nav.sources'), 'source scanning should be directly reachable');
   for (const [, target, key] of links) {
     assert.ok(ids.has(target), `navigation target #${target} must exist`);
     for (const locale of LOCALES) {
