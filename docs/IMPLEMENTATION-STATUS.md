@@ -5,6 +5,12 @@ GitHub repository: `iantsai886/brainlink`
 Branch: `feat/complete-raw-wiki-folder-flow` (current working branch; based on `origin/main`)
 Code baseline: development target `1.2.8`, with `package.json` as the canonical version source. The `v1.2.7` tag belongs to the separate `wip/v1.2.7` release line; this branch continues from the full-source `main` history and does not move or recreate that tag.
 
+### Repeat live cross-client handoff (2026-11-03; checkout commit `9940dea`)
+
+Ran `node scripts/smoke-live-cross-client-handoff.mjs --live` twice on Windows/Node.js 24.22.1 with signed-in Claude Code and Codex CLI. Both independent runs used temporary fictional vaults: Claude created a source-linked handoff, Codex continued from the cited fictional note, and a planted private canary did not appear in outputs or handoff results. The script removed its fixtures. Together with the prior passing run on commit `0b659e1`, this makes three successful live synthetic turns across two adjacent checkouts. This is stronger repeat evidence, but it does not establish large-sample reliability, real-vault safety, another client, or customer acceptance.
+
+The exact checkout also passed `npm run test:all` on Windows/Node.js 24.22.1: core 647 total (637 passed, 0 failed, 10 platform/privilege skips), UI 48/48. This local suite does not verify hosted CI, native macOS/Linux desktop behavior, signing, publication, or customer acceptance.
+
 ### Explain sign-in requirement for scheduled source scans (2026-11-03; commit `0b659e1`)
 
 The Sources panel now shows a clear message when scheduled folder scans are enabled but BrainLink's quiet start-at-sign-in option is off. The message links directly to the Background setting. English, Traditional Chinese, and Portuguese labels were added. This prevents users from assuming scheduled scans run while BrainLink is closed; it does not change the scheduler or create an always-on system service. On Windows/Node.js 24.22.1, the focused ingestion, startup and main-navigation tests passed 14/14; `npm run test:ui` passed 48/48; the full core suite passed 647 total (637 passed, 0 failed, 10 platform/privilege skips). The rebuilt unsigned 1.2.8 QA installer passed `npm run smoke:installed:win`, including the new Sources warning's presence, scan/file/retry, OCR/PDF/HTML, Hermes hook preservation and isolated uninstall. These are local synthetic-data results; sign-in behavior on a user's account, native macOS/Linux desktop behavior, hosted CI, signing, public distribution and customer acceptance remain unverified.
