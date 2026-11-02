@@ -31,12 +31,8 @@ Remove-Item -Recurse -Force "$Stage\app\ui\app\test" -ErrorAction SilentlyContin
 $Store = "$Stage\app\node_modules\brainlink-store"
 New-Item -ItemType Directory -Force $Store | Out-Null
 foreach ($p in "memory-store.mjs", "errors.mjs", "package.json") { Copy-Item "$Root\vendor\brainlink-store\$p" $Store }
-$Yaml = "$Stage\app\node_modules\yaml"
-New-Item -ItemType Directory -Force $Yaml | Out-Null
-Copy-Item -Recurse "$Root\node_modules\yaml\*" $Yaml
-$Pdfjs = "$Stage\app\node_modules\pdfjs-dist"
-New-Item -ItemType Directory -Force $Pdfjs | Out-Null
-Copy-Item -Recurse "$Root\node_modules\pdfjs-dist\*" $Pdfjs
+& "$Stage\node\node.exe" "$Root\scripts\stage-runtime-dependencies.mjs" "$Stage\app\node_modules"
+if ($LASTEXITCODE -ne 0) { throw "Failed to stage locked runtime dependencies (exit code $LASTEXITCODE)" }
 
 # 3. Installer.
 $env:BRAINLINK_VERSION = $Version

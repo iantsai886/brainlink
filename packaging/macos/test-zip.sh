@@ -60,6 +60,8 @@ REQUIRED=(
   "app/node_modules/brainlink-store/memory-store.mjs" "app/node_modules/brainlink-store/package.json"
   "app/node_modules/yaml/package.json" "app/node_modules/yaml/dist/index.js"
   "app/node_modules/pdfjs-dist/package.json" "app/node_modules/pdfjs-dist/legacy/build/pdf.mjs"
+  "app/node_modules/mammoth/package.json" "app/node_modules/jszip/package.json"
+  "app/src/ingestion/docx-worker.mjs"
   "runtime/arm64/bin/node" "runtime/arm64/LICENSE" "runtime/x64/bin/node" "runtime/x64/LICENSE"
   "Install BrainLink.command" "Uninstall BrainLink.command" "READ ME FIRST.txt"
   "BrainLink.app/Contents/Info.plist" "BrainLink.app/Contents/MacOS/BrainLink"

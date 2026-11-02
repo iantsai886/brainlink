@@ -9,6 +9,7 @@
   },
   "dependencies": {
     "brainlink-store": "file:./vendor/brainlink-store",
+    "mammoth": "1.13.0",
     "pdfjs-dist": "4.10.38",
     "yaml": "^2.9.1"
   },
@@ -37,5 +38,8 @@
   "engines": {
     "node": ">=22"
   },
-  "license": "SEE LICENSE IN LICENSE.txt"
+  "license": "SEE LICENSE IN LICENSE.txt",
+  "devDependencies": {
+    "jszip": "3.10.2"
+  }
 }

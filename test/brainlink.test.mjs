@@ -6,6 +6,7 @@ import { spawn } from 'node:child_process';
 import { request } from 'node:http';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
+import JSZip from 'jszip';
 
 import { normalize, validate, saveConfig } from '../src/config.mjs';
 import { tokens, extractLinks, linkGraph } from '../src/graph.mjs';
@@ -43,6 +44,13 @@ function pdfFixture(text = '') {
   for (const offset of offsets.slice(1)) pdf += `${String(offset).padStart(10, '0')} 00000 n \n`;
   pdf += `trailer\n<< /Size ${objects.length + 1} /Root 1 0 R >>\nstartxref\n${xref}\n%%EOF\n`;
   return Buffer.from(pdf, 'binary');
+}
+async function docxFixture(text = '') {
+  const zip = new JSZip();
+  zip.file('[Content_Types].xml', '<Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types"><Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/><Default Extension="xml" ContentType="application/xml"/><Override PartName="/word/document.xml" ContentType="application/vnd.openxmlformats-officedocument.wordprocessingml.document.main+xml"/></Types>');
+  zip.file('_rels/.rels', '<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"><Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument" Target="word/document.xml"/></Relationships>');
+  zip.file('word/document.xml', `<w:document xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main"><w:body><w:p><w:r><w:t>${text}</w:t></w:r></w:p><w:sectPr/></w:body></w:document>`);
+  return zip.generateAsync({ type: 'nodebuffer', compression: 'DEFLATE' });
 }
 test('runtime version comes from the canonical package manifest', async () => {
   const pkg = JSON.parse(await readFile(path.join(ROOT, 'package.json'), 'utf8'));
@@ -232,13 +240,20 @@ test('ingestion reads only supported text files from the selected folder and rej
   await writeFile(path.join(raw, 'data.json'), '{"fictional":"JSON_CANARY"}');
   await writeFile(path.join(raw, 'brief.pdf'), pdfFixture('FICTIONAL_PDF_CANARY'));
   await writeFile(path.join(raw, 'scan.pdf'), pdfFixture());
+  await writeFile(path.join(raw, 'brief.docx'), await docxFixture('FICTIONAL_DOCX_CANARY'));
+  const oversizedDocx = await docxFixture('ZIP_BOMB_CANARY');
+  const centralHeader = oversizedDocx.indexOf(Buffer.from([0x50, 0x4b, 0x01, 0x02]));
+  assert.ok(centralHeader >= 0);
+  oversizedDocx.writeUInt32LE(20 * 1024 * 1024 + 1, centralHeader + 24);
+  await writeFile(path.join(raw, 'oversized.docx'), oversizedDocx);
   await writeFile(path.join(raw, 'page.html'), '<p>HTML_UNSUPPORTED_CANARY</p>');
+  await writeFile(path.join(raw, 'fake.docx'), 'NOT_A_ZIP_CANARY');
   await writeFile(path.join(raw, 'binary.log'), Buffer.from([0, 1, 2, 3]));
   await writeFile(path.join(raw, 'Blocked', 'hidden.txt'), 'EXCLUDED_TEXT_CANARY');
   const ctx = ctxOf(cfg, { BRAINLINK_HOME: path.join(base, 'app') });
   const queue = await ingestionQueue(ctx, 'Acme Studio', 'Raw');
-  assert.deepEqual(queue.candidates.map((item) => item.path).sort(), ['Raw/brief.pdf', 'Raw/brief.txt', 'Raw/data.json', 'Raw/scan.pdf', 'Raw/table.csv']);
-  assert.ok(queue.skipped >= 3, 'unsupported, binary, and excluded inputs are counted as skipped');
+  assert.deepEqual(queue.candidates.map((item) => item.path).sort(), ['Raw/brief.docx', 'Raw/brief.pdf', 'Raw/brief.txt', 'Raw/data.json', 'Raw/scan.pdf', 'Raw/table.csv']);
+  assert.ok(queue.skipped >= 5, 'unsupported, malformed, unsafe, binary, and excluded inputs are counted as skipped');
   const item = queue.candidates.find((candidate) => candidate.path === 'Raw/brief.txt');
   const source = await readIngestionSource(ctx, 'Acme Studio', 'Raw', item);
   assert.equal(source.format, 'txt');
@@ -248,9 +263,14 @@ test('ingestion reads only supported text files from the selected folder and rej
   assert.equal(pdfSource.format, 'pdf');
   assert.match(pdfSource.body, /FICTIONAL_PDF_CANARY/);
   assert.equal(pdfSource.body_truncated, false);
+  const docxItem = queue.candidates.find((candidate) => candidate.path === 'Raw/brief.docx');
+  const docxSource = await readIngestionSource(ctx, 'Acme Studio', 'Raw', docxItem);
+  assert.equal(docxSource.format, 'docx');
+  assert.match(docxSource.body, /FICTIONAL_DOCX_CANARY/);
+  assert.equal(docxSource.body_truncated, false);
   const scannedPdf = queue.candidates.find((candidate) => candidate.path === 'Raw/scan.pdf');
   await assert.rejects(readIngestionSource(ctx, 'Acme Studio', 'Raw', scannedPdf), /scanned PDF OCR is not available/i);
-  assert.doesNotMatch(JSON.stringify(queue), /FICTIONAL_TEXT_CANARY|JSON_CANARY|EXCLUDED_TEXT_CANARY/);
+  assert.doesNotMatch(JSON.stringify(queue), /FICTIONAL_TEXT_CANARY|JSON_CANARY|FICTIONAL_DOCX_CANARY|ZIP_BOMB_CANARY|EXCLUDED_TEXT_CANARY/);
   await writeFile(path.join(raw, 'brief.txt'), 'CHANGED_TEXT_CANARY');
   await assert.rejects(readIngestionSource(ctx, 'Acme Studio', 'Raw', item), /changed|Refresh/i);
   await assert.rejects(readIngestionSource(ctx, 'Acme Studio', 'Raw', { ...item, source_id: 'a'.repeat(64) }), /changed|no longer available/i);

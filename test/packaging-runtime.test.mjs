@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { cp, mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
+import { access, cp, mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { spawnSync } from 'node:child_process';
@@ -21,8 +21,7 @@ test('every native installer bundles all production dependencies and portable Br
   for (const [label, file] of builders) {
     const source = await read(file);
     assert.match(source, /skills/, `${label} must ship the versioned SKILL.md files`);
-    assert.match(source, /yaml/, `${label} must bundle the YAML runtime dependency`);
-    assert.match(source, /pdfjs-dist/, `${label} must bundle the local PDF text extractor`);
+    assert.match(source, /stage-runtime-dependencies/, `${label} must stage every locked runtime dependency`);
     assert.match(source, /brainlink-store/, `${label} must bundle the local store dependency`);
     assert.match(source, /ui[\\/]app[\\/]test/, `${label} must exclude development UI tests from the package`);
   }
@@ -31,6 +30,8 @@ test('every native installer bundles all production dependencies and portable Br
   assert.match(windowsPreview, /ui[\\/]app[\\/]test/, 'Windows portable preview must exclude development UI tests');
   assert.ok(pkg.dependencies.yaml, 'YAML connector dependency must remain a production dependency');
   assert.ok(pkg.dependencies['pdfjs-dist'], 'local PDF text extraction must remain a production dependency');
+  assert.ok(pkg.dependencies.mammoth, 'local DOCX text extraction must remain a production dependency');
+  assert.match(await read('packaging/windows/build-portable-zip.sh'), /npm install/, 'Windows source preview installs its declared production dependencies');
 
   const linuxBuilder = await read('packaging/linux/build-linux.sh');
   assert.match(linuxBuilder, /NODE_VERSION="\$\(tr -d '\\r\\n' < "\$ROOT\/vendor\/node\/VERSION"\)"/, 'Linux builds must accept the Windows CRLF version file');
@@ -89,6 +90,8 @@ test('every native installer bundles all production dependencies and portable Br
   assert.match(macZipTest, /app\/src\/update-manifest\.mjs/, 'the macOS zip package must include the update verifier');
   assert.match(macZipTest, /app\/node_modules\/yaml\/dist\/index\.js/, 'the macOS package smoke test must check a loadable YAML runtime');
   assert.match(macZipTest, /app\/node_modules\/pdfjs-dist\/legacy\/build\/pdf\.mjs/, 'the macOS package smoke test must check the PDF parser');
+  assert.match(macZipTest, /app\/node_modules\/mammoth\/package\.json/, 'the macOS package smoke test must check the DOCX parser');
+  assert.match(macZipTest, /app\/src\/ingestion\/docx-worker\.mjs/, 'the macOS package smoke test must check the isolated DOCX worker');
   assert.match(macZipTest, /app\/skills\/brainlink-session-closeout\/SKILL\.md/, 'the macOS package smoke test must check a shipped skill');
   assert.match(macZipTest, /app\/skills\/brainlink-graph-curation\/SKILL\.md/, 'the macOS package smoke test must check the graph-curation skill');
   assert.match(macZipTest, /app\/ui\/app\/test/, 'the macOS package smoke test must reject development UI tests');
@@ -130,6 +133,20 @@ test('every native installer bundles all production dependencies and portable Br
   assert.match(workflow, /test ! -e \/opt\/brainlink\/app\/ui\/app\/test/, 'Linux package smoke test must reject development UI tests');
   assert.match(workflow, /test ! -e "\$bundle\/app\/ui\/app\/test"/, 'Linux tarball smoke test must reject development UI tests');
   assert.match(workflow, /test ! -e "\$XDG_DATA_HOME\/brainlink"/, 'Linux CI must verify tarball uninstall removes the application only');
+});
+
+test('runtime dependency staging copies the locked Mammoth tree and it imports without the checkout', async () => {
+  const stage = await mkdtemp(path.join(tmpdir(), 'brainlink-runtime-deps-'));
+  try {
+    const modules = path.join(stage, 'node_modules');
+    const child = spawnSync(process.execPath, ['scripts/stage-runtime-dependencies.mjs', modules], { cwd: ROOT, encoding: 'utf8', timeout: 20_000 });
+    assert.equal(child.status, 0, child.stderr || child.stdout || child.error);
+    for (const name of ['mammoth', 'jszip', 'pdfjs-dist', 'yaml']) await access(path.join(modules, name, 'package.json'));
+    const importCheck = spawnSync(process.execPath, ['--input-type=module', '-e', "const mammoth = await import('mammoth'); const pdf = await import('pdfjs-dist/legacy/build/pdf.mjs'); if (typeof mammoth.default.extractRawText !== 'function' || typeof pdf.getDocument !== 'function') process.exit(2);"], {
+      cwd: stage, encoding: 'utf8', timeout: 20_000,
+    });
+    assert.equal(importCheck.status, 0, importCheck.stderr || importCheck.stdout || importCheck.error);
+  } finally { await rm(stage, { recursive: true, force: true }); }
 });
 
 test('the staged connector loads with the bundled YAML package outside the checkout', async () => {

@@ -39,10 +39,7 @@ cp -R "$ROOT/bin" "$ROOT/src" "$ROOT/ui" "$ROOT/samples" "$ROOT/skills" "$ROOT/p
 rm -rf "$APP/Contents/Resources/app/ui/app/test"
 mkdir -p "$APP/Contents/Resources/app/node_modules/brainlink-store"
 cp "$ROOT/vendor/brainlink-store/memory-store.mjs" "$ROOT/vendor/brainlink-store/errors.mjs" "$ROOT/vendor/brainlink-store/package.json" "$APP/Contents/Resources/app/node_modules/brainlink-store/"
-mkdir -p "$APP/Contents/Resources/app/node_modules/yaml"
-cp -R "$ROOT/node_modules/yaml/." "$APP/Contents/Resources/app/node_modules/yaml/"
-mkdir -p "$APP/Contents/Resources/app/node_modules/pdfjs-dist"
-cp -R "$ROOT/node_modules/pdfjs-dist/." "$APP/Contents/Resources/app/node_modules/pdfjs-dist/"
+node "$ROOT/scripts/stage-runtime-dependencies.mjs" "$APP/Contents/Resources/app/node_modules"
 cp "$HERE/icon/BrainLink.icns" "$APP/Contents/Resources/BrainLink.icns"
 
 cat > "$APP/Contents/Resources/bin/brainlink" <<'SH'

@@ -16,8 +16,9 @@ const MAX_DEPTH = 32;
 const MAX_NOTE_BYTES = 5 * 1024 * 1024;
 const MAX_HEADER_BYTES = 64 * 1024;
 const MAX_DRAFT_SOURCE_CHARS = 24_000;
-const TEXT_SOURCE_FORMATS = new Set(['.md', '.txt', '.csv', '.tsv', '.json', '.xml', '.yaml', '.yml', '.log', '.pdf']);
+const TEXT_SOURCE_FORMATS = new Set(['.md', '.txt', '.csv', '.tsv', '.json', '.xml', '.yaml', '.yml', '.log', '.pdf', '.docx']);
 const PDF_WORKER_TIMEOUT_MS = 15_000;
+const DOCX_WORKER_TIMEOUT_MS = 15_000;
 
 function sourceExtension(rel) { return path.posix.extname(String(rel || '')).toLowerCase(); }
 
@@ -67,6 +68,89 @@ function extractPdfText(bytes) {
     worker.once('exit', (code) => {
       if (!settled && code !== 0) finish(reject, new Error('This PDF could not be safely extracted.'));
       else if (!settled) finish(reject, new Error('PDF extraction ended without a result.'));
+    });
+  });
+}
+
+function validateDocxArchive(bytes) {
+  const buffer = Buffer.from(bytes);
+  if (buffer.length < 22 || buffer.readUInt32LE(0) !== 0x04034b50) throw new Error('This is not a valid DOCX file.');
+  const searchFrom = Math.max(0, buffer.length - 22 - 0xffff);
+  let end = -1;
+  for (let offset = buffer.length - 22; offset >= searchFrom; offset--) {
+    if (buffer.readUInt32LE(offset) === 0x06054b50) {
+      const commentLength = buffer.readUInt16LE(offset + 20);
+      if (offset + 22 + commentLength === buffer.length) { end = offset; break; }
+    }
+  }
+  if (end < 0) throw new Error('This DOCX archive is incomplete or unsupported.');
+  const disk = buffer.readUInt16LE(end + 4);
+  const centralDisk = buffer.readUInt16LE(end + 6);
+  const diskEntries = buffer.readUInt16LE(end + 8);
+  const entryCount = buffer.readUInt16LE(end + 10);
+  const centralSize = buffer.readUInt32LE(end + 12);
+  const centralOffset = buffer.readUInt32LE(end + 16);
+  if (disk || centralDisk || diskEntries !== entryCount || entryCount === 0xffff || centralSize === 0xffffffff || centralOffset === 0xffffffff || entryCount > 2048 || centralOffset + centralSize > end) throw new Error('This DOCX archive uses an unsupported or unsafe ZIP layout.');
+  let offset = centralOffset;
+  let expandedBytes = 0;
+  let hasDocument = false;
+  const names = new Set();
+  for (let index = 0; index < entryCount; index++) {
+    if (offset + 46 > centralOffset + centralSize || buffer.readUInt32LE(offset) !== 0x02014b50) throw new Error('This DOCX archive has a malformed directory.');
+    const flags = buffer.readUInt16LE(offset + 8);
+    const method = buffer.readUInt16LE(offset + 10);
+    const compressedBytes = buffer.readUInt32LE(offset + 20);
+    const uncompressedBytes = buffer.readUInt32LE(offset + 24);
+    const nameLength = buffer.readUInt16LE(offset + 28);
+    const extraLength = buffer.readUInt16LE(offset + 30);
+    const commentLength = buffer.readUInt16LE(offset + 32);
+    const entryEnd = offset + 46 + nameLength + extraLength + commentLength;
+    if (entryEnd > centralOffset + centralSize || !nameLength || nameLength > 4096 || (flags & 1) || (method !== 0 && method !== 8) || compressedBytes === 0xffffffff || uncompressedBytes === 0xffffffff || uncompressedBytes > 20 * 1024 * 1024) throw new Error('This DOCX archive contains an unsupported or unsafe entry.');
+    const name = buffer.subarray(offset + 46, offset + 46 + nameLength).toString('utf8');
+    if (name.startsWith('/') || name.includes('\\') || name.split('/').some((part) => part === '..' || part === '.')) throw new Error('This DOCX archive contains an unsafe entry path.');
+    if (names.has(name)) throw new Error('This DOCX archive contains duplicate entry names.');
+    names.add(name);
+    expandedBytes += uncompressedBytes;
+    if (expandedBytes > 32 * 1024 * 1024) throw new Error('This DOCX archive expands beyond the 32 MB safety limit.');
+    if (name === 'word/document.xml') hasDocument = true;
+    offset = entryEnd;
+  }
+  if (offset !== centralOffset + centralSize || !hasDocument) throw new Error('This DOCX archive is missing its main document.');
+}
+
+function extractDocxText(bytes) {
+  try { validateDocxArchive(bytes); }
+  catch (error) { return Promise.reject(error); }
+  const data = Uint8Array.from(bytes);
+  const worker = new Worker(new URL('./ingestion/docx-worker.mjs', import.meta.url), {
+    workerData: data,
+    transferList: [data.buffer],
+    resourceLimits: { maxOldGenerationSizeMb: 96, maxYoungGenerationSizeMb: 24, stackSizeMb: 4 },
+  });
+  return new Promise((resolve, reject) => {
+    let settled = false;
+    const finish = (fn, value) => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timer);
+      fn(value);
+    };
+    const timer = setTimeout(() => {
+      void worker.terminate();
+      finish(reject, new Error('DOCX extraction exceeded its time limit.'));
+    }, DOCX_WORKER_TIMEOUT_MS);
+    timer.unref?.();
+    worker.once('message', (result) => {
+      if (result?.ok && typeof result.text === 'string') finish(resolve, result);
+      else {
+        const reason = result?.reason === 'no_text' ? 'This DOCX has no readable text.' : 'This DOCX could not be safely extracted.';
+        finish(reject, new Error(reason));
+      }
+    });
+    worker.once('error', () => finish(reject, new Error('This DOCX could not be safely extracted.')));
+    worker.once('exit', (code) => {
+      if (!settled && code !== 0) finish(reject, new Error('This DOCX could not be safely extracted.'));
+      else if (!settled) finish(reject, new Error('DOCX extraction ended without a result.'));
     });
   });
 }
@@ -130,9 +214,12 @@ async function readEligible(full, root, realRoot, rel, { includeBody = false } =
     // Scope and .brainlinkignore exclusions were checked before opening the source. Markdown
     // additionally requires a bounded frontmatter privacy check before its body is read.
     const bytes = await fh.readFile();
-    const raw = extension === '.pdf'
-      ? (includeBody ? await extractPdfText(bytes) : { text: '' })
-      : { text: decodeSourceText(bytes) };
+    let raw;
+    if (extension === '.pdf') raw = includeBody ? await extractPdfText(bytes) : { text: '' };
+    else if (extension === '.docx') {
+      validateDocxArchive(bytes);
+      raw = includeBody ? await extractDocxText(bytes) : { text: '' };
+    } else raw = { text: decodeSourceText(bytes) };
     const after = await fh.stat();
     const pathAfter = await lstat(full);
     if (after.size !== opened.size || after.mtimeMs !== opened.mtimeMs || pathAfter.isSymbolicLink() || (pathAfter.ino && opened.ino && pathAfter.ino !== opened.ino)) return null;
