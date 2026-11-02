@@ -44,6 +44,15 @@ test('every native installer bundles all production dependencies and portable Br
   assert.match(linuxBuilder, /NODE_VERSION="\$\(tr -d '\\r\\n' < "\$ROOT\/vendor\/node\/VERSION"\)"/, 'Linux builds must accept the Windows CRLF version file');
   assert.match(linuxBuilder, /Invalid pinned Node\.js version/, 'Linux build must reject malformed pinned runtime versions before making download URLs');
 
+  const macZipBuilder = await read('packaging/macos/build-zip.sh');
+  const macPkgBuilder = await read('packaging/macos/build-pkg.sh');
+  for (const [label, builder] of [['macOS zip', macZipBuilder], ['macOS pkg', macPkgBuilder]]) {
+    assert.match(builder, /NODE_VERSION="22\.23\.3"/, `${label} must use the macOS-compatible pinned Node runtime`);
+    assert.match(builder, /for arch in arm64 x64/, `${label} must package both supported Mac architectures`);
+  }
+  assert.match(macPkgBuilder, /BRAINLINK_MAC_NODE_RT/, 'the macOS installer must keep its Node 22 runtime cache separate from the Node 24 Windows/Linux cache');
+  assert.match(macPkgBuilder, /os-version min="11\.0"/, 'the macOS installer target must match its advertised minimum OS');
+
   const windowsBuilder = await read('packaging/windows/build-windows.ps1');
   assert.match(windowsBuilder, /LOCALAPPDATA.*Inno Setup 6\\ISCC\.exe/, 'Windows builder must find a per-user Inno Setup installation');
   assert.match(windowsBuilder, /Inno Setup compiler failed with exit code/, 'Windows builder must report compiler failures');

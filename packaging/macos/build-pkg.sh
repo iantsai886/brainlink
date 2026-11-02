@@ -10,25 +10,26 @@ HERE="$(cd "$(dirname "$0")" && pwd)"
 ROOT="$(cd "$HERE/../.." && pwd)"
 VERSION="$(node -p "require('$ROOT/package.json').version")"
 BUNDLE_ID="${BUNDLE_ID:-com.iango.brainlink}"
-NODE_VERSION="$(cat "$ROOT/vendor/node/VERSION")"
+NODE_VERSION="22.23.3"
 NODE_DIST="https://nodejs.org/dist/v$NODE_VERSION"
+NODE_RT="${BRAINLINK_MAC_NODE_RT:-$ROOT/vendor/node-macos}"
 WORK="$ROOT/build/macos"
 DIST="$ROOT/dist"
 APP="$WORK/root/Applications/BrainLink.app"
 
 echo "BrainLink $VERSION · Node $NODE_VERSION · $BUNDLE_ID"
-rm -rf "$WORK" && mkdir -p "$WORK/node" "$APP/Contents/MacOS" "$APP/Contents/Resources/bin" "$APP/Contents/Resources/node/bin" "$DIST"
+rm -rf "$WORK" && mkdir -p "$WORK/node" "$APP/Contents/MacOS" "$APP/Contents/Resources/bin" "$APP/Contents/Resources/node/bin" "$DIST" "$NODE_RT"
 
 # 1. Universal Node runtime from the checksum-verified official tarballs.
-[ -f "$ROOT/vendor/node/SHASUMS256.txt" ] || curl -fsS "$NODE_DIST/SHASUMS256.txt" -o "$ROOT/vendor/node/SHASUMS256.txt"
+[ -f "$NODE_RT/SHASUMS256.txt" ] || curl -fsS "$NODE_DIST/SHASUMS256.txt" -o "$NODE_RT/SHASUMS256.txt"
 for arch in arm64 x64; do
-  archive="$ROOT/vendor/node/node-v$NODE_VERSION-darwin-$arch.tar.gz"
+  archive="$NODE_RT/node-v$NODE_VERSION-darwin-$arch.tar.gz"
   [ -f "$archive" ] || curl -fsS "$NODE_DIST/$(basename "$archive")" -o "$archive"
 done
-(cd "$ROOT/vendor/node" && grep -E "darwin-(arm64|x64).tar.gz" SHASUMS256.txt | shasum -a 256 -c --quiet)
+(cd "$NODE_RT" && grep -E "node-v$NODE_VERSION-darwin-(arm64|x64)\.tar\.gz$" SHASUMS256.txt | shasum -a 256 -c --quiet)
 for arch in arm64 x64; do
   mkdir -p "$WORK/node/$arch"
-  tar -xzf "$ROOT/vendor/node/node-v$NODE_VERSION-darwin-$arch.tar.gz" -C "$WORK/node/$arch" --strip-components=1 "node-v$NODE_VERSION-darwin-$arch/bin/node" "node-v$NODE_VERSION-darwin-$arch/LICENSE"
+  tar -xzf "$NODE_RT/node-v$NODE_VERSION-darwin-$arch.tar.gz" -C "$WORK/node/$arch" --strip-components=1 "node-v$NODE_VERSION-darwin-$arch/bin/node" "node-v$NODE_VERSION-darwin-$arch/LICENSE"
 done
 lipo -create "$WORK/node/arm64/bin/node" "$WORK/node/x64/bin/node" -output "$APP/Contents/Resources/node/bin/node"
 cp "$WORK/node/arm64/LICENSE" "$APP/Contents/Resources/node/LICENSE"

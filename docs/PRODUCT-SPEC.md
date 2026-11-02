@@ -39,7 +39,7 @@ The local-first product connects authorized clients to BrainLink. Data is filter
 └────────────────────────────────────────────────────────────────────────────────┘
 ```
 
-- **Runtime:** the Node application and its pinned production dependencies ship with the official Node 24.22.1 runtime so customers do not need a separate Node installation.
+- **Runtime:** the app and pinned production dependencies ship with their runtime, so customers do not need a separate Node installation. Windows and Linux use official Node 24.22.1. Both macOS installers use official Node 22.23.3 to preserve the advertised macOS 11 minimum; Node.js 24 prebuilt macOS binaries require macOS 13.5 or newer ([Node.js migration notes](https://nodejs.org/en/blog/migrations/v22-to-v24)). Keep the Mac runtime cache separate from the Windows/Linux runtime cache.
 - **Current build:** every implemented feature is enabled. There is no trial timer, expiration, licence key or account check. Commercial plans and limits are not implemented or approved.
 - **Local first:** no cloud relay is implied. Any remote client connection needs an explicit transport, authentication, privacy and deployment design.
 
@@ -152,7 +152,7 @@ Setup can install or update BrainLink's versioned Agent Skills in the user-level
 | | macOS | Windows | Linux |
 |---|---|---|---|
 | Installer | `.pkg` (pkgbuild + productbuild): `/Applications/BrainLink.app` + CLI link | Inno Setup `.exe` (per-user, no admin) | `.deb` (amd64/arm64) or per-user tar.gz installer |
-| Runtime | official Node 24.22.1 universal (arm64 + x64) inside the app bundle | official Node 24.22.1 x64 `node.exe` inside the install dir | official Node 24.22.1 x64 or arm64 inside the package |
+| Runtime | official Node 22.23.3 universal (arm64 + x64), to retain macOS 11 compatibility | official Node 24.22.1 x64 `node.exe` inside the install dir | official Node 24.22.1 x64 or arm64 inside the package |
 | Signing | Developer ID signing and notarisation are still release gates | Authenticode signing is still a release gate | Signed repository/package distribution is not yet designed |
 | Store | Direct download; Mac App Store sandbox needs separate design | Microsoft Store/MSIX needs separate design | Package repository and update policy need separate design |
 | Updates | Ed25519 manifest verification, Setup check/download, SHA-256 recheck, and an explicit OS package-open action are implemented; user confirms installation in the OS | same | same |
