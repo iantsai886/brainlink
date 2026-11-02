@@ -261,7 +261,10 @@ main #ready, main #ask-panel, main #brain-panel, main #sessions-panel, main #s-c
       <label class="muted" style="display:flex;flex-direction:row;gap:6px;align-items:center;margin-top:6px"><input type="checkbox" id="sess-local-summary-auto" style="width:auto"><span data-i18n="sessions.localSummaryAuto"></span></label>
       <label class="muted" style="display:flex;flex-direction:row;gap:6px;align-items:center;margin-top:6px"><input type="checkbox" id="sess-local-summary-auto-file" style="width:auto"><span data-i18n="sessions.localSummaryAutoFile"></span></label>
       <p class="muted" data-i18n="sessions.localSummaryAutoFileHint"></p>
+      <p class="muted" data-i18n="sessions.localSummarySetupGuide"></p>
       <div class="row" style="margin-top:6px"><label><span data-i18n="sessions.localSummaryModel"></span><input id="sess-local-summary-model" list="sess-local-summary-model-options" maxlength="160" placeholder="qwen2.5:3b"><datalist id="sess-local-summary-model-options"></datalist></label><button class="secondary" id="sess-local-summary-find" data-i18n="sessions.localSummaryFind"></button><button class="secondary" id="sess-local-summary-check-vision" data-i18n="sessions.localSummaryCheckVision"></button><button class="secondary" id="sess-local-summary-save" data-i18n="sessions.localSummarySave"></button></div>
+      <p id="sess-local-summary-connection-status" class="muted" role="status" aria-live="polite"></p>
+      <p><a href="https://ollama.com/download" target="_blank" rel="noopener noreferrer" data-i18n="sessions.localSummaryDownload"></a></p>
       <p id="sess-local-summary-vision-status" class="muted" role="status" aria-live="polite"></p>
     </div>
     <div class="row" style="margin-bottom:10px"><label class="muted" style="display:flex;flex-direction:row;gap:6px;align-items:center"><input type="checkbox" id="sess-private" style="width:auto"><span data-i18n="sessions.showPrivate"></span></label></div>
@@ -2082,12 +2085,17 @@ const updateLocalSummaryControls = () => {
 $('sess-local-summary-enabled').onchange = updateLocalSummaryControls;
 $('sess-local-summary-auto').onchange = updateLocalSummaryControls;
 $('sess-local-summary-find').onclick = () => act(async () => {
+  const status = $('sess-local-summary-connection-status');
+  status.textContent = t('sessions.localSummaryChecking');
+  status.className = 'muted';
   const result = await api('POST', '/api/sessions/local-summary/models', {});
   const options = $('sess-local-summary-model-options');
   options.replaceChildren(...result.models.map((name) => { const option = document.createElement('option'); option.value = name; return option; }));
-  if (!result.available) { toast(t('sessions.localSummaryUnavailable')); return; }
-  if (!result.models.length) { toast(t('sessions.localSummaryNone')); return; }
+  if (!result.available) { status.textContent = t('sessions.localSummaryUnavailable'); status.className = 'muted'; toast(t('sessions.localSummaryUnavailable')); return; }
+  if (!result.models.length) { status.textContent = t('sessions.localSummaryNone'); status.className = 'muted'; toast(t('sessions.localSummaryNone')); return; }
   if (!result.models.includes($('sess-local-summary-model').value)) $('sess-local-summary-model').value = result.models[0];
+  status.textContent = t('sessions.localSummaryModelsReady', { count: result.models.length, model: $('sess-local-summary-model').value });
+  status.className = 'muted pill on';
   toast(t('sessions.localSummaryFound', { count: result.models.length }));
 });
 $('sess-local-summary-check-vision').onclick = () => act(async () => {

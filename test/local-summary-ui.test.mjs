@@ -11,6 +11,11 @@ test('local summary UI explains opt-in, local processing, and review requirement
   assert.match(html, /id="sess-local-summary-model"/);
   assert.match(html, /id="sess-local-summary-find"/);
   assert.match(html, /id="sess-local-summary-check-vision"/);
+  assert.match(html, /id="sess-local-summary-connection-status"[^>]*aria-live="polite"/);
+  assert.match(html, /href="https:\/\/ollama\.com\/download"[^>]*target="_blank"[^>]*rel="noopener noreferrer"/);
+  assert.match(html, /sessions\.localSummarySetupGuide/);
+  assert.match(html, /sessions\.localSummaryChecking/);
+  assert.match(html, /sessions\.localSummaryModelsReady/);
   assert.match(html, /id="sess-local-summary-vision-status"[^>]*aria-live="polite"/);
   assert.match(html, /POST', '\/api\/sessions\/local-summary\/models'/);
   assert.match(html, /POST', '\/api\/sessions\/local-summary\/model-capabilities'/);
@@ -31,7 +36,7 @@ test('automatic local-summary wording explains the Harness idle guess in every s
     const catalog = JSON.parse(await readFile(new URL(`../ui/locales/${locale}.json`, import.meta.url), 'utf8'));
     assert.match(catalog['sessions.localSummaryAuto'], /30/);
     assert.match(catalog['sessions.localSummaryAuto'], /Harness/i);
-    for (const key of ['sessions.localSummaryFind', 'sessions.localSummaryFound', 'sessions.localSummaryNone', 'sessions.localSummaryUnavailable', 'sessions.localSummaryCheckVision', 'sessions.localSummaryVisionSupported', 'sessions.localSummaryVisionUnsupported', 'sessions.localSummaryVisionUnknown']) {
+    for (const key of ['sessions.localSummaryFind', 'sessions.localSummarySetupGuide', 'sessions.localSummaryDownload', 'sessions.localSummaryChecking', 'sessions.localSummaryFound', 'sessions.localSummaryModelsReady', 'sessions.localSummaryNone', 'sessions.localSummaryUnavailable', 'sessions.localSummaryCheckVision', 'sessions.localSummaryVisionSupported', 'sessions.localSummaryVisionUnsupported', 'sessions.localSummaryVisionUnknown']) {
       assert.equal(typeof catalog[key], 'string', `${locale} must define ${key}`);
     }
   }
