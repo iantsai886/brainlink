@@ -30,6 +30,10 @@ export function normalizeIngestionTargets(rawTargets) {
 
 export function validateIngestionSchedule(input, current = {}) {
   const enabled = Boolean(input?.enabled);
+  const mode = input?.mode === undefined ? (current.mode || 'daily') : String(input.mode);
+  if (!['daily', 'watch'].includes(mode)) throw new Error('Choose a daily scan or a background folder check.');
+  const intervalMinutes = Number(input?.intervalMinutes ?? current.intervalMinutes ?? 5);
+  if (![1, 5, 15, 30, 60].includes(intervalMinutes)) throw new Error('Choose a supported background check interval.');
   const autoDrafts = enabled && Boolean(input?.autoDrafts);
   const autoFile = autoDrafts && Boolean(input?.autoFile);
   const legacyTarget = input?.vault && input?.folder ? [{ vault: input.vault, folder: input.folder }] : [];
@@ -40,10 +44,11 @@ export function validateIngestionSchedule(input, current = {}) {
   if (!/^\d{2}:\d{2}$/.test(time) || Number(time.slice(0, 2)) > 23 || Number(time.slice(3)) > 59) throw new Error('Choose a valid daily scan time in 24-hour format.');
   if (enabled && !targets.length) throw new Error('Add at least one vault folder before enabling scheduled scans.');
   const priorTargets = Array.isArray(current.targets) ? current.targets : current.vault && current.folder ? [{ vault: current.vault, folder: current.folder }] : [];
-  const unchanged = enabled === Boolean(current.enabled) && autoDrafts === Boolean(current.autoDrafts) && autoFile === Boolean(current.autoFile) && JSON.stringify(targets) === JSON.stringify(priorTargets)
+  const unchanged = enabled === Boolean(current.enabled) && mode === (current.mode || 'daily') && intervalMinutes === Number(current.intervalMinutes || 5) && autoDrafts === Boolean(current.autoDrafts) && autoFile === Boolean(current.autoFile) && JSON.stringify(targets) === JSON.stringify(priorTargets)
     && time === (current.time || '02:00');
   return {
-    enabled, autoDrafts, autoFile, vault, folder, targets, time,
+    enabled, mode, intervalMinutes, last_scan_at: unchanged ? current.last_scan_at || null : null,
+    autoDrafts, autoFile, vault, folder, targets, time,
     last_scheduled_date: unchanged ? current.last_scheduled_date || null : null,
     retry_count: unchanged ? Number(current.retry_count) || 0 : 0,
     retry_date: unchanged ? current.retry_date || null : null,
@@ -63,6 +68,18 @@ export function localDateAndTime(date = new Date(), timezone) {
 export function ingestionScheduleDue(schedule, now = new Date(), timezone) {
   const hasTargets = Array.isArray(schedule?.targets) ? schedule.targets.length > 0 : Boolean(schedule?.vault && schedule?.folder);
   if (!schedule?.enabled || !hasTargets) return false;
+  if (schedule.mode === 'watch') {
+    if (schedule.retry_after) {
+      const retryAfter = Date.parse(schedule.retry_after);
+      return Number.isFinite(retryAfter) && now.getTime() >= retryAfter;
+    }
+    if (schedule.last_scan_at == null) return true;
+    const lastScan = Date.parse(schedule.last_scan_at);
+    if (!Number.isFinite(lastScan)) return false;
+    const intervalMinutes = Number(schedule.intervalMinutes);
+    if (![1, 5, 15, 30, 60].includes(intervalMinutes)) return false;
+    return now.getTime() - lastScan >= intervalMinutes * 60_000;
+  }
   const local = localDateAndTime(now, timezone);
   if (schedule.retry_date === local.date && schedule.retry_after) {
     const retryAfter = Date.parse(schedule.retry_after);

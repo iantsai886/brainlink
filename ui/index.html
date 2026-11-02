@@ -30,6 +30,7 @@ p.hint { margin: 0 0 14px; color: var(--muted); font-size: 14px; }
 .grid2 { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
 @media (max-width: 640px) { .grid2 { grid-template-columns: 1fr; } }
 label { display: grid; gap: 4px; font-size: 13px; color: var(--muted); }
+#ingestion-time-wrap[hidden], #ingestion-interval-wrap[hidden] { display: none; }
 input, select, textarea { font: inherit; color: var(--ink); background: var(--bg); border: 1px solid var(--line); border-radius: 8px; padding: 8px 10px; width: 100%; }
 textarea { min-height: 64px; resize: vertical; }
 input:focus, select:focus, textarea:focus, button:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
@@ -492,7 +493,9 @@ main #ready, main #ask-panel, main #brain-panel, main #sessions-panel, main #s-c
     <div class="grid2" style="margin-top:10px">
       <label><span data-i18n="ingestion.vault"></span><select id="ingestion-vault"></select></label>
       <label><span data-i18n="ingestion.folder"></span><select id="ingestion-folder"></select></label>
-      <label><span data-i18n="ingestion.time"></span><input id="ingestion-time" type="time" value="02:00"></label>
+      <label><span data-i18n="ingestion.mode"></span><select id="ingestion-mode"><option value="daily" data-i18n="ingestion.modeDaily"></option><option value="watch" data-i18n="ingestion.modeWatch"></option></select></label>
+      <label id="ingestion-time-wrap"><span data-i18n="ingestion.time"></span><input id="ingestion-time" type="time" value="02:00"></label>
+      <label id="ingestion-interval-wrap" hidden><span data-i18n="ingestion.interval"></span><select id="ingestion-interval"><option value="1">1</option><option value="5">5</option><option value="15">15</option><option value="30">30</option><option value="60">60</option></select></label>
     </div>
     <div class="row" style="margin-top:8px"><button type="button" id="ingestion-add" data-i18n="ingestion.addTarget"></button></div>
     <h3 data-i18n="ingestion.targets"></h3>
@@ -703,6 +706,11 @@ function currentIngestionTargets() {
       : S?.ingestion?.vault && S?.ingestion?.folder ? [{ vault: S.ingestion.vault, folder: S.ingestion.folder }] : [];
   }
   return ingestionTargetsDraft;
+}
+function refreshIngestionModeControls() {
+  const watching = $('ingestion-mode').value === 'watch';
+  $('ingestion-time-wrap').hidden = watching;
+  $('ingestion-interval-wrap').hidden = !watching;
 }
 let ingestionFolderRequest = 0;
 async function refreshIngestionFolders(preferred = '') {
@@ -1647,6 +1655,9 @@ async function load() {
   ].join('\n') : '';
   $('backup-enabled').checked = Boolean(S.backup?.enabled);
   $('ingestion-enabled').checked = Boolean(S.ingestion?.enabled);
+  $('ingestion-mode').value = S.ingestion?.mode === 'watch' ? 'watch' : 'daily';
+  $('ingestion-interval').value = String(S.ingestion?.intervalMinutes || 5);
+  refreshIngestionModeControls();
   $('ingestion-auto-drafts').checked = Boolean(S.ingestion?.autoDrafts);
   $('ingestion-auto-drafts').disabled = !S.sessions_local_summary?.enabled || !S.sessions_local_summary?.model;
   $('ingestion-auto-drafts').parentElement.title = $('ingestion-auto-drafts').disabled ? t('ingestion.autoDraftsNeedsModel') : '';
@@ -2510,8 +2521,9 @@ $('ingestion-add').onclick = () => {
   $('ingestion-folder').value = '';
   renderIngestionTargets();
 };
+$('ingestion-mode').onchange = refreshIngestionModeControls;
 $('ingestion-save').onclick = () => act(async () => {
-  const r = await api('POST', '/api/ingestion/settings', { enabled: $('ingestion-enabled').checked, autoDrafts: $('ingestion-auto-drafts').checked, autoFile: $('ingestion-auto-file').checked, targets: currentIngestionTargets(), time: $('ingestion-time').value });
+  const r = await api('POST', '/api/ingestion/settings', { enabled: $('ingestion-enabled').checked, mode: $('ingestion-mode').value, intervalMinutes: Number($('ingestion-interval').value), autoDrafts: $('ingestion-auto-drafts').checked, autoFile: $('ingestion-auto-file').checked, targets: currentIngestionTargets(), time: $('ingestion-time').value });
   ingestionTargetsDraft = null;
   toast(t(r.ingestion.enabled ? 'ingestion.saved' : 'ingestion.disabled'));
 });

@@ -348,3 +348,63 @@ test('scheduled local draft failures use bounded schedule retries and do not rep
     assert.deepEqual(await readdir(path.join(vault, 'Knowledge')), [], 'the retry still does not write a vault note');
   } finally { await new Promise((resolve) => app.server.close(resolve)); }
 });
+
+test('repeated background checks automatically analyze only changed files in the selected folders', async () => {
+  const home = await mkdtemp(path.join(tmpdir(), 'brainlink-ingestion-watch-drafts-'));
+  const appHome = path.join(home, 'app'), vault = path.join(home, 'vault');
+  await mkdir(path.join(vault, 'Raw'), { recursive: true });
+  await mkdir(path.join(vault, 'Other'), { recursive: true });
+  await writeFile(path.join(vault, 'Raw', 'First.md'), '# First source\n\nFIRST_SELECTED_CANARY');
+  await writeFile(path.join(vault, 'Other', 'Outside.md'), '# Outside\n\nOUT_OF_SCOPE_CANARY');
+  const env = { BRAINLINK_HOME: appHome, HOME: home, BRAINLINK_SEMANTIC: '0' };
+  const config = normalize({ vaults: [{ name: 'Fictional Team', path: vault }], ingestion: {
+    enabled: true, mode: 'watch', intervalMinutes: 5, last_scan_at: new Date(Date.now() - 10 * 60_000).toISOString(),
+    autoDrafts: true, targets: [{ vault: 'Fictional Team', folder: 'Raw' }],
+  } });
+  config.sessions.localSummary = { enabled: true, model: 'qwen2.5:3b', autoDraftOnEnd: false, autoFileOnEnd: false };
+  const configPath = path.join(appHome, 'config.json');
+  await saveConfig(config, configPath);
+  const modelInputs = [];
+  const app = await startSetup({ env, home, os: 'linux', port: 0, useCli: false, ingestionTickMs: 10,
+    ingestionDraftFetch: async (_url, options) => {
+      modelInputs.push(JSON.parse(options.body).messages[1].content);
+      return { ok: true, json: async () => ({ message: { content: JSON.stringify({ title: `Watch result ${modelInputs.length}`, memory_type: 'semantic', summary: 'A fictional watched-folder summary.', key_points: [] }) } }) };
+    },
+  });
+  const base = `http://127.0.0.1:${app.port}`;
+  const headers = { 'X-BrainLink-Token': app.token };
+  const getState = () => fetch(base + '/api/state', { headers }).then((r) => r.json());
+  const getDrafts = () => fetch(base + '/api/ingestion/drafts', { headers }).then((r) => r.json());
+  try {
+    const deadline = Date.now() + 5000;
+    let state, drafts;
+    while (Date.now() < deadline) {
+      state = await getState(); drafts = await getDrafts();
+      if (state.ingestion_drafts.status?.trigger === 'watch' && drafts.drafts.length === 1) break;
+      await new Promise((resolve) => setTimeout(resolve, 10));
+    }
+    assert.equal(modelInputs.length, 1);
+    assert.equal(state.ingestion_drafts.status.trigger, 'watch');
+    assert.equal(drafts.drafts.length, 1);
+    assert.match(modelInputs[0], /FIRST_SELECTED_CANARY/);
+    assert.doesNotMatch(modelInputs[0], /OUT_OF_SCOPE_CANARY/);
+    await new Promise((resolve) => setTimeout(resolve, 80));
+    assert.equal(modelInputs.length, 1, 'the watcher waits for its configured interval before scanning again');
+
+    await writeFile(path.join(vault, 'Raw', 'Second.md'), '# Second source\n\nSECOND_SELECTED_CANARY');
+    const nextConfig = JSON.parse(await readFile(configPath, 'utf8'));
+    nextConfig.ingestion.last_scan_at = new Date(Date.now() - 10 * 60_000).toISOString();
+    await saveConfig(nextConfig, configPath);
+    const secondDeadline = Date.now() + 5000;
+    while (Date.now() < secondDeadline) {
+      state = await getState(); drafts = await getDrafts();
+      if (modelInputs.length === 2 && drafts.drafts.length === 2) break;
+      await new Promise((resolve) => setTimeout(resolve, 10));
+    }
+    assert.equal(state.ingestion_drafts.status.trigger, 'watch');
+    assert.equal(modelInputs.length, 2, 'the next changed source is analyzed on the next due check');
+    assert.match(modelInputs[1], /SECOND_SELECTED_CANARY/);
+    assert.doesNotMatch(modelInputs[1], /OUT_OF_SCOPE_CANARY/);
+    assert.equal(state.ingestion_drafts.status.failed, 0);
+  } finally { await new Promise((resolve) => app.server.close(resolve)); }
+});

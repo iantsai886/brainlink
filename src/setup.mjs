@@ -664,10 +664,16 @@ export async function startSetup(opts = {}) {
         const now = new Date();
         if (!ingestionScheduleDue(cfg.ingestion, now, cfg.timezone)) return null;
         const localDate = localDateAndTime(now, cfg.timezone).date;
-        const isRetry = cfg.ingestion.retry_date === localDate && Boolean(cfg.ingestion.retry_after);
+        const isRetry = Boolean(cfg.ingestion.retry_after)
+          && (cfg.ingestion.mode === 'watch' || cfg.ingestion.retry_date === localDate);
         const attempt = isRetry ? (Number(cfg.ingestion.retry_count) || 1) + 1 : 1;
-        // Mark the day before the initial run, then retry failures at a bounded interval.
-        if (!isRetry) {
+        // Reserve the next run before starting it, then retry failures at a bounded interval.
+        if (!isRetry && cfg.ingestion.mode === 'watch') {
+          cfg.ingestion.last_scan_at = now.toISOString();
+          cfg.ingestion.retry_count = 0;
+          cfg.ingestion.retry_date = null;
+          cfg.ingestion.retry_after = null;
+        } else if (!isRetry) {
           cfg.ingestion.last_scheduled_date = localDate;
           cfg.ingestion.retry_count = 0;
           cfg.ingestion.retry_date = null;
@@ -679,10 +685,20 @@ export async function startSetup(opts = {}) {
       if (!scheduled) return;
       const { cfg, localDate, attempt } = scheduled;
       try {
-        const result = await runIngestion(cfg, { trigger: 'schedule' });
+        const trigger = cfg.ingestion.mode === 'watch' ? 'watch' : 'schedule';
+        const result = await runIngestion(cfg, { trigger });
         if (!result.ok) throw new Error(result.error || 'One or more scan folders could not be read.');
-        if (cfg.ingestion.autoDrafts) {
-          const draftResult = await runScheduledIngestionDrafts(cfg, result.candidates);
+        const latestBeforeDrafts = await loadConfig(file);
+        const stillSameTargets = latestBeforeDrafts.ingestion?.enabled
+          && (latestBeforeDrafts.ingestion?.mode || 'daily') === (cfg.ingestion?.mode || 'daily')
+          && JSON.stringify(latestBeforeDrafts.ingestion?.targets || []) === JSON.stringify(cfg.ingestion?.targets || []);
+        if (stillSameTargets && latestBeforeDrafts.ingestion.autoDrafts) {
+          const currentTargets = new Map(latestBeforeDrafts.ingestion.targets.map((target) => [`${target.vault}\0${target.folder}`, target]));
+          const currentCandidates = result.candidates.map((candidate) => ({
+            ...candidate,
+            destination: currentTargets.get(`${candidate.vault}\0${candidate.folder}`)?.destination || null,
+          })).filter((candidate) => currentTargets.has(`${candidate.vault}\0${candidate.folder}`));
+          const draftResult = await runScheduledIngestionDrafts(latestBeforeDrafts, currentCandidates, { trigger });
           if (!draftResult.ok) throw new Error('One or more scheduled local drafts failed.');
         }
         await withConfigMutation(async () => {
@@ -697,7 +713,12 @@ export async function startSetup(opts = {}) {
       } catch (error) {
         const retryAt = await withConfigMutation(async () => {
           const latest = await loadConfig(file);
-          const sameSchedule = latest.ingestion?.enabled && JSON.stringify(latest.ingestion?.targets || []) === JSON.stringify(cfg.ingestion?.targets || []);
+          const sameSchedule = latest.ingestion?.enabled
+            && (latest.ingestion?.mode || 'daily') === (cfg.ingestion?.mode || 'daily')
+            && Number(latest.ingestion?.intervalMinutes || 5) === Number(cfg.ingestion?.intervalMinutes || 5)
+            && (latest.ingestion?.time || '02:00') === (cfg.ingestion?.time || '02:00')
+            && Boolean(latest.ingestion?.autoDrafts) === Boolean(cfg.ingestion?.autoDrafts)
+            && JSON.stringify(latest.ingestion?.targets || []) === JSON.stringify(cfg.ingestion?.targets || []);
           const retry = sameSchedule && attempt < (opts.ingestionMaxAttempts ?? INGESTION_MAX_ATTEMPTS)
             ? new Date(Date.now() + (opts.ingestionRetryMs ?? INGESTION_RETRY_DELAY_MS)).toISOString() : null;
           if (sameSchedule) {
@@ -1480,7 +1501,7 @@ export async function startSetup(opts = {}) {
         const updated = { ...cfg, vaults: cfg.vaults.filter((v) => v.name !== b.name), agents: cfg.agents.filter((a) => a.vault !== b.name), handoff: cfg.handoff?.vault === b.name ? null : cfg.handoff };
         if ((updated.ingestion?.targets || []).some((target) => target.vault === b.name)) {
           const targets = updated.ingestion.targets.filter((target) => target.vault !== b.name);
-          updated.ingestion = { ...updated.ingestion, targets, vault: targets[0]?.vault || null, folder: targets[0]?.folder || null, enabled: Boolean(updated.ingestion.enabled && targets.length), last_scheduled_date: null, retry_count: 0, retry_date: null, retry_after: null };
+          updated.ingestion = { ...updated.ingestion, targets, vault: targets[0]?.vault || null, folder: targets[0]?.folder || null, enabled: Boolean(updated.ingestion.enabled && targets.length), last_scheduled_date: null, last_scan_at: null, retry_count: 0, retry_date: null, retry_after: null };
         }
         await saveConfig(updated, file);
         return updated;
@@ -1511,7 +1532,7 @@ export async function startSetup(opts = {}) {
         v.private = Boolean(b.private);
         if (v.private && (cfg.ingestion?.targets || []).some((target) => target.vault === v.name)) {
           const targets = cfg.ingestion.targets.filter((target) => target.vault !== v.name);
-          cfg.ingestion = { ...cfg.ingestion, targets, vault: targets[0]?.vault || null, folder: targets[0]?.folder || null, enabled: Boolean(cfg.ingestion.enabled && targets.length), last_scheduled_date: null, retry_count: 0, retry_date: null, retry_after: null };
+          cfg.ingestion = { ...cfg.ingestion, targets, vault: targets[0]?.vault || null, folder: targets[0]?.folder || null, enabled: Boolean(cfg.ingestion.enabled && targets.length), last_scheduled_date: null, last_scan_at: null, retry_count: 0, retry_date: null, retry_after: null };
         }
         await saveConfig(cfg, file);
         return { cfg, isPrivate: v.private };

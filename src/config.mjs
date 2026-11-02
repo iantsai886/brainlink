@@ -39,7 +39,7 @@ export const AGENT_KINDS = ['local', 'remote'];
 export const CONFIG_SCHEMA_VERSION = 2;
 
 export function emptyConfig() {
-  return { version: CONFIG_SCHEMA_VERSION, timezone: null, locale: null, vaults: [], agents: [], ai_agents: [], twin_profiles: [], handoff: null, platforms: DEFAULT_PLATFORMS, http: { port: 8765, token: null }, connections: {}, sessions: { shareSummaries: false, shareFullText: false, hermesHome: null, localSummary: { enabled: false, model: '', autoDraftOnEnd: false, autoFileOnEnd: false } }, session_filing: { projectVaults: {}, projectFolders: {} }, backup: { enabled: false, folder: null, intervalHours: 24, scheduleMode: 'interval', time: '02:00', last_scheduled_date: null, keepCount: 0, encrypted: false }, ingestion: { enabled: false, autoDrafts: false, autoFile: false, vault: null, folder: null, targets: [], time: '02:00', last_scheduled_date: null, retry_count: 0, retry_date: null, retry_after: null }, brief: { enabled: false, vault: null, time: '08:00', last_scheduled_date: null }, weekly_benchmark: { enabled: false, weekday: 1, time: '09:00', last_scheduled_week: null, last_run_at: null, last_run_ok: null } };
+  return { version: CONFIG_SCHEMA_VERSION, timezone: null, locale: null, vaults: [], agents: [], ai_agents: [], twin_profiles: [], handoff: null, platforms: DEFAULT_PLATFORMS, http: { port: 8765, token: null }, connections: {}, sessions: { shareSummaries: false, shareFullText: false, hermesHome: null, localSummary: { enabled: false, model: '', autoDraftOnEnd: false, autoFileOnEnd: false } }, session_filing: { projectVaults: {}, projectFolders: {} }, backup: { enabled: false, folder: null, intervalHours: 24, scheduleMode: 'interval', time: '02:00', last_scheduled_date: null, keepCount: 0, encrypted: false }, ingestion: { enabled: false, mode: 'daily', intervalMinutes: 5, last_scan_at: null, autoDrafts: false, autoFile: false, vault: null, folder: null, targets: [], time: '02:00', last_scheduled_date: null, retry_count: 0, retry_date: null, retry_after: null }, brief: { enabled: false, vault: null, time: '08:00', last_scheduled_date: null }, weekly_benchmark: { enabled: false, weekday: 1, time: '09:00', last_scheduled_week: null, last_run_at: null, last_run_ok: null } };
 }
 
 // Fill defaults so the rest of the code never checks for missing keys.
@@ -55,7 +55,7 @@ export function normalize(raw = {}) {
   cfg.http = { port: 8765, token: null, ...(raw.http || {}) };
   cfg.connections = raw.connections || {};
   cfg.backup = { enabled: false, folder: null, intervalHours: 24, scheduleMode: 'interval', time: '02:00', last_scheduled_date: null, keepCount: 0, encrypted: false, ...(raw.backup || {}) };
-  cfg.ingestion = { enabled: false, autoDrafts: false, autoFile: false, vault: null, folder: null, targets: [], time: '02:00', last_scheduled_date: null, retry_count: 0, retry_date: null, retry_after: null, ...(raw.ingestion || {}) };
+  cfg.ingestion = { enabled: false, mode: 'daily', intervalMinutes: 5, last_scan_at: null, autoDrafts: false, autoFile: false, vault: null, folder: null, targets: [], time: '02:00', last_scheduled_date: null, retry_count: 0, retry_date: null, retry_after: null, ...(raw.ingestion || {}) };
   if (typeof cfg.ingestion.autoDrafts !== 'boolean') cfg.ingestion.autoDrafts = false;
   if (typeof cfg.ingestion.autoFile !== 'boolean') cfg.ingestion.autoFile = false;
   if (!Array.isArray(cfg.ingestion.targets)) cfg.ingestion.targets = [];
