@@ -5,6 +5,8 @@ GitHub repository: `iantsai886/brainlink`
 Branch: `feat/complete-raw-wiki-folder-flow` (current working branch; based on `origin/main`)
 Code baseline: development target `1.2.8`, with `package.json` as the canonical version source. The `v1.2.7` tag belongs to the separate `wip/v1.2.7` release line; this branch continues from the full-source `main` history and does not move or recreate that tag.
 
+Current implementation note (working tree based on `d846cfc`, 2026-11-03): workflow records now have an editor for bounded `triggers`, `inputs`, `steps`, `outputs`, and `exception_handling` frontmatter lists. They remain descriptive Markdown; BrainLink does not execute them. Windows/Node.js 24.22.1 `npm run test:all` passed: core 645 total (635 passed, 0 failed, 10 platform/privilege skips); UI 48/48. `npm run smoke:installed:win` also passed for the unsigned package's install/launch, existing OCR and ingestion checks, Hermes hook handling, and isolated uninstall. The smoke did not click through the workflow editor. This is local evidence; interactive browser and customer acceptance remain unverified.
+
 ### Dependency advisory refresh (source commit `9abbfd8`, 2026-11-03)
 
 Both `npm audit` and `npm audit --omit=dev` completed with exit code 0 and reported zero known vulnerabilities. This is an advisory-database snapshot, not proof that the code is vulnerability-free.

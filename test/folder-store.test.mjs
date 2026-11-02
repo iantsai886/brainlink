@@ -46,6 +46,21 @@ test('folder-store: never rewrites an untouched note on disk', async () => {
   rmSync(root, { recursive: true, force: true });
 });
 
+test('folder-store: workflow lists round-trip commas, quotes, and colon text', async () => {
+  const root=mkdtempSync(path.join(tmpdir(),'bl-folder-workflow-'));
+  try {
+    const store=createFolderStore({vaults:[{name:'Work',private:false}],root});
+    const expected={triggers:['New file arrives, then wait','User asks: run review'],inputs:['CSV, JSON','"Ready" folder'],steps:['Read source, check revision','Create a linked note'],outputs:['Review proposal']};
+    const made=await store.write({vault:'Work',path:'Workflow.md',body:'# Workflow',frontmatter:{type:'workflow',...expected}},{expected_etag:''});
+    const text=readFileSync(path.join(root,'Work','Workflow.md'),'utf8');
+    assert.match(text,/New file arrives, then wait/);
+    assert.deepEqual((await store.read(made.id)).frontmatter,{type:'workflow',...expected});
+    const reopened=createFolderStore({vaults:[{name:'Work',private:false}],root});
+    const loaded=(await reopened.list({vault:'Work'}))[0];
+    assert.deepEqual((await reopened.read(loaded.id)).frontmatter,{type:'workflow',...expected},'a fresh store must parse the lists back from Markdown');
+  } finally { rmSync(root,{recursive:true,force:true}); }
+});
+
 test('folder-store: rename moves the file without touching its bytes', async () => {
   const root = mkdtempSync(path.join(tmpdir(), 'bl-folder-rename-'));
   const store = await createFolderStore({ vaults: [{ name: 'Work', private: false }], root });

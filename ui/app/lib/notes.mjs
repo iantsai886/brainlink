@@ -27,6 +27,21 @@ export function useNotes(api) {
     h.set({frontmatter:serialized,dirty:serialized!==JSON.stringify(s.note.frontmatter||{},null,2)||s.body!==s.note.body,error:null,editingMeta:true});
     return true;
   }
+  function changeWorkflowField(field, value) {
+    const limits={triggers:20,inputs:30,steps:50,outputs:30,exception_handling:30};
+    const s=h.get();
+    if(!s.note||!Object.hasOwn(limits,field))return false;
+    let frontmatter;
+    try{frontmatter=JSON.parse(s.frontmatter||'{}');}catch{h.set({error:'Fix the frontmatter JSON before editing workflow details.'});return false;}
+    if(!frontmatter||Array.isArray(frontmatter)||typeof frontmatter!=='object'||frontmatter.type!=='workflow'){h.set({error:'Choose workflow as the graph record type before editing workflow details.'});return false;}
+    if(typeof value!=='string'||value.length>12000){h.set({error:'Workflow details are too long. Shorten the text and try again.'});return false;}
+    const items=value.split(/\r?\n/).map(item=>item.trim()).filter(Boolean);
+    if(items.length>limits[field]||items.some(item=>item.length>500||/[\u0000-\u0008\u000b\u000c\u000e-\u001f]/.test(item))){h.set({error:`Use up to ${limits[field]} lines, with no more than 500 characters per line.`});return false;}
+    if(items.length)frontmatter[field]=items;else delete frontmatter[field];
+    const serialized=JSON.stringify(frontmatter,null,2);
+    h.set({frontmatter:serialized,dirty:serialized!==JSON.stringify(s.note.frontmatter||{},null,2)||s.body!==s.note.body,error:null,editingMeta:true});
+    return true;
+  }
   function changeMemoryType(memoryType) {
     const allowed = ['working', 'semantic', 'procedural', 'episodic'];
     if (!allowed.includes(memoryType)) { h.set({error:'Choose one of the four supported memory types.'}); return false; }
@@ -72,5 +87,5 @@ export function useNotes(api) {
   async function rename(path) { const s=h.get(); if(!s.note || !guard()) return false; if(!api.renameNote) {h.set({error:'Rename is not supported by this store.'});return false;} try { await api.renameNote(s.note.id,path,s.note.etag); await load(); await open(s.note.id); return true; } catch(e){h.set({error:errText(e)});return false;} }
   function close() {if(!guard())return false;h.set({note:null,dirty:false,editing:false,error:null});return true;}
   function cancel() {if(!guard())return false;const n=h.get().note;h.set({editing:false,editingMeta:false,dirty:false,body:n?.body||'',frontmatter:JSON.stringify(n?.frontmatter||{},null,2)});return true;}
-  return {...h,load,open,edit,setVault,changeBody,changeMeta,changeTypedField,changeMemoryType,save,withdrawEpisode,create,rename,close,cancel,guard};
+  return {...h,load,open,edit,setVault,changeBody,changeMeta,changeTypedField,changeWorkflowField,changeMemoryType,save,withdrawEpisode,create,rename,close,cancel,guard};
 }

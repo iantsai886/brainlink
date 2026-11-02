@@ -104,6 +104,29 @@ test('graph record save rejects a duplicate stable ID in the same vault',async()
  const store=await makeStore();const robinSummary=(await store.list({vault:'Work'})).find(n=>n.title==='Robin'),robin=await store.read(robinSummary.id);await store.write({id:robin.id,vault:'Work',path:robin.path,body:robin.body,frontmatter:{...robin.frontmatter,type:'person',id:'person.robin',scope:'organisation',status:'current'}},{expected_etag:robin.etag});
  const api=createApi({store}),h=useNotes(api);await h.load();const id=h.get().items.find(n=>n.title==='Website relaunch').id;await h.open(id);for(const [field,value] of Object.entries({type:'project',id:'person.robin',scope:'organisation',status:'proposed'}))assert.equal(h.changeTypedField(field,value),true);assert.equal(await h.save(),false);assert.match(h.get().error,/already used/);assert.equal((await store.read(id)).frontmatter.id,undefined);
 });
+test('workflow editor saves structured steps as normal Markdown frontmatter lists',async()=>{
+ const store=await makeStore(),created=await store.write({vault:'Work',path:'Workflows/Collect questions.md',body:'# Collect questions\n\nSource-backed process.',frontmatter:{type:'workflow',id:'workflow.collect-questions',scope:'organisation',status:'proposed'}},{expected_etag:''});
+ const api=createApi({store}),h=useNotes(api);await h.load();await h.open(created.id);
+ let view=notesView(h.get(),api);assert.match(view,/data-workflow-field="triggers"[^>]*disabled/);assert.match(view,/These fields describe the workflow; they do not run it/);
+ h.set({editingMeta:true});view=notesView(h.get(),api);assert.match(view,/data-workflow-field="steps" rows="5"/);assert.doesNotMatch(view,/workflow steps.*execute/i);
+ assert.equal(h.changeWorkflowField('triggers','A new file arrives\nA user requests a refresh'),true);
+ assert.equal(h.changeWorkflowField('inputs','CSV, JSON\nApproved source folder'),true);
+ assert.equal(h.changeWorkflowField('steps','Read the selected source\nCheck source revision\nPrepare a review proposal'),true);
+ assert.equal(h.changeWorkflowField('outputs','Proposed note, with source link'),true);
+ assert.equal(h.changeWorkflowField('exception_handling','Keep the draft if the destination conflicts'),true);
+ assert.equal(await h.save(),true);
+ const saved=await store.read(created.id);assert.deepEqual(saved.frontmatter.triggers,['A new file arrives','A user requests a refresh']);assert.deepEqual(saved.frontmatter.inputs,['CSV, JSON','Approved source folder']);assert.equal(saved.frontmatter.steps.length,3);assert.deepEqual(saved.frontmatter.outputs,['Proposed note, with source link']);assert.deepEqual(saved.frontmatter.exception_handling,['Keep the draft if the destination conflicts']);assert.match(saved.body,/Source-backed process/);
+ await h.open(created.id);view=notesView(h.get(),api);assert.match(view,/data-workflow-field="inputs"[^>]*disabled>[\s\S]*CSV, JSON/);
+});
+test('workflow editor rejects unsupported fields, non-workflow notes, oversized entries, and too many lines',async()=>{
+ const store=await makeStore(),api=createApi({store}),h=useNotes(api);await h.load();await h.open(h.get().items[0].id);
+ assert.equal(h.changeWorkflowField('steps','Do work'),false);assert.match(h.get().error,/Choose workflow/);
+ const created=await store.write({vault:'Work',path:'Workflow.md',body:'# Workflow',frontmatter:{type:'workflow'}},{expected_etag:''});await h.open(created.id);
+ assert.equal(h.changeWorkflowField('unknown','x'),false);
+ assert.equal(h.changeWorkflowField('steps',Array.from({length:51},(_,i)=>`Step ${i}`).join('\n')),false);assert.match(h.get().error,/up to 50 lines/);
+ assert.equal(h.changeWorkflowField('inputs','x'.repeat(501)),false);assert.match(h.get().error,/500 characters/);
+ assert.equal(h.get().dirty,false);
+});
 test('search vault picker shows only accessible vaults and preserves the selected scope',async()=>{
  const store=await makeStore(),api=createApi({store,access:{vaults:['Work']}});
  const view=searchView({q:'website',scope:'Work',result:{hits:[]}},api.vaults());

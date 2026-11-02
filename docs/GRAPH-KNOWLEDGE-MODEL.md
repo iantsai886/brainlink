@@ -27,7 +27,7 @@ The supplied keyframes at 00:12 and 02:00 show governance/data-sensitivity examp
 | Note graph | `src/graph.mjs` extracts Obsidian wikilinks and Markdown links; `src/typed-graph.mjs` also derives directional typed edges from verified frontmatter relations. Deterministic suggestions match a small multilingual phrase set to unique, same-scope entity titles, including team/person communication and handoff phrases. Local Raw-to-Wiki drafts may suggest up to eight entities with exact quotes and relations among existing same-vault entities explicitly named in the selected source. Selected entity and relation candidates are saved as proposed. | No unsourced/general relation inference, session entity extraction, or quality proof; deterministic scanner suggestions cover fixed phrase patterns and require review. |
 | 3D graph | `src/graph3d.mjs` builds nodes and edge metadata from visible, non-generated notes only; nodes can show validated entity type/ID, each typed edge retains its own predicate/evidence/confidence, and parallel relations are curved apart. Note details show incoming/outgoing relations and allow manual proposal and editing of a typed relation with an exact source-note excerpt. Changed verified links return to review; removal preserves evidence and can be restored. Notes provides structured fields for type, stable ID, scope, and status while preserving the Markdown record. | Workflow simulation and automatic arbitrary-language entity/relation extraction remain future work. |
 | Related suggestions | `src/core.mjs` and `src/graph.mjs` suggest links using shared terms and graph neighbors. | A suggested association is not a verified semantic relationship. |
-| Structured workflows | A Markdown note can use `type: workflow`, a stable `id`, an explicit scope, and verified relations to teams, datasets, and artifacts. Typed edges join the existing graph-aware ranking. | Workflow steps, triggers, input/output schemas, and process execution are still prose; no automatic workflow extraction exists. |
+| Structured workflows | A Markdown note can use `type: workflow`, a stable `id`, an explicit scope, verified relations to teams, datasets, and artifacts, and editable `triggers`, `inputs`, `steps`, `outputs`, and `exception_handling` lists in frontmatter. The Notes screen edits each list as one item per line; Graph-aware ranking still uses the verified typed edges. | The lists are descriptive records only: there is no workflow runner, schema enforcement for domain-specific inputs/outputs, or automatic extraction from arbitrary text. |
 | Authorization | Vault and note privacy are filtered before indexing, search, reads, graph construction, and graph-wide discovery. Typed candidates stay within one visible vault and matching declared scope. | Future graph traversal across vaults must apply access policy to both endpoints before an edge, expansion, excerpt, or log is exposed. |
 
 This is based on code inspection and local tests on the current branch, not on the reel's marketing claims.
@@ -57,6 +57,17 @@ type: workflow
 id: workflow.collect-product-questions
 scope: organisation
 status: current
+triggers:
+  - A support question is received
+inputs:
+  - Support ticket text
+steps:
+  - Collect questions from the approved channel
+  - Check ticket details and draft an answer
+outputs:
+  - Draft answer with ticket source
+exception_handling:
+  - Keep incomplete drafts in review
 relations:
   - predicate: owned_by
     target: team.product
@@ -75,8 +86,10 @@ relations:
     review: verified
 ---
 # Collect product questions
-Trigger, inputs, steps, exception handling, outputs, and owner responsibilities.
+Owner responsibilities and additional context for the workflow.
 ```
+
+The structured workflow lists are portable descriptive metadata. BrainLink does not execute them or infer/validate a domain-specific input/output schema. Keep supporting detail and sources in the Markdown body.
 
 Recommended initial predicates: `owned_by`, `runs`, `consumes`, `produces`, `depends_on`, `part_of`, `assigned_to`, `informed_by`, and `communicates_with`. Keep them directional and version the vocabulary. Unknown predicates should remain unresolved proposals rather than silently becoming graph edges.
 
