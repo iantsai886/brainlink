@@ -481,6 +481,18 @@ export async function startSetup(opts = {}) {
   let ingestionRunning = false;
   const ingestionDraftsDir = path.join(appHome(env), 'ingestion', 'drafts');
   const ingestionDraftStatusFile = path.join(appHome(env), 'ingestion-draft-state.json');
+  async function typedEntitiesForIngestionSource(ctx, vaultName, source) {
+    const index = await loadVault(ctx, vaultName);
+    const visible = index.notes.filter((note) => !note.private && !note.generated);
+    const metadata = typedEntityMetadataMap(visible);
+    if (!metadata.size) return [];
+    const text = redactText(source.body).toLocaleLowerCase();
+    return visible.map((note) => ({ note, entity: metadata.get(note) }))
+      .filter(({ note, entity }) => entity && note.rel !== source.rel && note.title.length >= 3 && text.includes(note.title.toLocaleLowerCase()))
+      .sort((a, b) => b.note.title.length - a.note.title.length || a.note.rel.localeCompare(b.note.rel))
+      .slice(0, 12)
+      .map(({ note, entity }) => ({ id: entity.entity_id, title: note.title, type: entity.type, scope: entity.scope }));
+  }
   let ingestionDraftStatus = await readFile(ingestionDraftStatusFile, 'utf8').then((raw) => JSON.parse(raw)).catch(() => ({ ok: null, at: null, trigger: null, attempted: 0, created: 0, failed: 0 }));
   const briefStateFile = path.join(appHome(env), 'brief-state.json');
   let briefStatus = await readFile(briefStateFile, 'utf8').then((raw) => JSON.parse(raw)).catch(() => ({ ok: null, at: null, trigger: null, vault: null, result: null, error: null }));
@@ -597,6 +609,7 @@ export async function startSetup(opts = {}) {
       for (const candidate of selected) {
         try {
           const source = await readIngestionSource(ctx, candidate.vault, candidate.folder, { source_id: candidate.source_id, revision: candidate.revision });
+          source.typed_entities = await typedEntitiesForIngestionSource(ctx, candidate.vault, source);
           const draft = await generateLocalIngestionDraft(source, cfg.sessions.localSummary.model, { fetchImpl: opts.ingestionDraftFetch || fetch });
           const related = await relatedText(ctx, draft.vault, `${draft.title}\n${draft.body}\n${redactText(source.body)}`, { excludePath: source.rel });
           draft.related_basis = 'source_and_draft';
@@ -625,7 +638,7 @@ export async function startSetup(opts = {}) {
     await logActivity(env, { tool: 'source_auto_draft', ok: record.ok });
     return record;
   }
-  async function saveIngestionDraftRecord(cfg, id, destination, requestedRelated = null, entityIndexes = []) {
+  async function saveIngestionDraftRecord(cfg, id, destination, requestedRelated = null, entityChoices = [], relationChoices = []) {
     const stored = await readIngestionDraft(ingestionDraftsDir, id);
     const draft = stored?.draft;
     if (!draft) throw new Error('This local draft is missing or damaged. Prepare it again from the source queue.');
@@ -635,12 +648,17 @@ export async function startSetup(opts = {}) {
     const source = await readIngestionSource(ctx, draft.vault, draft.folder, { source_id: draft.source_id, revision: draft.revision });
     const availableFolders = new Set((await listSessionFilingFolders(ctx, draft.vault)).map((entry) => entry.path));
     if (!availableFolders.has(chosen)) throw new Error('The selected knowledge folder is no longer available in this vault.');
-    if (!Array.isArray(entityIndexes) || entityIndexes.length > 8 || entityIndexes.some((choice) => !choice || !Number.isSafeInteger(choice.index) || choice.index < 0 || choice.index >= (draft.entities || []).length || !['personal', 'organisation', 'client'].includes(choice.scope))) throw new Error('Choose only entity suggestions shown in this draft and set a valid scope.');
-    const uniqueIndexes = new Set(entityIndexes.map((choice) => choice.index));
-    if (uniqueIndexes.size !== entityIndexes.length) throw new Error('An entity suggestion was selected more than once.');
-    const selectedEntities = entityIndexes.map((choice) => ({ ...draft.entities[choice.index], scope: choice.scope }));
+    if (!Array.isArray(entityChoices) || entityChoices.length > 8 || entityChoices.some((choice) => !choice || !Number.isSafeInteger(choice.index) || choice.index < 0 || choice.index >= (draft.entities || []).length || !['personal', 'organisation', 'client'].includes(choice.scope))) throw new Error('Choose only entity suggestions shown in this draft and set a valid scope.');
+    const uniqueIndexes = new Set(entityChoices.map((choice) => choice.index));
+    if (uniqueIndexes.size !== entityChoices.length) throw new Error('An entity suggestion was selected more than once.');
+    const selectedEntities = entityChoices.map((choice) => ({ ...draft.entities[choice.index], scope: choice.scope }));
+    if (!Array.isArray(relationChoices) || relationChoices.length > 12 || relationChoices.some((index) => !Number.isSafeInteger(index) || index < 0 || index >= (draft.relationships || []).length)) throw new Error('Choose only relationship suggestions shown in this draft.');
+    const uniqueRelationIndexes = new Set(relationChoices);
+    if (uniqueRelationIndexes.size !== relationChoices.length) throw new Error('A relationship suggestion was selected more than once.');
+    const selectedRelationships = relationChoices.map((index) => draft.relationships[index]);
     const redactedSource = redactText(source.body);
     if (selectedEntities.some((entity) => !entity.evidence || !redactedSource.includes(entity.evidence))) throw new Error('An entity quote no longer matches the selected source. Prepare the draft again.');
+    if (selectedRelationships.some((relationship) => !relationship.evidence || !redactedSource.includes(relationship.evidence))) throw new Error('A relationship quote no longer matches the selected source. Prepare the draft again.');
     const originalCandidates = new Set((draft.related_notes || []).map((item) => item.path));
     if (requestedRelated !== null && (!Array.isArray(requestedRelated) || requestedRelated.length > 5 || requestedRelated.some((item) => typeof item !== 'string'))) throw new Error('Choose up to five related-note suggestions from this draft.');
     const selectedPaths = requestedRelated === null ? [...originalCandidates].slice(0, 3) : [...new Set(requestedRelated)];
@@ -682,7 +700,40 @@ export async function startSetup(opts = {}) {
       if (entityResult.ok && entityResult.written) entityProposals.push({ title: entity.title, path: entityResult.path, status: 'proposed', verified: false });
       else entityProposals.push({ title: entity.title, errors: entityResult.errors || ['Could not save this entity proposal.'] });
     }
-    return { ok: true, written: true, saved_as_proposal: true, path: result.path, entity_proposals: entityProposals, note_status: 'proposed', confidence: 'reported', verified: false };
+    const relationProposals = [];
+    const latestIndex = await loadVault(ctx, draft.vault);
+    const visible = latestIndex.notes.filter((note) => !note.private && !note.generated);
+    const entityMap = typedEntityMetadataMap(visible);
+    for (const relationship of selectedRelationships) {
+      const subjectEntry = [...entityMap.entries()].find(([, meta]) => meta.entity_id === relationship.subject_id && meta.scope === relationship.scope);
+      const targetEntry = [...entityMap.entries()].find(([, meta]) => meta.entity_id === relationship.target_id && meta.scope === relationship.scope);
+      if (!subjectEntry || !targetEntry || subjectEntry[0] === targetEntry[0] || !typedRelationAllowed(relationship.predicate, subjectEntry[1].type, targetEntry[1].type)) {
+        relationProposals.push({ predicate: relationship.predicate, errors: ['The graph records changed or are no longer compatible. Review the current graph and try again.'] });
+        continue;
+      }
+      const subjectNote = subjectEntry[0];
+      const full = safeJoin(vaultRoot(ctx, draft.vault), subjectNote.rel);
+      const raw = await readFile(full, 'utf8');
+      if (raw !== subjectNote.raw) {
+        relationProposals.push({ predicate: relationship.predicate, errors: ['The graph record changed while saving. Reload it and review again.'] });
+        continue;
+      }
+      let next;
+      try { next = appendTypedRelationProposal(raw, { predicate: relationship.predicate, target_id: relationship.target_id, evidence: relationship.evidence, confidence: 0.5 }); }
+      catch {
+        relationProposals.push({ predicate: relationship.predicate, errors: ['This relationship is already present or is no longer valid.'] });
+        continue;
+      }
+      const sourceLink = draft.source_path.replace(/\.md$/i, '');
+      const linkLine = `- [[${sourceLink}]]`;
+      if (!next.includes(linkLine)) next += `\n\n## BrainLink proposed relationship sources\n\n${linkLine}\n`;
+      const temp = `${full}.brainlink-${randomBytes(6).toString('hex')}.tmp`;
+      try { await writeFile(temp, next, 'utf8'); await rename(temp, full); }
+      catch (error) { await unlink(temp).catch(() => {}); relationProposals.push({ predicate: relationship.predicate, errors: ['Could not save the relationship proposal.'] }); continue; }
+      subjectNote.raw = next;
+      relationProposals.push({ subject: relationship.subject_title, predicate: relationship.predicate, target: relationship.target_title, path: subjectNote.rel, review: 'proposed', verified: false });
+    }
+    return { ok: true, written: true, saved_as_proposal: true, path: result.path, entity_proposals: entityProposals, relationship_proposals: relationProposals, note_status: 'proposed', confidence: 'reported', verified: false };
   }
   let ingestionTickRunning = false;
   const ingestionTimer = setInterval(async () => {
@@ -2462,6 +2513,7 @@ export async function startSetup(opts = {}) {
       if (!local.enabled || !local.model) throw new Error('Enable Local summary drafts and choose an Ollama model in Sessions first.');
       const ctx = localContext(cfg, { ...env, BRAINLINK_SEMANTIC: '0' });
       const source = await readIngestionSource(ctx, String(b.vault || ''), String(b.folder || ''), { source_id: b.source_id, revision: b.revision });
+      source.typed_entities = await typedEntitiesForIngestionSource(ctx, source.vault, source);
       const draft = await generateLocalIngestionDraft(source, local.model, { fetchImpl: opts.ingestionDraftFetch || fetch });
       const related = await relatedText(ctx, draft.vault, `${draft.title}\n${draft.body}\n${redactText(source.body)}`, { excludePath: source.rel });
       draft.related_basis = 'source_and_draft';
@@ -2503,7 +2555,7 @@ export async function startSetup(opts = {}) {
       const destination = String(b.destination || '').trim().replace(/\\/g, '/').replace(/^\/+|\/+$/g, '');
       if (!destination || !Array.isArray(draft.destinations) || !draft.destinations.includes(destination)) throw new Error('Choose an existing knowledge folder outside the selected source folder.');
       const requestedRelated = b.related_note_paths === undefined ? [] : b.related_note_paths;
-      return saveIngestionDraftRecord(cfg, id, destination, requestedRelated, b.entity_choices || []);
+      return saveIngestionDraftRecord(cfg, id, destination, requestedRelated, b.entity_choices || [], b.relationship_indexes || []);
     },
     'POST /api/brief/settings': async (b) => {
       const cfg = await loadConfig(file);

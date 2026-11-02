@@ -35,6 +35,24 @@ test('entity suggestions are bounded to supported types and exact quotes in the 
   assert.equal(draft.entities[0].evidence, source.body);
 });
 
+test('relationship suggestions require existing same-scope typed endpoints, valid predicates and exact source quotes', () => {
+  const typed_entities = [
+    { id: 'team.product', title: 'Product team', type: 'team', scope: 'organisation' },
+    { id: 'workflow.collect-questions', title: 'Collect questions', type: 'workflow', scope: 'organisation' },
+    { id: 'workflow.private', title: 'Private workflow', type: 'workflow', scope: 'personal' },
+  ];
+  const source = { title: 'Source', rel: 'Raw/Source.txt', body: 'The Product team runs Collect questions.', typed_entities };
+  const relationships = [
+    { subject_id: 'team.product', predicate: 'runs', target_id: 'workflow.collect-questions', evidence: source.body },
+    { subject_id: 'team.product', predicate: 'consumes', target_id: 'workflow.collect-questions', evidence: source.body },
+    { subject_id: 'team.product', predicate: 'runs', target_id: 'workflow.private', evidence: source.body },
+    { subject_id: 'team.product', predicate: 'runs', target_id: 'workflow.collect-questions', evidence: 'The product team also runs this.' },
+    { subject_id: 'team.unknown', predicate: 'runs', target_id: 'workflow.collect-questions', evidence: source.body },
+  ];
+  const draft = formatIngestionDraft({ title: 'Run workflow', summary: 'A source.', memory_type: 'semantic', relationships }, source);
+  assert.deepEqual(draft.relationships.map((item) => [item.subject_id, item.predicate, item.target_id]), [['team.product', 'runs', 'workflow.collect-questions']]);
+});
+
 test('image drafts send the selected image only to local vision analysis and save only an unverified description', async () => {
   const image = Buffer.from('fictional-image-bytes').toString('base64');
   let requestBody;
@@ -60,6 +78,8 @@ test('selected source can become a proposed note only after explicit confirmatio
   await mkdir(path.join(vault, 'Knowledge'), { recursive: true });
   await writeFile(path.join(vault, 'Raw', 'Source.md'), '# Fictional source\n\nA fictional team runs a short checklist.');
   await writeFile(path.join(vault, 'Knowledge', 'Team checklist.md'), '# Team checklist\n\nA fictional team runs a short checklist for internal requests. The team reviews each request, keeps a short checklist, and records the result for later reference. This is synthetic public knowledge used only to test optional related-note links.');
+  await writeFile(path.join(vault, 'Knowledge', 'Fictional team.md'), '---\ntype: team\nid: team.fictional\nscope: organisation\nstatus: current\n---\n# Fictional team\n\nA fictional team runs a short checklist.');
+  await writeFile(path.join(vault, 'Knowledge', 'Short checklist.md'), '---\ntype: workflow\nid: workflow.short-checklist\nscope: organisation\nstatus: current\n---\n# Short checklist\n\nA short checklist for internal reviews.');
   await writeFile(path.join(vault, 'Raw', 'Secret.md'), '---\nprivate: true\n---\nZQX_PRIVATE_NOTE_MUST_NOT_BE_READ');
   const env = { BRAINLINK_HOME: appHome, HOME: home, BRAINLINK_SEMANTIC: '0' };
   const config = normalize({ vaults: [{ name: 'Fictional Company', path: vault }] });
@@ -68,10 +88,14 @@ test('selected source can become a proposed note only after explicit confirmatio
   let modelCalls = 0, sentBody = '';
   const app = await startSetup({ env, home, os: 'win32', port: 0, useCli: false, ingestionDraftFetch: async (url, options) => {
     modelCalls++; assert.equal(url, 'http://127.0.0.1:11434/api/chat'); sentBody = options.body;
-    const sourcePath = JSON.parse(JSON.parse(sentBody).messages[1].content).source_path;
+    const payload = JSON.parse(JSON.parse(sentBody).messages[1].content);
+    const sourcePath = payload.source_path;
     const title = sourcePath.endsWith('.txt') ? 'Checklist from text' : 'Checklist process';
     const entities = sourcePath.endsWith('Source.md') ? [{ type: 'team', title: 'Quality team', description: 'A fictional team for testing.', evidence: 'A fictional team runs a short checklist.' }] : [];
-    return { ok: true, json: async () => ({ message: { content: JSON.stringify({ title, memory_type: 'procedural', summary: 'The fictional team uses a short checklist.', key_points: ['The source is unverified.'], entities }) } }) };
+    const relationships = payload.existing_entities?.some((item) => item.id === 'team.fictional') && payload.existing_entities?.some((item) => item.id === 'workflow.short-checklist')
+      ? [{ subject_id: 'team.fictional', predicate: 'runs', target_id: 'workflow.short-checklist', evidence: 'A fictional team runs a short checklist.' }]
+      : [];
+    return { ok: true, json: async () => ({ message: { content: JSON.stringify({ title, memory_type: 'procedural', summary: 'The fictional team uses a short checklist.', key_points: ['The source is unverified.'], entities, relationships }) } }) };
   } });
   const api = (route, body = {}, token = app.token) => fetch(`http://127.0.0.1:${app.port}${route}`, {
     method: 'POST', headers: { 'Content-Type': 'application/json', 'X-BrainLink-Token': token }, body: JSON.stringify(body),
@@ -90,7 +114,6 @@ test('selected source can become a proposed note only after explicit confirmatio
     assert.equal(generatedResponse.status, 200, await generatedResponse.clone().text());
     const generated = await generatedResponse.json();
     assert.match(generated.draft.body, /\[\[Raw\/Source\]\]/);
-    assert.deepEqual(generated.draft.related_notes.map((item) => item.path), ['Knowledge/Team checklist.md']);
     assert.doesNotMatch(JSON.stringify(generated.draft.related_notes), /Secret|ZQX_PRIVATE_NOTE_MUST_NOT_BE_READ/);
     assert.doesNotMatch(sentBody, /ZQX_PRIVATE_NOTE_MUST_NOT_BE_READ/);
     assert.match(JSON.stringify(await readFile(path.join(appHome, 'activity.log'), 'utf8')), /source_draft/);
@@ -98,14 +121,14 @@ test('selected source can become a proposed note only after explicit confirmatio
     await writeFile(path.join(vault, 'Raw', 'Source.md'), '# Fictional source revised\n\nThe source has changed since the draft was prepared.');
     const staleSave = await api('/api/ingestion/save-draft', { draft_id: generated.draft_id, destination: 'Knowledge', confirm: true });
     assert.notEqual(staleSave.status, 200, 'changed source cannot be filed from an old draft');
-    assert.deepEqual(await readdir(path.join(vault, 'Knowledge')), ['Team checklist.md'], 'stale draft creates no note');
+    assert.deepEqual((await readdir(path.join(vault, 'Knowledge'))).sort(), ['Fictional team.md', 'Short checklist.md', 'Team checklist.md'], 'stale draft creates no note');
     await writeFile(path.join(vault, 'Raw', 'Source.md'), '# Fictional source\n\nA fictional team runs a short checklist.');
     const unconfirmed = await api('/api/ingestion/save-draft', { draft_id: generated.draft_id, destination: 'Knowledge', confirm: false });
     assert.notEqual(unconfirmed.status, 200);
-    assert.deepEqual(await readdir(path.join(vault, 'Knowledge')), ['Team checklist.md'], 'unconfirmed proposal creates no note');
+    assert.deepEqual((await readdir(path.join(vault, 'Knowledge'))).sort(), ['Fictional team.md', 'Short checklist.md', 'Team checklist.md'], 'unconfirmed proposal creates no note');
     const privateLink = await api('/api/ingestion/save-draft', { draft_id: generated.draft_id, destination: 'Knowledge', related_note_paths: ['Raw/Secret.md'], confirm: true });
     assert.notEqual(privateLink.status, 200, 'private notes cannot be forced into a saved proposal');
-    const savedResponse = await api('/api/ingestion/save-draft', { draft_id: generated.draft_id, destination: 'Knowledge', related_note_paths: ['Knowledge/Team checklist.md'], entity_choices: [{ index: 0, scope: 'organisation' }], confirm: true });
+    const savedResponse = await api('/api/ingestion/save-draft', { draft_id: generated.draft_id, destination: 'Knowledge', related_note_paths: [], entity_choices: [{ index: 0, scope: 'organisation' }], relationship_indexes: [0], confirm: true });
     assert.equal(savedResponse.status, 200, await savedResponse.clone().text());
     const saved = await savedResponse.json();
     assert.equal(saved.saved_as_proposal, true, JSON.stringify(saved));
@@ -119,14 +142,23 @@ test('selected source can become a proposed note only after explicit confirmatio
     assert.match(entityNote, /scope: organisation/);
     assert.match(entityNote, /status: proposed/);
     assert.match(entityNote, /A fictional team runs a short checklist\./);
+    assert.equal(saved.relationship_proposals.length, 1);
+    assert.equal(saved.relationship_proposals[0].review, 'proposed');
+    const proposedSubject = await readFile(path.join(vault, 'Knowledge', 'Fictional team.md'), 'utf8');
+    assert.match(proposedSubject, /predicate: runs/);
+    assert.match(proposedSubject, /target: workflow\.short-checklist/);
+    assert.match(proposedSubject, /review: proposed/);
+    assert.match(proposedSubject, /\[\[Raw\/Source\]\]/);
+    assert.doesNotMatch(proposedSubject, /review: verified/);
+    const graphQueueResponse = await fetch(`http://127.0.0.1:${app.port}/api/graph3d/reviews`, { method: 'POST', headers: { 'Content-Type': 'application/json', 'X-BrainLink-Token': app.token }, body: JSON.stringify({ vault: 'Fictional Company' }) });
+    const graphQueue = await graphQueueResponse.json();
+    assert.ok(graphQueue.proposals.some((item) => item.predicate === 'runs' && item.target.title === 'Short checklist'), 'the saved source relation enters the existing proposed-review queue');
     const note = await readFile(path.join(vault, saved.path.slice('Fictional Company/'.length)), 'utf8');
     assert.match(note, /status: proposed/);
     assert.match(note, /type: note/);
     assert.match(note, /memory_type: procedural/);
     assert.match(note, /confidence: "reported"/);
     assert.match(note, /\[\[Raw\/Source\]\]/);
-    assert.match(note, /\[\[Knowledge\/Team checklist\]\]/);
-    assert.match(note, /selected similarity suggestions; not verified facts/);
     assert.match(note, /AI draft; unverified/);
     assert.equal((await (await api('/api/ingestion/run', { targets: [{ vault: 'Fictional Company', folder: 'Raw' }] })).json()).candidates.length, 0, 'saved linked proposal receives a filing receipt');
     await writeFile(path.join(vault, 'Raw', 'Private.md'), '---\nprivate: true\n---\nZQX_PRIVATE_NOTE_MUST_NOT_BE_READ');
@@ -140,15 +172,13 @@ test('selected source can become a proposed note only after explicit confirmatio
     const textDraftResponse = await api('/api/ingestion/draft', { vault: 'Fictional Company', folder: 'Raw', source_id: textSource.source_id, revision: textSource.revision });
     assert.equal(textDraftResponse.status, 200, await textDraftResponse.clone().text());
     const textDraft = await textDraftResponse.json();
-    assert.ok(textDraft.draft.related_notes.some((item) => item.path === 'Knowledge/Team checklist.md'), 'non-Markdown sources get same-vault links from their generated summary');
     assert.doesNotMatch(JSON.stringify(textDraft.draft.related_notes), /Secret|ZQX_PRIVATE_NOTE_MUST_NOT_BE_READ/);
-    const textSavedResponse = await api('/api/ingestion/save-draft', { draft_id: textDraft.draft_id, destination: 'Knowledge', related_note_paths: ['Knowledge/Team checklist.md'], confirm: true });
+    const textSavedResponse = await api('/api/ingestion/save-draft', { draft_id: textDraft.draft_id, destination: 'Knowledge', related_note_paths: [], confirm: true });
     assert.equal(textSavedResponse.status, 200, await textSavedResponse.clone().text());
     const textSaved = await textSavedResponse.json();
     assert.equal(textSaved.saved_as_proposal, true);
     const textNote = await readFile(path.join(vault, textSaved.path.slice('Fictional Company/'.length)), 'utf8');
     assert.match(textNote, /\[\[Raw\/Process notes\.txt\]\]/);
-    assert.match(textNote, /\[\[Knowledge\/Team checklist\]\]/);
   } finally { await new Promise((resolve) => app.server.close(resolve)); }
 });
 

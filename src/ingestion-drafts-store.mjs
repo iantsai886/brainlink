@@ -32,6 +32,12 @@ function validRecord(record, id) {
       && typeof item.title === 'string' && item.title.length > 0 && item.title.length <= 100
       && typeof item.description === 'string' && item.description.length > 0 && item.description.length <= 500
       && typeof item.evidence === 'string' && item.evidence.length > 0 && item.evidence.length <= 240)))
+    && (draft.relationships === undefined || (Array.isArray(draft.relationships) && draft.relationships.length <= 12 && draft.relationships.every((item) => item
+      && typeof item.subject_id === 'string' && item.subject_id.length <= 128 && typeof item.subject_title === 'string' && item.subject_title.length <= 160
+      && ['owned_by', 'runs', 'consumes', 'produces', 'depends_on', 'part_of', 'assigned_to', 'informed_by', 'communicates_with'].includes(item.predicate)
+      && typeof item.target_id === 'string' && item.target_id.length <= 128 && typeof item.target_title === 'string' && item.target_title.length <= 160
+      && ['personal', 'organisation', 'client'].includes(item.scope)
+      && typeof item.evidence === 'string' && item.evidence.length > 0 && item.evidence.length <= 240)))
     && (draft.related_basis === undefined || draft.related_basis === 'source_and_draft')
     && (draft.related_notes === undefined || (Array.isArray(draft.related_notes) && draft.related_notes.length <= 8 && draft.related_notes.every((item) => item
       && safeNotePath(item.path) && !/[\[\]]/.test(item.path)
