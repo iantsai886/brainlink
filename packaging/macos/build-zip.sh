@@ -8,13 +8,15 @@
 #
 # Env overrides (for testing against a different checkout/runtime cache):
 #   BRAINLINK_STORE_SRC  optional override (default: checked-in vendor/brainlink-store)
-#   BRAINLINK_NODE_RT    path to the downloaded, SHA-checked Node tarballs (default: /workspace/brainlink-runs/node-rt)
+#   BRAINLINK_MAC_NODE_RT path to the shared downloaded, SHA-checked Mac Node cache (default: vendor/node-macos)
+#   BRAINLINK_NODE_RT     legacy alias for BRAINLINK_MAC_NODE_RT
 set -euo pipefail
 HERE="$(cd "$(dirname "$0")" && pwd)"
 ROOT="$(cd "${1:-$HERE/../..}" && pwd)"
 STORE_SRC="$(cd "${BRAINLINK_STORE_SRC:-$ROOT/vendor/brainlink-store}" && pwd)"
-NODE_RT="${BRAINLINK_NODE_RT:-/workspace/brainlink-runs/node-rt}"
 NODE_VERSION="22.23.3"
+NODE_DIST="https://nodejs.org/dist/v$NODE_VERSION"
+NODE_RT="${BRAINLINK_MAC_NODE_RT:-${BRAINLINK_NODE_RT:-$ROOT/vendor/node-macos}}"
 VERSION_FULL="$(node -p "require('$ROOT/package.json').version")"
 VERSION="$(node -p "'$VERSION_FULL'.split('.').slice(0,2).join('.')")"
 WORK="$ROOT/build/macos-zip"
@@ -22,10 +24,21 @@ DIST="$ROOT/dist"
 STAGE="$WORK/BrainLink"
 
 echo "BrainLink $VERSION_FULL mac zip · Node $NODE_VERSION"
-rm -rf "$WORK" && mkdir -p "$STAGE/app" "$DIST"
+rm -rf "$WORK" && mkdir -p "$STAGE/app" "$DIST" "$NODE_RT"
 
 # 1. Node runtimes: verify the official tarballs against the SHA256 sums downloaded alongside
 #    them, then extract only bin/node + LICENSE for each architecture (no npm, no headers, no docs).
+if [ ! -f "$NODE_RT/SHASUMS256.txt" ]; then
+  curl -fsS "$NODE_DIST/SHASUMS256.txt" -o "$NODE_RT/SHASUMS256.txt.tmp"
+  mv "$NODE_RT/SHASUMS256.txt.tmp" "$NODE_RT/SHASUMS256.txt"
+fi
+for arch in arm64 x64; do
+  archive="$NODE_RT/node-v$NODE_VERSION-darwin-$arch.tar.gz"
+  if [ ! -f "$archive" ]; then
+    curl -fLsS --retry 2 "$NODE_DIST/$(basename "$archive")" -o "$archive.tmp"
+    mv "$archive.tmp" "$archive"
+  fi
+done
 (cd "$NODE_RT" && grep -E "darwin-(arm64|x64)\.tar\.gz" SHASUMS256.txt | sha256sum -c --quiet)
 for arch in arm64 x64; do
   mkdir -p "$STAGE/runtime/$arch/bin"

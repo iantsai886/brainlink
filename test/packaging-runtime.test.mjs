@@ -51,6 +51,10 @@ test('every native installer bundles all production dependencies and portable Br
     assert.match(builder, /for arch in arm64 x64/, `${label} must package both supported Mac architectures`);
   }
   assert.match(macPkgBuilder, /BRAINLINK_MAC_NODE_RT/, 'the macOS installer must keep its Node 22 runtime cache separate from the Node 24 Windows/Linux cache');
+  assert.match(macZipBuilder, /BRAINLINK_MAC_NODE_RT/, 'the macOS ZIP must reuse the macOS installer runtime cache override');
+  assert.match(macZipBuilder, /vendor\/node-macos/, 'the macOS ZIP must use a repository-local default runtime cache');
+  assert.match(macZipBuilder, /curl -fsS "\$NODE_DIST\/SHASUMS256\.txt"/, 'the macOS ZIP must fetch the pinned runtime checksum list when missing');
+  assert.match(macZipBuilder, /curl -fLsS --retry 2 "\$NODE_DIST\/\$\(basename "\$archive"\)"/, 'the macOS ZIP must fetch missing runtime archives before validating them');
   assert.match(macPkgBuilder, /os-version min="11\.0"/, 'the macOS installer target must match its advertised minimum OS');
 
   const windowsBuilder = await read('packaging/windows/build-windows.ps1');
