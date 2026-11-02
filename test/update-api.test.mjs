@@ -99,3 +99,40 @@ test('Setup update check requires its local token and returns only signed releas
     await rm(home, { recursive: true, force: true });
   }
 });
+
+test('verified update open and manual download reject overlapping actions but allow the fallback afterward', async () => {
+  const home = await mkdtemp(path.join(tmpdir(), 'brainlink-update-race-'));
+  let beginLaunch;
+  let finishLaunch;
+  const launchStarted = new Promise((resolve) => { beginLaunch = resolve; });
+  const launchGate = new Promise((resolve) => { finishLaunch = resolve; });
+  const app = await startSetup({
+    env: { BRAINLINK_HOME: path.join(home, 'app'), HOME: home }, home, os: 'linux', arch: 'x64', useCli: false,
+    updatePublicKey: publicPem,
+    updateTempRoot: home,
+    updateLauncher: async ({ file }) => { assert.deepEqual(await readFile(file), packageBytes); beginLaunch(); await launchGate; },
+    updateFetch: async (url) => url.includes('/releases/download/')
+      ? new Response(packageBytes, { headers: { 'content-type': 'application/octet-stream', 'content-length': String(packageBytes.length) } })
+      : new Response(JSON.stringify(envelope), { headers: { 'content-type': 'application/json' } }),
+  });
+  const base = `http://127.0.0.1:${app.port}`;
+  try {
+    const preparedResponse = await fetch(`${base}/api/updates/download`, { method: 'POST', headers: { 'X-BrainLink-Token': app.token, 'Content-Type': 'application/json' }, body: '{}' });
+    const prepared = await preparedResponse.json();
+    const openPromise = fetch(`${base}/api/updates/open`, { method: 'POST', headers: { 'X-BrainLink-Token': app.token, 'Content-Type': 'application/json' }, body: JSON.stringify({ ticket: prepared.ticket }) });
+    await launchStarted;
+    const duplicateOpen = await fetch(`${base}/api/updates/open`, { method: 'POST', headers: { 'X-BrainLink-Token': app.token, 'Content-Type': 'application/json' }, body: JSON.stringify({ ticket: prepared.ticket }) });
+    assert.equal(duplicateOpen.status, 400, 'a second open cannot race the active installer handoff');
+    const overlappingDownload = await fetch(new URL(prepared.download_url, base));
+    assert.equal(overlappingDownload.status, 409, 'download cannot race the active installer handoff');
+    finishLaunch();
+    assert.equal((await openPromise).status, 200);
+    const fallback = await fetch(new URL(prepared.download_url, base));
+    assert.equal(fallback.status, 200, 'manual download is allowed after the installer handoff completes');
+    assert.deepEqual(Buffer.from(await fallback.arrayBuffer()), packageBytes);
+  } finally {
+    finishLaunch();
+    await new Promise((resolve) => app.server.close(resolve));
+    await rm(home, { recursive: true, force: true });
+  }
+});
