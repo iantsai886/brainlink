@@ -281,7 +281,11 @@ export async function startSetup(opts = {}) {
   const sessions = sessionsService(env, home); // src/host.mjs: imports only from this Setup user's home
   const rsiLedger = createRsiLedger({ home: appHome(env), verifyCommit: opts.rsiVerifyCommit || ((sha) => hasGitCommit(ROOT, sha)) });
   const rsiWeekly = createRsiWeekly({ home: appHome(env) });
-  const rsiExperiments = createRsiExperiments({ env, ...(opts.rsiSourceState ? { sourceState: opts.rsiSourceState } : {}) });
+  const rsiExperiments = createRsiExperiments({
+    env,
+    getRerankerSettings: async () => (await loadConfig(file)).reranker,
+    ...(opts.rsiSourceState ? { sourceState: opts.rsiSourceState } : {}),
+  });
   // Opt-in research discovery: off until the user enables it; runs only while this process is open.
   const rsiDiscovery = createRsiDiscovery({ home: appHome(env), ledger: rsiLedger, fetchImpl: opts.discoveryFetch, lookup: opts.discoveryLookup });
   const initialDiscoveryStatus = await rsiDiscovery.status().catch(() => null);
@@ -1591,13 +1595,17 @@ export async function startSetup(opts = {}) {
       attachRetrievalObservationSignals(report, await rsiWeekly.listRetrievalObservations({ since }), { now });
       return { report };
     },
-    'GET /api/rsi/experiments': async () => ({ suites: rsiExperiments.suites() }),
+    'GET /api/rsi/experiments': async () => {
+      const cfg = await loadConfig(file);
+      return { suites: rsiExperiments.suites({ rerankerEnabled: cfg.reranker.enabled }) };
+    },
     'POST /api/rsi/experiments/run': async (b) => {
       const ideas = await rsiLedger.list();
       const idea = ideas.find((item) => item.id === b.idea_id);
       if (!idea) throw new Error('RSI idea not found.');
       if (idea.status !== 'testing') throw new Error('Move this RSI idea to testing before running an experiment.');
-      const suite = rsiExperiments.suites().find((item) => item.id === b.suite);
+      const cfg = await loadConfig(file);
+      const suite = rsiExperiments.suites({ rerankerEnabled: cfg.reranker.enabled }).find((item) => item.id === b.suite);
       if (!suite) throw new Error('Choose one of the built-in fictional evaluation suites.');
       if (idea.fields.candidate_version !== suite.candidate_version) throw new Error(`This test is for candidate ${suite.candidate_version}; update the RSI idea candidate version first.`);
       const receipt = await rsiExperiments.run(b.suite);

@@ -1160,7 +1160,7 @@
   "rsi.experiment.suite1": "Conjunto de teste da qualidade da pesquisa",
   "rsi.experiment.suite2": "Conjunto independente de qualidade e eficiência",
   "rsi.experiment.run": "Executar avaliação",
-  "rsi.experiment.note": "Usa apenas notas fictícias incluídas. Guarda resultados resumidos para revisão e nunca altera a pesquisa ativa.",
+  "rsi.experiment.note": "Usa apenas notas fictícias. Se selecionado, o teste envia perguntas sintéticas e trechos permitidos ao reranker local ativado neste computador. Nunca lê os seus vaults nem altera a pesquisa ativa.",
   "rsi.experiment.history": "Registos de avaliação",
   "rsi.experiment.done": "Avaliação guardada para revisão.",
   "rsi.experiment.tokens": "Tokens estimados: {baseline} → {candidate}",
@@ -1177,5 +1177,6 @@
   "rsi.experiment.source.clean": "commit limpo",
   "rsi.experiment.source.changed": "código alterado ou com mudanças locais",
   "rsi.experiment.useForReview": "Usar este teste na revisão",
-  "rsi.experiment.evidencePrefilled": "A execução, o commit e a fixture foram copiados para os campos de revisão."
+  "rsi.experiment.evidencePrefilled": "A execução, o commit e a fixture foram copiados para os campos de revisão.",
+  "rsi.experiment.reranker": "Teste do reranker local (notas fictícias)"
 }

@@ -10,7 +10,7 @@ import { normalize, saveConfig } from '../src/config.mjs';
 import { createContext, loadVault, searchWithVerdict } from '../src/core.mjs';
 import { createMcp } from '../src/server.mjs';
 import { VectorStore, fillVectors } from '../src/embed.mjs';
-import { evaluateRetrieval, validateRetrievalFixture, decideIndependentComparison } from '../src/retrieval-eval.mjs';
+import { evaluateRetrieval, validateRetrievalFixture, decideIndependentComparison, decideRetrievalComparison } from '../src/retrieval-eval.mjs';
 import { estTokens } from '../src/sessions/tokens.mjs';
 import { compactSearchResponse } from '../src/search-projection.mjs';
 import { buildContextPacket } from '../src/context-packet.mjs';
@@ -26,6 +26,17 @@ test('RSI comparison gates prioritize privacy, sample size, and quality before e
     [{ privacyOk: false, enoughCases: false, qualityOk: false, smallerContext: true }, 'blocked_privacy'],
   ];
   for (const [input, expected] of cases) assert.equal(decideIndependentComparison(input), expected);
+});
+
+test('retrieval RSI rejects regressions before allowing human review', () => {
+  const cases = [
+    [{ privacyOk: false, enoughCases: true, qualityRegression: false, qualityGain: true }, 'blocked_privacy'],
+    [{ privacyOk: true, enoughCases: false, qualityRegression: false, qualityGain: true }, 'needs_more_cases'],
+    [{ privacyOk: true, enoughCases: true, qualityRegression: true, qualityGain: true }, 'quality_regression'],
+    [{ privacyOk: true, enoughCases: true, qualityRegression: false, qualityGain: true }, 'eligible_for_review'],
+    [{ privacyOk: true, enoughCases: true, qualityRegression: false, qualityGain: false }, 'no_demonstrated_gain'],
+  ];
+  for (const [input, expected] of cases) assert.equal(decideRetrievalComparison(input), expected);
 });
 
 test('retrieval experiment is scoped, privacy-safe, token-measured and never self-promotes on too few cases', async () => {

@@ -21,3 +21,9 @@ The [llama.cpp server](https://github.com/ggml-org/llama.cpp/blob/master/tools/s
 - The connection test checks only that the service responds in the expected format. It does not measure ranking quality, token savings, or answer quality.
 
 To turn the feature off, clear **Use local reranking** and save. BrainLink then uses its normal search ranking.
+
+## RSI evaluation
+
+When local reranking is enabled in Setup, the RSI experiment list offers **Local reranker test set (fictional notes)**. It compares normal search with the configured local service using 21 bundled fictional cases. The test is manual, runs only after an RSI idea enters `testing` with candidate version `local-reranker-v1`, and stores only aggregate, commit-bound evidence. It sends synthetic questions and eligible snippets to the loopback service; it never reads connected vaults. A failed service call aborts the experiment so normal-search fallback cannot be mistaken for a reranker result.
+
+This development set is not an independent held-out benchmark. The receipt does not certify which model is installed, measure generated answers or provider-billed token savings, or change live search. Human review is still required.

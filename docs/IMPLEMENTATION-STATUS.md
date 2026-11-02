@@ -2,6 +2,12 @@
 
 Status snapshot: 2026-11-03 (Asia/Taipei).
 
+### Local reranker RSI experiment (working tree based on `4ee2feb`; 2026-11-03)
+
+Added a third fixed RSI experiment, visible only when the user has enabled the local loopback reranker. It runs on the bundled 21-case fictional vault, sends only synthetic queries and already-authorized synthetic snippets to that local service, and aborts if the reranker fails instead of scoring fallback search. A candidate with lower hit@k or reciprocal rank is marked `quality_regression`; only a non-regressing candidate can be eligible for human review. It never changes live search settings or promotes itself. This small development set is not held-out or independent model-quality evidence, and no token savings or real-model gain is claimed.
+
+Windows / Node.js 24.22.1 `npm run test:all` passed on the working tree: core 657 total (647 passed, 0 failed, 10 platform/privilege skips); UI 48/48 passed. Focused reranker/RSI/privacy tests passed as part of the full run. No real reranker service or model was used. GitHub Actions remain intentionally unused; this is local test evidence only.
+
 ### Latest branch update (`f89884f`; 2026-11-03)
 
 RSI experiment options now come from the server's fixed suite registry. The page no longer repeats suite IDs and labels in a separate hardcoded list, reducing the chance that a registered evaluation cannot be selected in Setup. The registry still allows only the two built-in fictional retrieval suites; this does not add arbitrary code execution, reranker quality measurement, or automatic promotion. Focused RSI tests passed 14/14 after the final UI assertion update. A full Windows `npm run test:all` run on the same application change passed 645 tests, failed 0, and skipped 10 due to platform/privilege constraints.

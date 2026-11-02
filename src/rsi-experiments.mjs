@@ -10,23 +10,32 @@ import { normalize } from './config.mjs';
 import { createContext } from './core.mjs';
 import { evaluateRetrieval, RETRIEVAL_EVALUATOR_VERSION } from './retrieval-eval.mjs';
 import { readGitSourceState } from './git-source-state.mjs';
+import { validateRerankerSettings } from './rerank.mjs';
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 export const RSI_EXPERIMENT_SUITES = Object.freeze({
   'retrieval-rsi-v1': Object.freeze({ fixture: 'retrieval-rsi-v1.json', vault: 'vault', candidate_version: 'per-case-rephrasing-v1', policy: 'fixed rephrasing policy; semantic search off', label_key: 'rsi.experiment.suite1' }),
   'retrieval-independent-v1': Object.freeze({ fixture: 'retrieval-independent-v1.json', vault: 'independent-vault', candidate_version: 'compact-search-v1', policy: 'lossless production MCP compact-search projection; evaluation only', label_key: 'rsi.experiment.suite2' }),
+  'local-reranker-v1': Object.freeze({ fixture: 'retrieval-rsi-v1.json', vault: 'vault', candidate_version: 'local-reranker-v1', policy: 'explicitly enabled loopback reranker against 21 fictional cases; development evidence only', label_key: 'rsi.experiment.reranker', requires_reranker: true }),
 });
 
 const safeRatio = (value) => Number.isFinite(value) ? Math.max(0, Math.min(1, Number(value))) : 0;
 
-export function createRsiExperiments({ root = ROOT, env = process.env, now = () => new Date(), sourceState = readGitSourceState } = {}) {
+export function createRsiExperiments({ root = ROOT, env = process.env, now = () => new Date(), sourceState = readGitSourceState, getRerankerSettings = async () => ({ enabled: false }) } = {}) {
   let running = false;
   return {
-    suites: () => Object.entries(RSI_EXPERIMENT_SUITES).map(([id, suite]) => ({ id, fixture: suite.fixture, candidate_version: suite.candidate_version, candidate_policy: suite.policy, label_key: suite.label_key })),
+    suites: ({ rerankerEnabled = false } = {}) => Object.entries(RSI_EXPERIMENT_SUITES)
+      .filter(([, suite]) => !suite.requires_reranker || rerankerEnabled)
+      .map(([id, suite]) => ({ id, fixture: suite.fixture, candidate_version: suite.candidate_version, candidate_policy: suite.policy, label_key: suite.label_key })),
     run: async (suiteId) => {
       if (running) throw new Error('An RSI experiment is already running. Try again when it finishes.');
       const suite = RSI_EXPERIMENT_SUITES[suiteId];
       if (!suite) throw new Error('Choose one of BrainLink’s built-in fictional retrieval suites.');
+      let rerankerSettings = null;
+      if (suite.requires_reranker) {
+        rerankerSettings = validateRerankerSettings(await getRerankerSettings());
+        if (!rerankerSettings.enabled) throw new Error('Enable and test the local reranking service in Setup before running this experiment.');
+      }
       running = true;
       try {
         const startedAt = now().toISOString();
@@ -41,7 +50,15 @@ export function createRsiExperiments({ root = ROOT, env = process.env, now = () 
           const ctx = createContext(normalize({ vaults: [{ name: fixture.vault, path: vaultRoot }] }), {
             env: { ...env, BRAINLINK_HOME: isolatedHome, BRAINLINK_VAULTS: fixture.vault, BRAINLINK_SEMANTIC: '0' },
           });
-          report = await evaluateRetrieval(ctx, fixture, { fixtureBytes });
+          if (suite.requires_reranker) {
+            const candidateContext = createContext(normalize({ vaults: [{ name: fixture.vault, path: vaultRoot }], reranker: rerankerSettings }), {
+              env: { ...env, BRAINLINK_HOME: isolatedHome, BRAINLINK_VAULTS: fixture.vault, BRAINLINK_SEMANTIC: '0' },
+            });
+            report = await evaluateRetrieval(ctx, fixture, {
+              fixtureBytes, candidateContext, candidateRephrasing: false, requireCandidateReranker: true,
+              candidatePolicy: suite.policy,
+            });
+          } else report = await evaluateRetrieval(ctx, fixture, { fixtureBytes });
         } finally { await rm(isolatedHome, { recursive: true, force: true }); }
         const sourceAfter = sourceState(root);
         const sourceStable = Boolean(sourceBefore?.clean && sourceAfter?.clean
@@ -83,7 +100,9 @@ export function createRsiExperiments({ root = ROOT, env = process.env, now = () 
           },
           guardrails: { baseline_privacy_violations: baselinePrivacy, candidate_privacy_violations: candidatePrivacy },
           estimated_context_tokens: { baseline: baselineTokens, candidate: candidateTokens },
-          limitations: independent
+          limitations: suite.requires_reranker
+            ? ['Development fixture only; these cases are not an independent held-out set.', 'Only synthetic fixture queries and eligible snippets are sent to the explicitly configured loopback reranker.', 'The receipt does not identify or certify the installed model.', 'No model-generated answer quality, provider-billed token savings, or production result is measured.']
+            : independent
             ? ['Fictional frozen corpus only; no model-generated answers.', 'Token values are local estimates, not provider billing.', 'No cross-client or production claim.']
             : ['Fictional frozen corpus only.', 'Token values are local estimates, not provider billing.', 'No live ranking or knowledge is changed.'],
         };

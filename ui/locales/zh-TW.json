@@ -1160,7 +1160,7 @@
   "rsi.experiment.suite1": "檢索品質測試集",
   "rsi.experiment.suite2": "獨立品質與效率測試集",
   "rsi.experiment.run": "執行評估",
-  "rsi.experiment.note": "只使用內建虛構筆記。保存彙總結果供審查，不會改變實際檢索。",
+  "rsi.experiment.note": "只使用虛構筆記。選取此測試時，會將合成問題與允許的摘要片段送到這台電腦上已啟用的本機重排序服務。不會讀取你的 vault，也不會改變實際搜尋。",
   "rsi.experiment.history": "評估紀錄",
   "rsi.experiment.done": "評估結果已保存，等待審查。",
   "rsi.experiment.tokens": "估算 token：{baseline} → {candidate}",
@@ -1177,6 +1177,6 @@
   "rsi.experiment.source.clean": "乾淨的 commit",
   "rsi.experiment.source.changed": "程式碼有變更或工作目錄不乾淨",
   "rsi.experiment.useForReview": "用這次測試作為審查依據",
-  "rsi.experiment.evidencePrefilled": "已將測試執行、commit 和 fixture 填入審查欄位。"
+  "rsi.experiment.evidencePrefilled": "已將測試執行、commit 和 fixture 填入審查欄位。",
+  "rsi.experiment.reranker": "本機重排序測試集（虛構筆記）"
 }
-

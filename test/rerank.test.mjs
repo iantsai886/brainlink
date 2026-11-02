@@ -72,6 +72,9 @@ test('search filters private notes before sending candidates to the local rerank
   };
   try {
     await search(ctx, 'Test', 'project calendar weekly review', { limit: 5, semantic: false });
+    globalThis.fetch = async () => { throw new Error('local reranker failed'); };
+    await assert.rejects(search(ctx, 'Test', 'project calendar weekly review', { limit: 5, semantic: false, strictReranker: true }), /local reranker failed/);
+    await assert.doesNotReject(search(ctx, 'Test', 'project calendar weekly review', { limit: 5, semantic: false }), 'normal search keeps its documented fallback outside strict evaluation');
   } finally { globalThis.fetch = originalFetch; }
   assert.ok(payload, 'reranker was called');
   const sent = JSON.stringify(payload);
@@ -87,7 +90,7 @@ test('reranker settings and connection controls are present in all user locales'
   assert.match(html, /api\('POST', '\/api\/reranker\/test'/);
   for (const locale of ['en', 'pt', 'zh-TW']) {
     const strings = JSON.parse(await readFile(path.join(root, 'ui', 'locales', `${locale}.json`), 'utf8'));
-    for (const key of ['reranker.title', 'reranker.hint', 'reranker.enabled', 'reranker.url', 'reranker.save', 'reranker.test', 'reranker.testing', 'reranker.ready', 'reranker.failed', 'reranker.savedOn', 'reranker.savedOff']) assert.ok(strings[key], `${locale} ${key}`);
+    for (const key of ['reranker.title', 'reranker.hint', 'reranker.enabled', 'reranker.url', 'reranker.save', 'reranker.test', 'reranker.testing', 'reranker.ready', 'reranker.failed', 'reranker.savedOn', 'reranker.savedOff', 'rsi.experiment.reranker']) assert.ok(strings[key], `${locale} ${key}`);
   }
 });
 
@@ -107,9 +110,15 @@ test('authenticated Setup saves loopback reranker settings and rejects remote ta
     const stateResponse = await fetch(`${base}/api/state`, { headers: { 'X-BrainLink-Token': app.token } });
     assert.deepEqual((await stateResponse.json()).reranker, body.reranker);
     assert.deepEqual((await loadConfig(path.join(env.BRAINLINK_HOME, 'config.json'))).reranker, body.reranker);
+    const suitesOn = await fetch(`${base}/api/rsi/experiments`, { headers: { 'X-BrainLink-Token': app.token } }).then(r => r.json());
+    assert.ok(suitesOn.suites.some((suite) => suite.id === 'local-reranker-v1'));
 
     const rejected = await fetch(`${base}/api/reranker/settings`, { method: 'POST', headers, body: JSON.stringify({ enabled: true, url: 'http://example.com/v1/rerank' }) });
     assert.equal(rejected.status, 400);
     assert.deepEqual((await loadConfig(path.join(env.BRAINLINK_HOME, 'config.json'))).reranker, body.reranker);
+    const disabled = await fetch(`${base}/api/reranker/settings`, { method: 'POST', headers, body: JSON.stringify({ ...body.reranker, enabled: false }) });
+    assert.equal(disabled.status, 200);
+    const suitesOff = await fetch(`${base}/api/rsi/experiments`, { headers: { 'X-BrainLink-Token': app.token } }).then(r => r.json());
+    assert.ok(!suitesOff.suites.some((suite) => suite.id === 'local-reranker-v1'));
   } finally { app.server.close(); }
 });

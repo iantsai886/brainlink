@@ -1160,7 +1160,7 @@
   "rsi.experiment.suite1": "Retrieval quality test set",
   "rsi.experiment.suite2": "Independent quality and efficiency test set",
   "rsi.experiment.run": "Run evaluation",
-  "rsi.experiment.note": "Uses built-in fictional notes only. Saves summary results for review and never changes live retrieval.",
+  "rsi.experiment.note": "Uses fictional notes only. If selected, the test sends synthetic questions and eligible snippets to your enabled local reranker on this computer. It never reads your vaults or changes live search.",
   "rsi.experiment.history": "Evaluation records",
   "rsi.experiment.done": "Evaluation saved for review.",
   "rsi.experiment.tokens": "Estimated tokens: {baseline} → {candidate}",
@@ -1177,6 +1177,6 @@
   "rsi.experiment.source.clean": "clean commit",
   "rsi.experiment.source.changed": "source changed or dirty",
   "rsi.experiment.useForReview": "Use this test for review",
-  "rsi.experiment.evidencePrefilled": "Test run, commit and fixture are copied into the review fields."
+  "rsi.experiment.evidencePrefilled": "Test run, commit and fixture are copied into the review fields.",
+  "rsi.experiment.reranker": "Local reranker test set (fictional notes)"
 }
-

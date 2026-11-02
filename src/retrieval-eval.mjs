@@ -9,6 +9,13 @@ const sha256 = (value) => createHash('sha256').update(value).digest('hex');
 const boundedMean = (values) => values.length ? Math.round(values.reduce((a, b) => a + b, 0) / values.length) : 0;
 export const RETRIEVAL_EVALUATOR_VERSION = 'retrieval-eval-v3';
 
+export function decideRetrievalComparison({ privacyOk, enoughCases, qualityRegression, qualityGain }) {
+  if (!privacyOk) return 'blocked_privacy';
+  if (!enoughCases) return 'needs_more_cases';
+  if (qualityRegression) return 'quality_regression';
+  return qualityGain ? 'eligible_for_review' : 'no_demonstrated_gain';
+}
+
 export function validateRetrievalFixture(fixture) {
   const errors = [];
   if (fixture?.schema !== 1) errors.push('schema must be 1');
@@ -166,7 +173,12 @@ export async function evaluateRetrieval(ctx, fixture, options = {}) {
     const details = [], times = [], tokens = [];
     for (const c of fixture.cases) {
       const start = now();
-      const results = await search(ctx, fixture.vault, c.query, { limit: fixture.topK, semantic: false, queries: candidate ? c.queries || [] : [] });
+      const searchContext = candidate ? options.candidateContext || ctx : ctx;
+      const candidateQueries = candidate && options.candidateRephrasing !== false ? c.queries || [] : [];
+      const results = await search(searchContext, fixture.vault, c.query, {
+        limit: fixture.topK, semantic: false, queries: candidateQueries,
+        ...(candidate && options.requireCandidateReranker ? { strictReranker: true } : {}),
+      });
       times.push(Math.max(0, now() - start));
       tokens.push(estTokens(JSON.stringify(results)));
       const rank = results.findIndex((r) => c.expected.includes(r.path)) + 1;
@@ -183,11 +195,12 @@ export async function evaluateRetrieval(ctx, fixture, options = {}) {
   const candidate = await measure(true);
   const enough = fixture.cases.length >= minimumCases;
   const qualityGain = candidate.hit_at_k > baseline.hit_at_k || (candidate.hit_at_k === baseline.hit_at_k && candidate.reciprocal_rank > baseline.reciprocal_rank);
+  const qualityRegression = candidate.hit_at_k < baseline.hit_at_k || candidate.reciprocal_rank < baseline.reciprocal_rank;
   const privacyOk = baseline.privacy_violations === 0 && candidate.privacy_violations === 0;
-  const decision = !privacyOk ? 'blocked_privacy' : !enough ? 'needs_more_cases' : qualityGain ? 'eligible_for_review' : 'no_demonstrated_gain';
+  const decision = decideRetrievalComparison({ privacyOk, enoughCases: enough, qualityRegression, qualityGain });
   return {
     schema: 1, fixture_sha256: sha256(options.fixtureBytes ?? JSON.stringify(fixture)), vault: fixture.vault, case_count: fixture.cases.length,
-    minimum_cases_for_review: minimumCases, top_k: fixture.topK, candidate: 'per-case query rephrasings; semantic search off',
+    minimum_cases_for_review: minimumCases, top_k: fixture.topK, candidate: options.candidatePolicy || 'per-case query rephrasings; semantic search off',
     baseline, result: candidate, decision,
     limitations: ['Output tokens are locally estimated, not provider billing.', 'Latency is environment-dependent.', 'Only labelled fixture queries are evaluated.', 'No live ranking or knowledge is changed.'],
   };
