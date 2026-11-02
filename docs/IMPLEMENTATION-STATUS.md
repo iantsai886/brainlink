@@ -2,6 +2,10 @@
 
 Status snapshot: 2026-11-03 (Asia/Taipei).
 
+### Current Windows installed-app smoke (`0e86ffd551bf8260ff0a56e393ca9249d93961df`; 2026-11-03)
+
+`npm run smoke:installed:win` rebuilt the unsigned Windows 1.2.8 QA installer from the current branch and passed. The installed app launched from its bundled Node runtime; both shortcuts opened Setup; folder-ingestion controls loaded; synthetic English, Portuguese and Traditional Chinese image OCR passed; scanned-PDF OCR passed; HTML extraction omitted scripts and hidden content; conflict retry did not duplicate the saved note; the temporary Hermes hook was preserved; the isolated sign-in launcher passed health and removed only its own entry; and uninstall removed only the QA app while preserving test data and restoring PATH. This is synthetic local Windows evidence. The package is unsigned and unpublished; it does not prove Mac/Linux behavior, user acceptance, or production readiness.
+
 ### Local reranker RSI experiment (commit `08c2732`; 2026-11-03)
 
 Added a third fixed RSI experiment, visible only when the user has enabled the local loopback reranker. It runs on the bundled 21-case fictional vault, sends only synthetic queries and already-authorized synthetic snippets to that local service, and aborts if the reranker fails instead of scoring fallback search. A candidate with lower hit@k or reciprocal rank is marked `quality_regression`; only a non-regressing candidate can be eligible for human review. It never changes live search settings or promotes itself. This small development set is not held-out or independent model-quality evidence, and no token savings or real-model gain is claimed.
