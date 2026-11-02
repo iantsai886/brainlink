@@ -2,6 +2,14 @@
 
 Status snapshot: 2026-11-03 (Asia/Taipei).
 
+### Latest branch update (`f89884f`; 2026-11-03)
+
+RSI experiment options now come from the server's fixed suite registry. The page no longer repeats suite IDs and labels in a separate hardcoded list, reducing the chance that a registered evaluation cannot be selected in Setup. The registry still allows only the two built-in fictional retrieval suites; this does not add arbitrary code execution, reranker quality measurement, or automatic promotion. Focused RSI tests passed 14/14 after the final UI assertion update. A full Windows `npm run test:all` run on the same application change passed 645 tests, failed 0, and skipped 10 due to platform/privilege constraints.
+
+A fresh Windows stage and unsigned 1.2.8 installer were rebuilt from source commit `f89884f6023ec4d64233069de58860f2a3817c69`; installer SHA-256 `8377AB5501D0C40E2F0CE5563DCD13E92F2CBEFC7C84D8ACFCD28B0484EEA121`. `npm run smoke:installed:win` passed on that exact application source: bundled-runtime launch, shortcuts, Setup and folder-scan controls, multilingual OCR, scanned-PDF OCR, safe HTML extraction, conflict-safe filing retry, temporary Hermes hook, isolated startup toggle, and uninstall while preserving the test data and PATH. This is Windows local QA evidence only. GitHub Actions remain intentionally canceled; no Mac/Linux desktop run, signed installer, public release, or customer acceptance is established by this receipt.
+
+The exact same Windows source commit `f89884f6023ec4d64233069de58860f2a3817c69` also passed `npm run smoke:upgrade:win`: the isolated 1.2.7 install upgraded in place to 1.2.8, passed Setup health, preserved its test-data canary, and uninstalled while preserving data and restoring PATH. The upgrade test used a temporary profile and did not touch the real BrainLink install.
+
 ### Exact current branch full-suite receipt (`56817e21978fcad3bf0751e9830390bbc69f4c1c`; 2026-11-03)
 
 On Windows with Node.js 24.22.1 and npm 11.19.1, `npm run test:all` passed on the exact current checkout: core 649 total (639 passed, 0 failed, 10 platform/privilege skips); UI 48/48 passed. The skips require other operating systems or Windows symlink privileges. The run covers the current source tree, including folder scanning and local draft filing, graph and workflow editing, Twin scope isolation, GitHub-backed knowledge sync, backups, session handoffs, and RSI evaluation. This is local automated evidence only; it does not establish native macOS/Linux desktop behavior, signed/public distribution, hosted CI, broad model quality, real-vault acceptance, or measured provider-billed token savings.
