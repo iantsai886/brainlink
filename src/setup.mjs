@@ -159,7 +159,9 @@ function startVaultChangeWatcher(vaults, onChange, { debounceMs = 300, pollMs = 
   // network/FUSE-backed vault (for example an rclone Google Drive mount). In that
   // case the user can refresh Setup manually; never scan the whole remote tree just
   // to start the local dashboard.
-  if (fallback.length && process.platform !== 'linux') {
+  // Linux always uses the fingerprint fallback because recursive fs.watch is unavailable.
+  // Non-Linux platforms use it only when their native recursive watcher could not start.
+  if (fallback.length) {
     const initialize = Promise.all(fallback.map(async (vault) => fingerprints.set(vault.name, await markdownFingerprint(vault.path))));
     pollTimer = setInterval(async () => {
       if (stopped || pollRunning) return;

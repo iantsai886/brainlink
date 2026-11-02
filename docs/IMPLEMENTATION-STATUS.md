@@ -5,6 +5,10 @@ GitHub repository: `iantsai886/brainlink`
 Branch: `feat/complete-raw-wiki-folder-flow` (current working branch; based on `origin/main`)
 Code baseline: development target `1.2.8`, with `package.json` as the canonical version source. The `v1.2.7` tag belongs to the separate `wip/v1.2.7` release line; this branch continues from the full-source `main` history and does not move or recreate that tag.
 
+### Linux graph and vault-change refresh (current working tree)
+
+Fixed the Linux fallback in `startVaultChangeWatcher`: Linux does not provide recursive `fs.watch`, and the existing fingerprint-polling fallback was mistakenly disabled on that platform. Configured vault changes now trigger the same content-free `vault-changed` event and graph refresh as other platforms. The graph HTTP refresh test passed in Linux/Node.js 24.22.2. Full `npm run test:all` passed in a clean Linux container on the working tree: core 627 total (627 passed, 0 failed, 2 platform skips); UI 44/44. This is local Docker evidence, not hosted CI or GUI desktop acceptance.
+
 ### Profile-scoped automatic retrieval feedback (current working tree)
 
 Successful `vault_search` and `context_packet` calls from a named, profile-scoped AI now add content-free retrieval observations to the existing RSI ledger. The record contains only the Twin profile ID, tool, search verdict, timestamp, and a coarse response-time bucket. It never records the question, question hash, vault name, note path, excerpt, or answer; legacy and unassigned connections are not recorded. `brainlink miss observations --profile PROFILE_ID` reports profile-separated aggregates. The optional scheduled and manual RSI review compares each profile's current and previous 30-day weak-match rates, requires at least 20 current searches, and can open a fixed review-only proposal when the rate is high or sharply rising. It does not label correct abstentions as errors or change ranking/content. On Windows/Node.js 24.22.1, full `npm run test:all` passed on this working tree: core 629 total (621 passed, 0 failed, 8 platform/privilege skips); UI 44/44. These are local tests, not hosted CI or live customer evidence.
