@@ -10,7 +10,7 @@ A fresh Windows stage and unsigned 1.2.8 installer were rebuilt from source comm
 
 The exact same Windows source commit `f89884f6023ec4d64233069de58860f2a3817c69` also passed `npm run smoke:upgrade:win`: the isolated 1.2.7 install upgraded in place to 1.2.8, passed Setup health, preserved its test-data canary, and uninstalled while preserving data and restoring PATH. The upgrade test used a temporary profile and did not touch the real BrainLink install.
 
-### Exact current branch full-suite receipt (`56817e21978fcad3bf0751e9830390bbc69f4c1c`; 2026-11-03)
+### Earlier exact-commit full-suite receipt (`56817e21978fcad3bf0751e9830390bbc69f4c1c`; 2026-11-03)
 
 On Windows with Node.js 24.22.1 and npm 11.19.1, `npm run test:all` passed on the exact current checkout: core 649 total (639 passed, 0 failed, 10 platform/privilege skips); UI 48/48 passed. The skips require other operating systems or Windows symlink privileges. The run covers the current source tree, including folder scanning and local draft filing, graph and workflow editing, Twin scope isolation, GitHub-backed knowledge sync, backups, session handoffs, and RSI evaluation. This is local automated evidence only; it does not establish native macOS/Linux desktop behavior, signed/public distribution, hosted CI, broad model quality, real-vault acceptance, or measured provider-billed token savings.
 
