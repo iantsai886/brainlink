@@ -5,6 +5,10 @@ GitHub repository: `iantsai886/brainlink`
 Branch: `feat/complete-raw-wiki-folder-flow` (current working branch; based on `origin/main`)
 Code baseline: development target `1.2.8`, with `package.json` as the canonical version source. The `v1.2.7` tag belongs to the separate `wip/v1.2.7` release line; this branch continues from the full-source `main` history and does not move or recreate that tag.
 
+### Linux packages rebuilt with update keyring (exact source commit `e52e77d`, 2026-11-02)
+
+In Docker `node:24-bookworm`, rebuilt the x64/ARM64 portable tarballs and amd64/arm64 Debian packages from the keyring commit. All four SHA-256 sidecars matched. The staged x64 runtime passed `scripts/smoke-staged-runtime.mjs` with its bundled Node.js: version, production dependencies and Skills, OCR in English/Portuguese/Traditional Chinese, scanned-PDF OCR, safe HTML extraction, MCP initialization, fictional public-note search, and private-note canary exclusion. The full source suite passed on the same source commit: core 635 total (633 passed, 0 failed, 2 Windows-only skips); UI 44/44. ARM64 artifacts were built and hashed, not run on ARM hardware; native Mac, graphical Linux, production signing, hosted CI, and customer acceptance remain unverified.
+
 ### Signed-update key rotation overlap support (working tree based on `7c570e0`, 2026-11-02)
 
 The update verifier now accepts a fixed keyring of up to four pinned Ed25519 public keys. During a planned rotation, an app can temporarily trust both the old and new keys; signature key IDs select only a matching compiled key. Empty keyrings still disable update network checks, and duplicate, unpinned, invalid, or oversized keyrings fail closed. Focused updater tests passed 15/15 and the full Linux/Node.js 24.22.2 `npm run test:all` passed on this working tree: core 635 total (633 passed, 0 failed, 2 Windows-only skips); UI 44/44. This does not create a production key or verify a real signed release, key migration across installed machines, publication, hosted CI, or customer acceptance.
