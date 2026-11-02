@@ -16,6 +16,11 @@ $Stage = Join-Path $Root 'build\windows\stage'
 if (-not (Test-Path (Join-Path $Stage 'node\node.exe')) -or -not (Test-Path (Join-Path $Stage 'app\bin\brainlink.mjs'))) {
   throw 'The Windows package stage is missing. Run packaging/windows/build-windows.ps1 first.'
 }
+$SourceUi = Join-Path $Root 'ui\index.html'
+$StagedUi = Join-Path $Stage 'app\ui\index.html'
+if (-not (Test-Path -LiteralPath $StagedUi) -or (Get-FileHash -LiteralPath $SourceUi -Algorithm SHA256).Hash -ne (Get-FileHash -LiteralPath $StagedUi -Algorithm SHA256).Hash) {
+  throw 'The Windows package stage is stale. Run packaging/windows/build-windows.ps1 before the installed-app smoke test.'
+}
 $TestRoot = Join-Path $env:TEMP ('brainlink-install-smoke-' + [guid]::NewGuid().ToString('N'))
 $InstallDir = Join-Path $TestRoot 'installed'
 $BrainLinkHome = Join-Path $TestRoot 'home'
@@ -113,6 +118,7 @@ try {
   $token = (Get-Content -LiteralPath (Join-Path $BrainLinkHome 'setup-token') -Raw).Trim()
   $page = Invoke-WebRequest "http://127.0.0.1:$($instance.port)/?t=$token" -Headers @{ 'X-BrainLink-Token' = $token } -TimeoutSec 5
   if ($page.StatusCode -ne 200 -or $page.Content -notmatch 'BrainLink Setup') { throw 'Installed Setup UI did not load with its local session token.' }
+  if ($page.Content -notmatch 'href="#s-ingestion" data-main-nav="s-ingestion" data-i18n="nav.sources"') { throw 'Installed Setup is missing direct Sources navigation to folder scanning.' }
   if ($page.Content -notmatch 'id="ingestion-enabled"' -or $page.Content -notmatch 'id="ingestion-auto-file"' -or $page.Content -notmatch 'id="ingestion-run"') { throw 'Installed Setup is missing the scheduled scan, auto-file, or manual scan control.' }
   $OcrFixtures = @('ocr-sample.png', 'ocr-portuguese.png', 'ocr-traditional-chinese.png') | ForEach-Object { Join-Path $Root "test\fixtures\$_" }
   & $InstalledNode $OcrSmoke $InstalledApp @OcrFixtures | Out-Host
@@ -120,6 +126,7 @@ try {
   & $InstalledNode $HtmlSmoke $InstalledApp | Out-Host
   if ($LASTEXITCODE -ne 0) { throw 'The installed HTML parser could not safely extract its fictional fixture.' }
   $englishLocale = Invoke-RestMethod "http://127.0.0.1:$($instance.port)/locales/en.json" -TimeoutSec 5
+  if ($englishLocale.'nav.sources' -ne 'Sources') { throw 'Installed Setup is missing the Sources navigation label.' }
   foreach ($key in @('ingestion.enabled', 'ingestion.autoFile', 'ingestion.run', 'ingestion.destination')) {
     if (-not $englishLocale.PSObject.Properties[$key].Value) { throw "Installed Setup is missing the folder-ingestion label: $key" }
   }
