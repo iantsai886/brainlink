@@ -17,6 +17,10 @@ In an isolated detached worktree, `npm ci && npm run build:linux` completed in `
 
 In `node:24-bookworm`, downloaded Node.js 22.23.3 Darwin x64 and arm64 archives, verified both against the official `SHASUMS256.txt`, built `BrainLink-1.2-mac.zip`, and passed `npm run test:mac-zip`. The test verified ZIP paths and permissions, app bundle and install scripts, simulated install into a fake home with LaunchAgent, app HTTP 200 using the Linux host runtime, uninstall, and preservation of notes. SHA-256: `077f5d91d498a3c95f373018dc833adc5847ec194fee2162db6dd57b5f78d0d2`. This is simulated packaging evidence only: Darwin executables, Gatekeeper, native `.pkg`, and a real Mac were not tested. The ZIP is unsigned and unpublished.
 
+### Windows 1.2.7-to-1.2.8 upgrade and uninstall (source commit `9a8c394`, 2026-11-03)
+
+`npm run smoke:upgrade:win` passed using an isolated v1.2.7 test installation and the branch's 1.2.8 installer. The old app launched, the upgrade completed in place, Setup health passed, a planted user-data marker survived, and uninstall removed only the isolated app while preserving the test data and restoring PATH. Temporary test profiles were removed. This validates the local unsigned installer upgrade path; it is not a signed/public release test.
+
 ### Vault note count timing fix (working tree based on `32fe33b`, 2026-11-03)
 
 Setup now sends completed vault note counts to browsers that connect after the background scan, and buffers early count events until vault state loads. This addresses a visible race where the page could stay on “Counting notes…” even though the count was ready. Removed a duplicate `/api/events` handler. Focused tests passed 4/4. A first full Windows suite run had two non-reproducing failures; both passed individually. A clean rerun on Windows/Node.js 24.22.1 passed: core 638 total (628 passed, 0 failed, 10 platform/privilege skips), UI 44/44. Browser visual recheck was not completed because the computer-use session stopped at its URL safety check.
