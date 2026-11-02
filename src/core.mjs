@@ -733,7 +733,7 @@ export function findSecrets(text) {
   // exact, schema-shaped fields before the generic long-token detector runs; do not exempt hashes
   // elsewhere in prose or permit arbitrary metadata fields to bypass secret scanning.
   const scanText = String(text).replace(
-    /(["']?)(fixture_sha256|source_commit_sha|question_sha256)\1\s*:\s*(["']?)([a-f0-9]+)\3(?=\s*[,}\]\n]|$)/gi,
+    /(["']?)(fixture_sha256|source_commit_sha(?:_after)?|question_sha256)\1\s*:\s*(["']?)([a-f0-9]+)\3(?=\s*[,}\]\n]|$)/gi,
     (match, keyQuote, key, _valueQuote, value) => {
       const expectedLength = ['fixture_sha256', 'question_sha256'].includes(key.toLowerCase()) ? 64 : 40;
       return value.length === expectedLength ? `${keyQuote}${key}${keyQuote}: "[public hash]"` : match;

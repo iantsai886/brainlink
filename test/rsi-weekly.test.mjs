@@ -67,7 +67,9 @@ test('week-on-week delta and applied fix type', async () => {
 
 test('Setup weekly benchmark is authenticated, uses only the built-in fictional vault, and stores aggregates', async () => {
   const home = await mkdtemp(path.join(tmpdir(), 'brainlink-rsi-weekly-setup-'));
-  const app = await startSetup({ env: { BRAINLINK_HOME: path.join(home, 'app'), BRAINLINK_SEMANTIC: '0' }, home, os: 'linux', port: 0, useCli: false });
+  let sourcePair = ['a'.repeat(40), 'a'.repeat(40)], sourceRead = 0;
+  const weeklyBenchmarkSourceState = () => ({ commit_sha: sourcePair[sourceRead++ % 2], clean: true });
+  const app = await startSetup({ env: { BRAINLINK_HOME: path.join(home, 'app'), BRAINLINK_SEMANTIC: '0' }, home, os: 'linux', port: 0, useCli: false, weeklyBenchmarkSourceState });
   const base = `http://127.0.0.1:${app.port}`;
   const api = (route, { method = 'GET', token = app.token } = {}) => fetch(`${base}${route}`, {
     method,
@@ -88,7 +90,11 @@ test('Setup weekly benchmark is authenticated, uses only the built-in fictional 
     assert.equal(saved.run.privacy_violations, 0);
     assert.equal(saved.run.software_version, '1.2.8');
     assert.match(saved.run.source_commit_sha, /^[a-f0-9]{40}$/);
-    assert.equal(typeof saved.run.source_tree_clean, 'boolean');
+    assert.equal(saved.run.source_commit_sha_after, 'a'.repeat(40));
+    assert.equal(saved.run.source_tree_clean, true);
+    assert.equal(saved.run.source_tree_clean_after, true);
+    assert.equal(saved.run.source_stable, true);
+    assert.ok(Date.parse(saved.run.started_at) <= Date.parse(saved.run.completed_at));
     assert.match(saved.run.fixture_sha256, /^[a-f0-9]{64}$/);
     assert.equal(saved.runs.length, 1);
     const serialized = JSON.stringify(saved);
@@ -97,6 +103,14 @@ test('Setup weekly benchmark is authenticated, uses only the built-in fictional 
     const repeated = await (await api('/api/rsi/weekly-benchmark/run', { method: 'POST' })).json();
     assert.equal(repeated.run.recorded, false, 'the same week, fixture, evaluator and source revision is idempotent');
     assert.equal(repeated.runs.length, 1);
+    sourcePair = ['b'.repeat(40), 'c'.repeat(40)];
+    sourceRead = 0;
+    const changed = await (await api('/api/rsi/weekly-benchmark/run', { method: 'POST' })).json();
+    assert.equal(changed.run.recorded, true, 'a different source interval receives a distinct receipt');
+    assert.equal(changed.run.source_commit_sha, 'b'.repeat(40));
+    assert.equal(changed.run.source_commit_sha_after, 'c'.repeat(40));
+    assert.equal(changed.run.source_stable, false, 'a source change during evaluation is not reported as stable');
+    assert.equal(changed.runs.length, 1, 'history presents the latest receipt for the week');
     const fixture = JSON.parse(await readFile(path.join(ROOT, 'samples', 'evaluation', 'rsi-weekly-fictional-20.json'), 'utf8'));
     assert.equal(fixture.cases.length, 20);
   } finally { app.server.close(); }
@@ -111,7 +125,7 @@ test('Setup exposes localized weekly benchmark controls and labels their evidenc
   assert.match(html, /loadWeeklyBenchmark\(\)\.catch/);
   for (const locale of ['en', 'pt', 'zh-TW']) {
     const catalog = JSON.parse(await readFile(path.join(ROOT, 'ui', 'locales', `${locale}.json`), 'utf8'));
-    for (const key of ['rsi.weekly.title', 'rsi.weekly.hint', 'rsi.weekly.run', 'rsi.weekly.running', 'rsi.weekly.saved', 'rsi.weekly.empty', 'rsi.weekly.result', 'rsi.weekly.sourceClean', 'rsi.weekly.sourceWorking', 'rsi.weekly.sourceUnknown', 'rsi.weekly.scheduleEnabled', 'rsi.weekly.saveSchedule', 'rsi.weekly.scheduleOff', 'rsi.weekly.scheduleOn', 'rsi.weekly.scheduleDone', 'rsi.weekly.scheduleFailed']) assert.ok(catalog[key], `${locale} ${key}`);
+    for (const key of ['rsi.weekly.title', 'rsi.weekly.hint', 'rsi.weekly.run', 'rsi.weekly.running', 'rsi.weekly.saved', 'rsi.weekly.empty', 'rsi.weekly.result', 'rsi.weekly.sourceClean', 'rsi.weekly.sourceWorking', 'rsi.weekly.sourceStable', 'rsi.weekly.sourceUnstable', 'rsi.weekly.sourceUnknown', 'rsi.weekly.scheduleEnabled', 'rsi.weekly.saveSchedule', 'rsi.weekly.scheduleOff', 'rsi.weekly.scheduleOn', 'rsi.weekly.scheduleDone', 'rsi.weekly.scheduleFailed']) assert.ok(catalog[key], `${locale} ${key}`);
   }
 });
 

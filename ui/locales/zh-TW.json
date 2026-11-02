@@ -864,6 +864,8 @@
   "rsi.weekly.result": "{week}：首次命中 {correct}/{total} ({percent}%) · 漏找 {failures} · 隱私問題 {privacy}",
   "rsi.weekly.sourceClean": "程式碼乾淨",
   "rsi.weekly.sourceWorking": "程式碼有未提交變更",
+  "rsi.weekly.sourceStable": "前後為相同且乾淨的版本",
+  "rsi.weekly.sourceUnstable": "程式碼已變更或有未提交內容",
   "rsi.weekly.sourceUnknown": "無法取得程式碼版本",
   "rsi.weekly.scheduleEnabled": "每週自動執行",
   "rsi.weekly.day": "星期",

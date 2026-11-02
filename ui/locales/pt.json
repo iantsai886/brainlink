@@ -864,6 +864,8 @@
   "rsi.weekly.result": "{week}: {correct}/{total} resultados iniciais correspondem ({percent}%) · {failures} ausentes · {privacy} problemas de privacidade",
   "rsi.weekly.sourceClean": "código sem alterações",
   "rsi.weekly.sourceWorking": "código com alterações",
+  "rsi.weekly.sourceStable": "mesma revisão limpa antes e depois",
+  "rsi.weekly.sourceUnstable": "código alterado ou não limpo",
   "rsi.weekly.sourceUnknown": "revisão do código indisponível",
   "rsi.weekly.scheduleEnabled": "Executar automaticamente toda semana",
   "rsi.weekly.day": "Dia",

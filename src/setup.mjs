@@ -972,6 +972,7 @@ export async function startSetup(opts = {}) {
   if (await rsiObservationSchedule.due().catch(() => false)) rsiObservationSchedule.run('schedule').catch(() => {});
 
   let weeklyBenchmarkRunning = false;
+  const weeklyBenchmarkSourceState = opts.weeklyBenchmarkSourceState || (() => readGitSourceState(ROOT));
   async function runWeeklyBenchmark(trigger = 'manual', week = null) {
     if (weeklyBenchmarkRunning) throw new Error('A weekly benchmark is already running.');
     weeklyBenchmarkRunning = true;
@@ -984,7 +985,8 @@ export async function startSetup(opts = {}) {
       const cfg = await loadConfig(file);
       const benchmarkWeek = week || weeklyScheduleWeek(opts.weeklyBenchmarkNow?.() || new Date(), cfg.timezone);
       const ctx = createContext({ ...emptyConfig(), vaults: [{ name: fixture.vault, path: vaultPath }] }, { env: { ...env, BRAINLINK_SEMANTIC: '0' }, trustedLocal: true });
-      const result = await rsiWeekly.runBenchmark({ ctx, fixture, fixtureBytes, week: benchmarkWeek, softwareVersion: VERSION, sourceState: readGitSourceState(ROOT) });
+      const sourceState = weeklyBenchmarkSourceState();
+      const result = await rsiWeekly.runBenchmark({ ctx, fixture, fixtureBytes, week: benchmarkWeek, softwareVersion: VERSION, sourceState, getSourceState: weeklyBenchmarkSourceState });
       return { ...result, trigger };
     } finally { weeklyBenchmarkRunning = false; }
   }

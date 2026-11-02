@@ -1110,7 +1110,7 @@ function renderWeeklyBenchmark(runs) {
   const latest = [...(runs || [])].reverse();
   $('rsi-weekly-history').innerHTML = latest.length
     ? '<ol>' + latest.map(run => {
-      const source = run.source_commit_sha ? `${run.source_commit_sha.slice(0, 8)} · ${t(run.source_tree_clean ? 'rsi.weekly.sourceClean' : 'rsi.weekly.sourceWorking')}` : t('rsi.weekly.sourceUnknown');
+      const source = run.source_commit_sha ? `${run.source_commit_sha.slice(0, 8)} · ${t(run.source_tree_clean ? 'rsi.weekly.sourceClean' : 'rsi.weekly.sourceWorking')}${typeof run.source_stable === 'boolean' ? ` · ${t(run.source_stable ? 'rsi.weekly.sourceStable' : 'rsi.weekly.sourceUnstable')}` : ''}` : t('rsi.weekly.sourceUnknown');
       return '<li>' + esc(t('rsi.weekly.result', { week: run.week, correct: run.first_try_correct.count, total: run.first_try_correct.total, percent: run.first_try_correct.percent, failures: run.failed_case_count, privacy: run.privacy_violations })) + ' · ' + esc(run.evaluator_version) + ' · ' + esc(run.software_version || '—') + ' · ' + esc(source) + '</li>';
     }).join('') + '</ol>'
     : '<p class="muted">' + esc(t('rsi.weekly.empty')) + '</p>';

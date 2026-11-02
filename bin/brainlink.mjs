@@ -250,7 +250,7 @@ async function main() {
       const fixture = JSON.parse(fixtureBytes.toString('utf8'));
       const root = opt('vault-root'), name = opt('vault-name', fixture.vault);
       const { ctx } = root ? { ctx: createContext(normalize({ vaults: [{ name, path: path.resolve(root) }] }), { env: { ...process.env, BRAINLINK_SEMANTIC: '0' } }) } : await openContext(process.env, { trustedLocal: true });
-      out(JSON.stringify(await rsi.runBenchmark({ ctx, fixture, fixtureBytes, week: opt('week', taipeiWeek(new Date().toISOString())), softwareVersion: VERSION, sourceState: readGitSourceState(ROOT) }), null, 2)); return;
+      out(JSON.stringify(await rsi.runBenchmark({ ctx, fixture, fixtureBytes, week: opt('week', taipeiWeek(new Date().toISOString())), softwareVersion: VERSION, sourceState: readGitSourceState(ROOT), getSourceState: () => readGitSourceState(ROOT) }), null, 2)); return;
     }
     case 'eval': {
       const fixtureFile = opt('fixture');

@@ -864,6 +864,8 @@
   "rsi.weekly.result": "{week}: {correct}/{total} first results matched ({percent}%) · {failures} missed · {privacy} privacy issues",
   "rsi.weekly.sourceClean": "clean source",
   "rsi.weekly.sourceWorking": "working tree changed",
+  "rsi.weekly.sourceStable": "same clean revision before and after",
+  "rsi.weekly.sourceUnstable": "source changed or is not clean",
   "rsi.weekly.sourceUnknown": "source revision unavailable",
   "rsi.weekly.scheduleEnabled": "Run automatically each week",
   "rsi.weekly.day": "Day",

@@ -93,12 +93,19 @@ export function createRsiWeekly({ home, now = () => new Date() }) {
       }
       return { added, skipped };
     },
-    async runBenchmark({ ctx, fixture, fixtureBytes, week = taipeiWeek(now().toISOString()), softwareVersion = 'unknown', sourceState = { commit_sha: null, clean: false } }) {
+    async runBenchmark({ ctx, fixture, fixtureBytes, week = taipeiWeek(now().toISOString()), softwareVersion = 'unknown', sourceState = { commit_sha: null, clean: false }, getSourceState = null }) {
       if (!validWeek(week) || fixture.schema !== 2 || fixture.cases?.length !== 20) throw new Error('Weekly benchmark requires a schema-2 fixture of exactly 20 cases and valid week.');
+      const startedAt = now().toISOString();
       const report = await evaluateRetrieval(ctx, fixture, { fixtureBytes });
+      const sourceAfter = typeof getSourceState === 'function' ? await getSourceState() : sourceState;
+      const sourceCommitBefore = /^[a-f0-9]{40}$/i.test(sourceState?.commit_sha || '') ? sourceState.commit_sha.toLowerCase() : null;
+      const sourceCommitAfter = /^[a-f0-9]{40}$/i.test(sourceAfter?.commit_sha || '') ? sourceAfter.commit_sha.toLowerCase() : null;
+      const sourceCleanBefore = sourceState?.clean === true;
+      const sourceCleanAfter = sourceAfter?.clean === true;
+      const sourceStable = Boolean(sourceCommitBefore && sourceCommitBefore === sourceCommitAfter && sourceCleanBefore && sourceCleanAfter);
       const score = report.baseline.task_success.count / 20;
-      const evidence = { week, fixture_sha256: report.fixture_sha256, evaluator_version: report.evaluator_version, software_version: String(softwareVersion).slice(0, 64), source_commit_sha: /^[a-f0-9]{40}$/i.test(sourceState?.commit_sha || '') ? sourceState.commit_sha.toLowerCase() : null, source_tree_clean: sourceState?.clean === true, case_count: 20, first_try_correct: { count: report.baseline.task_success.count, total: 20, percent: +(100 * score).toFixed(1) }, privacy_violations: report.baseline.privacy_violations, failed_case_count: report.baseline.failures.length };
-      const saved = await ledger.appendRsiEvidence('weekly_benchmark', evidence, sha({ week, fixture_sha256: evidence.fixture_sha256, evaluator_version: evidence.evaluator_version, software_version: evidence.software_version, source_commit_sha: evidence.source_commit_sha, source_tree_clean: evidence.source_tree_clean }));
+      const evidence = { week, started_at: startedAt, completed_at: now().toISOString(), fixture_sha256: report.fixture_sha256, evaluator_version: report.evaluator_version, software_version: String(softwareVersion).slice(0, 64), source_commit_sha: sourceCommitBefore, source_commit_sha_after: sourceCommitAfter, source_tree_clean: sourceCleanBefore, source_tree_clean_after: sourceCleanAfter, source_stable: sourceStable, case_count: 20, first_try_correct: { count: report.baseline.task_success.count, total: 20, percent: +(100 * score).toFixed(1) }, privacy_violations: report.baseline.privacy_violations, failed_case_count: report.baseline.failures.length };
+      const saved = await ledger.appendRsiEvidence('weekly_benchmark', evidence, sha({ week, fixture_sha256: evidence.fixture_sha256, evaluator_version: evidence.evaluator_version, software_version: evidence.software_version, source_commit_sha: evidence.source_commit_sha, source_commit_sha_after: evidence.source_commit_sha_after, source_tree_clean: evidence.source_tree_clean, source_tree_clean_after: evidence.source_tree_clean_after, source_stable: evidence.source_stable }));
       return { ...evidence, recorded: saved.added };
     },
     async benchmarkReport(weeks = 8) {
