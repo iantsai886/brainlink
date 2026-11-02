@@ -23,5 +23,7 @@
 
 ## Validation performed
 
-- Node.js `v22.16.0`: `node --check` passed for `src/rsi-weekly.mjs`, `src/rsi-ledger.mjs`, `bin/brainlink.mjs`, and `test/rsi-weekly.test.mjs`.
-- Attempted `node --test test/rsi-weekly.test.mjs` but **could not run**: supplied `src-pr3/` is a selective snapshot, not the complete repo; `src/core.mjs` imports missing `src/graph.mjs` (and other modules such as config/sync CLI are absent). No passing-runtime-test claim is made. Run the tests in the complete BrainLink PR #3 checkout (Node >=22), and run the full existing suite before merge.
+- Fixed two issues found during complete-repository verification: the weekly evidence secret scanner now permits only a well-formed `fixture_sha256` integrity fingerprint while still scanning every other field; the Agent Skill loader normalizes CRLF only for metadata parsing and preserves original source bytes.
+- Windows, Node.js `v24.22.1`: focused Agent Skill and RSI weekly tests passed **13/13**.
+- Windows, Node.js `v24.22.1`: `npm run test:all` passed on the contribution worktree: core **582 total (575 passed, 0 failed, 7 platform/privilege skips)**; UI **44/44**. Skips are Windows symlink-privilege/platform checks. This is local verification; hosted CI, Linux/macOS package behavior, and a live benchmark against a customer vault remain separate.
+- `git diff --check` passed.

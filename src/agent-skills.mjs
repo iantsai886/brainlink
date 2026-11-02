@@ -38,10 +38,12 @@ async function loadCatalog(sourceRoot) {
     if (!info.isFile() || info.isSymbolicLink()) throw new Error(`The bundled skill ${entry.name} is not a regular file.`);
     const body = await readFile(file);
     const text = body.toString('utf8');
-    if (text.startsWith('\uFEFF') || !text.startsWith('---\n')) throw new Error(`The bundled skill ${entry.name} has invalid Agent Skills metadata.`);
-    const end = text.indexOf('\n---', 4);
+    // Windows checkouts can use CRLF. Normalize only for parsing; preserve the source bytes.
+    const normalizedText = text.replace(/\r\n/g, '\n');
+    if (normalizedText.startsWith('\uFEFF') || !normalizedText.startsWith('---\n')) throw new Error(`The bundled skill ${entry.name} has invalid Agent Skills metadata.`);
+    const end = normalizedText.indexOf('\n---', 4);
     if (end < 0) throw new Error(`The bundled skill ${entry.name} has invalid Agent Skills metadata.`);
-    const doc = parseDocument(text.slice(4, end), { uniqueKeys: true });
+    const doc = parseDocument(normalizedText.slice(4, end), { uniqueKeys: true });
     if (doc.errors.length) throw new Error(`The bundled skill ${entry.name} has invalid Agent Skills metadata.`);
     const metadata = doc.toJS();
     if (metadata?.name !== entry.name || typeof metadata.description !== 'string' || !metadata.description.trim()) {

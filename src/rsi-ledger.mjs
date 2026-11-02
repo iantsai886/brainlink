@@ -418,7 +418,13 @@ export function createRsiLedger({ home, now = () => new Date() }) {
       if (!['retrieval_miss', 'weekly_benchmark'].includes(kind)) throw new Error('Unsupported RSI evidence kind.');
       if (typeof key !== 'string' || !/^[a-f0-9]{64}$/.test(key)) throw new Error('Invalid RSI evidence key.');
       if (!data || typeof data !== 'object' || Array.isArray(data)) throw new Error('Invalid RSI evidence.');
-      const serial = JSON.stringify(data);
+      // A fixture SHA-256 is a public integrity fingerprint, not an API credential.
+      // The generic high-entropy detector also matches 64-character hex digests, so
+      // exempt only this exact, validated field; scan every other evidence value.
+      const scanData = kind === 'weekly_benchmark' && typeof data.fixture_sha256 === 'string' && /^[a-f0-9]{64}$/.test(data.fixture_sha256)
+        ? { ...data, fixture_sha256: '[validated SHA-256 fingerprint]' }
+        : data;
+      const serial = JSON.stringify(scanData);
       if (serial.length > 16000 || findSecrets(serial).length || /<(?:script|iframe)\b/i.test(serial)) throw new Error('RSI evidence contains sensitive or disallowed content.');
       const events = await readEvents(file);
       if (events.some(e => e.kind === kind && e.key === key)) return { added: false };

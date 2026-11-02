@@ -48,3 +48,12 @@ test('week-on-week delta and applied fix type', async () => {
   assert.equal(report[1].delta_pp, 20);
   assert.deepEqual(report[1].applied_fix_types, ['add_index_entry']);
 });
+
+test('weekly evidence accepts a validated fixture digest but still rejects secrets elsewhere', async () => {
+  const home = await mkdtemp(path.join(tmpdir(), 'brainlink-rsi-weekly-'));
+  const { createRsiLedger } = await import('../src/rsi-ledger.mjs');
+  const ledger = createRsiLedger({ home });
+  const evidence = { week: '2026-W44', fixture_sha256: '0123456789abcdef'.repeat(4), evaluator_version: 'retrieval-eval-v3', case_count: 20, first_try_correct: { count: 10, total: 20, percent: 50 }, privacy_violations: 0, failed_case_ids: [] };
+  assert.deepEqual(await ledger.appendRsiEvidence('weekly_benchmark', evidence, 'c'.repeat(64)), { added: true });
+  await assert.rejects(ledger.appendRsiEvidence('weekly_benchmark', { ...evidence, note: 'credential sk-proj-abcdefghijklmnopqrstuvwxyz12345678901234567890' }, 'd'.repeat(64)), /sensitive or disallowed/);
+});
