@@ -26,7 +26,7 @@ import { syncSettings, chooseSync, suggestFolders, PROVIDERS, PROVIDER_LABELS } 
 import { linuxDriveSetup, normalizeDriveSelection } from './sync/gdrive-linux.mjs';
 import { backupScheduleDue, normalizeBackupSchedule } from './backup-schedule.mjs';
 import { runSync } from './sync-cli.mjs';
-import { listGitHubShareCandidates, previewGitHubRepository, commitGitHubSelectedNotes, pushGitHubSelectedNotes, listGitHubPullCandidates, importGitHubSelectedNotes, saveGitHubConflictCopies, inspectGitHubAssignment, githubAssignmentStatus } from './sync/github-preview.mjs';
+import { listGitHubShareCandidates, previewGitHubRepository, commitGitHubSelectedNotes, pushGitHubSelectedNotes, listGitHubPullCandidates, importGitHubSelectedNotes, saveGitHubConflictCopies, inspectGitHubAssignment, testGitHubRepositoryAccess, githubAssignmentStatus } from './sync/github-preview.mjs';
 import { githubAssignmentProjection } from './sync/github-assignment.mjs';
 import { runGitHubAutoSync } from './sync/github-auto-sync.mjs';
 import { sessionsService } from './host.mjs';
@@ -1737,6 +1737,10 @@ export async function startSetup(opts = {}) {
     'POST /api/github/assignment/inspect': async (b) => {
       const cfg = await loadConfig(file);
       return inspectGitHubAssignment(cfg, b);
+    },
+    'POST /api/github/assignment/test-access': async (b) => {
+      const cfg = await loadConfig(file);
+      return testGitHubRepositoryAccess(cfg, b);
     },
     'POST /api/github/assignment/pick-repository': async () => {
       const selected = await pickGitHubRepository();

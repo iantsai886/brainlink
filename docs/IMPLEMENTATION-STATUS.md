@@ -2,6 +2,12 @@
 
 Status snapshot: 2026-11-03 (Asia/Taipei).
 
+### Read-only GitHub access check (2026-11-03)
+
+Before saving a Twin-to-repository assignment, Setup can now run `git ls-remote` against the selected clone's GitHub origin. It uses the OS Git credential helper without interactive prompts, returns only a sanitized result, and does not save the assignment. The test uses a temporary local bare remote (no real GitHub account contacted). `test/github-profile-assignment.test.mjs` passed 10/10, including successful access, sanitized auth failure, authenticated API, UI invalidation and localization checks. Live user-account permissions and cross-device sync remain unverified.
+
+The full local Windows `npm run test:all` run on this working tree passed: core 659 total (649 passed, 0 failed, 10 platform/privilege skips); UI 48/48. The skips require another OS or Windows symlink privileges.
+
 ### Background folder-scan status clarity (2026-11-03)
 
 Setup now states the active daily scan time or repeat-check interval and plainly reminds users that BrainLink must remain open; the existing sign-in startup warning links to the startup setting. English, Traditional Chinese, and Portuguese messages are covered. Focused ingestion schedule tests passed 5/5 and the UI suite passed 48/48. This improves status clarity but does not add an always-running operating-system service; the app still needs to be running for scans.

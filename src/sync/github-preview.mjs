@@ -146,6 +146,23 @@ export async function inspectGitHubAssignment(cfg, input) {
   return { profile_id: profile.id, profile_name: profile.name, mode: profile.mode, vault: vaultName, remote: identity, path: root, folders, whole_vault: wholeVault, branch, replaces: profile.github_repository?.remote || null, blocked };
 }
 
+// Read-only credential/connectivity check used before the user confirms a GitHub assignment.
+// Git's saved credential helper remains authoritative; no token is accepted, persisted or logged.
+export async function testGitHubRepositoryAccess(cfg, input, { runGit = run } = {}) {
+  const inspected = await inspectGitHubAssignment(cfg, input);
+  if (inspected.blocked.length) throw new Error(inspected.blocked[0]);
+  try {
+    const { stdout = '' } = await runGit('git', ['-C', inspected.path, 'ls-remote', '--symref', 'origin', 'HEAD'], {
+      windowsHide: true, timeout: 30_000, maxBuffer: 64 * 1024,
+      env: { ...process.env, GIT_TERMINAL_PROMPT: '0', GCM_INTERACTIVE: 'never' },
+    });
+    return { ok: true, remote: inspected.remote, head_found: Boolean(stdout.trim()) };
+  } catch {
+    // Git stderr may contain a credential-bearing URL. Return only a fixed, actionable message.
+    throw new Error('GitHub could not verify access. Check the internet connection and Git sign-in, then try again. No credentials were shown or saved.');
+  }
+}
+
 // Projection for the Setup UI, including whether each assigned clone still matches on disk.
 export async function githubAssignmentStatus(cfg) {
   return Promise.all(githubAssignmentProjection(cfg).map(async (item) => {
