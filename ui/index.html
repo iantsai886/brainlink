@@ -518,6 +518,7 @@ main #ready, main #ask-panel, main #brain-panel, main #sessions-panel, main #s-c
     <div id="ingestion-target-list" class="cards"></div>
     <div class="row" style="margin-top:12px"><button class="primary" id="ingestion-save" data-i18n="ingestion.save"></button><button id="ingestion-run" data-i18n="ingestion.run"></button></div>
     <p id="ingestion-status" class="muted" role="status"></p>
+    <p id="ingestion-schedule-status" class="muted" role="status"></p>
     <p id="ingestion-draft-status" class="muted" role="status"></p>
     <div id="ingestion-queue" class="cards" aria-live="polite"></div>
     <h3 data-i18n="ingestion.pendingDrafts"></h3>
@@ -1751,6 +1752,12 @@ async function load() {
     : t('ingestion.never');
   $('ingestion-status').textContent = [ingestionStatusText, ingestionUnsupportedText(ingestionStatus)].filter(Boolean).join(' ');
   if (S.ingestion?.status?.running) $('ingestion-status').textContent = t('ingestion.running');
+  const ingestionSchedule = S.ingestion?.enabled
+    ? (S.ingestion.mode === 'watch'
+      ? t('ingestion.backgroundWatch', { interval: S.ingestion.intervalMinutes || 5 })
+      : t('ingestion.backgroundDaily', { time: S.ingestion.time || '02:00' }))
+    : '';
+  $('ingestion-schedule-status').textContent = ingestionSchedule;
   const draftStatus = S.ingestion_drafts?.status;
   $('ingestion-draft-status').textContent = draftStatus?.at ? t('ingestion.autoDraftStatus', { trigger: t(`ingestion.trigger.${draftStatus.trigger || 'schedule'}`), created: draftStatus.created || 0, filed: draftStatus.filed || 0, attempted: draftStatus.attempted || 0, at: new Date(draftStatus.at).toLocaleString(LOCALE), failed: draftStatus.failed || 0 }) : '';
   await renderIngestionDraftList().catch(() => {});

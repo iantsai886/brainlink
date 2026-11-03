@@ -723,6 +723,8 @@
   "ingestion.save": "Save scan settings",
   "ingestion.run": "Scan now",
   "ingestion.never": "No source scan has run yet.",
+  "ingestion.backgroundDaily": "Automatic daily scan is on for {time}. BrainLink must be open; turn on launch at sign-in to start it automatically.",
+  "ingestion.backgroundWatch": "Automatic folder checks are on every {interval} minutes. BrainLink must be open; turn on launch at sign-in to start it automatically.",
   "ingestion.running": "Scanning the selected folder…",
   "ingestion.lastRun": "{trigger} scan at {at}: {count} new or changed files found.",
   "ingestion.failed": "Last scan failed: {error}",

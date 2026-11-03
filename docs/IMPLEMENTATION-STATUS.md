@@ -2,6 +2,10 @@
 
 Status snapshot: 2026-11-03 (Asia/Taipei).
 
+### Background folder-scan status clarity (2026-11-03)
+
+Setup now states the active daily scan time or repeat-check interval and plainly reminds users that BrainLink must remain open; the existing sign-in startup warning links to the startup setting. English, Traditional Chinese, and Portuguese messages are covered. Focused ingestion schedule tests passed 5/5 and the UI suite passed 48/48. This improves status clarity but does not add an always-running operating-system service; the app still needs to be running for scans.
+
 ### Current Windows package source verification (`17f17713fb15d6ee39b27b13b578ab3975428828`; 2026-11-03)
 
 The Windows install and upgrade smoke scripts now hash-check every bundled source tree (`bin`, `src`, `ui`, `samples`, `skills`) and package metadata before building. This caught a stale stage whose `src/rsi-discovery.mjs` differed from the repository; the earlier install smoke receipt below is superseded and must not be treated as current-source evidence. The stage was rebuilt from app source commit `29d517b4be23a6de8d5910b347ec2136e629a088`; the complete freshness check passed. Its missing-stage failure case also passed. After factoring the check into a helper used by both smoke scripts, `test/packaging-runtime.test.mjs` passed 3/3.

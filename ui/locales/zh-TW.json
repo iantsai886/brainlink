@@ -723,6 +723,8 @@
   "ingestion.save": "儲存掃描設定",
   "ingestion.run": "立即掃描",
   "ingestion.never": "尚未執行過資料掃描。",
+  "ingestion.backgroundDaily": "每日自動掃描已開啟，時間為 {time}。BrainLink 必須保持開啟；開啟「登入時啟動」可在登入後自動開始。",
+  "ingestion.backgroundWatch": "每 {interval} 分鐘自動檢查資料夾已開啟。BrainLink 必須保持開啟；開啟「登入時啟動」可在登入後自動開始。",
   "ingestion.running": "正在掃描所選資料夾……",
   "ingestion.lastRun": "{trigger}掃描時間：{at}；找到 {count} 個新增或變更檔案。",
   "ingestion.failed": "上次掃描失敗：{error}",

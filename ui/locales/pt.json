@@ -723,6 +723,8 @@
   "ingestion.save": "Salvar configuração",
   "ingestion.run": "Verificar agora",
   "ingestion.never": "Nenhuma verificação foi executada ainda.",
+  "ingestion.backgroundDaily": "A verificação diária automática está ativada para {time}. O BrainLink precisa ficar aberto; ative a inicialização ao entrar para iniciá-lo automaticamente.",
+  "ingestion.backgroundWatch": "As verificações automáticas estão ativadas a cada {interval} minutos. O BrainLink precisa ficar aberto; ative a inicialização ao entrar para iniciá-lo automaticamente.",
   "ingestion.running": "Verificando a pasta selecionada…",
   "ingestion.lastRun": "Verificação {trigger} às {at}: {count} arquivos novos ou alterados.",
   "ingestion.failed": "A última verificação falhou: {error}",
