@@ -2,15 +2,23 @@
 
 Status snapshot: 2026-11-03 (Asia/Taipei).
 
+### Current Windows package source verification (`17f17713fb15d6ee39b27b13b578ab3975428828`; 2026-11-03)
+
+The Windows install and upgrade smoke scripts now hash-check every bundled source tree (`bin`, `src`, `ui`, `samples`, `skills`) and package metadata before building. This caught a stale stage whose `src/rsi-discovery.mjs` differed from the repository; the earlier install smoke receipt below is superseded and must not be treated as current-source evidence. The stage was rebuilt from app source commit `29d517b4be23a6de8d5910b347ec2136e629a088`; the complete freshness check passed. Its missing-stage failure case also passed. After factoring the check into a helper used by both smoke scripts, `test/packaging-runtime.test.mjs` passed 3/3.
+
+On the rebuilt stage, `npm run smoke:installed:win` passed: bundled runtime, shortcuts, Setup/folder controls, three OCR languages, scanned PDF, safe HTML, conflict-safe filing, sign-in launcher, Hermes hook preservation, isolated uninstall, user-data preservation and PATH restoration. `npm run smoke:upgrade:win` passed from 1.2.7 to 1.2.8, preserving its canary and user data and restoring PATH on uninstall. The current unsigned installer is `dist/BrainLink-Setup-1.2.8.exe` (63,606,077 bytes; SHA-256 `573F3F5516DE2BA37EEDDF106334A3B1F2AE01E291E56D5FB26CB53A8BF4568F`). These are isolated local Windows checks, not signed release or customer acceptance.
+
+The full Windows suite passed on the working tree based on `29d517b` before the freshness logic was extracted into the shared helper: core 658 total (648 passed, 0 failed, 10 platform/privilege skips); UI 48/48. Production dependency audit found 0 vulnerabilities. After helper extraction, the focused packaging runtime suite passed 3/3. GitHub Actions remain intentionally unused per Ian's direction; do not pay to unblock them.
+
 ### Current exact checkout verification (`91588c451da9e273990442142d96df2353525161`; 2026-11-03)
 
 On Windows, Node.js 24.22.1 and npm 11.19.1, `npm run test:all` passed on this exact source commit: core 658 total (648 passed, 0 failed, 10 platform/privilege skips); UI 48/48. `npm audit --omit=dev --audit-level=moderate` reported 0 production dependency vulnerabilities. The skipped cases require platform or Windows symlink privileges unavailable in this environment. These are local automated results, not hosted CI or customer acceptance.
 
 Release boundary remains: real Mac and graphical Linux acceptance, physical ARM execution, signing/notarization and a signed public release, cross-device restore, customer usability/accessibility review, and measured real-task token/time/answer-quality results are still open. GitHub Actions remain intentionally unused per Ian's direction; do not pay to unblock them.
 
-### Current Windows package installation and upgrade (`6cbeb6aeb425a0ef585da0f2aa8ac95c95b9936f`; 2026-11-03)
+### Superseded Windows package smoke using stale stage (`6cbeb6aeb425a0ef585da0f2aa8ac95c95b9936f`; 2026-11-03)
 
-On Windows / Node.js 24.22.1 / npm 11.19.1, `npm run smoke:installed:win` built and installed an isolated unsigned 1.2.8 QA package. Bundled runtime, shortcuts, Setup and folder controls, English/Portuguese/Traditional Chinese OCR, scanned-PDF OCR, safe HTML extraction, conflict-safe filing retry, sign-in background launcher, Hermes hook preservation, isolated uninstall, test-data preservation, and PATH restoration passed. `npm run smoke:upgrade:win` also passed: isolated 1.2.7 upgraded to 1.2.8, health check passed, the data canary survived, and isolated uninstall preserved the user data and restored PATH. These are local synthetic Windows checks, not a signed public release or customer acceptance.
+The smoke used a stale packaged stage: `src/rsi-discovery.mjs` did not match the source checkout. Its install result is invalid as current-source evidence. The upgrade behavior was rerun successfully after rebuilding the stage from the current source; see the current receipt above.
 
 ### Independent local-reranker RSI comparison (working tree based on `6ac2c77`; 2026-11-03)
 
