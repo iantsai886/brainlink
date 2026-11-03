@@ -718,7 +718,7 @@
   "ingestion.modelSetup": "若要自動分析新檔案，請先啟用本機 AI 草稿並選擇 Ollama 模型。",
   "ingestion.modelSetupLink": "設定本機 AI",
   "ingestion.autoFile": "自動將新筆記存成待審核提案",
-  "ingestion.autoFileHint": "請為每個掃描資料夾選擇存放位置。BrainLink 只新增標記為 proposed 的筆記，不會改寫既有筆記。它可能依共用詞彙加入最多 3 個同一 vault 的連結；這些只是未驗證的建議，不代表事實。",
+  "ingestion.autoFileHint": "請為每個掃描資料夾選擇存放位置。BrainLink 只新增標記為 proposed 的筆記，不會改寫既有筆記。它可能依共用詞彙加入最多 3 個同一 vault 的筆記連結，也會依來源原文，為同一範圍的既有資料提出圖譜關係。圖譜關係會保留為待審核，不會自動視為已驗證事實。",
   "ingestion.scanFiled": "掃描完成。{count} 篇新筆記已存入你選擇的資料夾，並標記為待審核提案。",
   "ingestion.autoDraftsNeedsModel": "請先到「Sessions」啟用本機摘要草稿並選擇 Ollama 模型。",
   "ingestion.pendingDrafts": "等待檢查的本機 AI 草稿",

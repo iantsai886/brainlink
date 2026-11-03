@@ -634,7 +634,8 @@ export async function startSetup(opts = {}) {
         if (existing) {
           if (cfg.ingestion.autoFile && candidate.destination && existing.draft.destinations.includes(candidate.destination)) {
             try {
-              const filed = await saveIngestionDraftRecord(cfg, id, candidate.destination);
+              const relationshipIndexes = (existing.draft.relationships || []).map((_, index) => index).slice(0, 12);
+              const filed = await saveIngestionDraftRecord(cfg, id, candidate.destination, null, [], relationshipIndexes);
               if (filed.written) record.filed++;
               else record.waiting_review++;
             } catch { record.failed++; }
@@ -662,7 +663,8 @@ export async function startSetup(opts = {}) {
           const savedDraft = await saveIngestionDraft(ingestionDraftsDir, draft);
           record.created++;
           if (cfg.ingestion.autoFile && candidate.destination && draft.destinations.includes(candidate.destination)) {
-            const filed = await saveIngestionDraftRecord(cfg, savedDraft.id, candidate.destination);
+            const relationshipIndexes = (draft.relationships || []).map((_, index) => index).slice(0, 12);
+            const filed = await saveIngestionDraftRecord(cfg, savedDraft.id, candidate.destination, null, [], relationshipIndexes);
             if (filed.written) record.filed++;
             else record.waiting_review++;
           }

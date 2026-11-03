@@ -2,6 +2,10 @@
 
 Status snapshot: 2026-11-03 (Asia/Taipei).
 
+### Auto-filed graph relation proposals (2026-11-03; current worktree based on `f407d1b`)
+
+When auto-file is explicitly enabled, a source-backed draft may now save relationship suggestions between existing typed records in the same vault and scope. The suggestions require exact source quotes and remain `review: proposed`; they do not become verified automatically. Manual filing behavior is unchanged. English, Portuguese and Traditional Chinese setup hints explain this. The focused ingestion tests passed 13/13, including manual and scheduled filing and the bounded retry path. `npm run test:ui` passed 48/48. A logged clean `npm test` run passed: core 660 total (650 passed, 0 failed, 10 platform/privilege skips). An earlier full attempt had two intermittent failures; the ingestion file (13/13) and broad BrainLink file (84 passed, 2 Windows-only skips) passed in isolation. No live-model accuracy or customer-vault result is claimed. `git diff --check` passed before documentation updates.
+
 ### Fresh current-branch verification (`5ef698e18095099953878a72abb1fcd39e94a071`; 2026-11-03)
 
 On Windows with Node.js 24.22.1, `npm run test:all` passed: core 660 total (650 passed, 0 failed, 10 platform/privilege skips); UI 48/48. `test/brainlink.test.mjs` also passed alone (84 passed, 2 Windows-only skips), and `test/rsi-ledger.test.mjs` passed 12/12. A current-branch `npm run smoke:live-ingestion` run used local Ollama `qwen3.5:2b` and a temporary fictional vault: the scheduled watch analyzed one changed source, filed one source-linked proposal, reported zero failures, and kept the private canary and source text out of the proposal and logs. The proposal stayed unverified; no real vault was used.

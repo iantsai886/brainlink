@@ -718,7 +718,7 @@
   "ingestion.modelSetup": "To analyze new files automatically, first enable local AI drafts and choose an Ollama model.",
   "ingestion.modelSetupLink": "Set up local AI",
   "ingestion.autoFile": "Automatically save new notes as proposed notes",
-  "ingestion.autoFileHint": "Choose a destination for each folder below. BrainLink saves only new notes marked proposed and never edits existing notes. It may add up to 3 same-vault links based on shared words; these are unverified suggestions, not facts.",
+  "ingestion.autoFileHint": "Choose a destination for each folder below. BrainLink saves only new notes marked proposed and never edits existing notes. It may add up to 3 same-vault note links and source-quoted graph links between existing same-scope records. Graph links stay proposed for review and are not treated as verified facts.",
   "ingestion.scanFiled": "Scan finished. {count} new notes were saved as proposals in your chosen folders.",
   "ingestion.autoDraftsNeedsModel": "First enable Local summary drafts and choose an Ollama model in Sessions.",
   "ingestion.pendingDrafts": "Local AI drafts to review",

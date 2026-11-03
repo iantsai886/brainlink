@@ -291,6 +291,8 @@ test('manual scan auto-files a linked proposed note only into its selected same-
   await mkdir(path.join(vault, 'Knowledge'), { recursive: true });
   await writeFile(path.join(vault, 'Raw', 'Source.md'), '# Fictional source\n\nA fictional team uses a checklist.');
   await writeFile(path.join(vault, 'Knowledge', 'Team checklist.md'), '# Team checklist\n\nA fictional team uses a short checklist for internal requests and records each result so the process can be reused later. This is a synthetic reference note for automatic link tests.');
+  await writeFile(path.join(vault, 'Knowledge', 'Fictional team.md'), '---\ntype: team\nid: team.fictional\nscope: organisation\nstatus: current\n---\n# Fictional team\n\nAn existing fictional organisation team.');
+  await writeFile(path.join(vault, 'Knowledge', 'Checklist.md'), '---\ntype: workflow\nid: workflow.checklist\nscope: organisation\nstatus: current\n---\n# Checklist\n\nAn existing fictional workflow.');
   await writeFile(path.join(vault, 'Raw', 'Private.md'), '---\nprivate: true\n---\nPRIVATE_AUTO_FILE_CANARY must not be read.');
   const env = { BRAINLINK_HOME: appHome, HOME: home, BRAINLINK_SEMANTIC: '0' };
   const local = localDateAndTime(new Date(), 'UTC');
@@ -306,7 +308,7 @@ test('manual scan auto-files a linked proposed note only into its selected same-
     ingestionDraftFetch: async (url, options) => {
       modelCalls++; sent = options.body;
       assert.equal(url, 'http://127.0.0.1:11434/api/chat');
-      return { ok: true, json: async () => ({ message: { content: JSON.stringify({ title: 'Auto proposal', memory_type: 'semantic', summary: 'A fictional checklist workflow.', key_points: ['The result is unverified.'] }) } }) };
+      return { ok: true, json: async () => ({ message: { content: JSON.stringify({ title: 'Auto proposal', memory_type: 'semantic', summary: 'A fictional checklist workflow.', key_points: ['The result is unverified.'], relationships: [{ subject_id: 'team.fictional', predicate: 'runs', target_id: 'workflow.checklist', evidence: 'A fictional team uses a checklist.' }] }) } }) };
     },
   });
   const base = `http://127.0.0.1:${app.port}`;
@@ -327,7 +329,7 @@ test('manual scan auto-files a linked proposed note only into its selected same-
     assert.equal(scan.processing.failed, 0);
     assert.doesNotMatch(sent, /PRIVATE_AUTO_FILE_CANARY/);
     const files = await readdir(path.join(vault, 'Knowledge'));
-    assert.equal(files.length, 2);
+    assert.equal(files.length, 4, 'the three pre-existing notes plus the new source proposal remain in the destination');
     const notePath = files.find((file) => file.endsWith('Auto proposal.md'));
     assert.ok(notePath);
     const note = await readFile(path.join(vault, 'Knowledge', notePath), 'utf8');
@@ -337,6 +339,12 @@ test('manual scan auto-files a linked proposed note only into its selected same-
     assert.match(note, /automatic shared-term suggestions; unverified/);
     assert.match(note, /\[\[Knowledge\/Team checklist\]\]/);
     assert.match(note, /AI draft; unverified/);
+    const subject = await readFile(path.join(vault, 'Knowledge', 'Fictional team.md'), 'utf8');
+    assert.match(subject, /predicate: runs/);
+    assert.match(subject, /target: workflow\.checklist/);
+    assert.match(subject, /source: "A fictional team uses a checklist\."/);
+    assert.match(subject, /review: proposed/);
+    assert.doesNotMatch(subject, /review: verified/);
     const pending = await fetch(base + '/api/ingestion/drafts', { headers }).then((r) => r.json());
     assert.equal(pending.drafts.length, 0, 'saved proposals are removed from the local draft queue');
     const nextScan = await post('/api/ingestion/run', { targets: [{ vault: 'Fictional Company', folder: 'Raw' }] }).then((r) => r.json());
@@ -384,7 +392,9 @@ test('scheduled scan automatically files a source-linked proposal and records th
   const appHome = path.join(home, 'app'), vault = path.join(home, 'vault');
   await mkdir(path.join(vault, 'Raw'), { recursive: true });
   await mkdir(path.join(vault, 'Knowledge'), { recursive: true });
-  await writeFile(path.join(vault, 'Raw', 'Source.md'), '# Fictional source\n\nA fictional team records decisions.');
+  await writeFile(path.join(vault, 'Raw', 'Source.md'), '# Fictional source\n\nA fictional team runs a decision workflow.');
+  await writeFile(path.join(vault, 'Knowledge', 'Fictional team.md'), '---\ntype: team\nid: team.fictional\nscope: organisation\nstatus: current\n---\n# Fictional team\n\nAn existing fictional organisation team.');
+  await writeFile(path.join(vault, 'Knowledge', 'Decision workflow.md'), '---\ntype: workflow\nid: workflow.decision\nscope: organisation\nstatus: current\n---\n# Decision workflow\n\nAn existing fictional workflow.');
   await writeFile(path.join(vault, 'Raw', 'Private.md'), '---\nprivate: true\n---\nSCHEDULE_PRIVATE_CANARY must not reach Ollama.');
   const local = localDateAndTime(new Date(), 'UTC');
   const yesterday = new Date(`${local.date}T00:00:00.000Z`);
@@ -400,7 +410,7 @@ test('scheduled scan automatically files a source-linked proposal and records th
   const app = await startSetup({ env, home, os: 'linux', port: 0, useCli: false, ingestionTickMs: 20,
     ingestionDraftFetch: async (_url, options) => {
       modelCalls++; sent = options.body;
-      return { ok: true, json: async () => ({ message: { content: JSON.stringify({ title: 'Decision workflow', memory_type: 'procedural', summary: 'The fictional team records decisions.', key_points: [] }) } }) };
+      return { ok: true, json: async () => ({ message: { content: JSON.stringify({ title: 'Decision workflow summary', memory_type: 'procedural', summary: 'The fictional team runs a decision workflow.', key_points: [], relationships: [{ subject_id: 'team.fictional', predicate: 'runs', target_id: 'workflow.decision', evidence: 'A fictional team runs a decision workflow.' }] }) } }) };
     },
   });
   const base = `http://127.0.0.1:${app.port}`;
@@ -420,10 +430,17 @@ test('scheduled scan automatically files a source-linked proposal and records th
     assert.equal(modelCalls, 1);
     assert.doesNotMatch(sent, /SCHEDULE_PRIVATE_CANARY/);
     const files = await readdir(path.join(vault, 'Knowledge'));
-    assert.equal(files.length, 1);
-    const note = await readFile(path.join(vault, 'Knowledge', files[0]), 'utf8');
+    assert.equal(files.length, 3, 'automatic filing adds the note and preserves both existing graph records');
+    const notePath = files.find((file) => file.endsWith('Decision workflow summary.md'));
+    assert.ok(notePath);
+    const note = await readFile(path.join(vault, 'Knowledge', notePath), 'utf8');
     assert.match(note, /status: proposed/);
     assert.match(note, /\[\[Raw\/Source\]\]/);
+    const subject = await readFile(path.join(vault, 'Knowledge', 'Fictional team.md'), 'utf8');
+    assert.match(subject, /predicate: runs/);
+    assert.match(subject, /target: workflow\.decision/);
+    assert.match(subject, /review: proposed/);
+    assert.doesNotMatch(subject, /review: verified/);
     assert.equal((await fetch(base + '/api/ingestion/drafts', { headers }).then((r) => r.json())).drafts.length, 0);
     const next = await fetch(base + '/api/ingestion/run', { method: 'POST', headers: { ...headers, 'Content-Type': 'application/json' }, body: JSON.stringify({ targets: [{ vault: 'Fictional Team', folder: 'Raw' }] }) }).then((r) => r.json());
     assert.equal(next.queued_total, 0, 'a successful scheduled filing records its current source revision');

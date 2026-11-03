@@ -718,7 +718,7 @@
   "ingestion.modelSetup": "Para analisar arquivos novos automaticamente, primeiro ative os rascunhos locais de IA e escolha um modelo Ollama.",
   "ingestion.modelSetupLink": "Configurar IA local",
   "ingestion.autoFile": "Salvar automaticamente novas notas como propostas",
-  "ingestion.autoFileHint": "Escolha uma pasta de destino para cada pasta monitorada. O BrainLink salva apenas notas novas marcadas como propostas e nunca altera notas existentes. Pode adicionar até 3 links no mesmo vault com base em palavras compartilhadas; são sugestões não verificadas, não fatos.",
+  "ingestion.autoFileHint": "Escolha uma pasta de destino para cada pasta monitorada. O BrainLink salva apenas notas novas marcadas como propostas e nunca altera notas existentes. Pode adicionar até 3 links de notas no mesmo vault e propor relações no grafo, com citação da fonte, entre registros existentes do mesmo escopo. As relações ficam propostas para revisão e não são tratadas como fatos verificados.",
   "ingestion.scanFiled": "Verificação concluída. {count} novas notas foram salvas como propostas nas pastas escolhidas.",
   "ingestion.autoDraftsNeedsModel": "Primeiro, ative os rascunhos de resumo local e escolha um modelo Ollama em Sessions.",
   "ingestion.pendingDrafts": "Rascunhos locais de IA para revisar",
