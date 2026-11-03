@@ -26,7 +26,7 @@ import { syncSettings, chooseSync, suggestFolders, PROVIDERS, PROVIDER_LABELS } 
 import { linuxDriveSetup, normalizeDriveSelection } from './sync/gdrive-linux.mjs';
 import { backupScheduleDue, normalizeBackupSchedule } from './backup-schedule.mjs';
 import { runSync } from './sync-cli.mjs';
-import { listGitHubShareCandidates, previewGitHubRepository, commitGitHubSelectedNotes, pushGitHubSelectedNotes, listGitHubPullCandidates, importGitHubSelectedNotes, saveGitHubConflictCopies, inspectGitHubAssignment, testGitHubRepositoryAccess, githubAssignmentStatus } from './sync/github-preview.mjs';
+import { listGitHubShareCandidates, previewGitHubRepository, commitGitHubSelectedNotes, pushGitHubSelectedNotes, listGitHubPullCandidates, importGitHubSelectedNotes, saveGitHubConflictCopies, inspectGitHubAssignment, testGitHubRepositoryAccess, cloneGitHubRepository, githubAssignmentStatus } from './sync/github-preview.mjs';
 import { githubAssignmentProjection } from './sync/github-assignment.mjs';
 import { runGitHubAutoSync } from './sync/github-auto-sync.mjs';
 import { sessionsService } from './host.mjs';
@@ -1741,6 +1741,14 @@ export async function startSetup(opts = {}) {
     'POST /api/github/assignment/test-access': async (b) => {
       const cfg = await loadConfig(file);
       return testGitHubRepositoryAccess(cfg, b);
+    },
+    'POST /api/github/repository/clone': async (b) => {
+      const cfg = await loadConfig(file);
+      const profile = cfg.twin_profiles.find((item) => item.id === String(b.profile_id || ''));
+      const vault = cfg.vaults.find((item) => item.name === String(b.vault || ''));
+      if (!profile || !(profile.vaults || []).some((item) => item.name === vault?.name)) throw new Error('Choose one of this Twin profile\'s vaults first.');
+      if (!vault || vault.private) throw new Error('Private or unavailable vaults cannot be connected to GitHub.');
+      return cloneGitHubRepository({ ownerRepo: b.remote, home, reservedPaths: cfg.vaults.map((item) => item.path) });
     },
     'POST /api/github/assignment/pick-repository': async () => {
       const selected = await pickGitHubRepository();

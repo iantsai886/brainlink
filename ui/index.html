@@ -481,6 +481,12 @@ main #ready, main #ask-panel, main #brain-panel, main #sessions-panel, main #s-c
         <label><span data-i18n="github.vault"></span><select id="github-vault"></select></label>
         <label id="github-repository-row"><span data-i18n="github.repository"></span><div class="row"><input id="github-repository" class="mono" style="flex:1;min-width:0" data-i18n-placeholder="github.repositoryPlaceholder"><button type="button" id="github-repository-pick" data-i18n="github.repositoryBrowse"></button></div></label>
       </div>
+      <div id="github-clone-panel" class="notice" style="margin-top:10px">
+        <p data-i18n="github.cloneHint"></p>
+        <label><span data-i18n="github.cloneRemote"></span><input id="github-clone-remote" class="mono" data-i18n-placeholder="github.cloneRemotePlaceholder"></label>
+        <button type="button" id="github-clone" data-i18n="github.cloneButton"></button>
+        <p id="github-clone-status" class="muted" role="status"></p>
+      </div>
       <div id="github-assign-form" hidden>
         <label><span data-i18n="github.folders"></span><textarea id="github-assign-folders" rows="2" class="mono" data-i18n-placeholder="github.foldersPlaceholder"></textarea></label>
         <label class="muted"><span><input type="checkbox" id="github-assign-whole-vault" style="width:auto"> <span data-i18n="github.wholeVaultConfirm"></span></span></label>
@@ -2292,12 +2298,30 @@ $('github-assign-test').onclick = async () => {
     if (githubInspected && JSON.stringify(githubAssignInput()) === reviewedInput) $('github-status').textContent = t('github.accessFailed', { error: e.message });
   } finally { $('github-assign-test').disabled = !githubInspected; }
 };
+$('github-clone').onclick = async () => {
+  const remote = $('github-clone-remote').value.trim();
+  const profile_id = githubProfileId();
+  const vault = $('github-vault').value;
+  if (!profile_id || !vault) { $('github-clone-status').textContent = t('github.cloneChooseProfile'); return; }
+  if (!confirm(t('github.cloneConfirm', { remote }))) return;
+  $('github-clone').disabled = true;
+  $('github-clone-status').textContent = t('github.cloneRunning');
+  try {
+    const result = await api('POST', '/api/github/repository/clone', { remote, profile_id, vault });
+    $('github-repository').value = result.path;
+    $('github-assign-folders').value = '';
+    $('github-assign-whole-vault').checked = false;
+    invalidateGitHubAssignmentReview();
+    $('github-clone-status').textContent = t(result.head_found ? 'github.cloneDone' : 'github.cloneEmpty', { remote: result.remote });
+  } catch (e) { $('github-clone-status').textContent = t('github.cloneFailed', { error: e.message }); }
+  finally { $('github-clone').disabled = false; }
+};
 $('github-repository-pick').onclick = () => act(async () => {
   const result = await api('POST', '/api/github/assignment/pick-repository', {});
   const selected = result.path || (result.unavailable ? await window.promptForFolder() : '');
   if (!selected) return;
   $('github-repository').value = selected;
-  githubInspected = null;
+  invalidateGitHubAssignmentReview();
   $('github-assign-test').hidden = true; $('github-assign-test').disabled = true;
   $('github-assign-review').hidden = true;
   $('github-assign-confirm').disabled = true;

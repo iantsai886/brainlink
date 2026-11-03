@@ -2,6 +2,10 @@
 
 Status snapshot: 2026-11-03 (Asia/Taipei).
 
+### First-device managed GitHub clone (2026-11-03)
+
+Setup can clone a user-entered `owner/repository` into a new BrainLink-managed local directory using the saved Git sign-in. The clone uses Git's blob filter and non-cone sparse checkout to materialize only `BrainLink/notes`; unsupported filtered-clone servers fail instead of silently downloading the whole checkout. It does not overwrite an existing clone or assign the Twin; users still review the repository, test access and confirm scope. A fictional local bare-remote test verifies the checked-out note, excluded root file, clean Git status, credential and private-vault path rejection, preserved prior clone, and empty-repository handling. `npm test` passed 650/660 (0 failed, 10 platform/privilege skips); `npm run test:ui` passed 48/48. Live GitHub auth and second-device use remain unverified.
+
 ### Read-only GitHub access check (2026-11-03)
 
 Before saving a Twin-to-repository assignment, Setup can now run `git ls-remote` against the selected clone's GitHub origin. It uses the OS Git credential helper without interactive prompts, returns only a sanitized result, and does not save the assignment. The test uses a temporary local bare remote (no real GitHub account contacted). `test/github-profile-assignment.test.mjs` passed 10/10, including successful access, sanitized auth failure, authenticated API, UI invalidation and localization checks. Live user-account permissions and cross-device sync remain unverified.
