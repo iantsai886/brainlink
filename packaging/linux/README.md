@@ -41,5 +41,7 @@ Verified 2026-10-24 in a Debian 12 x64 container: rebuilt x64 and arm64 archives
 
 **Refreshed 2026-11-02 on source commit `e592d4a`:** rebuilt all four unsigned 1.2.8 artifacts in a disposable `node:24-bookworm` container. All four checksums passed. The extracted amd64 `.deb` reported version 1.2.8 and the installed app's bundled OCR read generated English, accented Portuguese, and Traditional Chinese PNG fixtures using local data. ARM64 artifacts were built and checksum-checked, not run on ARM hardware; a graphical Linux session and signed release remain untested. The artifacts stayed inside the disposable container and were not published.
 
+**Refreshed 2026-11-03 on source commit `54b1813`:** in a disposable `node:24-bookworm` container, `npm ci` reported no vulnerabilities and `npm run test:all` passed. `npm run build:linux` rebuilt all four unsigned x64/ARM64 packages, and all four SHA-256 checks passed. The extracted amd64 `.deb` reported version 1.2.8 and initialized a fictional vault; the x64 portable archive installed, reported version 1.2.8, and uninstalled successfully. ARM64 packages were built and hash-checked only, not run on ARM hardware. No graphical Linux session, published/signed installer, or user vault was involved.
+
 `ar.mjs` writes the `.deb` container, because macOS's `ar` only handles object files.
 
