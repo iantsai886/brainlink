@@ -8,6 +8,10 @@ On Windows, Node.js 24.22.1 and npm 11.19.1, `npm run test:all` passed on this e
 
 Release boundary remains: real Mac and graphical Linux acceptance, physical ARM execution, signing/notarization and a signed public release, cross-device restore, customer usability/accessibility review, and measured real-task token/time/answer-quality results are still open. GitHub Actions remain intentionally unused per Ian's direction; do not pay to unblock them.
 
+### Current Windows package installation and upgrade (`6cbeb6aeb425a0ef585da0f2aa8ac95c95b9936f`; 2026-11-03)
+
+On Windows / Node.js 24.22.1 / npm 11.19.1, `npm run smoke:installed:win` built and installed an isolated unsigned 1.2.8 QA package. Bundled runtime, shortcuts, Setup and folder controls, English/Portuguese/Traditional Chinese OCR, scanned-PDF OCR, safe HTML extraction, conflict-safe filing retry, sign-in background launcher, Hermes hook preservation, isolated uninstall, test-data preservation, and PATH restoration passed. `npm run smoke:upgrade:win` also passed: isolated 1.2.7 upgraded to 1.2.8, health check passed, the data canary survived, and isolated uninstall preserved the user data and restored PATH. These are local synthetic Windows checks, not a signed public release or customer acceptance.
+
 ### Independent local-reranker RSI comparison (working tree based on `6ac2c77`; 2026-11-03)
 
 Added an opt-in, second reranker experiment using the existing frozen 30-task fictional evaluation set. It records mean reciprocal rank (how high the expected source appears) and gates review on privacy, task success, source recall, ranking, and abstention. The configured local reranker receives only synthetic queries and eligible synthetic snippets; a service error aborts the run. The RSI receipt stores aggregates only, is tied to a clean Git commit, and keeps model identity, customer quality, and billed-token savings explicitly unverified. No production search behavior is changed or auto-promoted.
