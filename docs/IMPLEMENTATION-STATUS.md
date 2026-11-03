@@ -2,6 +2,10 @@
 
 Status snapshot: 2026-11-03 (Asia/Taipei).
 
+### Current Windows installed-app smoke (`712e76ca23279208c9d4da2363dbd0942f4aed81`; 2026-11-03)
+
+After rebuilding the Windows stage from the current source, the exact-source check passed and `npm run smoke:installed:win` passed. The unsigned 1.2.8 installer launched from its bundled runtime; shortcuts and Setup/folder-ingestion controls worked; English, Portuguese, and Traditional Chinese OCR, scanned-PDF OCR, and safe HTML extraction passed; the background sign-in launcher passed its isolated health check; retry-safe filing and Hermes hook preservation passed; and isolated uninstall preserved test data and restored PATH. The installer is 63,608,788 bytes with SHA-256 `98B32935BABE802698E5A5CCCA4C0807D9054F1F0F5E01876518FB6FDA3AE32D`. This is local Windows QA, not signed publication, native Mac/Linux, or customer acceptance.
+
 ### First-device managed GitHub clone (2026-11-03)
 
 Setup can clone a user-entered `owner/repository` into a new BrainLink-managed local directory using the saved Git sign-in. The clone uses Git's blob filter and non-cone sparse checkout to materialize only `BrainLink/notes`; unsupported filtered-clone servers fail instead of silently downloading the whole checkout. It does not overwrite an existing clone or assign the Twin; users still review the repository, test access and confirm scope. A fictional local bare-remote test verifies the checked-out note, excluded root file, clean Git status, credential and private-vault path rejection, preserved prior clone, and empty-repository handling. `npm test` passed 650/660 (0 failed, 10 platform/privilege skips); `npm run test:ui` passed 48/48. A blank shared-notes starter now exists on the draft feature branch. Using the saved GitHub sign-in, a live filtered sparse clone of that branch returned the notes file, excluded `package.json`, and had a clean status. This manual Git test did not exercise BrainLink's Setup clone button. The draft is not merged, so `main` still lacks the notes folder; the app-managed clone of the shared notes and actual second-device retrieval remain unverified.
