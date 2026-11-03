@@ -134,6 +134,7 @@ test('feed fetching refuses hosts outside the allowlist, private DNS answers, re
 
   const url = feedUrl('arxiv', 'agent memory');
   await assert.rejects(fetchFeed(url, { fetchImpl: async () => response('', { status: 302, headers: { location: 'http://169.254.169.254/' } }), lookup: publicLookup }), /redirect/);
+  await assert.rejects(fetchFeed(url, { fetchImpl: async () => response('', { status: 429 }), lookup: publicLookup }), /rate limiting requests \(HTTP 429\); try again later/);
   await assert.rejects(fetchFeed(url, { fetchImpl: async () => response('busy', { status: 503 }), lookup: publicLookup }), /HTTP 503/);
   await assert.rejects(fetchFeed(url, { fetchImpl: async () => response('<html></html>', { type: 'text/html' }), lookup: publicLookup }), /content type/);
   await assert.rejects(fetchFeed(url, { fetchImpl: async () => response('x', { headers: { 'content-length': String(50_000_000) } }), lookup: publicLookup }), /larger/);
