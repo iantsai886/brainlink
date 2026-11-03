@@ -1988,3 +1988,7 @@ Added `npm run smoke:live-ingestion` to exercise the actual scheduled watcher, l
 ### Linux suite and package verification (2026-11-03; exact source commit `54b1813`)
 
 In a disposable `node:24-bookworm` container, `npm ci` reported zero vulnerabilities and `npm run test:all` exited successfully. `npm run build:linux` built the unsigned 1.2.8 x64 and ARM64 tar and Debian packages; all four SHA-256 checks passed. The extracted amd64 Debian package reported version 1.2.8 and initialized a fictional vault. The x64 portable archive installed, reported version 1.2.8, and uninstalled successfully. ARM64 artifacts were built and checksum-checked, not run on ARM hardware. No graphical Linux desktop, public release, signing, or user vault was tested. Full package notes are in [packaging/linux/README.md](../packaging/linux/README.md).
+
+### Linux Setup HTTP check (2026-11-03; source commit `9a0ecbe`)
+
+Started the Linux Setup server in a disposable container with a fictional vault and accessed it through a localhost-only port forward. The page returned HTTP 200 with title `BrainLink Setup`; the authenticated state endpoint reported version 1.2.8 and only the fictional test vault. The container was stopped afterward. This verifies HTTP serving and the Linux backend state, not a graphical Linux desktop or visual/browser interaction; the Windows browser automation could not safely open the forwarded QA page.
