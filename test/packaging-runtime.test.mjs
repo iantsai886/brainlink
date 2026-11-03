@@ -62,6 +62,8 @@ test('every native installer bundles all production dependencies and portable Br
   assert.match(windowsBuilder, /Inno Setup compiler failed with exit code/, 'Windows builder must report compiler failures');
   const windowsInstaller = await read('packaging/windows/BrainLink.iss');
   const installedWindowsSmoke = await read('scripts/smoke-installed-windows.ps1');
+  const upgradeWindowsSmoke = await read('scripts/smoke-upgrade-windows.ps1');
+  const stageFreshnessCheck = await read('scripts/assert-windows-stage-current.ps1');
   const installedOcrSmoke = await read('scripts/smoke-installed-ocr.mjs');
   const installedHtmlSmoke = await read('scripts/smoke-installed-html.mjs');
   assert.match(installedWindowsSmoke, /smoke-installed-ocr\.mjs/);
@@ -78,6 +80,11 @@ test('every native installer bundles all production dependencies and portable Br
   assert.match(windowsInstaller, /^#define ProductStartupLauncher "BrainLink Background\.vbs"$/m, 'the production uninstaller must target the real startup launcher name');
   assert.match(windowsInstaller, /^#define ProductStartupLauncher "BrainLink QA Smoke Background\.vbs"$/m, 'the smoke installer must use its own startup launcher name');
   assert.match(installedWindowsSmoke, /TcpListener/, 'the installed-app smoke must use a port separate from a running BrainLink');
+  assert.match(installedWindowsSmoke, /assert-windows-stage-current\.ps1/, 'Windows install smoke must verify its complete staged source');
+  assert.match(upgradeWindowsSmoke, /assert-windows-stage-current\.ps1/, 'Windows upgrade smoke must verify its complete staged source');
+  assert.match(stageFreshnessCheck, /foreach \(\$Tree in @\('bin', 'src', 'ui', 'samples', 'skills'\)\)/, 'package freshness must cover every bundled source tree');
+  assert.match(stageFreshnessCheck, /Get-FileHash -LiteralPath \$SourceFile\.FullName/, 'package freshness must compare source and staged file hashes');
+  assert.match(stageFreshnessCheck, /The Windows package stage is stale/, 'a stale stage must fail before building an installer');
   assert.match(installedWindowsSmoke, /Join-Path \$TestRoot "BrainLink-QA-Smoke-Setup-\$Version\.exe"/, 'the smoke installer must live in its unique temporary directory');
   assert.match(installedWindowsSmoke, /if \(\$SkipCompile\) \{ \$ReusableInstaller \} else/, 'skip-compile mode must reuse the existing QA artifact');
   assert.match(installedWindowsSmoke, /Join-Path \$Root "dist\\BrainLink-QA-Smoke-Setup-\$Version\.exe"/, 'the reusable installer must keep the existing QA artifact path');

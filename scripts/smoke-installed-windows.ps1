@@ -16,11 +16,7 @@ $Stage = Join-Path $Root 'build\windows\stage'
 if (-not (Test-Path (Join-Path $Stage 'node\node.exe')) -or -not (Test-Path (Join-Path $Stage 'app\bin\brainlink.mjs'))) {
   throw 'The Windows package stage is missing. Run packaging/windows/build-windows.ps1 first.'
 }
-$SourceUi = Join-Path $Root 'ui\index.html'
-$StagedUi = Join-Path $Stage 'app\ui\index.html'
-if (-not (Test-Path -LiteralPath $StagedUi) -or (Get-FileHash -LiteralPath $SourceUi -Algorithm SHA256).Hash -ne (Get-FileHash -LiteralPath $StagedUi -Algorithm SHA256).Hash) {
-  throw 'The Windows package stage is stale. Run packaging/windows/build-windows.ps1 before the installed-app smoke test.'
-}
+& (Join-Path $PSScriptRoot 'assert-windows-stage-current.ps1') -Root $Root -Stage $Stage
 $TestRoot = Join-Path $env:TEMP ('brainlink-install-smoke-' + [guid]::NewGuid().ToString('N'))
 $InstallDir = Join-Path $TestRoot 'installed'
 $BrainLinkHome = Join-Path $TestRoot 'home'

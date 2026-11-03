@@ -19,6 +19,7 @@ $CurrentStage = Join-Path $Root 'build\windows\stage'
 if (-not (Test-Path (Join-Path $CurrentStage 'node\node.exe')) -or -not (Test-Path (Join-Path $CurrentStage 'app\bin\brainlink.mjs'))) {
   throw 'Current Windows stage is missing. Run packaging/windows/build-windows.ps1 first.'
 }
+& (Join-Path $PSScriptRoot 'assert-windows-stage-current.ps1') -Root $Root -Stage $CurrentStage
 $TestRoot = Join-Path $env:TEMP ('brainlink-upgrade-smoke-' + [guid]::NewGuid().ToString('N'))
 $OldRoot = Join-Path $TestRoot 'source-old'
 $OldStage = Join-Path $OldRoot 'build\windows\stage'
