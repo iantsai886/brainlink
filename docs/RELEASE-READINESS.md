@@ -16,6 +16,8 @@ These are separate, dated local checks; they are not a single cross-platform rel
 
 ## Latest verification
 
+- **Current Windows backup recovery (`e80d1d6`, 2026-11-03):** encrypted fictional Personal, Organisation and Client-A backup verified and restored four files into a clean destination; wrong-key refusal, RSI artifact restore, and unchanged sources passed. This is same-machine test data, not a second-device recovery acceptance.
+
 - **Current Windows folder watcher (`825f81d`, 2026-11-03):** `npm run smoke:live-ingestion` passed with local Ollama `qwen3.5:2b` and a temporary fictional vault. Watch mode analyzed and filed one proposed note, skipped private content, kept its canary/source out of logs, and reported zero failures. No user vault was used; this does not prove model accuracy on customer files.
 
 - **Latest macOS ZIP (`ee75260`, 2026-11-03):** built the universal 1.2.8 ZIP and passed `npm run test:mac-zip` in Docker `node:24-bookworm`. SHA-256 `947ab355f3b7c58a58677a29bf9d8f5bae98912502ab0c3f00dfa4150b34b3a8` (155,260,163 bytes). Install/uninstall simulation, LaunchAgent, local HTTP and notes preservation passed. The app ran with Linux Node in the simulation; native Mac, Gatekeeper/notarization, signing and customer acceptance remain unverified.

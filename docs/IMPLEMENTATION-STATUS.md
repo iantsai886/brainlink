@@ -2016,3 +2016,7 @@ In Docker `node:24-bookworm` on Windows, `npm ci` reported zero known vulnerabil
 ### Live folder watcher on the current branch (2026-11-03; exact source commit `825f81d`)
 
 After restoring Windows dependencies with `npm ci`, `npm run smoke:live-ingestion` passed on Windows/Node.js 24.22.1 using the installed local Ollama model `qwen3.5:2b`. The fictional watched folder ran in `watch` mode; one file was analyzed, one source-linked proposal was filed, and there were zero failures. The private fictional file was not analyzed into a saved proposal, its canary did not appear in results/logs, and the saved content remained marked proposal-only. The script removed its temporary vault and app data. This validates the local scheduled watcher and filing path on this machine, not model accuracy on customer files, every supported format, Mac/Linux runtime, or customer acceptance.
+
+### Current backup recovery smoke (2026-11-03; exact source commit `e80d1d6`)
+
+`npm run smoke:backup-recovery` passed on Windows with fictional Personal, Organisation and Client-A vaults. The encrypted backup verified and restored all four files into a clean destination; the wrong key was refused, the RSI backup artifact was recovered, and the original source files stayed unchanged. Temporary fixture data was used and removed. This is same-machine recovery verification; it does not prove recovery on a second physical device or customer-controlled destination.
