@@ -503,6 +503,7 @@ main #ready, main #ask-panel, main #brain-panel, main #sessions-panel, main #s-c
     <label class="muted" style="display:flex;flex-direction:row;gap:6px;align-items:center"><input type="checkbox" id="ingestion-enabled" style="width:auto"><span data-i18n="ingestion.enabled"></span></label>
     <label class="muted" style="display:flex;flex-direction:row;gap:6px;align-items:center;margin-top:6px"><input type="checkbox" id="ingestion-auto-drafts" style="width:auto"><span data-i18n="ingestion.autoDrafts"></span></label>
     <p class="muted" data-i18n="ingestion.autoDraftsHint"></p>
+    <p id="ingestion-model-setup" class="muted" role="status" hidden><span data-i18n="ingestion.modelSetup"></span> <a href="#sessions-panel" data-main-nav="sessions-panel" data-i18n="ingestion.modelSetupLink"></a></p>
     <label class="muted" style="display:flex;flex-direction:row;gap:6px;align-items:center;margin-top:6px"><input type="checkbox" id="ingestion-auto-file" style="width:auto"><span data-i18n="ingestion.autoFile"></span></label>
     <p class="muted" data-i18n="ingestion.autoFileHint"></p>
     <div class="grid2" style="margin-top:10px">
@@ -1732,6 +1733,7 @@ async function load() {
   $('ingestion-auto-drafts').checked = Boolean(S.ingestion?.autoDrafts);
   $('ingestion-auto-drafts').disabled = !S.sessions_local_summary?.enabled || !S.sessions_local_summary?.model;
   $('ingestion-auto-drafts').parentElement.title = $('ingestion-auto-drafts').disabled ? t('ingestion.autoDraftsNeedsModel') : '';
+  $('ingestion-model-setup').hidden = Boolean(S.sessions_local_summary?.enabled && S.sessions_local_summary?.model);
   $('ingestion-auto-file').checked = Boolean(S.ingestion?.autoFile);
   $('ingestion-auto-file').disabled = !S.ingestion?.autoDrafts || !S.sessions_local_summary?.enabled || !S.sessions_local_summary?.model;
   const scanVaults = S.vaults.filter((v) => !v.private && v.exists);

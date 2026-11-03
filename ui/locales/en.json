@@ -699,6 +699,8 @@
   "ingestion.interval": "Check every (minutes)",
   "ingestion.autoDrafts": "Automatically analyze new files with local AI",
   "ingestion.autoDraftsHint": "Uses Ollama only on this computer and analyzes up to 5 new files per scan. When enabled, PNG/JPEG images are sent to Ollama on this computer for a visual description; this needs a vision-capable model. Drafts stay unverified and wait here for review unless automatic filing is separately enabled.",
+  "ingestion.modelSetup": "To analyze new files automatically, first enable local AI drafts and choose an Ollama model.",
+  "ingestion.modelSetupLink": "Set up local AI",
   "ingestion.autoFile": "Automatically save new notes as proposed notes",
   "ingestion.autoFileHint": "Choose a destination for each folder below. BrainLink saves only new notes marked proposed and never edits existing notes. It may add up to 3 same-vault links based on shared words; these are unverified suggestions, not facts.",
   "ingestion.scanFiled": "Scan finished. {count} new notes were saved as proposals in your chosen folders.",
