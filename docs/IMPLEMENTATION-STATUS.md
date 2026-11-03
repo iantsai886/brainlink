@@ -2,6 +2,12 @@
 
 Status snapshot: 2026-11-03 (Asia/Taipei).
 
+### Current exact checkout verification (`91588c451da9e273990442142d96df2353525161`; 2026-11-03)
+
+On Windows, Node.js 24.22.1 and npm 11.19.1, `npm run test:all` passed on this exact source commit: core 658 total (648 passed, 0 failed, 10 platform/privilege skips); UI 48/48. `npm audit --omit=dev --audit-level=moderate` reported 0 production dependency vulnerabilities. The skipped cases require platform or Windows symlink privileges unavailable in this environment. These are local automated results, not hosted CI or customer acceptance.
+
+Release boundary remains: real Mac and graphical Linux acceptance, physical ARM execution, signing/notarization and a signed public release, cross-device restore, customer usability/accessibility review, and measured real-task token/time/answer-quality results are still open. GitHub Actions remain intentionally unused per Ian's direction; do not pay to unblock them.
+
 ### Independent local-reranker RSI comparison (working tree based on `6ac2c77`; 2026-11-03)
 
 Added an opt-in, second reranker experiment using the existing frozen 30-task fictional evaluation set. It records mean reciprocal rank (how high the expected source appears) and gates review on privacy, task success, source recall, ranking, and abstention. The configured local reranker receives only synthetic queries and eligible synthetic snippets; a service error aborts the run. The RSI receipt stores aggregates only, is tied to a clean Git commit, and keeps model identity, customer quality, and billed-token savings explicitly unverified. No production search behavior is changed or auto-promoted.
