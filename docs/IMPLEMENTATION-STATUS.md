@@ -2008,3 +2008,7 @@ On Windows with Node.js 24.22.1, `npm run test:all` passed: core 658 total (648 
 ### RSI rate-limit guidance from live connector check (2026-11-03; source change after `16dfe8c`)
 
 When a public research source returns HTTP 429, BrainLink now reports that the source is rate limiting requests and tells the user to try later. It does not automatically retry. The focused discovery suite passed 33/33 on Windows/Node.js 24.22.1 and `git diff --check` passed. The prior full-suite and installer receipts are on parent commit `16dfe8c`; the full suite has not been rerun after this one-line error-message change.
+
+### Latest macOS ZIP build and install simulation (2026-11-03; exact source commit `ee75260`)
+
+In Docker `node:24-bookworm` on Windows, `npm ci` reported zero known vulnerabilities. `npm run build:mac-zip` and `npm run test:mac-zip` passed. The universal ZIP is 155,260,163 bytes with SHA-256 `947ab355f3b7c58a58677a29bf9d8f5bae98912502ab0c3f00dfa4150b34b3a8`. The archive checks passed for required files, executable bits, excluded paths/secrets/trial wording, app bundle metadata, install/uninstall scripts, LaunchAgent and notes preservation. The bundled app served HTTP 200 using the Linux container's Node runtime. The package includes Darwin x64 and ARM64 runtimes, but neither was executed. This remains container simulation, not native Mac, Gatekeeper, notarization, signed distribution or customer acceptance.
