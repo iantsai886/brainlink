@@ -2,6 +2,14 @@
 
 Status snapshot: 2026-11-03 (Asia/Taipei).
 
+### Fresh current-branch verification (`5ef698e18095099953878a72abb1fcd39e94a071`; 2026-11-03)
+
+On Windows with Node.js 24.22.1, `npm run test:all` passed: core 660 total (650 passed, 0 failed, 10 platform/privilege skips); UI 48/48. `test/brainlink.test.mjs` also passed alone (84 passed, 2 Windows-only skips), and `test/rsi-ledger.test.mjs` passed 12/12. A current-branch `npm run smoke:live-ingestion` run used local Ollama `qwen3.5:2b` and a temporary fictional vault: the scheduled watch analyzed one changed source, filed one source-linked proposal, reported zero failures, and kept the private canary and source text out of the proposal and logs. The proposal stayed unverified; no real vault was used.
+
+`npm run smoke:installed:win` rebuilt from the exact source, passed package freshness checks, and installed/launched the unsigned 1.2.8 QA app from its bundled runtime. Shortcuts, Setup and folder-ingestion controls, English/Portuguese/Traditional Chinese OCR, scanned-PDF OCR, safe HTML extraction, conflict-safe filing retry, the isolated sign-in launcher, Hermes hook preservation, and data/PATH-preserving uninstall passed. This is local synthetic Windows evidence. Folder processing still requires the BrainLink process to be running; start-at-sign-in can resume it after login. Model drafting and auto-filing are separate opt-ins, and saved AI output remains proposed/unverified.
+
+This result does not establish native Mac or graphical Linux behavior, physical ARM behavior, hosted CI (GitHub Actions were left unused per Ian's instruction), signed publication, second-device sync/restore, customer accessibility acceptance, broad answer quality, or billed token/time savings. Those gates remain open.
+
 ### Current Windows installed-app smoke (`712e76ca23279208c9d4da2363dbd0942f4aed81`; 2026-11-03)
 
 After rebuilding the Windows stage from the current source, the exact-source check passed and `npm run smoke:installed:win` passed. The unsigned 1.2.8 installer launched from its bundled runtime; shortcuts and Setup/folder-ingestion controls worked; English, Portuguese, and Traditional Chinese OCR, scanned-PDF OCR, and safe HTML extraction passed; the background sign-in launcher passed its isolated health check; retry-safe filing and Hermes hook preservation passed; and isolated uninstall preserved test data and restored PATH. The installer is 63,608,788 bytes with SHA-256 `98B32935BABE802698E5A5CCCA4C0807D9054F1F0F5E01876518FB6FDA3AE32D`. This is local Windows QA, not signed publication, native Mac/Linux, or customer acceptance.
