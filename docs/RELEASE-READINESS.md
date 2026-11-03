@@ -16,6 +16,8 @@ These are separate, dated local checks; they are not a single cross-platform rel
 
 ## Latest verification
 
+- **Current Windows folder watcher (`825f81d`, 2026-11-03):** `npm run smoke:live-ingestion` passed with local Ollama `qwen3.5:2b` and a temporary fictional vault. Watch mode analyzed and filed one proposed note, skipped private content, kept its canary/source out of logs, and reported zero failures. No user vault was used; this does not prove model accuracy on customer files.
+
 - **Latest macOS ZIP (`ee75260`, 2026-11-03):** built the universal 1.2.8 ZIP and passed `npm run test:mac-zip` in Docker `node:24-bookworm`. SHA-256 `947ab355f3b7c58a58677a29bf9d8f5bae98912502ab0c3f00dfa4150b34b3a8` (155,260,163 bytes). Install/uninstall simulation, LaunchAgent, local HTTP and notes preservation passed. The app ran with Linux Node in the simulation; native Mac, Gatekeeper/notarization, signing and customer acceptance remain unverified.
 
 - **Current Windows checkout (`202f4b1`, 2026-11-03):** `npm run test:all` passed (core 648 passed, 0 failed, 10 platform/privilege skips; UI 48/48). Current unsigned 1.2.8 installer smoke passed in an isolated profile, including folder scanning, multilingual OCR, startup, filing retry, Hermes hook preservation and data-preserving uninstall. Current 1.2.7-to-1.2.8 upgrade smoke passed, preserved its data canary, passed health check and uninstalled cleanly. Local Windows evidence only; release limits below still apply.
