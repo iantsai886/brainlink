@@ -1996,3 +1996,7 @@ In a disposable `node:24-bookworm` container, `npm ci` reported zero vulnerabili
 ### Linux Setup HTTP check (2026-11-03; source commit `9a0ecbe`)
 
 Started the Linux Setup server in a disposable container with a fictional vault and accessed it through a localhost-only port forward. The page returned HTTP 200 with title `BrainLink Setup`; the authenticated state endpoint reported version 1.2.8 and only the fictional test vault. The container was stopped afterward. This verifies HTTP serving and the Linux backend state, not a graphical Linux desktop or visual/browser interaction; the Windows browser automation could not safely open the forwarded QA page.
+
+### Live RSI research connector check (2026-11-03; source commit `a179aa2`)
+
+Ran the existing discovery service once on Windows/Node.js 24.22.1 with all five built-in public metadata sources and a temporary fictional ledger. Four sources responded; Semantic Scholar returned HTTP 429, so the overall result was correctly `partial`. The successful responses yielded 100 entries; filters counted 12 invalid, 4 secret-like, 39 irrelevant and 40 over-limit items; five low-confidence proposals were filed in the temporary ledger. The run reported zero instruction-like entries. The temporary directory was deleted and no real vault/settings were used. This is a live connectivity check only, not a relevance or quality benchmark. Details and limits are in [RSI-DISCOVERY.md](RSI-DISCOVERY.md#live-connector-check-2026-11-03).
