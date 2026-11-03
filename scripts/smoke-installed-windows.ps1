@@ -184,7 +184,7 @@ try {
   $pending = Invoke-RestMethod -Uri "http://127.0.0.1:$($instance.port)/api/ingestion/drafts" -Method Get -Headers $headers -TimeoutSec 5
   if (@($pending.drafts).Count -ne 1 -or -not $pending.drafts[0].filing) { throw 'Installed UI does not retain the partial draft for retry.' }
   Remove-Item -LiteralPath $conflictPath
-  $retryBody = @{ draft_id = $draftId; destination = 'Knowledge'; confirm = $true } | ConvertTo-Json -Compress
+  $retryBody = @{ draft_id = $draftId; destination = 'Knowledge'; entity_choices = @(@{ index = 0; scope = 'organisation' }); confirm = $true } | ConvertTo-Json -Depth 5 -Compress
   $retried = Invoke-RestMethod -Uri "http://127.0.0.1:$($instance.port)/api/ingestion/save-draft" -Method Post -Headers $headers -ContentType 'application/json' -Body $retryBody -TimeoutSec 10
   if ($retried.partial -or $retried.path -ne $partial.path) { throw 'Installed retry did not finish using the already-saved main note.' }
   $savedRelative = [string]$partial.path -replace '^Fictional QA/', ''

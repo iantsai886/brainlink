@@ -2,6 +2,12 @@
 
 Status snapshot: 2026-11-03 (Asia/Taipei).
 
+### Auto-file entity review stays open until resolved (2026-11-03; branch based on `6b435ca`)
+
+Auto-file now preserves local entity suggestions after saving the main source-linked proposal and any safe existing-record graph links. The user can assign a Personal, Organisation, or Client scope to selected suggestions, or explicitly dismiss the unchecked remainder. Until all suggestions are saved or dismissed, the source stays in the local draft queue, no filed receipt is recorded, and background status counts it as `waiting_review`, not `filed`. No scope is guessed. A synthetic integration test covers save-main-note, save-one-scoped-entity, explicitly dismiss another, and only then close the draft. Focused folder/API tests passed 18/18; UI tests passed 48/48; locale JSON and `git diff --check` passed. The Windows stage was rebuilt from current source and `npm run smoke:installed:win` passed: bundled launch, shortcuts, Setup/folder controls, English/Portuguese/Traditional Chinese OCR, scanned-PDF OCR, safe HTML extraction, sign-in launcher, Hermes hook preservation, and isolated uninstall/data/PATH preservation.
+
+The full Windows core suite reported 647 passed, 3 failed, 10 platform/privilege skips out of 660. The three failures were unrelated temporary-file rename `EPERM` errors and an idle-time test; the affected brief tests passed 3/3 and RSI discovery tests passed 2/2 when rerun alone. This patch's folder tests pass; a clean full-suite run has not yet been obtained after it.
+
 ### Auto-filed graph relation proposals (2026-11-03; current worktree based on `f407d1b`)
 
 When auto-file is explicitly enabled, a source-backed draft may now save relationship suggestions between existing typed records in the same vault and scope. The suggestions require exact source quotes and remain `review: proposed`; they do not become verified automatically. Manual filing behavior is unchanged. English, Portuguese and Traditional Chinese setup hints explain this. The focused ingestion tests passed 13/13, including manual and scheduled filing and the bounded retry path. `npm run test:ui` passed 48/48. A logged clean `npm test` run passed: core 660 total (650 passed, 0 failed, 10 platform/privilege skips). An earlier full attempt had two intermittent failures; the ingestion file (13/13) and broad BrainLink file (84 passed, 2 Windows-only skips) passed in isolation. No live-model accuracy or customer-vault result is claimed. `git diff --check` passed before documentation updates.

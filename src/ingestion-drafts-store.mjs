@@ -52,6 +52,7 @@ function validFiling(filing, draft) {
   const validIndexes = (values, max) => Array.isArray(values) && values.length <= max
     && values.every((value) => Number.isSafeInteger(value) && value >= 0 && value < max)
     && new Set(values).size === values.length;
+  const dismissedEntities = filing?.dismissed_entity_indexes ?? [];
   return filing && typeof filing === 'object'
     && safeFolder(filing.destination) && draft.destinations.includes(filing.destination)
     && safeNotePath(filing.note_path)
@@ -63,8 +64,11 @@ function validFiling(filing, draft) {
     && new Set(filing.entity_choices.map((item) => item.index)).size === filing.entity_choices.length
     && validIndexes(filing.relationship_indexes, (draft.relationships || []).length)
     && validIndexes(filing.saved_entities, (draft.entities || []).length)
+    && validIndexes(dismissedEntities, (draft.entities || []).length)
     && validIndexes(filing.saved_relationships, (draft.relationships || []).length)
     && filing.saved_entities.every((index) => filing.entity_choices.some((item) => item.index === index))
+    && filing.saved_entities.every((index) => !dismissedEntities.includes(index))
+    && filing.entity_choices.every((item) => !dismissedEntities.includes(item.index))
     && filing.saved_relationships.every((index) => filing.relationship_indexes.includes(index));
 }
 

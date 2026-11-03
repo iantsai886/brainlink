@@ -154,7 +154,7 @@ test('selected source can become a proposed note only after explicit confirmatio
     assert.equal((await fetch(`http://127.0.0.1:${app.port}/api/ingestion/drafts`, { headers: { 'X-BrainLink-Token': app.token } }).then((r) => r.json())).drafts.length, 1, 'a partial filing remains available for retry');
     assert.equal(await readFile(entityConflict, 'utf8'), '# Existing unrelated proposal\n\nKeep this note untouched.');
     await unlink(entityConflict);
-    const retryResponse = await api('/api/ingestion/save-draft', { draft_id: generated.draft_id, destination: 'Knowledge', confirm: true });
+    const retryResponse = await api('/api/ingestion/save-draft', { draft_id: generated.draft_id, destination: 'Knowledge', entity_choices: [{ index: 0, scope: 'organisation' }], confirm: true });
     assert.equal(retryResponse.status, 200, await retryResponse.clone().text());
     const saved = await retryResponse.json();
     assert.equal(saved.saved_as_proposal, true, JSON.stringify(saved));
@@ -308,7 +308,7 @@ test('manual scan auto-files a linked proposed note only into its selected same-
     ingestionDraftFetch: async (url, options) => {
       modelCalls++; sent = options.body;
       assert.equal(url, 'http://127.0.0.1:11434/api/chat');
-      return { ok: true, json: async () => ({ message: { content: JSON.stringify({ title: 'Auto proposal', memory_type: 'semantic', summary: 'A fictional checklist workflow.', key_points: ['The result is unverified.'], relationships: [{ subject_id: 'team.fictional', predicate: 'runs', target_id: 'workflow.checklist', evidence: 'A fictional team uses a checklist.' }] }) } }) };
+      return { ok: true, json: async () => ({ message: { content: JSON.stringify({ title: 'Auto proposal', memory_type: 'semantic', summary: 'A fictional checklist workflow.', key_points: ['The result is unverified.'], entities: [{ type: 'concept', title: 'Checklist approach', description: 'A reusable checklist is mentioned.', evidence: 'A fictional team uses a checklist.' }, { type: 'concept', title: 'Team checklist practice', description: 'A team checklist practice is mentioned.', evidence: 'A fictional team uses a checklist.' }], relationships: [{ subject_id: 'team.fictional', predicate: 'runs', target_id: 'workflow.checklist', evidence: 'A fictional team uses a checklist.' }] }) } }) };
     },
   });
   const base = `http://127.0.0.1:${app.port}`;
@@ -325,7 +325,8 @@ test('manual scan auto-files a linked proposed note only into its selected same-
     assert.equal(scan.processing.trigger, 'manual');
     assert.equal(scan.processing.attempted, 1, 'the private source never enters the local model queue');
     assert.equal(scan.processing.created, 1);
-    assert.equal(scan.processing.filed, 1);
+    assert.equal(scan.processing.filed, 0, 'filing stays in review while entity scope is undecided');
+    assert.equal(scan.processing.waiting_review, 1);
     assert.equal(scan.processing.failed, 0);
     assert.doesNotMatch(sent, /PRIVATE_AUTO_FILE_CANARY/);
     const files = await readdir(path.join(vault, 'Knowledge'));
@@ -346,7 +347,18 @@ test('manual scan auto-files a linked proposed note only into its selected same-
     assert.match(subject, /review: proposed/);
     assert.doesNotMatch(subject, /review: verified/);
     const pending = await fetch(base + '/api/ingestion/drafts', { headers }).then((r) => r.json());
-    assert.equal(pending.drafts.length, 0, 'saved proposals are removed from the local draft queue');
+    assert.equal(pending.drafts.length, 1, 'entity suggestions remain available after the main note and graph link are saved');
+    assert.equal(pending.drafts[0].filing.note_path, `Knowledge/${notePath}`);
+    const entityReview = await post('/api/ingestion/save-draft', { draft_id: pending.drafts[0].id, destination: 'Knowledge', related_note_paths: [], entity_choices: [{ index: 0, scope: 'organisation' }], relationship_indexes: [0], confirm: true }).then((r) => r.json());
+    assert.equal(entityReview.written, true);
+    assert.equal(entityReview.partial, true);
+    assert.equal(entityReview.entity_review_remaining, 1);
+    assert.equal(entityReview.entity_proposals[0].status, 'proposed');
+    assert.equal(entityReview.entity_proposals[0].verified, false);
+    const dismissed = await post('/api/ingestion/save-draft', { draft_id: pending.drafts[0].id, destination: 'Knowledge', related_note_paths: [], entity_choices: [], relationship_indexes: [0], dismiss_unselected_entities: true, confirm: true }).then((r) => r.json());
+    assert.equal(dismissed.partial, false, 'the user can explicitly dismiss remaining suggestions without creating notes');
+    assert.equal(dismissed.entity_review_remaining, 0);
+    assert.equal((await fetch(base + '/api/ingestion/drafts', { headers }).then((r) => r.json())).drafts.length, 0, 'the draft closes only after every entity is scoped or explicitly dismissed');
     const nextScan = await post('/api/ingestion/run', { targets: [{ vault: 'Fictional Company', folder: 'Raw' }] }).then((r) => r.json());
     assert.equal(nextScan.queued_total, 0, 'the exact source revision is receipted only after the linked note is saved');
     const activity = await readFile(path.join(appHome, 'activity.log'), 'utf8');
