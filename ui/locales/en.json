@@ -708,6 +708,7 @@
   "ingestion.enabled": "Run scans in the background",
   "ingestion.startupWarning": "Scans only run while BrainLink is open. They will not resume after you sign in unless background startup is on.",
   "ingestion.startupLink": "Turn on start at sign-in",
+  "ingestion.startupEnable": "Enable background start now",
   "ingestion.mode": "Background scan mode",
   "ingestion.modeDaily": "Once a day",
   "ingestion.modeWatch": "Check folders repeatedly",

@@ -708,6 +708,7 @@
   "ingestion.enabled": "在背景執行掃描",
   "ingestion.startupWarning": "BrainLink 開啟時才會執行掃描。若未啟用登入時啟動，重新登入後不會自動繼續。",
   "ingestion.startupLink": "前往啟用登入時啟動",
+  "ingestion.startupEnable": "立即啟用背景啟動",
   "ingestion.mode": "背景掃描方式",
   "ingestion.modeDaily": "每天一次",
   "ingestion.modeWatch": "定期檢查資料夾",

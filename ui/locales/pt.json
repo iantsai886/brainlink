@@ -708,6 +708,7 @@
   "ingestion.enabled": "Executar verificações em segundo plano",
   "ingestion.startupWarning": "As verificações só funcionam enquanto o BrainLink está aberto. Elas não recomeçam após iniciar sessão, a menos que a inicialização em segundo plano esteja ativada.",
   "ingestion.startupLink": "Ativar início ao entrar",
+  "ingestion.startupEnable": "Ativar início em segundo plano agora",
   "ingestion.mode": "Modo de verificação em segundo plano",
   "ingestion.modeDaily": "Uma vez por dia",
   "ingestion.modeWatch": "Verificar pastas repetidamente",

@@ -506,7 +506,7 @@ main #ready, main #ask-panel, main #brain-panel, main #sessions-panel, main #s-c
   <section id="s-ingestion">
     <h2 data-i18n="ingestion.title"></h2>
     <p class="hint" data-i18n="ingestion.hint"></p>
-    <p id="ingestion-startup-warning" class="notice" role="status" hidden><span data-i18n="ingestion.startupWarning"></span> <a href="#s-background" data-main-nav="s-background" data-i18n="ingestion.startupLink"></a></p>
+    <p id="ingestion-startup-warning" class="notice" role="status" hidden><span data-i18n="ingestion.startupWarning"></span> <button type="button" id="ingestion-enable-startup" data-i18n="ingestion.startupEnable"></button> <a href="#s-background" data-main-nav="s-background" data-i18n="ingestion.startupLink"></a></p>
     <label class="muted" style="display:flex;flex-direction:row;gap:6px;align-items:center"><input type="checkbox" id="ingestion-enabled" style="width:auto"><span data-i18n="ingestion.enabled"></span></label>
     <label class="muted" style="display:flex;flex-direction:row;gap:6px;align-items:center;margin-top:6px"><input type="checkbox" id="ingestion-auto-drafts" style="width:auto"><span data-i18n="ingestion.autoDrafts"></span></label>
     <p class="muted" data-i18n="ingestion.autoDraftsHint"></p>
@@ -2763,6 +2763,16 @@ $('startup-at-login').onchange = async () => {
     $('startup-at-login').checked = !requested;
     toast(e.message, true);
   }
+};
+$('ingestion-enable-startup').onclick = async () => {
+  const button = $('ingestion-enable-startup');
+  button.disabled = true;
+  try {
+    await api('POST', '/api/startup', { enabled: true });
+    toast(t('startup.enabledToast'));
+    await load();
+  } catch (e) { toast(e.message, true); }
+  finally { button.disabled = false; }
 };
 $('backup-run').onclick = () => act(async () => {
   const r = await api('POST', '/api/backup/run');
