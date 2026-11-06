@@ -301,8 +301,21 @@ export async function countVisibleNotes(ctx, name) {
   return count;
 }
 
-// Hash-incremental: unchanged files are not re-chunked on the next call.
+// Hash-incremental: unchanged files are not re-chunked on the next call. Concurrent first
+// requests (for example the graph and a background vault scan) must share one index build; without
+// this, each request walks, parses and chunks the full vault independently before racing to cache it.
+const vaultLoadsInFlight = new WeakMap();
 export async function loadVault(ctx, name) {
+  let inFlight = vaultLoadsInFlight.get(ctx);
+  if (!inFlight) { inFlight = new Map(); vaultLoadsInFlight.set(ctx, inFlight); }
+  if (inFlight.has(name)) return inFlight.get(name);
+  const pending = loadVaultFresh(ctx, name);
+  inFlight.set(name, pending);
+  try { return await pending; }
+  finally { if (inFlight.get(name) === pending) inFlight.delete(name); }
+}
+
+async function loadVaultFresh(ctx, name) {
   const root = vaultRoot(ctx, name);
   const state = ctx.cache.get(name) || { files: new Map(), index: null };
   const seen = new Set();
@@ -367,6 +380,43 @@ export async function loadVault(ctx, name) {
   return state.index;
 }
 
+// A graph view needs note text only to resolve links and typed records. Building the full search
+// index first tokenizes and chunks every body, which can consume over a gigabyte on large vaults.
+// Keep this lightweight path independent so opening the graph does not require a search index.
+const graphVaultCache = new WeakMap();
+export async function loadVaultGraph(ctx, name) {
+  let cache = graphVaultCache.get(ctx);
+  if (!cache) { cache = new Map(); graphVaultCache.set(ctx, cache); }
+  const cached = cache.get(name);
+  if (cached && cached.until > Date.now()) return cached.value;
+  if (cached?.pending) return cached.pending;
+  const pending = (async () => {
+    const root = vaultRoot(ctx, name), notes = [], files = await walk(root);
+    for (let start = 0; start < files.length; start += 32) {
+      const batch = await Promise.all(files.slice(start, start + 32).map(async (full) => {
+        const rel = path.relative(root, full).split(path.sep).join('/');
+        if (!twinNoteMemoryAllowed(ctx, name, rel)) return null;
+        const st = await stat(full, { bigint: true });
+        const header = await readIndexableHeader(full, Number(st.size));
+        if (!header.indexable || !twinNoteMemoryAllowed(ctx, name, rel, header.meta)) return null;
+        const raw = await readFile(full, 'utf8');
+        const { meta } = parseFrontmatter(raw);
+        if (isPrivateMeta(meta) || !twinNoteMemoryAllowed(ctx, name, rel, meta)) return null;
+        return { rel, title: path.posix.basename(rel).replace(/\.md$/i, ''), aliases: listValue(meta.aliases), raw, meta,
+          tags: extractTags(raw, meta), generated: meta.generated_by === 'brainlink' || /^BrainLink\/Commands\//i.test(rel), private: false };
+      }));
+      notes.push(...batch.filter(Boolean));
+    }
+    notes.sort((a, b) => a.rel.localeCompare(b.rel));
+    const value = { notes, noteEdges: linkGraph(notes).edges, typedRelations: deriveTypedRelations(notes) };
+    cache.set(name, { value, until: Date.now() + 15000 });
+    return value;
+  })();
+  cache.set(name, { pending });
+  try { return await pending; }
+  catch (error) { if (cache.get(name)?.pending === pending) cache.delete(name); throw error; }
+}
+
 export function buildIndex(notes) {
   notes = notes.filter((n) => n && !n.private); // defensive: even direct callers cannot rank private content
   const { edges: noteEdges, broken } = linkGraph(notes);
@@ -390,7 +440,7 @@ export function buildIndex(notes) {
   notes.forEach((n, i) => { for (const a of n.aliases || []) if (!byAlias.has(a.toLowerCase())) byAlias.set(a.toLowerCase(), i); });
   const byTag = new Map();
   notes.forEach((n, i) => { for (const t of n.tags) { if (!byTag.has(t)) byTag.set(t, []); byTag.get(t).push(i); } });
-  return { notes, chunks, df, avgLen, backlinks, outlinks, byRel, byTitle, byAlias, byTag, edges, broken, typedRelations, termSets: null };
+  return { notes, chunks, df, avgLen, backlinks, outlinks, byRel, byTitle, byAlias, byTag, edges, noteEdges, broken, typedRelations, termSets: null };
 }
 
 // Note-level term sets and document frequencies, built lazily (used by related and linking).

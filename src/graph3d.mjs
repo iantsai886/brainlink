@@ -4,9 +4,10 @@
 // this module adds the one rule loadVault doesn't already enforce: private vaults and
 // frontmatter-flagged private notes are dropped before a single node is built.
 import { createHash } from 'node:crypto';
-import { loadVault, summarize } from './core.mjs';
-import { linkGraph } from './graph.mjs';
+import { loadVault, loadVaultGraph, summarize } from './core.mjs';
 import { deriveTypedRelations, typedEntityMetadataMap, typedEntityFields, deriveProposedTypedRelations, deriveRejectedTypedRelations, deriveWithdrawnTypedRelations, discoverTypedRelationshipCandidates, discoverTypedRelationshipCandidatesForSources } from './typed-graph.mjs';
+
+const GRAPH3D_LINK_LIMIT = 10_000;
 
 // n.private is already computed once, at index-build time, by core.mjs's isPrivateMeta — reusing
 // it here (rather than re-deriving private-ness from n.meta.private with a second, independent
@@ -17,7 +18,7 @@ const isPrivateNote = (n) => n.private;
 async function visibleVaults(ctx, only) {
   const names = (only ? [only] : ctx.enabled).filter((name) => ctx.enabled.includes(name) && !ctx.byName.get(name)?.private);
   const out = [];
-  for (const name of names) out.push({ name, index: await loadVault(ctx, name) });
+  for (const name of names) out.push({ name, index: await loadVaultGraph(ctx, name) });
   return out;
 }
 
@@ -30,15 +31,31 @@ export async function listGraphVaults(ctx) {
 export async function buildGraph3D(ctx, vaultName, { limit = 2000 } = {}) {
   const vaults = await visibleVaults(ctx, vaultName);
   const nodes = [], keep = [], graphByVault = new Map();
+  let linkCount = 0, unlinked = 0;
   for (const { name, index } of vaults) {
     // Build every graph-derived structure from the caller-visible note set. Private and generated
     // notes must not affect entity-ID uniqueness, edge counts, ranking, or graph output.
-    const visible = index.notes.filter((note) => !note.generated && !isPrivateNote(note));
-    const plainEdges = linkGraph(visible).edges.map(([source, target]) => ({ source, target, kind: 'note_link' }));
-    const typedEdges = deriveTypedRelations(visible).map((edge) => ({ ...edge, kind: 'typed' }));
+    const visible = [], visibleIndex = new Map();
+    index.notes.forEach((note, originalIndex) => {
+      if (note.generated || isPrivateNote(note)) return;
+      visibleIndex.set(originalIndex, visible.length);
+      visible.push(note);
+    });
+    // loadVault() already builds and caches these graph structures. Rebuilding the resolver and
+    // reparsing every note here duplicated large amounts of work and memory on real vaults.
+    const plainEdges = (index.noteEdges || []).flatMap(([source, target]) => {
+      const from = visibleIndex.get(source), to = visibleIndex.get(target);
+      return from === undefined || to === undefined ? [] : [{ source: from, target: to, kind: 'note_link' }];
+    });
+    const typedEdges = (index.typedRelations || deriveTypedRelations(index.notes)).flatMap((edge) => {
+      const source = visibleIndex.get(edge.source), target = visibleIndex.get(edge.target);
+      return source === undefined || target === undefined ? [] : [{ ...edge, source, target, kind: 'typed' }];
+    });
     const edges = [...plainEdges, ...typedEdges];
+    linkCount += new Set(edges.map((edge) => `${edge.source}>${edge.target}`)).size;
     const degree = new Array(visible.length).fill(0);
     for (const edge of edges) { degree[edge.source]++; degree[edge.target]++; }
+    unlinked += degree.filter((value) => value === 0).length;
     const entityMetadata = typedEntityMetadataMap(visible);
     graphByVault.set(name, { visible, edges, degree, entityMetadata });
     for (let i = 0; i < visible.length; i++) keep.push({ name, visibleIndex: i, note: visible[i], degree: degree[i], entityMetadata });
@@ -68,7 +85,15 @@ export async function buildGraph3D(ctx, vaultName, { limit = 2000 } = {}) {
   for (const group of includedPairs.values()) {
     group.forEach((edge, parallelIndex) => links.push({ ...edge, parallel_index: parallelIndex, parallel_count: group.length }));
   }
-  return { vault: vaultName || null, nodes, links, shown: nodes.length, total };
+  // The force layout becomes unresponsive when a large vault sends every edge between the top
+  // 2,000 nodes to WebGL. Keep the most useful/high-degree links, including typed relations first.
+  if (links.length > GRAPH3D_LINK_LIMIT) {
+    const degreeById = new Map(nodes.map((node) => [node.id, node.degree]));
+    links.sort((a, b) => Number(b.kind === 'typed') - Number(a.kind === 'typed') ||
+      Math.max(degreeById.get(b.source) || 0, degreeById.get(b.target) || 0) - Math.max(degreeById.get(a.source) || 0, degreeById.get(a.target) || 0));
+    links.length = GRAPH3D_LINK_LIMIT;
+  }
+  return { vault: vaultName || null, nodes, links, shown: nodes.length, total, linkCount, unlinked };
 }
 
 // A bounded, review-only queue for the local Setup UI. visibleVaults() applies the same enabled

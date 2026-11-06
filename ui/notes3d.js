@@ -515,15 +515,21 @@
         g = await api('/api/graph3d', { vault: vaultFilter && vaultFilter !== '*' ? vaultFilter : undefined });
       }
       catch (e) { canvas.innerHTML = `<p class="error-box">Could not load the map: ${esc(e.message)}</p>`; return; }
-      try { const h = await api('/api/graph', {}); stat('st-notes', h.health?.notes ?? 0); stat('st-links', h.health?.links ?? 0); stat('st-orphans', h.health?.not_linked ?? 0); } catch {}
+      // The health endpoint builds the full search index, and review suggestions can be slow on
+      // large vaults. Neither should hold the 3D canvas behind a loading message.
+      const refreshAuxiliary = () => {
+        loadReviewQueue().catch(() => {});
+      };
+      stat('st-notes', g.total ?? g.nodes.length);
+      stat('st-links', g.linkCount ?? g.links.length);
+      stat('st-orphans', g.unlinked ?? g.nodes.filter((node) => node.degree === 0).length);
       nodesById = g.nodes;
       byTitle = new Map(g.nodes.map((n) => [n.title.toLowerCase(), n]));
       renderNodeList();
-      await loadReviewQueue();
       if (!g.nodes.length) {
         if (graphInstance) graphInstance.graphData({ nodes: [], links: [] });
         else canvas.innerHTML = '<p class="muted">No notes yet — once you add some, their links show up here.</p>';
-        loadedOk = false; return;
+        loadedOk = false; refreshAuxiliary(); return;
       }
       if (graphInstance) {
         try {
@@ -536,6 +542,7 @@
           loadedOk = false;
           canvas.innerHTML = `<p class="error-box">Could not draw the 3D map: ${esc(e.message || e)}. Reload BrainLink and try again.</p>`;
         }
+        refreshAuxiliary();
         return;
       }
       if (typeof ForceGraph3D !== 'function') { canvas.innerHTML = '<p class="error-box">Could not load the 3D map (missing viewer). Try reloading.</p>'; return; }
@@ -571,6 +578,7 @@
       if (resetView) resetView.disabled = false;
       loadedOk = true;
       fitGraphAfterLayout();
+      refreshAuxiliary();
     }
 
     async function refreshGraph() {
