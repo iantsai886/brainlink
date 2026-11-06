@@ -525,7 +525,19 @@
         else canvas.innerHTML = '<p class="muted">No notes yet — once you add some, their links show up here.</p>';
         loadedOk = false; return;
       }
-      if (graphInstance) { graphInstance.graphData({ nodes: g.nodes, links: g.links }); loadedOk = true; if (resetView) resetView.disabled = false; resizeToContainer(); return; }
+      if (graphInstance) {
+        try {
+          graphInstance.graphData({ nodes: g.nodes, links: g.links });
+          loadedOk = true;
+          if (resetView) resetView.disabled = false;
+          fitGraphAfterLayout();
+        } catch (e) {
+          graphInstance = null;
+          loadedOk = false;
+          canvas.innerHTML = `<p class="error-box">Could not draw the 3D map: ${esc(e.message || e)}. Reload BrainLink and try again.</p>`;
+        }
+        return;
+      }
       if (typeof ForceGraph3D !== 'function') { canvas.innerHTML = '<p class="error-box">Could not load the 3D map (missing viewer). Try reloading.</p>'; return; }
       canvas.innerHTML = '';
       const css = getComputedStyle(document.documentElement);
@@ -539,20 +551,26 @@
       // behavior), so a note title must be escaped the same way any other note-derived text going
       // into innerHTML is (see renderInline/renderMarkdown above) — otherwise a crafted title could
       // inject HTML into the tooltip.
-      graphInstance = ForceGraph3D()(canvas)
-        .graphData({ nodes: g.nodes, links: g.links })
-        .backgroundColor(css.getPropertyValue('--bg').trim() || '#000')
-        .nodeLabel((n) => `${esc(n.title)}${n.type ? `<br><small>${esc(n.type)}</small>` : ''}`)
-        .nodeColor((n) => (n.id === selectedId ? selectedColor : colorOf(n.group)))
-        .nodeVal((n) => (n.id === selectedId ? 1.6 : 1) + Math.sqrt(n.degree || 0))
-        .linkColor((l) => l.kind === 'typed' ? selectedColor : css.getPropertyValue('--muted').trim())
-        .linkCurvature((l) => l.parallel_count > 1 ? (l.parallel_index - (l.parallel_count - 1) / 2) * 0.12 : 0)
-        .linkLabel((l) => l.predicate ? `${esc(l.predicate)}${l.evidence ? `<br><small>${esc(l.evidence)}</small>` : ''}${Number.isFinite(l.confidence) ? `<br><small>Confidence ${esc(l.confidence)}</small>` : ''}` : '')
-        .linkOpacity(0.35)
-        .onNodeClick((n) => openById(n.id));
+      try {
+        graphInstance = ForceGraph3D()(canvas)
+          .graphData({ nodes: g.nodes, links: g.links })
+          .backgroundColor(css.getPropertyValue('--bg').trim() || '#000')
+          .nodeLabel((n) => `${esc(n.title)}${n.type ? `<br><small>${esc(n.type)}</small>` : ''}`)
+          .nodeColor((n) => (n.id === selectedId ? selectedColor : colorOf(n.group)))
+          .nodeVal((n) => (n.id === selectedId ? 1.6 : 1) + Math.sqrt(n.degree || 0))
+          .linkColor((l) => l.kind === 'typed' ? selectedColor : css.getPropertyValue('--muted').trim())
+          .linkCurvature((l) => l.parallel_count > 1 ? (l.parallel_index - (l.parallel_count - 1) / 2) * 0.12 : 0)
+          .linkLabel((l) => l.predicate ? `${esc(l.predicate)}${l.evidence ? `<br><small>${esc(l.evidence)}</small>` : ''}${Number.isFinite(l.confidence) ? `<br><small>Confidence ${esc(l.confidence)}</small>` : ''}` : '')
+          .linkOpacity(0.35)
+          .onNodeClick((n) => openById(n.id));
+      } catch (e) {
+        graphInstance = null;
+        canvas.innerHTML = `<p class="error-box">Could not draw the 3D map: ${esc(e.message || e)}. Reload BrainLink and try again.</p>`;
+        return;
+      }
       if (resetView) resetView.disabled = false;
       loadedOk = true;
-      resizeToContainer();
+      fitGraphAfterLayout();
     }
 
     async function refreshGraph() {
@@ -577,6 +595,17 @@
       const c = document.getElementById('notes3d-canvas');
       if (!graphInstance || !c) return;
       graphInstance.width(c.clientWidth || 600).height(c.clientHeight || 450);
+    }
+
+    function fitGraphAfterLayout() {
+      const instance = graphInstance;
+      if (!instance) return;
+      requestAnimationFrame(() => {
+        resizeToContainer();
+        requestAnimationFrame(() => {
+          if (graphInstance === instance) instance.zoomToFit(700, 60);
+        });
+      });
     }
 
     buildLayout(root);

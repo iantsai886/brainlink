@@ -407,6 +407,15 @@ main #ready, main #ask-panel, main #brain-panel, main #sessions-panel, main #s-c
     <h2><span class="step" id="n2">2</span> <span data-i18n="rolePack.step2Title"></span></h2>
     <p class="hint" data-i18n="rolePack.hint"></p>
     <div id="agents" class="cards"></div>
+    <div class="card" style="margin-top:10px">
+      <b data-i18n="rolePack.addTitle"></b>
+      <p class="muted" data-i18n="rolePack.addHint"></p>
+      <div class="grid2">
+        <label><span data-i18n="rolePack.nameLabel"></span><input id="role-agent-name" maxlength="120"></label>
+        <label><span data-i18n="rolePack.vaultLabel"></span><select id="role-agent-vault"></select></label>
+      </div>
+      <div class="row" style="margin-top:8px"><button class="primary" id="role-agent-add" data-i18n="rolePack.addButton"></button><span id="role-agent-status" class="muted" role="status" aria-live="polite"></span></div>
+    </div>
   </section>
 
   <section id="s-connect">
@@ -1628,12 +1637,15 @@ async function load() {
     <div class="row" style="margin-top:6px"><button data-vault-excluded-save="${i}">${esc(t('vault.saveExcluded'))}</button></div>
   </div>`).join('') : `<p class="muted">${esc(t('vault.noneYet'))}</p>`;
   $('n2').className = 'step' + (S.agents.length ? ' done' : '');
+  const roleVaults = S.vaults.filter((v) => !v.private);
+  $('role-agent-vault').innerHTML = roleVaults.map((v) => `<option value="${esc(v.name)}">${esc(v.name)}</option>`).join('');
+  $('role-agent-add').disabled = !roleVaults.length;
   $('agents').innerHTML = S.agents.length ? S.agents.map((a, i) => `<div class="card"><b>${esc(a.name)} <span class="muted" style="font-weight:400">· ${esc(a.vault)} · close → ${esc(a.close_target.mode)} ${esc(a.close_target.path || a.close_target.dir || '')}</span></b>
     <label>${esc(t('rolePack.roleLabel'))}<textarea data-a="${i}" data-f="role">${esc(a.role)}</textarea></label>
     <div class="grid2"><label>${esc(t('rolePack.activationLabel'))}<textarea data-a="${i}" data-f="activation">${esc(a.activation.join('\n'))}</textarea></label>
     <label>${esc(t('rolePack.closeLabel'))}<textarea data-a="${i}" data-f="close">${esc(a.close.join('\n'))}</textarea></label></div>
     ${a.close_target.mode === 'proposal-only' ? `<label class="muted"><span><input type="checkbox" data-a="${i}" data-f="capture_approved" style="width:auto" ${a.capture_approved ? 'checked' : ''}> ${esc(t('rolePack.allowCaptures', { name: a.name }))}</span></label>` : ''}
-    <div class="row"><button data-save-agent="${i}">${esc(t('rolePack.saveBtn', { name: a.name }))}</button></div></div>`).join('') : `<p class="muted">${esc(t('rolePack.none'))}</p>`;
+    <div class="row"><button data-save-agent="${i}">${esc(t('rolePack.saveBtn', { name: a.name }))}</button><button class="link" data-remove-role-agent="${esc(a.name)}">${esc(t('rolePack.removeBtn'))}</button></div></div>`).join('') : `<p class="muted">${esc(t('rolePack.none'))}</p>`;
   const twin = S.twin_profiles;
   const twinVaults = S.vaults.filter((v) => !v.private && v.exists);
   $('twin-new-vaults').innerHTML = twinVaults.length ? twinVaults.map((v) => `<div class="card"><label style="display:flex;flex-direction:row;align-items:center;gap:8px"><input type="checkbox" data-twin-vault="${esc(v.name)}" style="width:auto"><span>${esc(v.name)}</span><select data-twin-vault-access="${esc(v.name)}" aria-label="${esc(t('twinProfiles.accessFor', { name: v.name }))}" style="margin-left:auto;width:auto"><option value="read">${esc(t('twinProfiles.access.read'))}</option><option value="propose">${esc(t('twinProfiles.access.propose'))}</option></select></label></div>`).join('') : `<p class="muted">${esc(t('twinProfiles.noVaults'))}</p>`;
@@ -1838,6 +1850,20 @@ $('save-vault').onclick = () => act(async () => {
 });
 document.addEventListener('click', (e) => {
   const d = e.target.dataset;
+  if (e.target.id === 'role-agent-add') act(async () => {
+    const name = $('role-agent-name').value.trim();
+    const vault = $('role-agent-vault').value;
+    await api('POST', '/api/agent/add', { name, vault });
+    $('role-agent-name').value = '';
+    toast(t('rolePack.addedToast', { name }));
+    await load();
+  });
+  if (d.removeRoleAgent) act(async () => {
+    if (!confirm(t('rolePack.removeConfirm', { name: d.removeRoleAgent }))) return;
+    await api('POST', '/api/agent/remove', { name: d.removeRoleAgent });
+    toast(t('rolePack.removedToast', { name: d.removeRoleAgent }));
+    await load();
+  });
   if (d.skillInstall) act(async () => {
     const result = await api('POST', '/api/skills/install', { client: d.skillInstall });
     const changed = [...result.installed, ...result.updated].length;

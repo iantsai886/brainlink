@@ -1982,6 +1982,39 @@ export async function startSetup(opts = {}) {
       await saveConfig(cfg, file);
       return { ok: true, agent: a };
     },
+    'POST /api/agent/add': async (b) => {
+      const cfg = await loadConfig(file);
+      const name = String(b.name || '').trim();
+      const vault = String(b.vault || '').trim();
+      if (!name || name.length > 120 || /[\\/:\r\n]/.test(name)) throw new Error('Enter a role name up to 120 characters without slashes or colons.');
+      if (cfg.agents.some((agent) => agent.name.toLowerCase() === name.toLowerCase())) throw new Error(`An agent named "${name}" already exists.`);
+      const targetVault = cfg.vaults.find((item) => item.name === vault);
+      if (!targetVault || targetVault.private) throw new Error('Choose an existing non-private vault for this role.');
+      const captureFile = `${name.replace(/[<>:"/\\|?*\x00-\x1f]/g, '-')} Session Captures.md`;
+      const agent = {
+        name,
+        vault,
+        role: `Assistant for ${vault}: answer from its notes and prepare safe, evidence-backed proposals within the user's instructions.`,
+        activation: [`Connect to ${name}`, name],
+        close: [`${name} close loop`, `${name}, close the loop`],
+        connect_notes: [],
+        tail_notes: [],
+        recent_dir: null,
+        stale_days: 14,
+        capture_approved: false,
+        close_target: { mode: 'append-section', path: captureFile },
+      };
+      const next = { ...cfg, agents: [...cfg.agents, agent] };
+      await saveConfig(next, file);
+      return { ok: true, agent };
+    },
+    'POST /api/agent/remove': async (b) => {
+      const cfg = await loadConfig(file);
+      const name = String(b.name || '').trim();
+      if (!cfg.agents.some((agent) => agent.name === name)) throw new Error(`Unknown agent "${name}".`);
+      await saveConfig({ ...cfg, agents: cfg.agents.filter((agent) => agent.name !== name) }, file);
+      return { ok: true };
+    },
     'POST /api/connect': async (b) => {
       const cfg = await loadConfig(file);
       if (cfg.twin_profiles?.length) return connectPresetWithTwin(b);
