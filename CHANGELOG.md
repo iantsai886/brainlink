@@ -2,6 +2,13 @@
 
 This log covers the development branch. Entries marked **unreleased** are not published product releases. See [release readiness](docs/RELEASE-READINESS.md) for the current evidence and remaining release gates.
 
+## 1.3.0 — Development, unreleased
+
+- One connected AI app can now be assigned to multiple Twin profiles at once. Setup shows each profile and its vault permissions separately; every tool call, write policy, memory policy, session record, and closeout is resolved using the selected vault's owning profile. Different profiles still cannot share note-reading access to the same vault. Existing single-profile requests remain supported.
+- Session history and private logging now respect multiple profile assignments. Private session records remain owned by their profile, and session logging requires an explicit destination vault.
+- Built-in agent activation and repository checks now resolve the Twin profile by role or assigned vault, so Anna and John can be available in one AI connection without merging their vault scopes.
+- Verification: all modified JavaScript modules and the Setup inline script passed syntax checks; `git diff --check` passed; the Windows installer built successfully. Automated test suites were not run.
+
 ## 1.2.9 — Development, unreleased
 
 - Added explicit per-vault full read/write permissions for Twin-assigned AI agents. A granted agent can create notes, add daily entries, save memories, and file private session closeouts in that vault after confirmation. Existing notes cannot be overwritten; vault exclusions, secret filtering, read-only mode, privacy defaults, and source attribution remain enforced. New Twin profiles support summary-only session closeouts without enabling imported session history.

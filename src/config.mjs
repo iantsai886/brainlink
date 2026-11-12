@@ -117,7 +117,6 @@ export function validate(cfg) {
     if (!AGENT_KINDS.includes(a.kind)) errors.push(`agent "${a.name}": kind must be ${AGENT_KINDS.join(' | ')}`);
   }
   const profileIds = new Set();
-  const assignedTwinAgents = new Set();
   if (!Array.isArray(cfg.twin_profiles)) errors.push('twin_profiles must be an array');
   for (const p of Array.isArray(cfg.twin_profiles) ? cfg.twin_profiles : []) {
     if (!p || typeof p !== 'object' || Array.isArray(p)) { errors.push('twin profile must be an object'); continue; }
@@ -147,9 +146,7 @@ export function validate(cfg) {
         else if (types.some((type) => access.memory_policy[type] && p.memory_policy?.[type] !== true)) errors.push(`twin profile "${p.id || ''}": an agent memory policy cannot exceed the Twin profile policy`);
       }
       if (profileAgents.has(access.agent_id)) errors.push(`twin profile "${p.id || ''}": duplicate agent access`);
-      if (assignedTwinAgents.has(access.agent_id)) errors.push('an AI agent may be assigned to only one Twin profile');
       profileAgents.add(access.agent_id);
-      assignedTwinAgents.add(access.agent_id);
       if (!Array.isArray(access.vaults) || !access.vaults.length) errors.push(`twin profile "${p.id || ''}": agent vault access must be a non-empty subset of profile vaults`);
       const agentVaults = new Set();
       for (const grant of Array.isArray(access.vaults) ? access.vaults : []) {

@@ -1398,25 +1398,30 @@ export async function startSetup(opts = {}) {
     const client = resolveClient(clientId);
     if (!client) throw new Error('Choose a supported AI app.');
     const cfg = await loadConfig(file);
-    const profileId = String(b.profile_id || '');
-    const profile = cfg.twin_profiles.find((item) => item.id === profileId);
-    if (!profile) throw new Error('Choose an existing Twin profile.');
     const existingPresetAgent = cfg.ai_agents.find((item) => item.preset_client_id === clientId);
+    const selections = Array.isArray(b.profiles) ? b.profiles : (b.profile_id ? [{ profile_id: b.profile_id, vaults: b.vaults, memory_policy: b.memory_policy }] : []);
+    if (!selections.length) throw new Error('Choose at least one Twin profile.');
+    if (new Set(selections.map((item) => item.profile_id)).size !== selections.length) throw new Error('A Twin profile can be selected only once.');
+    const updates = [];
+    const namesAcrossProfiles = new Set();
+    for (const selection of selections) {
+    const profile = cfg.twin_profiles.find((item) => item.id === String(selection.profile_id || ''));
+    if (!profile) throw new Error('Choose existing Twin profiles.');
     const existingProfileGrant = existingPresetAgent && profile.agent_access.find((item) => item.agent_id === existingPresetAgent.id);
     const defaultAgentMemory = existingProfileGrant?.memory_policy || (existingProfileGrant ? profile.memory_policy : {
       working: false, semantic: profile.memory_policy.semantic === true,
       procedural: profile.memory_policy.procedural === true, episodic: profile.memory_policy.episodic === true,
     });
-    const memory_policy = normalizeAgentMemoryPolicy(b.memory_policy, profile.memory_policy, defaultAgentMemory);
-    const requested = Array.isArray(b.vaults) ? b.vaults : [];
-    if (!requested.length || requested.length > profile.vaults.length) throw new Error('Choose at least one vault for this AI app.');
+    const memory_policy = normalizeAgentMemoryPolicy(selection.memory_policy, profile.memory_policy, defaultAgentMemory);
+    const requested = Array.isArray(selection.vaults) ? selection.vaults : [];
+    if (!requested.length || requested.length > profile.vaults.length) throw new Error('Choose at least one vault for each selected Twin profile.');
     const seen = new Set();
     const grants = requested.map((item) => {
       const name = String(item?.name || '');
       const profileVault = profile.vaults.find((grant) => grant.name === name);
       const vault = cfg.vaults.find((entry) => entry.name === name);
       const operations = Array.isArray(item?.operations) ? [...new Set(item.operations)] : [];
-      if (!profileVault || !vault || seen.has(name)) throw new Error('Choose only available vaults already included in this Twin profile.');
+      if (!profileVault || !vault || seen.has(name) || namesAcrossProfiles.has(name)) throw new Error('Choose available vaults only once across the selected Twin profiles.');
       if (!operations.length || operations.some((action) => !['search', 'read_note', 'read_session', 'log_session', 'propose_note', 'write_note', 'handoff_read', 'write_handoff'].includes(action))) throw new Error('Choose supported search, note, session, or handoff actions.');
       const needsSemantic = operations.some((action) => ['search', 'read_note', 'propose_note', 'write_note'].includes(action));
       const needsEpisodic = operations.includes('read_session');
@@ -1428,10 +1433,14 @@ export async function startSetup(opts = {}) {
       if (operations.includes('write_note') && profileVault.access !== 'write') throw new Error('Choose full read and write access for a vault before granting note writes.');
       if (operations.some((action) => ['propose_note', 'write_handoff'].includes(action)) && !['propose', 'write'].includes(profileVault.access)) throw new Error('Choose propose or write access for a vault before allowing note proposals or handoffs.');
       seen.add(name);
+      namesAcrossProfiles.add(name);
       return { name, access: operations.includes('write_note') ? 'write' : operations.some((action) => ['propose_note', 'write_handoff'].includes(action)) ? 'propose' : 'read', operations };
     });
     if (grants.some((grant) => grant.operations.includes('read_session')) && grants.some((grant) => !grant.operations.includes('read_session'))) throw new Error('Session history access applies across this Twin. Select session access for every vault granted to this AI, or remove the other vaults from its access.');
     if (grants.some((grant) => grant.operations.includes('log_session')) && grants.some((grant) => !grant.operations.includes('log_session'))) throw new Error('Private session logging applies across this Twin. Select it for every vault granted to this AI, or remove the other vaults from its access.');
+
+    updates.push({ profile, memory_policy, grants });
+    }
 
     let agent = cfg.ai_agents.find((item) => item.preset_client_id === clientId);
     const token = generateAgentToken();
@@ -1446,9 +1455,10 @@ export async function startSetup(opts = {}) {
       agent.revoked = false;
     }
     for (const item of cfg.twin_profiles) item.agent_access = (item.agent_access || []).filter((grant) => grant.agent_id !== agent.id);
-    const currentProfile = cfg.twin_profiles.find((item) => item.id === profileId);
-    currentProfile.agent_access.push({ agent_id: agent.id, memory_policy, vaults: grants });
-    currentProfile.allowed_actions = [...new Set([...(currentProfile.allowed_actions || []), ...grants.flatMap((grant) => grant.operations)])];
+    for (const { profile, memory_policy, grants } of updates) {
+      profile.agent_access.push({ agent_id: agent.id, memory_policy, vaults: grants });
+      profile.allowed_actions = [...new Set([...(profile.allowed_actions || []), ...grants.flatMap((grant) => grant.operations)])];
+    }
     const validationErrors = validate(cfg);
     if (validationErrors.length) throw new Error(`These permissions cannot be saved: ${validationErrors[0]}`);
 
@@ -1462,7 +1472,7 @@ export async function startSetup(opts = {}) {
       if (!health.ok) throw new Error(health.message);
       const latest = await loadConfig(file);
       await saveConfig(markConnected(latest, agent.id), file);
-      return { ...connected, health, twin_profile: currentProfile.name };
+      return { ...connected, health, twin_profiles: updates.map((item) => item.profile.name) };
     } catch (error) {
       await saveConfig(before, file).catch(() => {});
       if (previousClientConfig !== null) await writeFile(clientConfigFile, previousClientConfig, 'utf8').catch(() => {});

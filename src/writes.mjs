@@ -3,7 +3,7 @@
 // unless confirm=true.
 import { writeFile, appendFile, readdir, readFile, stat, lstat, open, mkdir, realpath } from 'node:fs/promises';
 import { createHash } from 'node:crypto';
-import { twinCanWriteNotes } from './twin-profiles.mjs';
+import { twinCanWriteNotes, twinMemoryAllowed, twinProfileForVault } from './twin-profiles.mjs';
 import path from 'node:path';
 import { TEMPLATES, renderTemplate } from './templates.mjs';
 import { suggestLinks, relatedSection, safeUpdateMap } from './links.mjs';
@@ -37,6 +37,7 @@ export function frontmatter(ctx, vaultName, id, f, now = new Date()) {
   const tags = `[${(f.tags || []).map((t) => String(t).replace(/[^\w㐀-鿿-]/g, '')).filter(Boolean).join(', ')}]`;
   const sourceSession = typeof f.source_session_id === 'string' && /^[A-Za-z0-9_-]{1,160}$/.test(f.source_session_id)
     ? [`source_session_id: ${q(f.source_session_id)}`] : [];
+  const twinProfile = twinProfileForVault(ctx, vaultName);
   const extra = Object.entries(v.extra_fields || {}).filter(([k]) => !(sourceSession.length && k.toLowerCase() === 'source_session_id')).map(([k, val]) => `${k}: ${q(val)}`);
   const typed = TYPED_ENTITY_TYPES.has(f.type) && f.entity_id && f.entity_scope;
   const typedFields = typed ? [`id: ${f.entity_id}`, `scope: ${f.entity_scope}`,
@@ -49,6 +50,7 @@ export function frontmatter(ctx, vaultName, id, f, now = new Date()) {
     const date = ts.slice(0, 10);
     return ['---', `type: ${f.type || 'log'}`, `status: ${f.status || 'proposed'}`, ...memoryTypeField, `tags: ${tags}`, ...extra,
       ...(f.private ? ['private: true'] : []),
+      ...(twinProfile ? [`twin_profile_id: ${q(twinProfile.profile_id)}`] : []),
       `created_by_platform: ${slug(id.ai_platform)}`, `created_by_agent: ${slug(id.agent_or_role)}`, `created_session_or_task_id: ${q(id.session_or_task_id)}`, `created_date: ${date}`,
       `last_material_revision_by_platform: ${slug(id.ai_platform)}`, `last_material_revision_by_agent: ${slug(id.agent_or_role)}`,
       `last_material_revision_session_or_task_id: ${q(id.session_or_task_id)}`, `last_material_revision_date: ${date}`,
@@ -57,6 +59,7 @@ export function frontmatter(ctx, vaultName, id, f, now = new Date()) {
   }
   return ['---', `type: ${f.type || 'note'}`, `status: ${f.status || 'proposed'}`, ...memoryTypeField, `ai_platform: ${q(id.ai_platform)}`, `agent_or_role: ${q(id.agent_or_role)}`,
     ...(f.private ? ['private: true'] : []),
+    ...(twinProfile ? [`twin_profile_id: ${q(twinProfile.profile_id)}`] : []),
     `session_or_task_id: ${q(id.session_or_task_id)}`, `written_at: ${ts}`, `source: ${q(f.source)}`, `confidence: ${q(f.confidence || 'proposed')}`, `tags: ${tags}`, ...extra, ...sourceSession, ...typedFields, '---'].join('\n');
 }
 
@@ -85,10 +88,11 @@ export async function proposeNote(ctx, a, now = new Date()) {
   const id = resolveIdentity(ctx, a);
   const errors = checkCommon(ctx, vaultName, a, id);
   if (a.memory_type !== undefined && !MEMORY_TYPES.has(a.memory_type)) errors.push('memory_type must be working, semantic, procedural, or episodic');
-  if (ctx.twinScope?.mode === 'scoped' && a.memory_type && ctx.twinScope.memory_policy?.[a.memory_type] !== true) {
+  if (ctx.twinScope?.mode === 'scoped' && a.memory_type && !twinMemoryAllowed(ctx, a.memory_type, vaultName)) {
     errors.push(`this Twin profile does not allow proposing ${a.memory_type} memory`);
   }
-  const twinSourcePolicy = ctx.twinScope?.mode === 'scoped' ? ctx.twinScope.source_policy : null;
+  const twinProfile = twinProfileForVault(ctx, vaultName);
+  const twinSourcePolicy = twinProfile?.source_policy || null;
   let twinConfidence = a.confidence;
   if (twinSourcePolicy?.provenance_required) {
     const sourceId = String(a.session_or_task_id || '').trim();
@@ -107,7 +111,7 @@ export async function proposeNote(ctx, a, now = new Date()) {
   if (typed) {
     if (!TYPED_ID.test(String(a.entity_id || ''))) errors.push('typed entity records require entity_id using lowercase letters, numbers, dot, underscore, colon or hyphen');
     if (!['personal', 'organisation', 'client'].includes(a.entity_scope)) errors.push('typed entity records require entity_scope: personal, organisation, or client');
-    if (ctx.twinScope?.mode === 'scoped' && a.entity_scope !== ctx.twinScope.mode) errors.push('typed entity scope must match the active Twin profile');
+    if (twinProfile && a.entity_scope !== twinProfile.mode) errors.push('typed entity scope must match the active Twin profile for this vault');
     if (a.relations !== undefined && (!Array.isArray(a.relations) || a.relations.length > 20)) errors.push('relations must be a list of at most 20 proposed relationships');
     else for (const relation of a.relations || []) {
       if (!relation || typeof relation !== 'object' || !TYPED_PREDICATES.has(relation.predicate)) errors.push('each relationship needs a supported predicate');
@@ -403,8 +407,9 @@ export async function sendHandoff(ctx, a, now = new Date()) {
         const relative = path.relative(realRoot, realTarget);
         if (relative && relative !== '..' && !relative.startsWith(`..${path.sep}`) && !path.isAbsolute(relative)) {
           header = await readHandoffHeader(realTarget);
+          const mailboxProfile = twinProfileForVault(ctx, h.vault);
           unavailable = !header || isPrivateMeta(header.meta) || fmSaysPrivate(header.block) || await isExcludedPath(root, rel)
-            || (ctx.twinScope?.mode === 'scoped' && header.meta.twin_profile_id !== ctx.twinScope.profile_id);
+            || (mailboxProfile && header.meta.twin_profile_id !== mailboxProfile.profile_id);
         }
       } catch {}
       if (unavailable) errors.push('ack_of does not identify an available handoff within this Twin profile');
@@ -456,7 +461,7 @@ export async function sendHandoff(ctx, a, now = new Date()) {
     `decision_needed: ${a.decision_needed ? 'yes' : 'no'}`, `deadline: ${a.deadline || ''}`, `ack_of: ${a.ack_of || ''}`, `source: ${q(a.source || 'handoff')}`,
     `scope: ${q(a.scope || 'unspecified')}`, `confidence: ${q(a.confidence || 'unknown')}`,
     ...(git.value ? ['git_checkpoint_schema: 1', `git_repo: ${q(git.value.repo)}`, `git_branch: ${q(git.value.branch)}`, `git_head: ${q(git.value.head)}`, `git_dirty: ${git.value.dirty ? 'true' : 'false'}`, `git_ahead: ${git.value.ahead}`] : []),
-    ...(ctx.twinScope?.mode === 'scoped' ? [`twin_profile_id: ${q(ctx.twinScope.profile_id)}`] : []), '---'].join('\n');
+    ...(twinProfileForVault(ctx, h.vault) ? [`twin_profile_id: ${q(twinProfileForVault(ctx, h.vault).profile_id)}`] : []), '---'].join('\n');
   const sections = HANDOFF_FIELDS.map(([field, label]) => handoffSection(label, a[field])).join('');
   const gitSection = git.value ? handoffSection('Git checkpoint (reported by sender; not verified by BrainLink)', `Repository: ${git.value.repo}\nBranch: ${git.value.branch}\nCommit: ${git.value.head}\nWorking tree dirty: ${git.value.dirty}\nCommits ahead: ${git.value.ahead}`) : '';
   const sources = refs.length ? handoffSection('Sources', refs.map((ref) => `\`${ref}\``)) : '';
@@ -483,7 +488,8 @@ export async function listHandoffs(ctx, { to, limit = 10 } = {}) {
     const full = safeJoin(dir, f);
     const header = await readHandoffHeader(full).catch(() => null);
     if (!header || isPrivateMeta(header.meta) || fmSaysPrivate(header.block)) continue;
-    if (ctx.twinScope?.mode === 'scoped' && header.meta.twin_profile_id !== ctx.twinScope.profile_id) continue;
+    const mailboxProfile = twinProfileForVault(ctx, h.vault);
+    if (mailboxProfile && header.meta.twin_profile_id !== mailboxProfile.profile_id) continue;
     // Read the recipient from frontmatter: splitting a slugged name such as "Claude Code"
     // at hyphens makes filename-only matching ambiguous with the subject slug.
     const recipient = slug(header.meta.to || f.match(/-to-([a-z0-9-]+?)-/)?.[1] || '');

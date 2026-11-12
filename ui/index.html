@@ -651,10 +651,8 @@ main #ready, main #ask-panel, main #brain-panel, main #sessions-panel, main #s-c
   <div class="modal" role="dialog" aria-modal="true" aria-labelledby="preset-connect-title">
     <b id="preset-connect-title"></b>
     <p class="hint" style="margin-top:6px" data-i18n="connect.profileHint"></p>
-    <label><span data-i18n="connect.profileLabel"></span><select id="preset-profile"></select></label>
-    <p class="muted" style="margin-top:10px" data-i18n="connect.memoryHint"></p>
-    <div id="preset-memory-list" class="grid2"></div>
-    <div id="preset-vault-list" class="cards" style="margin-top:10px"></div>
+    <p class="muted" style="margin-top:10px">Select every Twin this AI app should access. Each profile keeps its own vault permissions.</p>
+    <div id="preset-profile-list" class="cards"></div>
     <p id="preset-connect-summary" class="notice" style="margin-top:10px"></p>
     <div id="preset-connect-review" class="card" role="status" aria-live="polite" style="margin-top:8px"></div>
     <div class="row" style="margin-top:14px;justify-content:flex-end">
@@ -2232,95 +2230,78 @@ document.addEventListener('click', (e) => {
 });
 
 function renderPresetConnectOptions() {
-  const profile = S?.twin_profiles?.profiles?.find((item) => item.id === $('preset-profile').value);
-  if (!profile) { $('preset-vault-list').innerHTML = `<p class="muted">${esc(t('connect.noProfile'))}</p>`; $('preset-memory-list').innerHTML = ''; $('preset-connect-review').textContent = t('connect.reviewEmpty'); $('preset-connect-submit').disabled = true; return; }
-  const assigned = profile.agents?.find((agent) => agent.preset_client_id === pendingPresetClient);
-  const defaultMemory = assigned?.memory_policy || { working: false, semantic: profile.memory_policy?.semantic === true, procedural: profile.memory_policy?.procedural === true, episodic: profile.memory_policy?.episodic === true };
-  $('preset-memory-list').innerHTML = ['working','semantic','procedural','episodic'].map((key) => `<label class="card" style="display:flex;flex-direction:row;align-items:center;gap:6px;margin:0"><input type="checkbox" data-preset-memory="${key}" ${defaultMemory[key] ? 'checked' : ''} ${profile.memory_policy?.[key] === true ? '' : 'disabled'} style="width:auto">${esc(t('twinProfiles.memory.' + key))}</label>`).join('');
-  const vaults = (profile.vaults || []).filter((grant) => S.vaults.some((vault) => vault.name === grant.name && vault.exists));
+  const profiles = S?.twin_profiles?.profiles || [];
+  if (!profiles.length) { $('preset-profile-list').innerHTML = `<p class="muted">${esc(t('connect.noProfile'))}</p>`; $('preset-connect-review').textContent = t('connect.reviewEmpty'); $('preset-connect-submit').disabled = true; return; }
   const labels = [['search','connect.search','semantic'],['read_note','connect.readNote','semantic'],['write_note','twinProfiles.operation.write_note','semantic'],['read_session','connect.readSession','episodic'],['log_session','twinProfiles.operation.log_session','episodic'],['propose_note','twinProfiles.operation.propose_note','semantic'],['handoff_read','connect.readHandoffs','working'],['write_handoff','connect.sendHandoffs','working']];
-  $('preset-vault-list').innerHTML = vaults.length ? vaults.map((grant, index) => {
+  $('preset-profile-list').innerHTML = profiles.map((profile) => {
+    const assigned = profile.agents?.find((agent) => agent.preset_client_id === pendingPresetClient);
+    const defaultMemory = assigned?.memory_policy || { working: false, semantic: profile.memory_policy?.semantic === true, procedural: profile.memory_policy?.procedural === true, episodic: profile.memory_policy?.episodic === true };
+    const vaults = (profile.vaults || []).filter((grant) => S.vaults.some((vault) => vault.name === grant.name && vault.exists));
+    return `<section class="card" data-preset-profile="${esc(profile.id)}"><label style="display:flex;align-items:center;gap:8px"><input type="checkbox" data-preset-profile-check value="${esc(profile.id)}" ${assigned ? 'checked' : ''} style="width:auto"><b>${esc(profile.name)} · ${esc(t('twinProfiles.mode.' + profile.mode))}</b></label><div class="preset-profile-permissions" ${assigned ? '' : 'hidden'}><p class="muted" style="margin-top:10px">${esc(t('connect.memoryHint'))}</p><div class="grid2">${['working','semantic','procedural','episodic'].map((key) => `<label class="card" style="display:flex;flex-direction:row;align-items:center;gap:6px;margin:0"><input type="checkbox" data-preset-memory="${key}" ${defaultMemory[key] ? 'checked' : ''} ${profile.memory_policy?.[key] === true ? '' : 'disabled'} style="width:auto">${esc(t('twinProfiles.memory.' + key))}</label>`).join('')}</div><div class="cards" style="margin-top:10px">${vaults.map((grant) => {
     const isPrivate = S.vaults.some((vault) => vault.name === grant.name && vault.private);
     const available = labels.filter(([action]) => !['handoff_read','write_handoff'].includes(action) || S.handoff?.vault === grant.name);
-    const canPropose = ['propose', 'write'].includes(grant.access) && profile.memory_policy?.semantic === true && document.querySelector('[data-preset-memory="semantic"]')?.checked;
-    return `<div class="card"><b>${esc(grant.name)}${isPrivate ? ` (${esc(t('twinProfiles.privateVault'))})` : ''}</b><div class="row" style="margin-top:7px">${available.map(([action,key,memory]) => {
-      const needsPropose = ['propose_note','write_handoff'].includes(action);
-      const selectedMemory = Object.fromEntries([...document.querySelectorAll('[data-preset-memory]')].map((input) => [input.dataset.presetMemory, input.checked]));
-      const allowed = twinActionMemoryAllowed(action, selectedMemory) && profile.memory_policy?.[memory] === true && (!needsPropose || ['propose', 'write'].includes(grant.access)) && (action !== 'write_note' || grant.access === 'write');
+    return `<div class="card"><b>${esc(grant.name)}${isPrivate ? ` (${esc(t('twinProfiles.privateVault'))})` : ''}</b><div class="row" style="margin-top:7px">${available.map(([action,key]) => {
+      const memory = { search:'semantic', read_note:'semantic', write_note:'semantic', read_session:'episodic', log_session:'episodic', propose_note:'semantic', handoff_read:'working', write_handoff:'working' }[action];
       const assignedActions = assigned?.vaults?.find((item) => item.name === grant.name)?.operations || [];
       const defaultAction = assigned ? assignedActions.includes(action) : (grant.access === 'write' && ['search','read_note','write_note'].includes(action)) || (grant.access === 'propose' && ['search','read_note'].includes(action));
-      return `<label class="muted" style="display:flex;flex-direction:row;align-items:center;gap:5px"><input type="checkbox" data-preset-vault="${esc(grant.name)}" value="${action}" ${defaultAction ? 'checked' : ''} ${allowed ? '' : 'disabled'} style="width:auto">${esc(t(key))}</label>`;
-    }).join('')}</div>${canPropose ? `<button type="button" data-preset-read-propose="${esc(grant.name)}">${esc(t('connect.readProposePreset'))}</button>` : ''}</div>`;
-  }).join('') : `<p class="muted">${esc(t('connect.noVault'))}</p>`;
+      return `<label class="muted" style="display:flex;flex-direction:row;align-items:center;gap:5px"><input type="checkbox" data-preset-vault="${esc(grant.name)}" data-memory="${memory}" value="${action}" ${defaultAction ? 'checked' : ''} style="width:auto">${esc(t(key))}</label>`;
+    }).join('')}</div></div>`;
+  }).join('') || `<p class="muted">${esc(t('connect.noVault'))}</p>`}</div></section>`;
+  }).join('');
   $('preset-connect-summary').textContent = t('connect.permissionSummary');
-  updatePresetPermissionControls(profile);
-  $('preset-connect-submit').disabled = !vaults.length || !document.querySelector('[data-preset-vault]:checked');
+  updatePresetPermissionControls();
 }
-function updatePresetPermissionControls(profile) {
-  const selectedMemory = Object.fromEntries([...document.querySelectorAll('[data-preset-memory]')].map((input) => [input.dataset.presetMemory, input.checked]));
+function updatePresetPermissionControls() {
+  document.querySelectorAll('[data-preset-profile]').forEach((section) => { section.querySelector('.preset-profile-permissions').hidden = !section.querySelector('[data-preset-profile-check]').checked; });
   document.querySelectorAll('[data-preset-vault]').forEach((input) => {
-    const required = { search: 'semantic', read_note: 'semantic', write_note: 'semantic', read_session: 'episodic', log_session: 'episodic', propose_note: 'semantic', handoff_read: 'working', write_handoff: 'working' }[input.value];
+    const section = input.closest('[data-preset-profile]');
+    const profile = S?.twin_profiles?.profiles?.find((item) => item.id === section.dataset.presetProfile);
+    const selectedMemory = Object.fromEntries([...section.querySelectorAll('[data-preset-memory]')].map((memory) => [memory.dataset.presetMemory, memory.checked]));
+    const required = input.dataset.memory;
     const vaultAccess = profile?.vaults?.find((grant) => grant.name === input.dataset.presetVault)?.access;
     const vaultAllowed = input.value === 'write_note' ? vaultAccess === 'write' : input.value === 'propose_note' ? ['propose', 'write'].includes(vaultAccess) : true;
     input.disabled = !required || profile?.memory_policy?.[required] !== true || selectedMemory[required] !== true || !vaultAllowed;
     if (input.disabled) input.checked = false;
   });
-  const memories = [...document.querySelectorAll('[data-preset-memory]:checked')].map((input) => t('twinProfiles.memory.' + input.dataset.presetMemory));
   const actionKeys = { search: 'connect.search', read_note: 'connect.readNote', write_note: 'twinProfiles.operation.write_note', read_session: 'connect.readSession', log_session: 'twinProfiles.operation.log_session', propose_note: 'twinProfiles.operation.propose_note', handoff_read: 'connect.readHandoffs', write_handoff: 'connect.sendHandoffs' };
-  const grants = [...document.querySelectorAll('[data-preset-vault]:checked')].reduce((items, input) => {
+  const grants = [...document.querySelectorAll('[data-preset-profile-check]:checked')].map((check) => {
+    const section = check.closest('[data-preset-profile]');
+    const vaults = [...section.querySelectorAll('[data-preset-vault]:checked')].reduce((items, input) => {
     const name = input.dataset.presetVault;
     let grant = items.find((item) => item.name === name);
     if (!grant) { grant = { name, actions: [] }; items.push(grant); }
     grant.actions.push(t(actionKeys[input.value]));
     return items;
-  }, []);
-  const vaultSummary = grants.map((grant) => `${grant.name}: ${grant.actions.join(', ')}`).join(' · ');
-  $('preset-connect-review').textContent = grants.length
-    ? t('connect.reviewSelected', { memories: memories.join(', ') || t('connect.reviewNone'), grants: vaultSummary })
-    : t('connect.reviewEmpty');
+    }, []);
+    return `${S.twin_profiles.profiles.find((profile) => profile.id === check.value)?.name}: ${vaults.map((grant) => `${grant.name} (${grant.actions.join(', ')})`).join('; ')}`;
+  });
+  $('preset-connect-review').textContent = grants.length ? grants.join(' · ') : t('connect.reviewEmpty');
+  $('preset-connect-submit').disabled = !grants.length || !document.querySelector('[data-preset-vault]:checked');
 }
 function openPresetConnect(clientId) {
   pendingPresetClient = clientId;
   const profiles = S?.twin_profiles?.profiles || [];
   $('preset-connect-title').textContent = t('connect.permissionsTitle', { client: S.clients[clientId]?.title || clientLabel(clientId) });
-  $('preset-profile').innerHTML = profiles.map((profile) => `<option value="${esc(profile.id)}">${esc(profile.name)} · ${esc(t('twinProfiles.mode.' + profile.mode))}</option>`).join('');
   $('preset-connect-modal').hidden = false;
   renderPresetConnectOptions();
-  $('preset-profile').focus();
 }
-$('preset-profile').onchange = renderPresetConnectOptions;
-$('preset-vault-list').addEventListener('click', (event) => {
-  const button = event.target.closest('[data-preset-read-propose]');
-  if (!button) return;
-  const vault = button.dataset.presetReadPropose;
-  const semantic = document.querySelector('[data-preset-memory="semantic"]');
-  if (semantic && !semantic.disabled) semantic.checked = true;
-  updatePresetPermissionControls(S?.twin_profiles?.profiles?.find((item) => item.id === $('preset-profile').value));
-  document.querySelectorAll(`[data-preset-vault="${CSS.escape(vault)}"]`).forEach((input) => {
-    input.checked = ['search', 'read_note', 'propose_note'].includes(input.value);
-  });
-  $('preset-connect-submit').disabled = !document.querySelector('[data-preset-vault]:checked');
-});
-$('preset-vault-list').onchange = () => {
-  updatePresetPermissionControls(S?.twin_profiles?.profiles?.find((item) => item.id === $('preset-profile').value));
-  $('preset-connect-submit').disabled = !document.querySelector('[data-preset-vault]:checked');
-};
-$('preset-memory-list').onchange = () => {
-  updatePresetPermissionControls(S?.twin_profiles?.profiles?.find((item) => item.id === $('preset-profile').value));
-  $('preset-connect-submit').disabled = !document.querySelector('[data-preset-vault]:checked');
-};
+$('preset-profile-list').onchange = updatePresetPermissionControls;
 $('preset-connect-cancel').onclick = () => { $('preset-connect-modal').hidden = true; pendingPresetClient = null; };
 $('preset-connect-modal').onclick = (event) => { if (event.target === $('preset-connect-modal')) $('preset-connect-cancel').click(); };
 $('preset-connect-submit').onclick = () => act(async () => {
   if (!pendingPresetClient) return;
-  const grants = [...document.querySelectorAll('[data-preset-vault]:checked')].reduce((items, input) => {
+  const profiles = [...document.querySelectorAll('[data-preset-profile-check]:checked')].map((check) => {
+    const section = check.closest('[data-preset-profile]');
+    const grants = [...section.querySelectorAll('[data-preset-vault]:checked')].reduce((items, input) => {
     let grant = items.find((item) => item.name === input.dataset.presetVault);
     if (!grant) { grant = { name: input.dataset.presetVault, operations: [] }; items.push(grant); }
     grant.operations.push(input.value);
     return items;
-  }, []);
-  const memory_policy = Object.fromEntries([...document.querySelectorAll('[data-preset-memory]')].map((input) => [input.dataset.presetMemory, input.checked]));
-  const response = await api('POST', '/api/connect', { client: pendingPresetClient, profile_id: $('preset-profile').value, vaults: grants, memory_policy });
+    }, []);
+    const memory_policy = Object.fromEntries([...section.querySelectorAll('[data-preset-memory]')].map((input) => [input.dataset.presetMemory, input.checked]));
+    return { profile_id: check.value, vaults: grants, memory_policy };
+  });
+  const response = await api('POST', '/api/connect', { client: pendingPresetClient, profiles });
   healthByClient[pendingPresetClient] = response.health;
   toast(t('connect.connectedToast', { title: response.title, msg: response.health.message }));
   $('preset-connect-modal').hidden = true;

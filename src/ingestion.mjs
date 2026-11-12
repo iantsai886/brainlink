@@ -10,6 +10,7 @@ import { indexableHeader, isExcludedPath, isPrivateMeta, fmSaysPrivate, parseFro
 import { extractLinks } from './graph.mjs';
 import { redactText } from './sessions/redact.mjs';
 import { extractImageText, imageDimensions } from './ingestion/image-ocr.mjs';
+import { twinProfileForVault } from './twin-profiles.mjs';
 
 const hash = (s) => createHash('sha256').update(Buffer.isBuffer(s) ? s : String(s)).digest('hex');
 const MAX_NOTES = 5000;
@@ -237,7 +238,7 @@ async function checkedFolder(ctx, vaultName, requested) {
 }
 
 function scopeId(ctx, vaultName, root) {
-  return hash(`${path.resolve(root)}\0${vaultName}\0${ctx.twinScope?.profile_id || 'unscoped'}`);
+  return hash(`${path.resolve(root)}\0${vaultName}\0${twinProfileForVault(ctx, vaultName)?.profile_id || 'unscoped'}`);
 }
 
 function sourceId(scope, rel) { return hash(`${scope}\0${rel}`); }
