@@ -35,7 +35,9 @@ const summaryOf = (s) => ({ id: s.id, client: s.client, project: s.project, titl
 export async function sessionMetadata(store, id, a = {}) {
   if (!id) throw new Error('id is required');
   const allowedProfileIds = new Set(a.profile_ids || (a.profile_id ? [a.profile_id] : []));
-  const { session } = await store.readSession(id, { limit: 0 });
+  const readScope = a.profile_ids ? { profile_ids: a.profile_ids, include_unowned: a.allow_imported_private === true } : (a.profile_id ? { profile_id: a.profile_id } : {});
+  const { session } = await store.readSession(id, { ...readScope, limit: 0 });
+  if (session.profile_id && !allowedProfileIds.has(session.profile_id)) return { accessible: false, session: null };
   const profilePrivate = Boolean(a.allow_profile_private && allowedProfileIds.has(session.profile_id));
   const allowed = !session.private || a.include_private || profilePrivate || (a.allow_imported_private && isRelaxableImport(session));
   return { accessible: allowed, session: allowed ? summaryOf(session) : null };
@@ -63,8 +65,11 @@ function fitByTokens(messages, budget) {
 export async function sessionList(store, a = {}) {
   const limit = Math.max(1, Math.min(a.limit ?? 8, 20));
   const allowedProfileIds = new Set(a.profile_ids || (a.profile_id ? [a.profile_id] : []));
-  const fetched = await store.listSessions({ q: a.q, client: a.client, since: a.since, profile_id: a.profile_ids ? undefined : a.profile_id, limit: Math.min(limit * (a.profile_ids?.length > 1 ? 20 : 4), 400) });
+  const fetched = await store.listSessions({ q: a.q, client: a.client, since: a.since, profile_id: a.profile_ids ? undefined : a.profile_id,
+    ...(a.profile_ids ? { profile_ids: a.profile_ids, include_unowned: a.allow_imported_private === true } : {}),
+    limit: Math.min(limit * (a.profile_ids?.length > 1 ? 20 : 4), 400) });
   const visible = fetched.filter((s) => {
+    if (s.profile_id && !allowedProfileIds.has(s.profile_id)) return false;
     const profilePrivate = Boolean(a.allow_profile_private && allowedProfileIds.has(s.profile_id));
     const allowed = !s.private || a.include_private || profilePrivate || (a.allow_imported_private && isRelaxableImport(s));
     return allowed && (!a.project || s.project.includes(a.project));
@@ -92,8 +97,15 @@ const PRIVATE_FULL_MESSAGE = 'Full message text for this session is private; cha
 export async function sessionRead(store, a = {}) {
   if (!a.id) throw new Error('id is required');
   const allowedProfileIds = new Set(a.profile_ids || (a.profile_id ? [a.profile_id] : []));
-  const peek = await store.readSession(a.id);
+  const scope = a.profile_ids ? { profile_ids: a.profile_ids, include_unowned: a.allow_imported_private === true } : (a.profile_id ? { profile_id: a.profile_id } : {});
+  let peek;
+  try { peek = await store.readSession(a.id, scope); }
+  catch (error) {
+    if (a.profile_ids && error.code === 'E_NOT_FOUND') return { id: a.id, private: true, message: PRIVATE_MESSAGE };
+    throw error;
+  }
   const session = peek.session;
+  if (session.profile_id && !allowedProfileIds.has(session.profile_id)) return { id: session.id, private: true, message: PRIVATE_MESSAGE };
   const relaxable = isRelaxableImport(session);
   const profilePrivate = Boolean(a.allow_profile_private && allowedProfileIds.has(session.profile_id));
   const profileFullText = profilePrivate && (a.profile_full_text?.[session.profile_id] ?? a.allow_profile_full_text) === true;
@@ -107,7 +119,7 @@ export async function sessionRead(store, a = {}) {
     if (profilePrivate && !profileFullText) return { ...base, message: PRIVATE_FULL_MESSAGE };
     if (relaxable && a.allow_imported_private && !a.allow_imported_full_private) return { ...base, message: PRIVATE_FULL_MESSAGE };
     if (session.private && !fullOk) return { ...base, message: PRIVATE_FULL_MESSAGE };
-    const batch = await store.readSession(a.id, { offset: a.offset || 0, limit: FULL_PAGE_FETCH });
+    const batch = await store.readSession(a.id, { ...scope, offset: a.offset || 0, limit: FULL_PAGE_FETCH });
     const messages = fitByTokens(batch.messages, FULL_PAGE_TOKENS);
     const nextOffset = (a.offset || 0) + messages.length < session.message_count ? (a.offset || 0) + messages.length : null;
     return { ...base, messages: messages.map((m) => ({ ...m, text: redactText(m.text) })), next_offset: nextOffset };
@@ -116,7 +128,7 @@ export async function sessionRead(store, a = {}) {
   // never grant access to the body of a private imported session.
   if (session.private && !fullOk) return { ...base, key_turns: [] };
   // summary + metadata + up to 3 key-turn snippets — comfortably under the ~800 token default budget
-  return { ...base, key_turns: await keyTurns(store, a.id, session.message_count) };
+  return { ...base, key_turns: await keyTurns(store, a.id, session.message_count, scope) };
 }
 
 // a: { title?, text, role?, session_id?, project?, private? }. platform = ctx.platform (BRAINLINK_AI_PLATFORM).
