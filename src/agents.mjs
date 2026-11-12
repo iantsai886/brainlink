@@ -7,7 +7,7 @@ import { vault, vaultRoot, safeJoin, parseFrontmatter, zonedNow, readNote } from
 import { resolveIdentity, appendTo, appendProposalState, frontmatter, madeBy, checkCommon, checkWritePath, slug, readMemories } from './writes.mjs';
 import { suggestLinks, relatedSection, safeUpdateMap } from './links.mjs';
 import { recentNotes, openLoops } from './insights.mjs';
-import { twinMemoryAllowed } from './twin-profiles.mjs';
+import { twinMemoryAllowed, twinCanWriteNotes } from './twin-profiles.mjs';
 
 const norm = (s) => String(s || '').trim().toLowerCase().replace(/[，,。.!！]+$/u, '').replace(/\s+/g, ' ');
 
@@ -141,7 +141,8 @@ export async function closeLoop(ctx, args, now = new Date()) {
     if (!list(args.decisions).length && !list(args.actions).length) errors.push('at least one decision or action is required');
   }
   if (errors.length) return { ok: false, errors };
-  const proposalOnly = (v.private && !ctx.trustedLocal) || v.writes === 'proposal-only' || (t.mode === 'proposal-only' && !a.capture_approved);
+  const profileWrite = twinCanWriteNotes(ctx, a.vault);
+  const proposalOnly = (((v.private && !ctx.trustedLocal) || v.writes === 'proposal-only') && !profileWrite) || (t.mode === 'proposal-only' && !a.capture_approved);
   const target = t.mode === 'new-note' ? null : t.path;
   if (target) {
     try {

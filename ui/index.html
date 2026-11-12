@@ -1834,15 +1834,15 @@ async function load() {
     <div class="row"><button data-save-agent="${i}">${esc(t('rolePack.saveBtn', { name: a.name }))}</button><button class="link" data-remove-role-agent="${esc(a.name)}">${esc(t('rolePack.removeBtn'))}</button></div></div>`).join('') : `<p class="muted">${esc(t('rolePack.none'))}</p>`;
   const twin = S.twin_profiles;
   const twinVaults = S.vaults.filter((v) => v.exists);
-  $('twin-new-vaults').innerHTML = twinVaults.length ? twinVaults.map((v) => `<div class="card"><label style="display:flex;flex-direction:row;align-items:center;gap:8px"><input type="checkbox" data-twin-vault="${esc(v.name)}" style="width:auto"><span>${esc(v.name)}${v.private ? ` (${esc(t('twinProfiles.privateVault'))})` : ''}</span><select data-twin-vault-access="${esc(v.name)}" aria-label="${esc(t('twinProfiles.accessFor', { name: v.name }))}" style="margin-left:auto;width:auto"><option value="read">${esc(t('twinProfiles.access.read'))}</option><option value="propose">${esc(t('twinProfiles.access.propose'))}</option></select></label></div>`).join('') : `<p class="muted">${esc(t('twinProfiles.noVaults'))}</p>`;
+  $('twin-new-vaults').innerHTML = twinVaults.length ? twinVaults.map((v) => `<div class="card"><label style="display:flex;flex-direction:row;align-items:center;gap:8px"><input type="checkbox" data-twin-vault="${esc(v.name)}" style="width:auto"><span>${esc(v.name)}${v.private ? ` (${esc(t('twinProfiles.privateVault'))})` : ''}</span><select data-twin-vault-access="${esc(v.name)}" aria-label="${esc(t('twinProfiles.accessFor', { name: v.name }))}" style="margin-left:auto;width:auto"><option value="write">${esc(t('twinProfiles.access.write'))}</option><option value="propose">${esc(t('twinProfiles.access.propose'))}</option><option value="read">${esc(t('twinProfiles.access.read'))}</option></select></label></div>`).join('') : `<p class="muted">${esc(t('twinProfiles.noVaults'))}</p>`;
   const editableProfile = twin?.profiles?.find((item) => item.id === editingTwinId);
   const twinAgentVaults = S.ai_agents.filter((a) => !a.revoked && !(twin?.profiles || []).some((p) => p.id !== editingTwinId && p.agents.some((assigned) => assigned.id === a.id)));
   $('twin-new-agents').innerHTML = twinAgentVaults.map((a) => `<div class="card">
     <label style="display:flex;flex-direction:row;align-items:center;gap:8px"><input type="checkbox" data-twin-agent="${esc(a.id)}" style="width:auto"><b>${esc(a.name)}</b> <span class="muted">· ${esc(a.kind)}</span></label>
     <div data-twin-agent-options="${esc(a.id)}" hidden>
     <div class="muted" style="margin-top:8px" data-i18n="twinProfiles.agentMemory"></div>
-    <div class="row" data-twin-agent-memories="${esc(a.id)}">${['working','semantic','procedural','episodic'].map((key) => `<label class="muted" style="display:flex;flex-direction:row;align-items:center;gap:5px"><input type="checkbox" data-twin-agent-memory="${esc(a.id)}" data-memory-type="${key}" ${key === 'semantic' ? 'checked' : ''} style="width:auto">${esc(t('twinProfiles.memory.' + key))}</label>`).join('')}</div>
-    <div class="cards" data-twin-agent-scopes="${esc(a.id)}" style="margin-top:8px">${twinVaults.map((vault) => `<div class="card" data-twin-agent-scope="${esc(a.id)}" data-vault-scope="${esc(vault.name)}" hidden><label style="display:flex;flex-direction:row;align-items:center;gap:6px"><input type="checkbox" data-twin-agent-vault="${esc(a.id)}" data-vault-name="${esc(vault.name)}" style="width:auto"><b>${esc(vault.name)}</b></label><div class="row" style="margin-top:5px">${[['search','search'],['read_note','read_note'],['read_session','read_session'],['log_session','log_session'],['propose_note','propose_note'],['handoff_read','handoff_read'],['write_handoff','write_handoff']].filter(([op]) => !['handoff_read','write_handoff'].includes(op) || S.handoff?.vault === vault.name).map(([op,key]) => `<label class="muted" style="display:flex;flex-direction:row;align-items:center;gap:5px"><input type="checkbox" data-twin-operation="${esc(a.id)}" data-vault-name="${esc(vault.name)}" value="${op}" ${['search','read_note'].includes(op) ? 'checked' : ''} style="width:auto">${esc(t('twinProfiles.operation.' + key))}</label>`).join('')}</div></div>`).join('')}</div>
+    <div class="row" data-twin-agent-memories="${esc(a.id)}">${['working','semantic','procedural','episodic'].map((key) => `<label class="muted" style="display:flex;flex-direction:row;align-items:center;gap:5px"><input type="checkbox" data-twin-agent-memory="${esc(a.id)}" data-memory-type="${key}" ${['semantic','procedural','episodic'].includes(key) ? 'checked' : ''} style="width:auto">${esc(t('twinProfiles.memory.' + key))}</label>`).join('')}</div>
+    <div class="cards" data-twin-agent-scopes="${esc(a.id)}" style="margin-top:8px">${twinVaults.map((vault) => `<div class="card" data-twin-agent-scope="${esc(a.id)}" data-vault-scope="${esc(vault.name)}" hidden><label style="display:flex;flex-direction:row;align-items:center;gap:6px"><input type="checkbox" data-twin-agent-vault="${esc(a.id)}" data-vault-name="${esc(vault.name)}" style="width:auto"><b>${esc(vault.name)}</b></label><div class="row" style="margin-top:5px">${[['search','search'],['read_note','read_note'],['write_note','write_note'],['read_session','read_session'],['log_session','log_session'],['propose_note','propose_note'],['handoff_read','handoff_read'],['write_handoff','write_handoff']].filter(([op]) => !['handoff_read','write_handoff'].includes(op) || S.handoff?.vault === vault.name).map(([op,key]) => `<label class="muted" style="display:flex;flex-direction:row;align-items:center;gap:5px"><input type="checkbox" data-twin-operation="${esc(a.id)}" data-vault-name="${esc(vault.name)}" value="${op}" ${['search','read_note','write_note'].includes(op) ? 'checked' : ''} style="width:auto">${esc(t('twinProfiles.operation.' + key))}</label>`).join('')}</div></div>`).join('')}</div>
     </div>
   </div>`).join('') || `<p class="muted">${esc(t('twinProfiles.noAgents'))}</p>`;
   $('twin-new-memory').innerHTML = ['working','semantic','procedural','episodic'].map((key) => `<label class="card" style="display:flex;flex-direction:column;gap:6px;margin:0"><span style="display:flex;align-items:center;gap:7px"><input type="checkbox" data-twin-memory="${key}" checked style="width:auto"><b>${esc(t('twinProfiles.memory.' + key))}</b></span><small class="muted">${esc(t('twinProfiles.memoryDescription.' + key))}</small></label>`).join('');
@@ -2235,19 +2235,21 @@ function renderPresetConnectOptions() {
   const profile = S?.twin_profiles?.profiles?.find((item) => item.id === $('preset-profile').value);
   if (!profile) { $('preset-vault-list').innerHTML = `<p class="muted">${esc(t('connect.noProfile'))}</p>`; $('preset-memory-list').innerHTML = ''; $('preset-connect-review').textContent = t('connect.reviewEmpty'); $('preset-connect-submit').disabled = true; return; }
   const assigned = profile.agents?.find((agent) => agent.preset_client_id === pendingPresetClient);
-  const defaultMemory = assigned?.memory_policy || { working: false, semantic: profile.memory_policy?.semantic === true, procedural: false, episodic: false };
+  const defaultMemory = assigned?.memory_policy || { working: false, semantic: profile.memory_policy?.semantic === true, procedural: profile.memory_policy?.procedural === true, episodic: profile.memory_policy?.episodic === true };
   $('preset-memory-list').innerHTML = ['working','semantic','procedural','episodic'].map((key) => `<label class="card" style="display:flex;flex-direction:row;align-items:center;gap:6px;margin:0"><input type="checkbox" data-preset-memory="${key}" ${defaultMemory[key] ? 'checked' : ''} ${profile.memory_policy?.[key] === true ? '' : 'disabled'} style="width:auto">${esc(t('twinProfiles.memory.' + key))}</label>`).join('');
   const vaults = (profile.vaults || []).filter((grant) => S.vaults.some((vault) => vault.name === grant.name && vault.exists));
-  const labels = [['search','connect.search','semantic'],['read_note','connect.readNote','semantic'],['read_session','connect.readSession','episodic'],['log_session','twinProfiles.operation.log_session','episodic'],['propose_note','twinProfiles.operation.propose_note','semantic'],['handoff_read','connect.readHandoffs','working'],['write_handoff','connect.sendHandoffs','working']];
+  const labels = [['search','connect.search','semantic'],['read_note','connect.readNote','semantic'],['write_note','twinProfiles.operation.write_note','semantic'],['read_session','connect.readSession','episodic'],['log_session','twinProfiles.operation.log_session','episodic'],['propose_note','twinProfiles.operation.propose_note','semantic'],['handoff_read','connect.readHandoffs','working'],['write_handoff','connect.sendHandoffs','working']];
   $('preset-vault-list').innerHTML = vaults.length ? vaults.map((grant, index) => {
     const isPrivate = S.vaults.some((vault) => vault.name === grant.name && vault.private);
     const available = labels.filter(([action]) => !['handoff_read','write_handoff'].includes(action) || S.handoff?.vault === grant.name);
-    const canPropose = grant.access === 'propose' && profile.memory_policy?.semantic === true && document.querySelector('[data-preset-memory="semantic"]')?.checked;
+    const canPropose = ['propose', 'write'].includes(grant.access) && profile.memory_policy?.semantic === true && document.querySelector('[data-preset-memory="semantic"]')?.checked;
     return `<div class="card"><b>${esc(grant.name)}${isPrivate ? ` (${esc(t('twinProfiles.privateVault'))})` : ''}</b><div class="row" style="margin-top:7px">${available.map(([action,key,memory]) => {
       const needsPropose = ['propose_note','write_handoff'].includes(action);
       const selectedMemory = Object.fromEntries([...document.querySelectorAll('[data-preset-memory]')].map((input) => [input.dataset.presetMemory, input.checked]));
-      const allowed = twinActionMemoryAllowed(action, selectedMemory) && profile.memory_policy?.[memory] === true && (!needsPropose || grant.access === 'propose');
-      return `<label class="muted" style="display:flex;flex-direction:row;align-items:center;gap:5px"><input type="checkbox" data-preset-vault="${esc(grant.name)}" value="${action}" ${index === 0 && !isPrivate && ['search','read_note'].includes(action) ? 'checked' : ''} ${allowed ? '' : 'disabled'} style="width:auto">${esc(t(key))}</label>`;
+      const allowed = twinActionMemoryAllowed(action, selectedMemory) && profile.memory_policy?.[memory] === true && (!needsPropose || ['propose', 'write'].includes(grant.access)) && (action !== 'write_note' || grant.access === 'write');
+      const assignedActions = assigned?.vaults?.find((item) => item.name === grant.name)?.operations || [];
+      const defaultAction = assigned ? assignedActions.includes(action) : (grant.access === 'write' && ['search','read_note','write_note'].includes(action)) || (grant.access === 'propose' && ['search','read_note'].includes(action));
+      return `<label class="muted" style="display:flex;flex-direction:row;align-items:center;gap:5px"><input type="checkbox" data-preset-vault="${esc(grant.name)}" value="${action}" ${defaultAction ? 'checked' : ''} ${allowed ? '' : 'disabled'} style="width:auto">${esc(t(key))}</label>`;
     }).join('')}</div>${canPropose ? `<button type="button" data-preset-read-propose="${esc(grant.name)}">${esc(t('connect.readProposePreset'))}</button>` : ''}</div>`;
   }).join('') : `<p class="muted">${esc(t('connect.noVault'))}</p>`;
   $('preset-connect-summary').textContent = t('connect.permissionSummary');
@@ -2257,12 +2259,14 @@ function renderPresetConnectOptions() {
 function updatePresetPermissionControls(profile) {
   const selectedMemory = Object.fromEntries([...document.querySelectorAll('[data-preset-memory]')].map((input) => [input.dataset.presetMemory, input.checked]));
   document.querySelectorAll('[data-preset-vault]').forEach((input) => {
-    const required = { search: 'semantic', read_note: 'semantic', read_session: 'episodic', log_session: 'episodic', propose_note: 'semantic', handoff_read: 'working', write_handoff: 'working' }[input.value];
-    input.disabled = !required || profile?.memory_policy?.[required] !== true || selectedMemory[required] !== true;
+    const required = { search: 'semantic', read_note: 'semantic', write_note: 'semantic', read_session: 'episodic', log_session: 'episodic', propose_note: 'semantic', handoff_read: 'working', write_handoff: 'working' }[input.value];
+    const vaultAccess = profile?.vaults?.find((grant) => grant.name === input.dataset.presetVault)?.access;
+    const vaultAllowed = input.value === 'write_note' ? vaultAccess === 'write' : input.value === 'propose_note' ? ['propose', 'write'].includes(vaultAccess) : true;
+    input.disabled = !required || profile?.memory_policy?.[required] !== true || selectedMemory[required] !== true || !vaultAllowed;
     if (input.disabled) input.checked = false;
   });
   const memories = [...document.querySelectorAll('[data-preset-memory]:checked')].map((input) => t('twinProfiles.memory.' + input.dataset.presetMemory));
-  const actionKeys = { search: 'connect.search', read_note: 'connect.readNote', read_session: 'connect.readSession', log_session: 'twinProfiles.operation.log_session', propose_note: 'twinProfiles.operation.propose_note', handoff_read: 'connect.readHandoffs', write_handoff: 'connect.sendHandoffs' };
+  const actionKeys = { search: 'connect.search', read_note: 'connect.readNote', write_note: 'twinProfiles.operation.write_note', read_session: 'connect.readSession', log_session: 'twinProfiles.operation.log_session', propose_note: 'twinProfiles.operation.propose_note', handoff_read: 'connect.readHandoffs', write_handoff: 'connect.sendHandoffs' };
   const grants = [...document.querySelectorAll('[data-preset-vault]:checked')].reduce((items, input) => {
     const name = input.dataset.presetVault;
     let grant = items.find((item) => item.name === name);
@@ -2755,7 +2759,7 @@ document.addEventListener('click', async (event) => {
 });
 $('twin-edit-cancel').onclick = async () => { editingTwinId = null; await load(); };
 function twinActionMemoryAllowed(action, policy) {
-  const required = { search: 'semantic', read_note: 'semantic', read_session: 'episodic', log_session: 'episodic', propose_note: 'semantic', handoff_read: 'working', write_handoff: 'working' };
+  const required = { search: 'semantic', read_note: 'semantic', write_note: 'semantic', read_session: 'episodic', log_session: 'episodic', propose_note: 'semantic', handoff_read: 'working', write_handoff: 'working' };
   return policy?.[required[action]] === true;
 }
 function updateTwinPermissionControls() {
@@ -2771,9 +2775,15 @@ function updateTwinPermissionControls() {
     agentMemory.get(id)[type] = allowedByProfile && input.checked;
   });
   document.querySelectorAll('[data-twin-operation]').forEach((input) => {
-    const allowed = twinActionMemoryAllowed(input.value, agentMemory.get(input.dataset.twinOperation));
+    const vaultName = input.dataset.vaultName;
+    const vaultSelected = document.querySelector(`[data-twin-agent-vault="${CSS.escape(input.dataset.twinOperation)}"][data-vault-name="${CSS.escape(vaultName)}"]`)?.checked;
+    const profileVaultSelected = document.querySelector(`[data-twin-vault="${CSS.escape(vaultName)}"]`)?.checked;
+    const access = document.querySelector(`[data-twin-vault-access="${CSS.escape(vaultName)}"]`)?.value;
+    const vaultAllows = input.value === 'write_note' ? access === 'write' : input.value === 'propose_note' ? ['propose', 'write'].includes(access) : true;
+    const memoryAllowed = twinActionMemoryAllowed(input.value, agentMemory.get(input.dataset.twinOperation));
+    const allowed = vaultSelected && profileVaultSelected && vaultAllows && memoryAllowed;
     input.disabled = !allowed;
-    if (!allowed) input.checked = false;
+    if (!memoryAllowed) input.checked = false;
   });
 }
 function copyTwinMemoryToSelectedAgents() {
@@ -2806,7 +2816,9 @@ $('twin-new-agents').addEventListener('change', (event) => {
   if (!grant) return;
   const scope = document.querySelector(`[data-twin-agent-scope="${CSS.escape(grant.dataset.twinAgentVault)}"][data-vault-scope="${CSS.escape(grant.dataset.vaultName)}"]`);
   if (scope) scope.hidden = !grant.checked;
+  updateTwinPermissionControls();
 });
+$('twin-new-vaults').addEventListener('change', updateTwinPermissionControls);
 $('twin-read-propose-preset').addEventListener('click', () => {
   const selectedVaults = [...document.querySelectorAll('[data-twin-vault]:checked')];
   const selectedAgents = [...document.querySelectorAll('[data-twin-agent]:checked')];
@@ -2853,7 +2865,7 @@ $('twin-create').onclick = async () => {
     })),
   }));
   if (!name || !vaults.length) { toast(t('twinProfiles.needNameVault'), true); return; }
-  if (agent_access.some((agent) => !agent.vaults.length || agent.vaults.some((grant) => !grant.operations.length || !vaults.some((vault) => vault.name === grant.name) || (grant.operations.some((operation) => ['propose_note', 'write_handoff'].includes(operation)) && !vaults.some((vault) => vault.name === grant.name && vault.access === 'propose'))))) { toast(t('twinProfiles.needAgentVault'), true); return; }
+  if (agent_access.some((agent) => !agent.vaults.length || agent.vaults.some((grant) => !grant.operations.length || !vaults.some((vault) => vault.name === grant.name) || (grant.operations.includes('write_note') && !vaults.some((vault) => vault.name === grant.name && vault.access === 'write')) || (grant.operations.some((operation) => ['propose_note', 'write_handoff'].includes(operation)) && !vaults.some((vault) => vault.name === grant.name && ['propose','write'].includes(vault.access)))))) { toast(t('twinProfiles.needAgentVault'), true); return; }
   const vaultNames = vaults.map((item) => `${item.name} (${t('twinProfiles.access.' + item.access)})`).join(', ');
   const agentNames = selectedAgents.map((input) => {
     const entry = agent_access.find((item) => item.agent_id === input.dataset.twinAgent);

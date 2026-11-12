@@ -3,6 +3,7 @@
 // unless confirm=true.
 import { writeFile, appendFile, readdir, readFile, stat, lstat, open, mkdir, realpath } from 'node:fs/promises';
 import { createHash } from 'node:crypto';
+import { twinCanWriteNotes } from './twin-profiles.mjs';
 import path from 'node:path';
 import { TEMPLATES, renderTemplate } from './templates.mjs';
 import { suggestLinks, relatedSection, safeUpdateMap } from './links.mjs';
@@ -153,18 +154,18 @@ export async function proposeNote(ctx, a, now = new Date()) {
   const body = tpl ? renderTemplate(a.template, a.fields || {}, a.body) : String(a.body).trim();
   const links = a.auto_link === false ? [] : await suggestLinks(ctx, vaultName, `${title}\n${body}`, { limit: 5 }).catch(() => []);
   const content = `${fm}\n\n# ${title}\n\n${madeBy(id)}\nOther AI platforms also write this vault — do not treat unsigned edits as this note's author.\n\n${decision}${body}\n\n${relatedSection(links)}## Changelog\n\n- ${date} — Created. Made by ${id.ai_platform} (${id.agent_or_role}).\n`;
-  const r = await commitNew(ctx, vaultName, rel, content, a.confirm);
+  const r = await commitNew(ctx, vaultName, rel, content, a.confirm, { profileWrite: twinCanWriteNotes(ctx, vaultName) });
   return r.ok ? { ...r, linked_to: links.map((l) => l.target) } : r;
 }
 
-export async function commitNew(ctx, vaultName, rel, content, confirm, { ownerApproved = false } = {}) {
+export async function commitNew(ctx, vaultName, rel, content, confirm, { ownerApproved = false, profileWrite = false } = {}) {
   const v = vault(ctx, vaultName);
   if (ctx.readOnly || v.writes === 'off') return { ok: false, errors: [`${vaultName} is read-only; no file was created.`] };
   let full;
   try { full = await checkWritePath(vaultRoot(ctx, vaultName), rel); }
   catch { return { ok: false, errors: ['Destination is excluded or not a regular path in the vault.'] }; }
   if (await exists(full)) return { ok: false, conflict: true, path: `${vaultName}/${rel}`, errors: [`refused: ${vaultName}/${rel} already exists; never overwrite — choose a new path`] };
-  if (((v.private && !ctx.trustedLocal) || v.writes === 'proposal-only') && !ownerApproved) return { ok: true, written: false, path: `${vaultName}/${rel}`, preview: content, next: `${vaultName} is proposal-only: show this to the user; do not write it elsewhere.` };
+  if (((v.private && !ctx.trustedLocal) || v.writes === 'proposal-only') && !ownerApproved && !profileWrite) return { ok: true, written: false, path: `${vaultName}/${rel}`, preview: content, next: `${vaultName} is proposal-only: show this to the user; do not write it elsewhere.` };
   if (ownerApproved && !ctx.trustedLocal) return { ok: false, errors: ['Only the local vault owner can approve a saved proposal.'] };
   if (!confirm) return { ok: true, written: false, path: `${vaultName}/${rel}`, preview: content, next: 'Show the preview to the user; call again with confirm=true after approval.' };
   try { await writeFile(full, content, { flag: 'wx' }); }
@@ -252,7 +253,7 @@ export async function remember(ctx, a, now = new Date()) {
   // A user-requested memory is user-reported, not independently verified. Preserve its origin
   // beside the compact fact so later reviewers can trace it without retaining the conversation.
   const text = fresh.map((f) => `- ${f} _(BrainLink memory; date: ${date}; platform: ${q(id.ai_platform)}; source: ${q(source)}; confidence: reported)_`).join('\n') + '\n';
-  if ((vault(ctx, vaultName).private && !ctx.trustedLocal) || vault(ctx, vaultName).writes === 'proposal-only') return { ok: true, written: false, path: `${vaultName}/${MEMORY_NOTE}`, preview: text, ...await appendProposalState(root, MEMORY_NOTE, '# Memories\n\nFacts every connected AI should know. Added by AIs when you say "remember".\n\n'), next: 'This vault is proposal-only: show the memory to the user.' };
+  if (((vault(ctx, vaultName).private && !ctx.trustedLocal) || vault(ctx, vaultName).writes === 'proposal-only') && !twinCanWriteNotes(ctx, vaultName)) return { ok: true, written: false, path: `${vaultName}/${MEMORY_NOTE}`, preview: text, ...await appendProposalState(root, MEMORY_NOTE, '# Memories\n\nFacts every connected AI should know. Added by AIs when you say "remember".\n\n'), next: 'This vault is proposal-only: show the memory to the user.' };
   if (!a.confirm) return { ok: true, written: false, path: `${vaultName}/${MEMORY_NOTE}`, preview: text, next: 'Confirm with the user (or their "remember this" already did), then call again with confirm=true.' };
   const full = safeJoin(root, MEMORY_NOTE);
   if (!(await exists(full))) { await mkdir(path.dirname(full), { recursive: true }); await writeFile(full, '# Memories\n\nFacts every connected AI should know. Added by AIs when you say "remember".\n\n', { flag: 'wx' }); }
@@ -292,7 +293,7 @@ export async function appendDaily(ctx, a, now = new Date()) {
     if (await exists(full)) await readNote(ctx, vaultName, rel);
   } catch { return { ok: false, errors: ['Daily note destination is not accessible to this connection.'] }; }
   const entry = `${text.split('\n').map((l, i) => (i ? `  ${l}` : `- ${ts.slice(11, 16)} ${l}`)).join('\n')} _(${id.ai_platform})_\n`;
-  if ((vault(ctx, vaultName).private && !ctx.trustedLocal) || vault(ctx, vaultName).writes === 'proposal-only') return { ok: true, written: false, path: `${vaultName}/${rel}`, preview: entry, ...await appendProposalState(root, rel, `# ${ts.slice(0, 10)}\n\n`), next: 'This vault is proposal-only.' };
+  if (((vault(ctx, vaultName).private && !ctx.trustedLocal) || vault(ctx, vaultName).writes === 'proposal-only') && !twinCanWriteNotes(ctx, vaultName)) return { ok: true, written: false, path: `${vaultName}/${rel}`, preview: entry, ...await appendProposalState(root, rel, `# ${ts.slice(0, 10)}\n\n`), next: 'This vault is proposal-only.' };
   if (!a.confirm) return { ok: true, written: false, path: `${vaultName}/${rel}`, preview: entry, next: 'Call again with confirm=true to add it to today\'s note.' };
   if (!(await exists(full))) { await mkdir(path.dirname(full), { recursive: true }); await writeFile(full, `# ${ts.slice(0, 10)}\n\n`, { flag: 'wx' }); }
   await appendTo(root, rel, entry);

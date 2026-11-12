@@ -2,6 +2,12 @@
 
 This log covers the development branch. Entries marked **unreleased** are not published product releases. See [release readiness](docs/RELEASE-READINESS.md) for the current evidence and remaining release gates.
 
+## 1.2.9 — Development, unreleased
+
+- Added explicit per-vault full read/write permissions for Twin-assigned AI agents. A granted agent can create notes, add daily entries, save memories, and file private session closeouts in that vault after confirmation. Existing notes cannot be overwritten; vault exclusions, secret filtering, read-only mode, privacy defaults, and source attribution remain enforced. New Twin profiles support summary-only session closeouts without enabling imported session history.
+- Updated the Ian Personal Twin configuration so John, ChatGPT Codex, Claude Desktop, and Claude Code receive read/write note access only in Ian Personal. Repaired Claude Desktop's stale registered token hash. Runtime verification still requires restarting each AI app and starting a new chat; those apps were not restarted here.
+- Added matching permission controls and English, Portuguese, and Traditional Chinese labels. Built installer and GitHub branch status will be recorded after packaging and push.
+
 ## 2026-11-03 — Development, unreleased
 
 - Stabilized the Windows test run after intermittent file-level failures. Multi-language OCR checks now run in a separate test worker from the heavier multi-format ingestion integration test, and updater test cleanup retries bounded Windows `EBUSY`/`EPERM` locks. On Windows with Node.js 24.22.1, the full core suite passed (647 total: 637 passed, 0 failed, 10 platform/privilege skips); the UI suite passed 48/48; the updater API tests passed 2/2. This is local automated evidence, not hosted CI or customer acceptance.
