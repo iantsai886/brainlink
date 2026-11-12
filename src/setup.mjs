@@ -2099,11 +2099,13 @@ export async function startSetup(opts = {}) {
       const cfg = await loadConfig(file);
       const ctx = localContext(cfg, { ...env, BRAINLINK_SEMANTIC: '0' });
       if (!ctx.enabled.length) return { nodes: [], links: [], shown: 0, total: 0 };
-      return buildGraph3D(ctx, b.vault && ctx.enabled.includes(b.vault) ? b.vault : undefined);
+      const selected = b.vault && ctx.enabled.includes(b.vault) ? b.vault : undefined;
+      const includePrivateVault = Boolean(selected && ctx.byName.get(selected)?.private);
+      return buildGraph3D(ctx, selected, { includePrivateVault });
     },
     'POST /api/graph3d/vaults': async () => {
       const cfg = await loadConfig(file);
-      return listGraphVaults(localContext(cfg, { ...env, BRAINLINK_SEMANTIC: '0' }));
+      return listGraphVaults(localContext(cfg, { ...env, BRAINLINK_SEMANTIC: '0' }), { includePrivateVaults: true });
     },
     'POST /api/memory/review': async (b) => {
       const cfg = await loadConfig(file);
@@ -2173,7 +2175,8 @@ export async function startSetup(opts = {}) {
       const cfg = await loadConfig(file);
       const ctx = localContext(cfg, { ...env, BRAINLINK_SEMANTIC: '0' });
       if (!b.vault || !ctx.enabled.includes(b.vault)) throw new Error('Unknown vault.');
-      const detail = await noteDetail3D(ctx, b.vault, String(b.path || ''));
+      const includePrivateVault = Boolean(ctx.byName.get(b.vault)?.private);
+      const detail = await noteDetail3D(ctx, b.vault, String(b.path || ''), { includePrivateVault });
       const raw = await readFile(safeJoin(vaultRoot(ctx, b.vault), detail.path), 'utf8');
       const vaultPath = path.resolve(ctx.byName.get(b.vault).path);
       const obsidianRegistered = (await findObsidianVaults({ home, os, env })).some((item) => path.resolve(item.path) === vaultPath);

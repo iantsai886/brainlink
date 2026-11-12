@@ -1,8 +1,6 @@
-// 3D notes graph (Ian's RB7 feature 2): nodes/edges across every enabled, non-private vault, and
-// one note's detail (Markdown body, tags, backlinks, outlinks) for the side panel. Excluded
-// folders never reach the index at all (loadVault walks past .brainlinkignore, see src/core.mjs);
-// this module adds the one rule loadVault doesn't already enforce: private vaults and
-// frontmatter-flagged private notes are dropped before a single node is built.
+// 3D notes graph for the local Setup UI. Private vaults can be selected one at a time in this
+// local view, but are never combined with public vaults. Frontmatter-private notes and excluded
+// folders stay hidden in every view.
 import { createHash } from 'node:crypto';
 import { loadVault, loadVaultGraph, summarize } from './core.mjs';
 import { deriveTypedRelations, typedEntityMetadataMap, typedEntityFields, deriveProposedTypedRelations, deriveRejectedTypedRelations, deriveWithdrawnTypedRelations, discoverTypedRelationshipCandidates, discoverTypedRelationshipCandidatesForSources } from './typed-graph.mjs';
@@ -14,22 +12,32 @@ const GRAPH3D_LINK_LIMIT = 10_000;
 // regex) is what keeps this module in lockstep with every other private check in the codebase.
 const isPrivateNote = (n) => n.private;
 
-// Every enabled vault that isn't private, each with its own loaded index.
-async function visibleVaults(ctx, only) {
-  const names = (only ? [only] : ctx.enabled).filter((name) => ctx.enabled.includes(name) && !ctx.byName.get(name)?.private);
+// Public vaults can be combined. A private vault is visible only when the local caller explicitly
+// selects that one vault; it never joins the combined graph.
+async function visibleVaults(ctx, only, { includePrivateVault = false } = {}) {
+  const names = (only ? [only] : ctx.enabled).filter((name) => ctx.enabled.includes(name)
+    && (!ctx.byName.get(name)?.private || (includePrivateVault && only === name)));
   const out = [];
   for (const name of names) out.push({ name, index: await loadVaultGraph(ctx, name) });
   return out;
 }
 
-export async function listGraphVaults(ctx) {
-  const vaults = await visibleVaults(ctx);
-  return { vaults: vaults.map(({ name, index }) => ({ name, notes: index.notes.filter((note) => !note.generated && !isPrivateNote(note)).length })) };
+export async function listGraphVaults(ctx, { includePrivateVaults = false } = {}) {
+  const names = ctx.enabled.filter((name) => includePrivateVaults || !ctx.byName.get(name)?.private);
+  const vaults = [];
+  for (const name of names) {
+    const isPrivateVault = Boolean(ctx.byName.get(name)?.private);
+    // Listing the picker must not read/index a private vault before the user selects it.
+    if (isPrivateVault) { vaults.push({ name, private: true, notes: null }); continue; }
+    const index = await loadVaultGraph(ctx, name);
+    vaults.push({ name, private: false, notes: index.notes.filter((note) => !note.generated && !isPrivateNote(note)).length });
+  }
+  return { vaults };
 }
 
 // { nodes: [{id, title, vault, group, tags, degree}], links: [{source, target}], shown, total }
-export async function buildGraph3D(ctx, vaultName, { limit = 2000 } = {}) {
-  const vaults = await visibleVaults(ctx, vaultName);
+export async function buildGraph3D(ctx, vaultName, { limit = 2000, includePrivateVault = false } = {}) {
+  const vaults = await visibleVaults(ctx, vaultName, { includePrivateVault: includePrivateVault && Boolean(vaultName) });
   const nodes = [], keep = [], graphByVault = new Map();
   let linkCount = 0, unlinked = 0;
   for (const { name, index } of vaults) {
@@ -96,8 +104,7 @@ export async function buildGraph3D(ctx, vaultName, { limit = 2000 } = {}) {
   return { vault: vaultName || null, nodes, links, shown: nodes.length, total, linkCount, unlinked };
 }
 
-// A bounded, review-only queue for the local Setup UI. visibleVaults() applies the same enabled
-// vault and whole-private-vault boundary as the graph before any proposal is counted or returned.
+// A bounded, review-only queue for public vaults in the local Setup UI.
 export async function listProposedTypedRelations(ctx, { limit = 100, vault, offset = 0 } = {}) {
   const vaults = (await visibleVaults(ctx, vault)).sort((a, b) => a.name.localeCompare(b.name));
   const max = Math.max(1, Math.min(500, Number(limit) || 100));
@@ -164,10 +171,10 @@ export async function discoverVaultRelationshipCandidates(ctx, { vault, offset =
 
 // One note's panel data: rendered-ready Markdown body, tags, backlinks and outlinks (titles +
 // ids matching the same vault's buildGraph3D() so a backlink click can focus that node).
-export async function noteDetail3D(ctx, vaultName, rel) {
+export async function noteDetail3D(ctx, vaultName, rel, { includePrivateVault = false } = {}) {
   const v = ctx.byName.get(vaultName);
   if (!v || !ctx.enabled.includes(vaultName)) throw new Error(`Unknown vault "${vaultName}".`);
-  if (v.private) throw new Error('This note is in a private vault and cannot be shown in the graph.');
+  if (v.private && !includePrivateVault) throw new Error('This note is in a private vault and can only be shown in its local vault-only graph.');
   const index = await loadVault(ctx, vaultName);
   const i = index.byRel.get(rel);
   if (i === undefined) throw new Error(`Note not found: ${rel}`);

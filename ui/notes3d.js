@@ -139,7 +139,7 @@
     function renderVaultOptions() {
       const select = document.getElementById('notes3d-vault-select');
       if (!select) return;
-      select.innerHTML = `<option value="*">${esc(tr('notes3d.allVaults'))}</option>${graphVaultOptions.map((vault) => `<option value="${esc(vault.name)}">${esc(vault.name)} · ${esc(vault.notes)}</option>`).join('')}`;
+      select.innerHTML = `<option value="*">${esc(tr('notes3d.allVaults'))}</option>${graphVaultOptions.map((vault) => `<option value="${esc(vault.name)}">${esc(vault.name)}${vault.private ? ` · ${esc(tr('notes3d.privateLocal'))}` : ` · ${esc(vault.notes)}`}</option>`).join('')}`;
       select.value = vaultFilter === null ? '*' : vaultFilter;
     }
 
