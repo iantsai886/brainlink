@@ -193,6 +193,11 @@ export function createRsiLedger({ home, now = () => new Date(), verifyCommit = (
         handle = await open(lockFile, 'wx', 0o600);
         await handle.writeFile(JSON.stringify({ pid: process.pid, owner, created_at: new Date().toISOString() }));
       } catch (error) {
+        if (handle) {
+          await handle.close().catch(() => {});
+          await unlink(lockFile).catch(() => {});
+          throw error;
+        }
         if (error.code !== 'EEXIST') {
           // Windows may report EPERM/EACCES when another process already created the
           // exclusive lock file. Treat it as contention only when lstat confirms a
@@ -200,7 +205,13 @@ export function createRsiLedger({ home, now = () => new Date(), verifyCommit = (
           const existing = ['EPERM', 'EACCES'].includes(error.code)
             ? await lstat(lockFile).catch(() => null)
             : null;
-          if (!existing?.isFile() || existing.isSymbolicLink()) { await handle?.close().catch(() => {}); throw error; }
+          if (!existing && ['EPERM', 'EACCES'].includes(error.code) && Date.now() < until) {
+            // Another writer may have released its lock between open() and lstat().
+            // Retry exclusive creation; never assume we own the absent lock.
+            await delay(25);
+            continue;
+          }
+          if (!existing?.isFile() || existing.isSymbolicLink()) throw error;
         }
         // Recover only a lock whose recorded process is definitely gone. Unknown/malformed locks
         // fail closed instead of risking concurrent writes to the hash chain.

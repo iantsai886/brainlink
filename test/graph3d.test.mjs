@@ -51,6 +51,16 @@ test('buildGraph3D: a note with frontmatter "private: true" never appears as a n
   assert.ok(alpha && beta);
 });
 
+test('graph cache immediately drops notes newly marked private or excluded', async () => {
+  const dir = await buildVault(await tmp('graph3d-privacy-refresh'));
+  const ctx = await ctxFor(dir);
+  assert.ok((await buildGraph3D(ctx, 'Main')).nodes.some((node) => node.title === 'Alpha'));
+  await writeFile(path.join(dir, 'Alpha.md'), '---\nprivate: true\n---\n# Alpha\n');
+  assert.ok(!(await buildGraph3D(ctx, 'Main')).nodes.some((node) => node.title === 'Alpha'));
+  await writeFile(path.join(dir, '.brainlinkignore'), 'Secret Stuff/\nBeta.md\n');
+  assert.ok(!(await buildGraph3D(ctx, 'Main')).nodes.some((node) => node.title === 'Beta'));
+});
+
 test('buildGraph3D: a whole private vault is omitted even when another vault is enabled', async () => {
   const mainDir = await buildVault(await tmp('graph3d-mixed-main'));
   const privDir = await tmp('graph3d-mixed-priv');

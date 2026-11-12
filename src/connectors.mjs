@@ -127,7 +127,7 @@ async function detectOne(id, c, opts) {
     const raw = await readFile(file, 'utf8');
     connected = c.format === 'toml' ? /^\[mcp_servers\.brainlink\]/m.test(raw) : c.format === 'yaml' ? (() => { try { return Boolean(parseYaml(raw, file).value.mcp_servers?.[SERVER_KEY]); } catch { return false; } })() : c.format === 'dsh-yaml' ? (() => { try { return dshEntries(parseDocument(raw, { uniqueKeys: true })).some((entry) => entry.id === (c.entryId || 'mcp-brainlink') && entry.name === '@deepseek-ai/dsh-mcp-client'); } catch { return false; } })() : (() => { try { return Boolean(JSON.parse(raw || '{}').mcpServers?.[SERVER_KEY]); } catch { return false; } })();
   }
-  return { title: c.title, file, present, connected, canConnect: present || Boolean(c.manual), manual: Boolean(c.manual), note: c.note };
+  return { title: c.title, role: c.role, file, present, connected, canConnect: present || Boolean(c.manual), manual: Boolean(c.manual), note: c.note };
 }
 
 export async function detect(opts) {

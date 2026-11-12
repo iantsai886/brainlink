@@ -4,7 +4,7 @@ import { createServer } from 'node:http';
 import { createReadStream } from 'node:fs';
 import { existsSync } from 'node:fs';
 import { watch as watchFs } from 'node:fs';
-import { readFile, stat, lstat, cp, mkdir, writeFile, rename, unlink, readdir, rm } from 'node:fs/promises';
+import { readFile, stat, lstat, realpath, cp, mkdir, writeFile, rename, unlink, readdir, rm } from 'node:fs/promises';
 import { randomBytes, timingSafeEqual, createHash } from 'node:crypto';
 import { execFile } from 'node:child_process';
 import { setTimeout as delay } from 'node:timers/promises';
@@ -35,7 +35,9 @@ import { analyzeActivitySignals, attachRetrievalObservationSignals } from './rsi
 import { buildGraph3D, noteDetail3D, listProposedTypedRelations, discoverVaultRelationshipCandidates, listGraphVaults } from './graph3d.mjs';
 import { deriveTypedRelations, deriveProposedTypedRelations, deriveRejectedTypedRelations, deriveWithdrawnTypedRelations, discoverTypedRelationshipCandidates, typedEntityFields, typedEntityMetadataMap, typedRelationAllowed, updateTypedEntityFields, updateTypedRelation, appendTypedRelationProposal, approveTypedRelation, rejectTypedRelation, reopenTypedRelation, withdrawTypedRelation } from './typed-graph.mjs';
 import { snapshotSettings, chooseSnapshot, suggestSnapshotFolder, clearSnapshot, startSnapshotWatcher, writeSnapshotOnce, loadSnapshotStatus, saveSnapshotStatus } from './snapshot.mjs';
-import { listHandoffs, proposeNote } from './writes.mjs';
+import { listHandoffs, proposeNote, commitNew, appendTo, checkWritePath } from './writes.mjs';
+import { readMemoryForReview, saveMemoryForReview } from './memory-review.mjs';
+import { createProposalInbox } from './proposal-inbox.mjs';
 import { backupOnce, verifyBackup, restoreBackupToEmpty, loadBackupStatus, saveBackupStatus, pruneBackups, listVerifiedBackups } from './backup.mjs';
 import { createOrReadBackupRecoveryKey, parseBackupKey, requireBackupKey } from './backup-key.mjs';
 import { fileSessionSummary, readFiledSessionSummary, updateFiledSessionSummary, listFiledSessionSummaries, findFiledSessionSummary } from './sessions/filing.mjs';
@@ -278,6 +280,7 @@ export async function startSetup(opts = {}) {
   // Setup and its scheduled local jobs operate with the user's local authority. AI client
   // health checks intentionally use createContext() without this bypass.
   const localContext = (cfg, contextEnv = env) => createContext(cfg, { env: contextEnv, trustedLocal: true });
+  const proposalInbox = createProposalInbox({ home: appHome(env) });
   const sessions = sessionsService(env, home); // src/host.mjs: imports only from this Setup user's home
   const rsiLedger = createRsiLedger({ home: appHome(env), verifyCommit: opts.rsiVerifyCommit || ((sha) => hasGitCommit(ROOT, sha)) });
   const rsiWeekly = createRsiWeekly({ home: appHome(env) });
@@ -1286,6 +1289,7 @@ export async function startSetup(opts = {}) {
         return { ...current, providers: PROVIDERS, provider_labels: PROVIDER_LABELS, suggested_folders: suggestFolders(home), gdrive_setup: linuxDriveSetup({ home, os, env, sync: { ...current, drive: recordedDrive, folder: current.folder || recordedDrive?.mount_path || null } }), status: syncStatus, running: syncRunning };
       })(),
       sessions_sharing: cfg.sessions,
+      sessions_import_available: env.BRAINLINK_DISABLE_HISTORY_IMPORT !== '1',
       sessions_local_summary: cfg.sessions.localSummary,
       sessions_hermes_profile: { home: cfg.sessions.hermesHome, defaultHome: hermesDefaultRoot(home, env) },
       // P1a: imported sessions default to private, and a private session is invisible to every
@@ -1411,7 +1415,7 @@ export async function startSetup(opts = {}) {
       const profileVault = profile.vaults.find((grant) => grant.name === name);
       const vault = cfg.vaults.find((entry) => entry.name === name);
       const operations = Array.isArray(item?.operations) ? [...new Set(item.operations)] : [];
-      if (!profileVault || !vault || vault.private || seen.has(name)) throw new Error('Choose only non-private vaults already included in this Twin profile.');
+      if (!profileVault || !vault || seen.has(name)) throw new Error('Choose only available vaults already included in this Twin profile.');
       if (!operations.length || operations.some((action) => !['search', 'read_note', 'read_session', 'log_session', 'propose_note', 'handoff_read', 'write_handoff'].includes(action))) throw new Error('Choose supported search, note, session, or handoff actions.');
       const needsSemantic = operations.some((action) => ['search', 'read_note', 'propose_note'].includes(action));
       const needsEpisodic = operations.includes('read_session');
@@ -1493,7 +1497,7 @@ export async function startSetup(opts = {}) {
   }
 
   // The one-click path: use an Obsidian vault, a folder, or a brand-new vault; then connect all AIs.
-  async function quickStart(b) {
+  async function quickStart(b, { connect = true } = {}) {
     const cfg = await loadConfig(file);
     let vaultPath;
     if (b.mode === 'new') {
@@ -1502,7 +1506,6 @@ export async function startSetup(opts = {}) {
       vaultPath = path.join(docs, 'My Brain');
       while (await stat(vaultPath).catch(() => null)) vaultPath = path.join(docs, `My Brain ${++n}`);
       await mkdir(vaultPath, { recursive: true });
-      await writeFile(path.join(vaultPath, 'Welcome.md'), '# Welcome to your brain\n\nThis folder is your second brain. Every AI you connect can read it and add notes here.\n\nTry it: open Claude and say **"Connect to my brain"**. At the end of a chat, say **"Close loop"** to save what you decided.\n\nYou can open this folder in Obsidian (free) any time to read and edit your notes.\n', { flag: 'wx' });
     } else {
       vaultPath = path.resolve(String(b.path || '').replace(/^~(?=$|[\/\\])/, home));
       if (!(await stat(vaultPath).then((x) => x.isDirectory(), () => false))) return { ok: false, error: `Folder not found: ${vaultPath}` };
@@ -1529,7 +1532,7 @@ export async function startSetup(opts = {}) {
     const saved = await loadConfig(file);
     const vault = saved.vaults.find((v) => path.resolve(v.path) === vaultPath);
     const agent = saved.agents.find((a) => a.vault === vault.name);
-    return { ok: true, vault: vault.name, path: vault.path, phrase: agent?.activation[0], close: agent?.close[0], ...(await connectAll(saved)) };
+    return { ok: true, vault: vault.name, path: vault.path, phrase: agent?.activation[0], close: agent?.close[0], ...(connect ? await connectAll(saved) : { connected: [], skipped: [] }) };
   }
 
   const routes = {
@@ -1657,6 +1660,7 @@ export async function startSetup(opts = {}) {
     'POST /api/rsi/discovery/refresh-source': async (b) => ({ check: await rsiDiscovery.refreshSource(b.idea_id), discovery: await rsiDiscovery.status() }),
     'POST /api/pick-folder': async () => { const p = await pick(); return p === undefined ? { path: null, unavailable: true } : { path: p }; },
     'POST /api/quick': (b) => quickStart(b),
+    'POST /api/quick/prepare': (b) => quickStart(b, { connect: false }),
     'POST /api/graph': async (b) => {
       const cfg = await loadConfig(file);
       const name = b.vault || cfg.vaults[cfg.vaults.length - 1]?.name;
@@ -1827,11 +1831,11 @@ export async function startSetup(opts = {}) {
       const mode = String(b.mode || '');
       if (!name || name.length > 120 || !owner || owner.length > 160 || !['personal', 'organisation', 'client'].includes(mode)) throw new Error('Enter a profile name and owner, then choose Personal, Organisation or Client.');
       const vaults = Array.isArray(b.vaults) ? b.vaults : [];
-      if (!vaults.length || vaults.length > 50) throw new Error('Choose at least one available non-private vault.');
+      if (!vaults.length || vaults.length > 50) throw new Error('Choose at least one available vault.');
       const profileVaults = [];
       for (const item of vaults) {
         const vault = cfg.vaults.find((entry) => entry.name === item?.name);
-        if (!vault || vault.private || !['read', 'propose'].includes(item?.access)) throw new Error('Twin profiles can use only available non-private vaults, with read or propose access.');
+        if (!vault || !['read', 'propose'].includes(item?.access)) throw new Error('Twin profiles can use only available vaults, with read or propose access.');
         profileVaults.push({ name: vault.name, access: item.access });
       }
       if (new Set(profileVaults.map((item) => item.name)).size !== profileVaults.length) throw new Error('Choose each vault only once.');
@@ -1885,11 +1889,11 @@ export async function startSetup(opts = {}) {
       if (!name || name.length > 120 || !owner || owner.length > 160 || !['personal', 'organisation', 'client'].includes(mode)) throw new Error('Enter a profile name and owner, then choose Personal, Organisation or Client.');
       if (mode !== profile.mode || owner !== profile.owner) throw new Error('A Twin’s type and owner cannot be changed after creation because stored sessions and handoffs belong to that identity.');
       const vaults = Array.isArray(b.vaults) ? b.vaults : [];
-      if (!vaults.length || vaults.length > 50) throw new Error('Choose at least one available non-private vault.');
+      if (!vaults.length || vaults.length > 50) throw new Error('Choose at least one available vault.');
       const profileVaults = [];
       for (const item of vaults) {
         const vault = cfg.vaults.find((entry) => entry.name === item?.name);
-        if (!vault || vault.private || !['read', 'propose'].includes(item?.access)) throw new Error('Twin profiles can use only available non-private vaults, with read or propose access.');
+        if (!vault || !['read', 'propose'].includes(item?.access)) throw new Error('Twin profiles can use only available vaults, with read or propose access.');
         profileVaults.push({ name: vault.name, access: item.access });
       }
       if (new Set(profileVaults.map((item) => item.name)).size !== profileVaults.length) throw new Error('Choose each vault only once.');
@@ -2101,6 +2105,56 @@ export async function startSetup(opts = {}) {
       const cfg = await loadConfig(file);
       return listGraphVaults(localContext(cfg, { ...env, BRAINLINK_SEMANTIC: '0' }));
     },
+    'POST /api/memory/review': async (b) => {
+      const cfg = await loadConfig(file);
+      return readMemoryForReview(localContext(cfg, { ...env, BRAINLINK_SEMANTIC: '0' }), String(b.vault || ''));
+    },
+    'POST /api/memory/save': async (b) => {
+      const cfg = await loadConfig(file);
+      return saveMemoryForReview(localContext(cfg, { ...env, BRAINLINK_SEMANTIC: '0' }), String(b.vault || ''), b.text, b.etag);
+    },
+    'GET /api/proposals': async () => ({ proposals: (await proposalInbox.listPending()).map(({ id, vault, path: rel, content, tool, agent, agent_verified, created_at }) => ({ id, vault, path: rel, content, tool, agent, agent_verified, created_at })) }),
+    'POST /api/proposals/approve': async (b) => {
+      if (b.confirm !== true) throw new Error('Review the full draft, then explicitly approve it.');
+      const proposal = await proposalInbox.getPending(String(b.id || ''));
+      if (!proposal) throw new Error('This proposal is no longer pending. Refresh the review list.');
+      const cfg = await loadConfig(file);
+      const vault = cfg.vaults.find((item) => item.name === proposal.vault);
+      if (!vault || vault.writes === 'off') throw new Error('This destination is missing or read-only; the proposal was not saved.');
+      const currentRoot = await realpath(vault.path).catch(() => null);
+      if (!currentRoot || createHash('sha256').update(currentRoot.toLocaleLowerCase()).digest('hex') !== proposal.vault_ref) throw new Error('The vault location changed since this proposal was created. Review a fresh proposal before saving.');
+      const ctx = localContext(cfg, { ...env, BRAINLINK_SEMANTIC: '0' });
+      let result;
+      if (proposal.action === 'append') {
+        const root = vaultRoot(ctx, proposal.vault);
+        let full = await checkWritePath(root, proposal.path);
+        await mkdir(path.dirname(full), { recursive: true });
+        full = await checkWritePath(root, proposal.path);
+        let existing = null;
+        try { existing = await readFile(full); } catch (error) { if (error.code !== 'ENOENT') throw error; }
+        const currentHash = existing === null ? null : createHash('sha256').update(existing).digest('hex');
+        if (currentHash !== proposal.expected_hash) throw new Error('The destination changed after this draft was prepared. Refresh and review a new draft before appending.');
+        if (existing === null) {
+          try { await writeFile(full, `${proposal.header || ''}${proposal.content}`, { flag: 'wx' }); }
+          catch (error) { if (error.code === 'EEXIST') throw new Error('The destination changed after review began. Refresh and review a new draft before appending.'); throw error; }
+        } else await appendTo(root, proposal.path, proposal.content);
+        result = { ok: true, written: true, path: `${proposal.vault}/${proposal.path}` };
+      } else {
+        result = await commitNew(ctx, proposal.vault, proposal.path, proposal.content, true, { ownerApproved: true });
+        if (!result.ok || !result.written) throw new Error((result.errors || ['The proposal could not be saved.']).join(' '));
+      }
+      await proposalInbox.resolve(proposal.id, 'approved');
+      await logActivity(env, { tool: 'proposal_approved', ok: true });
+      return { ok: true, path: result.path };
+    },
+    'POST /api/proposals/reject': async (b) => {
+      if (b.confirm !== true) throw new Error('Confirm that you want to discard this draft.');
+      const proposal = await proposalInbox.getPending(String(b.id || ''));
+      if (!proposal) throw new Error('This proposal is no longer pending. Refresh the review list.');
+      await proposalInbox.resolve(proposal.id, 'rejected');
+      await logActivity(env, { tool: 'proposal_rejected', ok: true });
+      return { ok: true };
+    },
     'POST /api/graph3d/reviews': async (b) => {
       const cfg = await loadConfig(file);
       const ctx = localContext(cfg, { ...env, BRAINLINK_SEMANTIC: '0' });
@@ -2121,7 +2175,9 @@ export async function startSetup(opts = {}) {
       if (!b.vault || !ctx.enabled.includes(b.vault)) throw new Error('Unknown vault.');
       const detail = await noteDetail3D(ctx, b.vault, String(b.path || ''));
       const raw = await readFile(safeJoin(vaultRoot(ctx, b.vault), detail.path), 'utf8');
-      return { ...detail, etag: createHash('sha256').update(raw).digest('hex'), writable: !ctx.readOnly && ctx.byName.get(b.vault).writes === 'on' };
+      const vaultPath = path.resolve(ctx.byName.get(b.vault).path);
+      const obsidianRegistered = (await findObsidianVaults({ home, os, env })).some((item) => path.resolve(item.path) === vaultPath);
+      return { ...detail, etag: createHash('sha256').update(raw).digest('hex'), writable: !ctx.readOnly && ctx.byName.get(b.vault).writes === 'on', obsidian_registered: obsidianRegistered };
     },
     'POST /api/graph3d/note/save': async (b) => {
       const cfg = await loadConfig(file);
@@ -2528,6 +2584,18 @@ export async function startSetup(opts = {}) {
       return listFiledSessionSummaries(ctx, String(b.vault || ''), { limit: 100 });
     },
     'POST /api/sessions/private': (b) => sessions.setPrivate(b.id, b.private),
+    'POST /api/sessions/import-setting': async (b) => {
+      if (typeof b.enabled !== 'boolean') throw new Error('Choose whether to import local AI session history.');
+      if (b.enabled && env.BRAINLINK_DISABLE_HISTORY_IMPORT === '1') throw new Error('Session-history import is unavailable in demo mode.');
+      const cfg = await loadConfig(file);
+      const next = { ...cfg, sessions: { ...cfg.sessions, importHistory: b.enabled } };
+      await saveConfig(next, file);
+      // Drain this Setup process's current refresh and re-read the new setting. Other
+      // BrainLink processes can have an import already in progress; they read the saved
+      // setting again on their next refresh.
+      await sessions.refresh();
+      return { ok: true, sessions: next.sessions };
+    },
     // What connected AI apps (not this local UI) may see of imported/logged sessions. The user's
     // own choice; session_list/session_read in src/server.mjs always read this, never a caller flag.
     'POST /api/sessions/sharing': async (b) => {
@@ -2965,7 +3033,9 @@ export async function startSetup(opts = {}) {
       try { body = raw ? JSON.parse(raw) : {}; } catch { json(res, 400, { error: 'Bad JSON' }); return; }
     }
     try {
-      const result = GRAPH_NOTE_MUTATIONS.has(url.pathname)
+      const result = url.pathname === '/api/memory/save'
+        ? await serializeGraphNoteMutation({ ...body, path: 'BrainLink/Memories.md' }, () => route(body))
+        : GRAPH_NOTE_MUTATIONS.has(url.pathname)
         ? await serializeGraphNoteMutation(body, () => route(body))
         : await route(body);
       json(res, 200, result);

@@ -67,6 +67,9 @@ export function twinProfileStatus(cfg) {
 
 export function resolveTwinAgentScope(cfg, agent, tokenProvided = false) {
   const profiles = Array.isArray(cfg.twin_profiles) ? cfg.twin_profiles : [];
+  // A supplied agent credential must never fall back to the unrestricted legacy connection
+  // when it is revoked or unknown, including before the first Twin profile exists.
+  if (tokenProvided && !agent) return { mode: 'unassigned', profile_id: null, grants: [] };
   if (!profiles.length) return { mode: 'legacy', profile_id: null, grants: [] };
   // Once the owner has configured Twin boundaries, an unidentified connector must never
   // silently inherit the old all-vault scope. Local Setup/background work opts into its own

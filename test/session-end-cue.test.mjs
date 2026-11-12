@@ -111,6 +111,7 @@ test('local cue UI API requires authentication, minimizes metadata, and preserve
   ].map((row) => JSON.stringify(row)).join('\n') + '\n');
   await recordSessionEndCue({ input: hookEvent(), client: 'codex', dir });
   const app = await startSetup({ env, home: taskHome, os: 'win32', port: 0, useCli: false });
+  await fetch(`http://127.0.0.1:${app.port}/api/sessions/import-setting`, { method: 'POST', headers: { 'Content-Type': 'application/json', 'X-BrainLink-Token': app.token }, body: JSON.stringify({ enabled: true }) });
   const call = (route, body = {}, token = app.token) => fetch(`http://127.0.0.1:${app.port}/api/sessions/end-cues${route}`, {
     method: 'POST', headers: { 'Content-Type': 'application/json', 'X-BrainLink-Token': token }, body: JSON.stringify(body),
   });

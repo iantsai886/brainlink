@@ -133,8 +133,11 @@ export async function discoverVaultRelationshipCandidates(ctx, { vault, offset =
       rows.push({ vault: name, path: note.rel, title: note.title, source, index });
     }
   }
+  // Filesystem enumeration order differs across platforms and can change between reads.
+  // Sort before paging and fingerprinting so a scan has stable, predictable pages.
+  rows.sort((a, b) => a.vault.localeCompare(b.vault, 'en') || a.path.localeCompare(b.path, 'en'));
   const fingerprint = createHash('sha256');
-  for (const row of rows) fingerprint.update(`${row.vault}\0${row.path}\0${row.index.notes[row.source].mtime}\0${row.index.notes[row.source].raw.length}\n`);
+  for (const row of rows) fingerprint.update(`${row.vault}\0${row.path}\0${createHash('sha256').update(row.index.notes[row.source].raw).digest('hex')}\n`);
   const currentScanId = fingerprint.digest('hex');
   if (offset > 0 && (typeof scanId !== 'string' || scanId !== currentScanId)) throw new Error('A vault changed during this scan. Start the scan again.');
   const page = rows.slice(offset, offset + pageSize);

@@ -6,10 +6,11 @@ import { homedir, tmpdir } from 'node:os';
 import { stat, readFile, writeFile, mkdir, cp, mkdtemp, rename, unlink } from 'node:fs/promises';
 import { randomBytes } from 'node:crypto';
 import { loadConfig, saveConfig, configPath, appHome, emptyConfig, normalize } from '../src/config.mjs';
-import { markConnected } from '../src/mcp-agents.mjs';
 import { buildPack, scaffold, mergePack, PACKS } from '../src/packs.mjs';
 import { CLIENTS, detect, connectClient, disconnectClient } from '../src/connectors.mjs';
 import { createMcp, serveStdio, serveHttp, VERSION } from '../src/server.mjs';
+import { createLiveMcp } from '../src/live-mcp.mjs';
+import { createProposalInbox } from '../src/proposal-inbox.mjs';
 import { openContext, launchSpec, logActivity, refreshMap, ROOT } from '../src/runtime.mjs';
 import { readGitSourceState } from '../src/git-source-state.mjs';
 import { createContext, warmSemantic } from '../src/core.mjs';
@@ -99,7 +100,7 @@ const HELP = `BrainLink MCP ${VERSION} — one Markdown brain for every AI
   brainlink session-end-cue --client claude-code|codex|hermes  record a local, metadata-only end cue from stdin
   brainlink session-end-cues            list local end cues (no transcripts are read)
   brainlink ui [--no-open] [--port N]  open the milestone UI (notes, search, graph) on your vaults
-  brainlink demo [--no-open]           try the UI on a throwaway sample vault; touches nothing real
+  brainlink demo [--no-open]           try the UI with a sample vault; session-history import is disabled
   brainlink serve                      MCP over stdio (what AI apps run)
   brainlink serve --http [PORT]        MCP over local HTTP (bearer token from Setup)
 
@@ -110,15 +111,11 @@ async function main() {
     case 'serve': {
       const { ctx, cfg } = await openContext();
       importAll({ env: ctx.env }).catch(() => {}); // keep the local session index warm at server start; cheap and incremental after the first run
-      const mcp = createMcp(ctx, { onCall: (e) => {
-        logActivity(process.env, { ...e, platform: ctx.platform || 'unknown', mode: flag('http') ? 'http' : 'stdio' });
-        // Connected only after a verified call that used that agent's token — same rule as the
-        // Connect buttons (clientHealthCheck in src/setup.mjs). Written once, not on every call.
-        if (ctx.mcpAgent && e.ok && !ctx.mcpAgent.connected) {
-          ctx.mcpAgent.connected = true; // avoid re-saving on every subsequent call this process makes
-          loadConfig().then((c) => saveConfig(markConnected(c, ctx.mcpAgent.id))).catch(() => {});
-        }
-      } });
+      const proposalInbox = createProposalInbox({ home: ctx.dataDir });
+      const createServer = (connectionCtx) => createMcp(connectionCtx, { onCall: (e) => {
+        logActivity(process.env, { ...e, platform: connectionCtx.platform || 'unknown', client_role: connectionCtx.agentRole || 'unknown', mode: flag('http') ? 'http' : 'stdio' });
+      }, onProposal: (proposal) => proposalInbox.add(proposal) });
+      const mcp = createLiveMcp({ env: ctx.env, initialConfig: cfg, initialContext: ctx, createServer, httpTokenFromConfig: flag('http') && !process.env.BRAINLINK_MCP_TOKEN });
       if (flag('http')) {
         const port = Number(opt('http', cfg.http.port)) || cfg.http.port;
         const token = process.env.BRAINLINK_MCP_TOKEN || cfg.http.token;
@@ -351,19 +348,18 @@ async function main() {
     case 'demo': {
       // Throwaway vault + throwaway config/session home (BRAINLINK_HOME), pre-populated with the
       // sample vault under the Founder OS pack, so the demo opens straight into the v1.1
-      // experience (vault, agent, graph, sessions) with nothing real touched.
+      // experience (vault, agent, graph, sessions). Import of local AI history is disabled.
       const demoRoot = await mkdtemp(path.join(tmpdir(), 'brainlink-demo-'));
       const demoPath = path.join(demoRoot, 'Acme Studio');
       await cp(path.join(ROOT, 'samples', 'acme-studio'), demoPath, { recursive: true });
-      const demoEnv = { ...process.env, BRAINLINK_HOME: path.join(demoRoot, 'home') };
+      const demoEnv = { ...process.env, BRAINLINK_HOME: path.join(demoRoot, 'home'), BRAINLINK_DISABLE_HISTORY_IMPORT: '1' };
       const built = buildPack('founder-os', { vaultName: 'Acme Studio', vaultPath: demoPath, agentName: 'Chief of Staff' });
       const cfg = mergePack(emptyConfig(), built);
       cfg.timezone = Intl.DateTimeFormat().resolvedOptions().timeZone;
       await saveConfig(cfg, configPath(demoEnv));
       await refreshMap(cfg, 'Acme Studio', demoEnv);
-      importAll({ env: demoEnv }).catch(() => {}); // same session-index warm-up as `brainlink ui`
       const s = await startSetup({ env: demoEnv, port: 0, openUrl: flag('no-open') ? null : (u) => openInBrowser(u) });
-      out(`BrainLink demo (made-up sample notes, nothing real touched): ${maskUrl(s.url)}\nVault copied to: ${demoPath}\nPress Control-C when done.`);
+      out(`BrainLink demo (sample notes; local AI session-history import disabled): ${maskUrl(s.url)}\nVault copied to: ${demoPath}\nPress Control-C when done.`);
       return;
     }
     case 'version': case '--version': out(VERSION); return;

@@ -213,7 +213,8 @@ test('Twin setup creates profiles from local UI choices and escapes every profil
   assert.match(html, /input\.disabled = !allowed;\s+if \(!allowed\) input\.checked = false;/);
   assert.match(html, /twin-new-memory'\)\.addEventListener\('change', updateTwinPermissionControls\)/);
   assert.match(html, /POST', '\/api\/twins\/create'/);
-  assert.match(html, /confirm\(t\('twinProfiles\.confirmCreate'/);
+  assert.match(html, /t\('twinProfiles\.confirmCreate'/);
+  assert.match(html, /confirm\(confirmText/);
   assert.match(html, /esc\(p\.name\)/);
   assert.match(html, /esc\(t\('twinProfiles\.owner', \{ owner: p\.owner \}\)\)/);
   assert.match(html, /twinProfiles\.limits/);
@@ -1009,7 +1010,7 @@ test('preset AI apps receive only the selected Twin permissions and disconnect r
 
     const invalid = await api('/api/connect', { client: 'cursor', profile_id: 'org_scope', vaults: [{ name: 'Ian Private', operations: ['search'] }] });
     assert.equal(invalid.status, 400);
-    assert.match(invalid.body.error, /non-private vaults/);
+    assert.match(invalid.body.error, /vaults already included/);
 
     const disconnected = await api('/api/disconnect', { client: 'cursor' });
     assert.equal(disconnected.status, 200);
@@ -1228,9 +1229,9 @@ test('Setup creates a validated Twin from explicit vault, agent, action and memo
     assert.equal(sharedOrgVault.status, 400);
     assert.match(sharedOrgVault.body.error, /cannot grant note access to multiple Twin profiles/);
 
-    const privateVaultResponse = await api({ ...request, name: 'Should Refuse', vaults: [{ name: 'Fictional Private', access: 'read' }], agent_access: [] });
+    const privateVaultResponse = await api({ ...request, name: 'Should Refuse', vaults: [{ name: 'Unavailable vault', access: 'read' }], agent_access: [] });
     assert.equal(privateVaultResponse.status, 400);
-    assert.match(privateVaultResponse.body.error, /non-private vaults/);
+    assert.match(privateVaultResponse.body.error, /available vaults/);
     const unsupported = await api({ ...request, name: 'Should Refuse Too', agent_access: [{ agent_id: 'agent_personal', operations: ['write_note'] }] });
     assert.equal(unsupported.status, 400);
     assert.match(unsupported.body.error, /supported action/);
@@ -1264,7 +1265,7 @@ test('Setup creates a validated Twin from explicit vault, agent, action and memo
   } finally { setup.server.close(); }
 });
 
-test('Setup edits a Twin without changing its identity or source policy and refuses private scope', async () => {
+test('Setup edits a Twin without changing its identity or source policy and refuses unavailable scope', async () => {
   const root = await mkdtemp(path.join(tmpdir(), 'brainlink-twin-update-'));
   const home = path.join(root, 'home');
   const vaultPath = path.join(root, 'vault');
@@ -1309,9 +1310,9 @@ test('Setup edits a Twin without changing its identity or source policy and refu
     assert.equal(proposalWithoutSemantic.status, 400);
     assert.match(proposalWithoutSemantic.body.error, /Enable semantic memory/);
     assert.equal(await readFile(path.join(env.BRAINLINK_HOME, 'config.json'), 'utf8'), savedBeforeRefusal);
-    const privateVault = await api({ ...request, name: 'Must Not Save', vaults: [{ name: 'Fictional Private', access: 'read' }] });
+    const privateVault = await api({ ...request, name: 'Must Not Save', vaults: [{ name: 'Unavailable vault', access: 'read' }] });
     assert.equal(privateVault.status, 400);
-    assert.match(privateVault.body.error, /non-private vaults/);
+    assert.match(privateVault.body.error, /available vaults/);
     assert.equal(await readFile(path.join(env.BRAINLINK_HOME, 'config.json'), 'utf8'), savedBeforeRefusal);
     const saved = JSON.parse(savedBeforeRefusal);
     assert.deepEqual(saved.twin_profiles[0].source_policy, cfg.twin_profiles[0].source_policy);

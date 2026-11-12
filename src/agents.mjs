@@ -4,7 +4,7 @@
 import { readdir, stat, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import { vault, vaultRoot, safeJoin, parseFrontmatter, zonedNow, readNote } from './core.mjs';
-import { resolveIdentity, appendTo, frontmatter, madeBy, checkCommon, slug, readMemories } from './writes.mjs';
+import { resolveIdentity, appendTo, appendProposalState, frontmatter, madeBy, checkCommon, checkWritePath, slug, readMemories } from './writes.mjs';
 import { suggestLinks, relatedSection, safeUpdateMap } from './links.mjs';
 import { recentNotes, openLoops } from './insights.mjs';
 import { twinMemoryAllowed } from './twin-profiles.mjs';
@@ -141,9 +141,13 @@ export async function closeLoop(ctx, args, now = new Date()) {
     if (!list(args.decisions).length && !list(args.actions).length) errors.push('at least one decision or action is required');
   }
   if (errors.length) return { ok: false, errors };
-  const proposalOnly = v.writes === 'proposal-only' || (t.mode === 'proposal-only' && !a.capture_approved);
+  const proposalOnly = (v.private && !ctx.trustedLocal) || v.writes === 'proposal-only' || (t.mode === 'proposal-only' && !a.capture_approved);
   const target = t.mode === 'new-note' ? null : t.path;
   if (target) {
+    try {
+      const full = await checkWritePath(root, target);
+      if (await stat(full).then(() => true, () => false)) await readNote(ctx, a.vault, target);
+    } catch { return { ok: false, errors: ['Close target is not accessible to this connection.'] }; }
     const dir = path.posix.dirname(target);
     if (dir !== '.' && !(await stat(safeJoin(root, dir)).then((s) => s.isDirectory(), () => false))) return { ok: false, errors: [`close target folder "${dir}" does not exist in ${a.vault}`] };
   }
@@ -155,7 +159,7 @@ export async function closeLoop(ctx, args, now = new Date()) {
   args = { ...args, related };
   if (t.mode === 'append-section' || t.mode === 'proposal-only') {
     const text = buildCapture(ctx, args, id, now);
-    if (proposalOnly) return result(false, target, text, `${a.name} captures are proposal-only until the user approves durable captures (capture_approved in BrainLink Setup). Show this to the user; do not write it elsewhere.`);
+    if (proposalOnly) return result(false, target, text, `This vault or agent is proposal-only. Show the preview to the user; do not write it elsewhere.`, await appendProposalState(root, target));
     if (!args.confirm) return result(false, target, text, 'The user\'s close phrase authorizes the capture; call again with confirm=true, then give a short completion summary.');
     await appendTo(root, target, text);
     await safeUpdateMap(ctx, a.vault);
@@ -166,7 +170,7 @@ export async function closeLoop(ctx, args, now = new Date()) {
     const tasks = args.tasks.map((x) => (typeof x === 'string' ? { task: x } : x));
     const lines = tasks.map((x) => `- [${x.done ? 'x' : ' '}] ${date} — ${x.task} — ${x.next || 'next: tbd'} — ${x.approval || 'no approval needed'} — ${x.source_confidence || `${args.source}/${args.confidence}`}`);
     const text = `${lines.join('\n')}  \n_${madeBy(id).replace(/\*\*/g, '')} ${zonedNow(ctx.tz, now)}_\n`;
-    if (proposalOnly) return result(false, target, text, 'This vault is proposal-only: show the tasks to the user.');
+    if (proposalOnly) return result(false, target, text, 'This vault is proposal-only: show the tasks to the user.', await appendProposalState(root, target));
     if (!args.confirm) return result(false, target, text, 'Call again with confirm=true to append.');
     await appendTo(root, target, text);
     await safeUpdateMap(ctx, a.vault);
@@ -175,7 +179,9 @@ export async function closeLoop(ctx, args, now = new Date()) {
   // new-note: a dated note in the agent's folder.
   const date = zonedNow(ctx.tz, now).slice(0, 10);
   const rel = `${t.dir}/${date} — ${String(args.title).trim().replace(/[\/\\:*?"<>|]/g, '-')}.md`;
-  const full = safeJoin(root, rel);
+  let full;
+  try { full = await checkWritePath(root, rel); }
+  catch { return { ok: false, errors: ['Close target is not accessible to this connection.'] }; }
   if (!(await stat(safeJoin(root, t.dir)).then((s) => s.isDirectory(), () => false))) return { ok: false, errors: [`close target folder "${t.dir}" does not exist in ${a.vault}`] };
   if (await stat(full).then(() => true, () => false)) return { ok: false, errors: [`refused: ${a.vault}/${rel} already exists`] };
   const content = `${frontmatter(ctx, a.vault, id, { ...args, type: t.type || 'decision', tags: ['close-loop', slug(a.name)] }, now)}\n\n# ${String(args.title).trim()}\n${buildCapture(ctx, { ...args, title: 'Close loop' }, id, now).replace(/^\n## [^\n]+\n/, '')}`;

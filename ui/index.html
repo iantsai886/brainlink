@@ -39,6 +39,7 @@ button.primary { background: var(--accent); color: var(--accent-ink); border-col
 button:disabled { opacity: .5; cursor: default; }
 button.link { border: none; background: none; color: var(--muted); padding: 4px 6px; text-decoration: underline; }
 .card { border: 1px solid var(--line); border-radius: 8px; padding: 12px 14px; display: grid; gap: 6px; }
+.card[hidden] { display: none; }
 .cards { display: grid; gap: 10px; }
 .clients { display: grid; grid-template-columns: repeat(auto-fill, minmax(230px, 1fr)); gap: 10px; }
 .client { border: 1px solid var(--line); border-radius: 8px; padding: 12px; display: grid; gap: 8px; align-content: space-between; }
@@ -111,9 +112,17 @@ ol.todo li { padding-left: 4px; }
 #main-nav { position: sticky; top: 0; z-index: 40; max-width: var(--content-width); margin: 0 auto; padding: 8px 20px; display: flex; gap: 6px; overflow-x: auto; background: var(--bg); border-bottom: 1px solid var(--line); scrollbar-width: none; }
 #main-nav::-webkit-scrollbar { display: none; }
 #main-nav[hidden] { display: none; }
+#rsi-panel, #agents-panel, #memory-review-panel, #proposal-review-panel, #brain-panel, #sessions-panel, #handoffs-panel { display: block; }
+#rsi-panel[hidden], #agents-panel[hidden], #memory-review-panel[hidden], #proposal-review-panel[hidden], #brain-panel[hidden], #sessions-panel[hidden], #handoffs-panel[hidden] { display: none; }
 #main-nav a { flex: none; border: 1px solid transparent; border-radius: 999px; padding: 5px 11px; color: var(--muted); font-size: 13px; text-decoration: none; white-space: nowrap; }
 #main-nav a:hover, #main-nav a:focus-visible { color: var(--accent); border-color: var(--line); background: var(--panel); }
 #main-nav a:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+.setup-progress { max-width: var(--content-width); margin: 10px auto 0; padding: 0 20px; display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; }
+.setup-progress[hidden] { display: none; }
+.setup-progress span { display: flex; align-items: center; gap: 8px; color: var(--muted); font-size: 13px; padding: 8px 10px; border-bottom: 2px solid var(--line); }
+.setup-progress span.active { color: var(--accent); border-color: var(--accent); font-weight: 600; }
+.setup-progress span.done { color: var(--ink); border-color: var(--accent); }
+.setup-progress b { width: 22px; height: 22px; border-radius: 50%; display: inline-grid; place-items: center; background: var(--accent-soft); color: var(--accent); flex: none; }
 main #ready, main #ask-panel, main #brain-panel, main #sessions-panel, main #s-connect, main #s-backup, main #rsi-panel { scroll-margin-top: 64px; }
 @media (prefers-reduced-motion: no-preference) { html { scroll-behavior: smooth; } }
 </style>
@@ -127,6 +136,8 @@ main #ready, main #ask-panel, main #brain-panel, main #sessions-panel, main #s-c
   <a href="#ready" data-main-nav="ready" data-i18n="nav.home"></a>
   <a href="#ask-panel" data-main-nav="ask-panel" data-i18n="nav.ask"></a>
   <a href="#brain-panel" data-main-nav="brain-panel" data-i18n="nav.notes"></a>
+  <a href="#memory-review-panel" data-main-nav="memory-review-panel" data-i18n="memoryReview.title"></a>
+  <a href="#proposal-review-panel" data-main-nav="proposal-review-panel" data-i18n="proposals.title"></a>
   <a href="#sessions-panel" data-main-nav="sessions-panel" data-i18n="nav.sessions"></a>
   <a href="#s-ingestion" data-main-nav="s-ingestion" data-i18n="nav.sources"></a>
   <a href="#s-connect" data-main-nav="s-connect" data-i18n="nav.connect"></a>
@@ -136,10 +147,21 @@ main #ready, main #ask-panel, main #brain-panel, main #sessions-panel, main #s-c
 <div id="boot-loading" role="status" data-i18n="boot.loading"></div>
 <div id="boot-error" hidden role="alert"><b data-i18n="boot.errorTitle"></b> <span id="boot-error-msg"></span> <button id="boot-retry" data-i18n="boot.retry"></button></div>
 <main>
+  <div id="first-run-progress" class="setup-progress" hidden aria-label="Setup progress">
+    <span id="first-progress-1"><b>1</b><span data-i18n="firstRun.stepNotes"></span></span>
+    <span id="first-progress-2"><b>2</b><span data-i18n="firstRun.stepAI"></span></span>
+    <span id="first-progress-3"><b>3</b><span data-i18n="firstRun.stepReady"></span></span>
+  </div>
   <section class="big" id="start" hidden>
     <h2 data-i18n="start.title"></h2>
     <p class="hint" data-i18n="start.hint"></p>
     <div class="choices" id="choices"></div>
+  </section>
+
+  <section class="big" id="first-run" hidden>
+    <h2 id="first-run-title"></h2>
+    <p class="hint" id="first-run-hint"></p>
+    <div id="first-run-content"></div>
   </section>
 
   <section class="big" id="sync-onboarding" hidden>
@@ -182,8 +204,8 @@ main #ready, main #ask-panel, main #brain-panel, main #sessions-panel, main #s-c
     <table style="margin-top:18px"><thead><tr><th data-i18n="ready.colWhen"></th><th data-i18n="ready.colAI"></th><th data-i18n="ready.colTool"></th><th data-i18n="ready.colResult"></th></tr></thead><tbody id="activity"></tbody></table>
   </section>
 
-  <section id="brain-panel" hidden>
-    <h2 data-i18n="brain.title"></h2>
+  <details class="card" id="brain-panel" hidden>
+    <summary data-i18n="brain.title"></summary>
     <p class="hint" data-i18n="brain.hint"></p>
     <div class="brain">
       <div><div id="notes3d-root" aria-label="Map of notes and links"></div></div>
@@ -199,7 +221,25 @@ main #ready, main #ask-panel, main #brain-panel, main #sessions-panel, main #s-c
         <p class="smart muted" id="smart"></p>
       </div>
     </div>
-  </section>
+  </details>
+
+  <details class="card" id="memory-review-panel" hidden>
+    <summary data-i18n="memoryReview.title"></summary>
+    <p class="hint" data-i18n="memoryReview.hint"></p>
+    <label><span data-i18n="memoryReview.vault"></span><select id="memory-review-vault"></select></label>
+    <div class="row"><button id="memory-review-open" type="button" data-i18n="memoryReview.open"></button></div>
+    <div id="memory-review-editor" hidden>
+      <p class="muted" data-i18n="memoryReview.format"></p>
+      <label><span data-i18n="memoryReview.note"></span><textarea id="memory-review-text" rows="12" style="width:100%;font-family:var(--mono)"></textarea></label>
+      <div class="row"><button id="memory-review-save" type="button" data-i18n="memoryReview.save"></button><span id="memory-review-status" role="status"></span></div>
+    </div>
+  </details>
+
+  <details class="card" id="proposal-review-panel" hidden>
+    <summary data-i18n="proposals.title"></summary>
+    <p class="hint" data-i18n="proposals.hint"></p>
+    <div id="proposal-review-list" class="cards"></div>
+  </details>
 
   <details class="card" id="twin-profiles-panel" style="margin-top:12px" hidden>
     <summary data-i18n="twinProfiles.title"></summary>
@@ -229,14 +269,14 @@ main #ready, main #ask-panel, main #brain-panel, main #sessions-panel, main #s-c
     <div id="twin-profiles" class="cards" aria-live="polite"></div>
   </details>
 
-  <section id="agents-panel" hidden>
-    <h2 data-i18n="agents.title"></h2>
+  <details class="card" id="agents-panel" hidden>
+    <summary data-i18n="agents.title"></summary>
     <p class="hint" data-i18n="agents.hint"></p>
     <div id="agents-root"></div>
-  </section>
+  </details>
 
-  <section id="sessions-panel" hidden>
-    <h2 data-i18n="sessions.title"></h2>
+  <details class="card" id="sessions-panel" hidden>
+    <summary data-i18n="sessions.title"></summary>
     <p class="hint" id="sessions-hint"></p>
     <div class="notice" id="sessions-private-notice" hidden style="margin-bottom:10px">
       <span data-i18n="sessions.privateNotice"></span>
@@ -244,6 +284,7 @@ main #ready, main #ask-panel, main #brain-panel, main #sessions-panel, main #s-c
     </div>
     <div class="card" style="margin-bottom:10px">
       <b data-i18n="sessions.shareTitle"></b>
+      <label class="muted" style="display:flex;flex-direction:row;gap:6px;align-items:center;margin-top:6px"><input type="checkbox" id="sess-import-history" style="width:auto"><span data-i18n="sessions.importHistoryLabel"></span></label>
       <label class="muted" style="display:flex;flex-direction:row;gap:6px;align-items:center;margin-top:6px"><input type="checkbox" id="sess-share-summaries" style="width:auto"><span data-i18n="sessions.shareSummariesLabel"></span></label>
       <label class="muted" style="display:flex;flex-direction:row;gap:6px;align-items:center;margin-top:6px"><input type="checkbox" id="sess-share-full" style="width:auto"><span data-i18n="sessions.shareFullTextLabel"></span></label>
     </div>
@@ -278,16 +319,16 @@ main #ready, main #ask-panel, main #brain-panel, main #sessions-panel, main #s-c
     <div id="filed-summary-editor" class="cards" style="margin-bottom:10px"></div>
     <div id="sessions-list" class="cards"></div>
     <div id="session-detail" style="margin-top:12px"></div>
-  </section>
+  </details>
 
-  <section id="handoffs-panel" hidden>
-    <h2 data-i18n="handoffs.title"></h2>
+  <details class="card" id="handoffs-panel" hidden>
+    <summary data-i18n="handoffs.title"></summary>
     <p class="hint" data-i18n="handoffs.hint"></p>
     <div id="handoffs-list" class="cards"></div>
-  </section>
+  </details>
 
-  <section id="rsi-panel" hidden>
-    <h2 data-i18n="rsi.title">Improve BrainLink</h2>
+  <details class="card" id="rsi-panel" hidden>
+    <summary data-i18n="rsi.title">Improve BrainLink</summary>
     <p class="hint" data-i18n="rsi.hint">Capture ideas, evidence and experiments. Saving a proposal never changes live behavior.</p>
     <details class="card" style="margin-bottom:10px"><summary data-i18n="rsi.newIdea">Add an improvement idea</summary>
       <form id="rsi-idea-form" style="margin-top:10px">
@@ -354,7 +395,7 @@ main #ready, main #ask-panel, main #brain-panel, main #sessions-panel, main #s-c
     </details>
     <div class="row" style="margin-bottom:10px"><button type="button" id="rsi-export" data-i18n="rsi.export">Download review record</button></div>
     <div id="rsi-ideas" class="cards" aria-live="polite"></div>
-  </section>
+  </details>
 
   <details class="settings" id="settings"><summary data-i18n="settings.summary"></summary><div>
   <section id="s-updates">
@@ -653,6 +694,8 @@ const fileLocalDraftIds = new Set();
 let activeFiledSummary = null;
 let filedSummaryRefs = [];
 let pendingSyncOnboarding = false; // set when a first-run vault pick just succeeded; cleared once the sync choice is saved
+const FIRST_RUN_KEY = 'brainlink-first-run-v1';
+let firstRunStage = localStorage.getItem(FIRST_RUN_KEY) || '';
 let healthByClient = {}; // client id -> last /api/client-health (or /api/connect's health) result, kept across re-renders
 let pendingPresetClient = null;
 const CLIENT_LABEL = { 'claude-code': 'Claude Code', 'claude-desktop': 'Claude Desktop', cursor: 'Cursor', codex: 'ChatGPT Codex', gemini: 'Gemini CLI', antigravity: 'Google Antigravity', hermes: 'Hermes Agent', 'deepseek-harness': 'DeepSeek Harness', windsurf: 'Windsurf' };
@@ -889,15 +932,53 @@ async function ensureLocale(saved) {
   await setLocale(SUPPORTED_LOCALES.includes(saved) ? saved : detectLocale(), { persist: !saved });
   resolveLocaleBooted();
 }
-$('main-nav').addEventListener('click', (event) => {
+document.addEventListener('click', (event) => {
   const link = event.target.closest('a[data-main-nav]');
   if (!link) return;
   const target = $(link.dataset.mainNav);
   if (!target || target.hidden) { event.preventDefault(); return; }
+  if (target.tagName === 'DETAILS') target.open = true;
   const settings = target.closest('details.settings');
   if (settings) settings.open = true;
 });
 $('lang').onchange = () => act(() => setLocale($('lang').value));
+
+let memoryReview = null;
+window.addEventListener('beforeunload', (event) => {
+  if (memoryReview && $('memory-review-text').value !== memoryReview.text) {
+    event.preventDefault();
+    event.returnValue = '';
+  }
+});
+$('memory-review-vault').onchange = () => {
+  $('memory-review-save').disabled = !memoryReview?.writable || $('memory-review-vault').value !== memoryReview.vault;
+};
+$('memory-review-open').onclick = async () => {
+  if (memoryReview && $('memory-review-text').value !== memoryReview.text && !confirm(t('memoryReview.discard'))) return;
+  const vault = $('memory-review-vault').value;
+  if (!vault) return;
+  try {
+    const result = await api('POST', '/api/memory/review', { vault });
+    memoryReview = { ...result, vault };
+    $('memory-review-text').value = result.text;
+    $('memory-review-text').readOnly = !result.writable;
+    $('memory-review-save').disabled = !result.writable;
+    $('memory-review-status').textContent = result.writable ? t('memoryReview.opened', { vault }) : t('memoryReview.readOnly', { vault });
+    $('memory-review-editor').hidden = false;
+  } catch (error) { toast(error.message, true); }
+};
+$('memory-review-save').onclick = async () => {
+  if (!memoryReview?.writable || $('memory-review-vault').value !== memoryReview.vault) return;
+  const button = $('memory-review-save');
+  button.disabled = true;
+  try {
+    const text = $('memory-review-text').value;
+    const result = await api('POST', '/api/memory/save', { vault: memoryReview.vault, text, etag: memoryReview.etag });
+    memoryReview = { ...memoryReview, text, etag: result.etag };
+    $('memory-review-status').textContent = t('memoryReview.saved', { vault: memoryReview.vault });
+  } catch (error) { $('memory-review-status').textContent = error.message; }
+  finally { button.disabled = !memoryReview?.writable || $('memory-review-vault').value !== memoryReview.vault; }
+};
 
 function choiceHtml(cls, title, sub, go, attrs) { return `<button class="choice ${cls}" ${attrs}><span><b>${esc(title)}</b>${sub ? `<small>${esc(sub)}</small>` : ''}</span><span class="go">${esc(go)}</span></button>`; }
 function renderStart(nested) {
@@ -914,6 +995,37 @@ function renderStart(nested) {
     return p ? { mode: 'folder', path: p } : null;
   });
 }
+function renderFirstRun(stage) {
+  const progress = $('first-run-progress');
+  progress.hidden = false;
+  for (let i = 1; i <= 3; i++) {
+    const item = $(`first-progress-${i}`);
+    item.classList.toggle('active', i === stage);
+    item.classList.toggle('done', i < stage);
+  }
+  const panel = $('first-run');
+  panel.hidden = false;
+  if (stage === 2) {
+    $('first-run-title').textContent = t('firstRun.aiTitle');
+    $('first-run-hint').textContent = t('firstRun.aiHint');
+    const clients = Object.entries(S.clients || {}).filter(([, c]) => c.present);
+    $('first-run-content').innerHTML = `${clients.map(([id, c]) => `<div class="card"><b>${esc(c.title)}</b><p class="muted">${esc(c.connected ? t('firstRun.connected') : c.canConnect ? t('firstRun.optional') : t('firstRun.notReady'))}</p>${c.connected ? '' : c.canConnect ? `<button class="primary" data-first-connect="${esc(id)}">${esc(t('connect.connectBtn'))}</button>` : ''}</div>`).join('') || `<p class="muted">${esc(t('firstRun.noAI'))}</p>`}<div class="row" style="margin-top:16px"><button class="primary" id="first-run-next">${esc(t('firstRun.continue'))}</button></div>`;
+    $('first-run-next').onclick = () => { firstRunStage = '3'; localStorage.setItem(FIRST_RUN_KEY, firstRunStage); load(); };
+  } else {
+    const vault = S.vaults[S.vaults.length - 1];
+    const agent = S.agents.find((a) => a.vault === vault?.name) || S.agents[0];
+    $('first-run-title').textContent = t('firstRun.readyTitle');
+    $('first-run-hint').textContent = t('firstRun.readyHint', { vault: vault?.name || '' });
+    $('first-run-content').innerHTML = `<div class="card"><p>${esc(t('firstRun.readyRestart', { apps: Object.values(S.clients || {}).filter((c) => c.connected).map((c) => c.title).join(', ') || t('firstRun.noneConnected') }))}</p><p>${esc(t('firstRun.sayConnect'))} <b>${esc(agent?.activation?.[0] || 'Connect to my brain')}</b></p></div><button class="primary" id="first-run-finish" style="margin-top:16px">${esc(t('firstRun.finish'))}</button>`;
+    $('first-run-finish').onclick = () => { localStorage.removeItem(FIRST_RUN_KEY); firstRunStage = ''; load(); };
+  }
+}
+document.addEventListener('click', (event) => {
+  const button = event.target.closest('[data-first-connect]');
+  if (!button) return;
+  button.disabled = true;
+  api('POST', '/api/connect', { client: button.dataset.firstConnect }).then(() => load()).catch((error) => { toast(error.message, true); button.disabled = false; });
+});
 function renderReady(r) {
   const v = S.vaults[S.vaults.length - 1];
   const agent = S.agents.find((a) => a.vault === v.name) || S.agents[0];
@@ -1031,6 +1143,42 @@ async function loadHandoffs() {
     if (r.enabled) renderHandoffs(r.receipts);
   } catch (e) { $('handoffs-list').innerHTML = `<p class="error-box">${esc(t('handoffs.loadError', { msg: e.message }))}</p>`; }
 }
+
+async function loadProposals() {
+  $('proposal-review-list').innerHTML = `<p class="skeleton">${esc(t('proposals.loading'))}</p>`;
+  try {
+    const { proposals = [] } = await api('GET', '/api/proposals');
+    renderProposals(proposals);
+  } catch (error) {
+    $('proposal-review-list').innerHTML = `<p class="error-box">${esc(t('proposals.error', { message: error.message }))}</p>`;
+  }
+}
+
+function renderProposals(proposals) {
+  if (!proposals.length) { $('proposal-review-list').innerHTML = `<p class="muted">${esc(t('proposals.empty'))}</p>`; return; }
+  $('proposal-review-list').innerHTML = proposals.map((proposal) => `<article class="card" data-owner-proposal="${esc(proposal.id)}">
+    <div class="row" style="justify-content:space-between"><b>${esc(proposal.path)}</b><span class="pill">${esc(proposal.vault)}</span></div>
+    <div class="muted" style="font-size:13px">${esc(t(proposal.agent_verified ? 'proposals.fromVerified' : 'proposals.fromUnverified', { agent: proposal.agent || t('proposals.unknownAgent'), tool: proposal.tool, when: new Date(proposal.created_at).toLocaleString(LOCALE) }))}</div>
+    <pre class="mono" style="white-space:pre-wrap;max-height:360px;overflow:auto">${esc(proposal.content)}</pre>
+    <div class="row"><button class="primary" type="button" data-proposal-approve="${esc(proposal.id)}">${esc(t('proposals.approve'))}</button><button type="button" data-proposal-reject="${esc(proposal.id)}">${esc(t('proposals.reject'))}</button></div>
+  </article>`).join('');
+}
+
+document.addEventListener('click', (event) => {
+  const approve = event.target.closest('[data-proposal-approve]');
+  const reject = event.target.closest('[data-proposal-reject]');
+  const button = approve || reject;
+  if (!button) return;
+  act(async () => {
+    button.disabled = true;
+    try {
+      const route = approve ? '/api/proposals/approve' : '/api/proposals/reject';
+      const result = await api('POST', route, { id: button.dataset[approve ? 'proposalApprove' : 'proposalReject'], confirm: true });
+      await loadProposals();
+      toast(approve ? t('proposals.saved', { path: result.path }) : t('proposals.discarded'));
+    } catch (error) { toast(error.message, true); button.disabled = false; }
+  });
+});
 
 async function loadRsi() {
   const [response, discoveryResponse, experimentResponse] = await Promise.all([api('GET', '/api/rsi'), api('GET', '/api/rsi/discovery'), api('GET', '/api/rsi/experiments')]);
@@ -1557,16 +1705,37 @@ document.addEventListener('click', (e) => {
 });
 
 let last = null;
+const activityVisibleSince = Date.now();
+function observedClientCall(events) {
+  return events.some((e) => e.ok && (e.mode === 'stdio' || e.mode === 'http') && Date.parse(e.at) >= activityVisibleSince);
+}
+function renderObservedClientCalls(events) {
+  document.querySelectorAll('[data-observed-client-role]').forEach((badge) => {
+    const role = badge.dataset.observedClientRole;
+    badge.hidden = !events.some((e) => e.ok && e.mode === 'stdio' && e.client_role === role && Date.parse(e.at) >= activityVisibleSince);
+  });
+}
+function activityRows(events) {
+  return events.length ? events.map((e) => {
+    const result = e.ok ? (e.written ? t('test.written') : t('test.ok')) : t('test.refused');
+    const estimate = Number.isFinite(e.result_token_estimate) ? ` · ${t('ready.estimatedTokens', { count: e.result_token_estimate })}` : '';
+    const check = e.mode === 'health-check' || e.mode === 'agent-check' ? ` · ${t('ready.localCheck')}` : '';
+    const client = [e.platform, e.client_role && e.client_role !== 'direct assistant' ? e.client_role : ''].filter(Boolean).join(' · ');
+    return `<tr><td>${esc(new Date(e.at).toLocaleString(LOCALE))}</td><td>${esc(client)}</td><td class="mono">${esc(e.tool)}</td><td>${esc(result + check + estimate)}</td></tr>`;
+  }).join('') : `<tr><td colspan="4" class="muted">${esc(t('ready.noCalls'))}</td></tr>`;
+}
 async function quick(getBody) {
   const box = $('start'); box.classList.add('working');
   try {
     const body = await getBody();
     if (!body) return;
-    const r = await api('POST', '/api/quick', body);
+    if (!window.confirm(t('firstRun.createConfirm'))) return;
+    const r = await api('POST', '/api/quick/prepare', body);
     if (!r.ok && r.nested) { renderStart(r.nested); return; }
     if (!r.ok) throw new Error(r.error);
     last = r;
-    pendingSyncOnboarding = true; // first-run vault pick just succeeded: ask the Sync question once before Ready
+    pendingSyncOnboarding = false; // Sync remains available in Settings after the first connection.
+    firstRunStage = '2'; localStorage.setItem(FIRST_RUN_KEY, firstRunStage);
     await load();
   } catch (e) { toast(e.message, true); } finally { box.classList.remove('working'); }
 }
@@ -1588,22 +1757,35 @@ async function load() {
   await ensureLocale(S.locale);
   $('app-version').textContent = t('header.version', { version: S.version });
   const hasVault = S.vaults.length > 0;
+  if (!hasVault) { firstRunStage = ''; localStorage.removeItem(FIRST_RUN_KEY); }
+  const guidedFirstRun = hasVault && ['2', '3'].includes(firstRunStage);
   const onboardingSync = hasVault && pendingSyncOnboarding;
-  $('main-nav').hidden = !hasVault || onboardingSync;
+  $('main-nav').hidden = !hasVault || onboardingSync || guidedFirstRun;
   $('start').hidden = hasVault;
+  $('first-run-progress').hidden = !guidedFirstRun && hasVault;
+  $('first-run').hidden = !guidedFirstRun;
   $('sync-onboarding').hidden = !onboardingSync;
   if (onboardingSync) renderSyncOnboarding();
   $('ready').hidden = !hasVault || onboardingSync;
   $('brain-panel').hidden = !hasVault || onboardingSync;
+  $('memory-review-panel').hidden = !hasVault || onboardingSync;
+  $('proposal-review-panel').hidden = !hasVault || onboardingSync;
+  const memoryChoice = $('memory-review-vault').value;
+  $('memory-review-vault').innerHTML = S.vaults.filter((v) => v.exists).map((v) => `<option value="${esc(v.name)}">${esc(v.name)}</option>`).join('');
+  if ([...$('memory-review-vault').options].some((option) => option.value === memoryChoice)) $('memory-review-vault').value = memoryChoice;
   $('twin-profiles-panel').hidden = !hasVault || onboardingSync;
   $('ask-panel').hidden = !hasVault || onboardingSync;
   $('smart').textContent = S.semantic?.available ? t('brain.smartOn', { model: S.semantic.model }) : t('brain.smartOff');
   $('reranker-form').elements.enabled.checked = Boolean(S.reranker?.enabled);
   $('reranker-form').elements.url.value = S.reranker?.url || 'http://127.0.0.1:8080/v1/rerank';
-  if (!hasVault) renderStart(); else if (!onboardingSync) { renderReady(last); drawGraph().catch(() => {}); }
+  if (!hasVault) { renderStart(); $('first-run-progress').hidden = false; $('first-progress-1').classList.add('active'); }
+  else if (guidedFirstRun) renderFirstRun(Number(firstRunStage));
+  else if (!onboardingSync) { renderReady(last); drawGraph().catch(() => {}); }
   $('sessions-panel').hidden = !hasVault || onboardingSync;
   $('sessions-hint').innerHTML = t('sessions.hint', { call: '<span class="mono">session_read</span>' });
   $('sess-share-summaries').checked = Boolean(S.sessions_sharing?.shareSummaries);
+  $('sess-import-history').checked = Boolean(S.sessions_sharing?.importHistory);
+  $('sess-import-history').disabled = S.sessions_import_available === false;
   $('sess-share-full').checked = Boolean(S.sessions_sharing?.shareFullText);
   const hermesProfile = S.sessions_hermes_profile || {};
   $('sessions-hermes-profile-path').textContent = hermesProfile.home || t('sessions.hermesProfileDetected', { path: hermesProfile.defaultHome || '' });
@@ -1623,11 +1805,15 @@ async function load() {
   if (hasVault && !onboardingSync) loadSessions().catch(() => {});
   $('handoffs-panel').hidden = !hasVault || onboardingSync;
   if (hasVault && !onboardingSync) loadHandoffs().catch(() => {});
+  if (hasVault && !onboardingSync) loadProposals().catch(() => {});
   $('rsi-panel').hidden = !hasVault || onboardingSync;
   if (hasVault && !onboardingSync) loadRsi().catch(e => { $('rsi-ideas').innerHTML = '<p class="error-box">' + esc(e.message) + '</p>'; });
   if (hasVault && !onboardingSync) loadWeeklyBenchmark().catch(e => { $('rsi-weekly-status').textContent = e.message; });
   if (hasVault && !onboardingSync) loadDiscovery().catch(e => { $('rsi-discovery-status').textContent = e.message; });
   if (hasVault && !onboardingSync) loadObservations().catch(e => { $('rsi-observe-status').textContent = e.message; });
+  if (guidedFirstRun) {
+    for (const id of ['ready','brain-panel','memory-review-panel','proposal-review-panel','twin-profiles-panel','ask-panel','sessions-panel','handoffs-panel','rsi-panel','sync-onboarding']) $(id).hidden = true;
+  }
   $('cfgpath').textContent = S.config_path;
   $('n1').className = 'step' + (S.vaults.length ? ' done' : '');
   $('vaults').innerHTML = S.vaults.length ? S.vaults.map((v, i) => `<div class="card"><div class="row" style="justify-content:space-between"><b>${esc(v.name)}</b><span class="pill ${v.exists ? 'on' : ''}" data-vault-note-count="${esc(v.name)}">${v.exists ? esc(v.notes == null ? (v.notes_status === 'unavailable' ? t('vault.countUnavailable') : t('vault.counting')) : t('vault.notesCount', { n: v.notes })) : esc(t('vault.missing'))}</span></div><div class="mono muted">${esc(v.path)}</div><div class="row muted" style="font-size:13px">${v.private ? esc(t('vault.privateShort')) + ' · ' : ''}${esc(t('vault.writes'))}: ${esc(v.writes)} · ${esc(t('vault.intake'))}: ${esc(v.flat ? 'root' : v.intake_folder)}${v.decisions.length ? ' · ' + esc(t('vault.decisions')) + ' ' + esc(v.decisions.join('/')) : ''}<button class="link" data-remove="${esc(v.name)}">${esc(t('vault.removeBtn'))}</button></div>
@@ -1647,8 +1833,8 @@ async function load() {
     ${a.close_target.mode === 'proposal-only' ? `<label class="muted"><span><input type="checkbox" data-a="${i}" data-f="capture_approved" style="width:auto" ${a.capture_approved ? 'checked' : ''}> ${esc(t('rolePack.allowCaptures', { name: a.name }))}</span></label>` : ''}
     <div class="row"><button data-save-agent="${i}">${esc(t('rolePack.saveBtn', { name: a.name }))}</button><button class="link" data-remove-role-agent="${esc(a.name)}">${esc(t('rolePack.removeBtn'))}</button></div></div>`).join('') : `<p class="muted">${esc(t('rolePack.none'))}</p>`;
   const twin = S.twin_profiles;
-  const twinVaults = S.vaults.filter((v) => !v.private && v.exists);
-  $('twin-new-vaults').innerHTML = twinVaults.length ? twinVaults.map((v) => `<div class="card"><label style="display:flex;flex-direction:row;align-items:center;gap:8px"><input type="checkbox" data-twin-vault="${esc(v.name)}" style="width:auto"><span>${esc(v.name)}</span><select data-twin-vault-access="${esc(v.name)}" aria-label="${esc(t('twinProfiles.accessFor', { name: v.name }))}" style="margin-left:auto;width:auto"><option value="read">${esc(t('twinProfiles.access.read'))}</option><option value="propose">${esc(t('twinProfiles.access.propose'))}</option></select></label></div>`).join('') : `<p class="muted">${esc(t('twinProfiles.noVaults'))}</p>`;
+  const twinVaults = S.vaults.filter((v) => v.exists);
+  $('twin-new-vaults').innerHTML = twinVaults.length ? twinVaults.map((v) => `<div class="card"><label style="display:flex;flex-direction:row;align-items:center;gap:8px"><input type="checkbox" data-twin-vault="${esc(v.name)}" style="width:auto"><span>${esc(v.name)}${v.private ? ` (${esc(t('twinProfiles.privateVault'))})` : ''}</span><select data-twin-vault-access="${esc(v.name)}" aria-label="${esc(t('twinProfiles.accessFor', { name: v.name }))}" style="margin-left:auto;width:auto"><option value="read">${esc(t('twinProfiles.access.read'))}</option><option value="propose">${esc(t('twinProfiles.access.propose'))}</option></select></label></div>`).join('') : `<p class="muted">${esc(t('twinProfiles.noVaults'))}</p>`;
   const editableProfile = twin?.profiles?.find((item) => item.id === editingTwinId);
   const twinAgentVaults = S.ai_agents.filter((a) => !a.revoked && !(twin?.profiles || []).some((p) => p.id !== editingTwinId && p.agents.some((assigned) => assigned.id === a.id)));
   $('twin-new-agents').innerHTML = twinAgentVaults.map((a) => `<div class="card">
@@ -1712,10 +1898,11 @@ async function load() {
     if (!skill?.supported) return '';
     const skillRows = skill.skills?.map((item) => `<span class="pill">${esc(item.name)} · ${esc(t('skills.state.' + item.state))}</span>`).join(' ') || '';
     return `<div class="card" style="margin-top:8px"><b>${esc(t('skills.title'))}${surfaceKey ? ` · ${esc(t(surfaceKey))}` : ''}</b><div class="muted" style="margin:4px 0 8px">${esc(t('skills.description'))}</div><div class="row">${skillRows}${skill.error ? `<span class="error-box">${esc(skill.error)}</span>` : ''}</div><div class="row" style="margin-top:8px"><button data-skill-install="${esc(targetId)}" ${c.connected ? '' : `disabled title="${esc(t('skills.connectFirst'))}"`}>${esc(t('skills.install'))}</button>${skill.skills?.some((item) => ['managed','update-available','current'].includes(item.state)) ? `<button class="link" data-skill-remove="${esc(targetId)}">${esc(t('skills.remove'))}</button>` : ''}</div></div>`;
-  }).join(''); return `<div class="client"><div><div class="name">${esc(c.title)}</div><span class="pill ${c.connected ? 'on' : ''}">${c.connected ? esc(t('connect.connected')) : c.unsupported ? esc(t('connect.chatgptManual')) : c.present ? esc(t('connect.found')) : c.manual ? esc(t('connect.manualReady')) : esc(t('connect.notFound'))}</span></div>
+  }).join(''); return `<div class="client"><div><div class="name">${esc(c.title)}</div><span class="pill ${c.connected ? 'on' : ''}">${c.connected ? esc(t('connect.connected')) : c.unsupported ? esc(t('connect.chatgptManual')) : c.present ? esc(t('connect.found')) : c.manual ? esc(t('connect.manualReady')) : esc(t('connect.notFound'))}</span>${c.connected && c.role && cs.filter(([, other]) => other.connected && other.role === c.role).length === 1 ? `<span class="pill on" data-observed-client-role="${esc(c.role)}" hidden>${esc(t('connect.observedCall'))}</span>` : ''}</div>
     <div class="row">${c.unsupported ? `<a class="button" href="https://help.openai.com/en/articles/12584461-connecting-custom-mcp-servers-in-chatgpt" target="_blank" rel="noopener noreferrer">${esc(t('connect.chatgptSetup'))}</a>` : scopedConnectors ? `${c.connected ? `<button data-disconnect="${id}">${esc(t('connect.disconnectBtn'))}</button>` : ''}<button class="primary" data-connect-scope="${id}" ${c.canConnect && S.vaults.length ? '' : `disabled title="${esc(c.canConnect ? t('connect.addVaultFirst') : t('connect.installFirst', { title: c.title }))}"`}>${esc(t('connect.permissionsBtn'))}</button>${c.connected ? `<button data-health="${id}">${esc(t('connect.testBtn'))}</button>` : ''}` : c.connected ? `<button data-disconnect="${id}">${esc(t('connect.disconnectBtn'))}</button><button data-health="${id}">${esc(t('connect.testBtn'))}</button>` : c.canConnect ? `<button class="primary" data-connect="${id}" ${S.vaults.length ? '' : `disabled title="${esc(t('connect.addVaultFirst'))}"`}>${esc(t('connect.connectBtn'))}</button>` : `<button class="primary" disabled title="${esc(t('connect.installFirst', { title: c.title }))}">${esc(t('connect.connectBtn'))}</button>`}</div>${c.unsupported ? `<small class="muted">${esc(t('connect.chatgptHint'))}<br><a href="https://developers.openai.com/api/docs/guides/secure-mcp-tunnels" target="_blank" rel="noopener noreferrer">${esc(t('connect.chatgptTunnelDocs'))}</a> · <a href="https://github.com/openai/tunnel-client/blob/master/docs/onboarding.md" target="_blank" rel="noopener noreferrer">${esc(t('connect.chatgptClientDocs'))}</a></small>` : c.connected ? `<small class="muted">${esc(c.note)}</small>` : c.manual ? `<small class="muted">${esc(id.startsWith('deepseek-harness') ? t('connect.deepseekHint') : t('connect.manualHint'))}</small>` : !c.present ? `<small class="muted">${esc(t('connect.notFoundHint'))}</small>` : ''}${h ? `<span class="pill ${h.ok ? 'on' : ''}" style="width:fit-content">${h.ok ? esc(t('connect.liveOk')) : esc(t('connect.liveFailed'))} · ${esc(h.message)}</span>` : ''}${skillControls}</div>`; }).join('') : `<p class="muted">${esc(t('connect.none'))}</p>`;
-  $('n4').className = 'step' + (S.activity.length ? ' done' : '');
-  $('activity').innerHTML = S.activity.length ? S.activity.map((e) => `<tr><td>${esc(new Date(e.at).toLocaleString(LOCALE))}</td><td>${esc(e.platform)}</td><td class="mono">${esc(e.tool)}</td><td>${e.ok ? (e.written ? esc(t('test.written')) : esc(t('test.ok'))) : esc(t('test.refused'))}</td></tr>`).join('') : `<tr><td colspan="4" class="muted">${esc(t('ready.noCalls'))}</td></tr>`;
+  $('n4').className = 'step' + (observedClientCall(S.activity) ? ' done' : '');
+  $('activity').innerHTML = activityRows(S.activity);
+  renderObservedClientCalls(S.activity);
   $('packs').innerHTML = S.packs.map((p) => `<label class="pack ${p.id === pack ? 'sel' : ''}"><span><input type="radio" name="pack" value="${p.id}" ${p.id === pack ? 'checked' : ''}><b>${esc(p.title)}</b></span><small>${esc(p.description)}</small></label>`).join('');
   const SY = S.sync;
   $('sync-provider').innerHTML = SY.providers.map((p) => `<option value="${esc(p)}" ${p === SY.provider ? 'selected' : ''}>${esc(t('sync.provider.' + p))}</option>`).join('');
@@ -2050,16 +2237,17 @@ function renderPresetConnectOptions() {
   const assigned = profile.agents?.find((agent) => agent.preset_client_id === pendingPresetClient);
   const defaultMemory = assigned?.memory_policy || { working: false, semantic: profile.memory_policy?.semantic === true, procedural: false, episodic: false };
   $('preset-memory-list').innerHTML = ['working','semantic','procedural','episodic'].map((key) => `<label class="card" style="display:flex;flex-direction:row;align-items:center;gap:6px;margin:0"><input type="checkbox" data-preset-memory="${key}" ${defaultMemory[key] ? 'checked' : ''} ${profile.memory_policy?.[key] === true ? '' : 'disabled'} style="width:auto">${esc(t('twinProfiles.memory.' + key))}</label>`).join('');
-  const vaults = (profile.vaults || []).filter((grant) => S.vaults.some((vault) => vault.name === grant.name && vault.exists && !vault.private));
+  const vaults = (profile.vaults || []).filter((grant) => S.vaults.some((vault) => vault.name === grant.name && vault.exists));
   const labels = [['search','connect.search','semantic'],['read_note','connect.readNote','semantic'],['read_session','connect.readSession','episodic'],['log_session','twinProfiles.operation.log_session','episodic'],['propose_note','twinProfiles.operation.propose_note','semantic'],['handoff_read','connect.readHandoffs','working'],['write_handoff','connect.sendHandoffs','working']];
   $('preset-vault-list').innerHTML = vaults.length ? vaults.map((grant, index) => {
+    const isPrivate = S.vaults.some((vault) => vault.name === grant.name && vault.private);
     const available = labels.filter(([action]) => !['handoff_read','write_handoff'].includes(action) || S.handoff?.vault === grant.name);
     const canPropose = grant.access === 'propose' && profile.memory_policy?.semantic === true && document.querySelector('[data-preset-memory="semantic"]')?.checked;
-    return `<div class="card"><b>${esc(grant.name)}</b><div class="row" style="margin-top:7px">${available.map(([action,key,memory]) => {
+    return `<div class="card"><b>${esc(grant.name)}${isPrivate ? ` (${esc(t('twinProfiles.privateVault'))})` : ''}</b><div class="row" style="margin-top:7px">${available.map(([action,key,memory]) => {
       const needsPropose = ['propose_note','write_handoff'].includes(action);
       const selectedMemory = Object.fromEntries([...document.querySelectorAll('[data-preset-memory]')].map((input) => [input.dataset.presetMemory, input.checked]));
       const allowed = twinActionMemoryAllowed(action, selectedMemory) && profile.memory_policy?.[memory] === true && (!needsPropose || grant.access === 'propose');
-      return `<label class="muted" style="display:flex;flex-direction:row;align-items:center;gap:5px"><input type="checkbox" data-preset-vault="${esc(grant.name)}" value="${action}" ${index === 0 && ['search','read_note'].includes(action) ? 'checked' : ''} ${allowed ? '' : 'disabled'} style="width:auto">${esc(t(key))}</label>`;
+      return `<label class="muted" style="display:flex;flex-direction:row;align-items:center;gap:5px"><input type="checkbox" data-preset-vault="${esc(grant.name)}" value="${action}" ${index === 0 && !isPrivate && ['search','read_note'].includes(action) ? 'checked' : ''} ${allowed ? '' : 'disabled'} style="width:auto">${esc(t(key))}</label>`;
     }).join('')}</div>${canPropose ? `<button type="button" data-preset-read-propose="${esc(grant.name)}">${esc(t('connect.readProposePreset'))}</button>` : ''}</div>`;
   }).join('') : `<p class="muted">${esc(t('connect.noVault'))}</p>`;
   $('preset-connect-summary').textContent = t('connect.permissionSummary');
@@ -2135,6 +2323,11 @@ $('preset-connect-submit').onclick = () => act(async () => {
   pendingPresetClient = null;
 });
 $('sess-private').onchange = () => loadSessions().catch(() => {});
+$('sess-import-history').onchange = () => act(async () => {
+  const r = await api('POST', '/api/sessions/import-setting', { enabled: $('sess-import-history').checked });
+  S.sessions_sharing = r.sessions;
+  await loadSessions();
+});
 $('sessions-private-notice-btn').onclick = () => act(async () => {
   const r = await api('POST', '/api/sessions/sharing', { shareSummaries: true, shareFullText: $('sess-share-full').checked });
   S.sessions_sharing = r.sessions;
@@ -2671,7 +2864,9 @@ $('twin-create').onclick = async () => {
   }).join('; ') || t('twinProfiles.noneSelected');
   const selectedMemories = [...document.querySelectorAll('[data-twin-memory]:checked')].map((input) => t(`twinProfiles.memory.${input.dataset.twinMemory}`)).join(', ') || t('twinProfiles.noneSelected');
   const editingProfile = editingTwinId && S.twin_profiles?.profiles?.find((profile) => profile.id === editingTwinId);
-  if (editingProfile ? !confirm(t('twinProfiles.confirmUpdate', { name, vaults: vaultNames, agents: agentNames, memory: selectedMemories })) : !confirm(t('twinProfiles.confirmCreate', { name, vaults: vaultNames, agents: agentNames, memory: selectedMemories }))) return;
+  const firstProfileWithConnections = !editingProfile && !S.twin_profiles?.profiles?.length && (Object.values(S.clients || {}).some((client) => client.connected) || (S.ai_agents || []).some((agent) => agent.connected && !agent.revoked));
+  const confirmText = editingProfile ? t('twinProfiles.confirmUpdate', { name, vaults: vaultNames, agents: agentNames, memory: selectedMemories }) : t('twinProfiles.confirmCreate', { name, vaults: vaultNames, agents: agentNames, memory: selectedMemories });
+  if (!confirm(confirmText + (firstProfileWithConnections ? `\n\n${t('twinProfiles.firstProfileWarning')}` : ''))) return;
   $('twin-create').disabled = true;
   $('twin-create-status').textContent = t('twinProfiles.creating');
   try {
@@ -2839,7 +3034,7 @@ boot();
 setInterval(async () => {
   if (document.visibilityState !== 'visible') return;
   if (!$('sessions-panel').hidden) loadSessionEndCues();
-  try { const s = await api('GET', '/api/state'); S.activity = s.activity; S.github_auto_sync = s.github_auto_sync; renderGitHubAutoStatus(); $('activity').innerHTML = s.activity.length ? s.activity.map((e) => `<tr><td>${esc(new Date(e.at).toLocaleString(LOCALE))}</td><td>${esc(e.platform)}</td><td class="mono">${esc(e.tool)}</td><td>${e.ok ? (e.written ? esc(t('test.written')) : esc(t('test.ok'))) : esc(t('test.refused'))}</td></tr>`).join('') : `<tr><td colspan="4" class="muted">${esc(t('ready.noCalls'))}</td></tr>`; $('n4').className = 'step' + (s.activity.length ? ' done' : ''); } catch {}
+  try { const s = await api('GET', '/api/state'); S.activity = s.activity; S.github_auto_sync = s.github_auto_sync; renderGitHubAutoStatus(); $('activity').innerHTML = activityRows(s.activity); $('n4').className = 'step' + (observedClientCall(s.activity) ? ' done' : ''); renderObservedClientCalls(s.activity); } catch {}
 }, 5000);
 </script>
 <script src="agents.js"></script>

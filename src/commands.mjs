@@ -1,9 +1,8 @@
 // Shared commands: each note in <vault>/BrainLink/Commands becomes an MCP prompt (a slash
 // command in clients that show prompts), so one saved prompt works in every connected AI.
 // {{input}} in the note is replaced by what the user types after the command.
-import { readdir, readFile } from 'node:fs/promises';
-import path from 'node:path';
-import { vaultRoot, safeJoin, parseFrontmatter } from './core.mjs';
+import { readdir } from 'node:fs/promises';
+import { vaultRoot, safeJoin, readNote } from './core.mjs';
 
 export const COMMANDS_DIR = 'BrainLink/Commands';
 const slug = (s) => s.toLowerCase().replace(/[^a-z0-9㐀-鿿]+/g, '-').replace(/^-|-$/g, '');
@@ -14,8 +13,10 @@ export async function listCommands(ctx) {
     let names = [];
     try { names = (await readdir(safeJoin(vaultRoot(ctx, v), COMMANDS_DIR))).filter((f) => f.toLowerCase().endsWith('.md')).sort(); } catch { continue; }
     for (const f of names) {
-      const raw = await readFile(path.join(vaultRoot(ctx, v), COMMANDS_DIR, f), 'utf8');
-      const { meta, body } = parseFrontmatter(raw);
+      let note;
+      try { note = await readNote(ctx, v, `${COMMANDS_DIR}/${f}`); }
+      catch { continue; }
+      const { meta, body } = note;
       const title = f.replace(/\.md$/i, '');
       const text = body.replace(/^# .*\n+/, '').trim();
       if (!text) continue;

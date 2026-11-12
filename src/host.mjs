@@ -15,11 +15,11 @@ export { CLIENTS };
 
 // Cross-session reads over the local session store (src/sessions/*): list, read-summary, privacy
 // toggle. Import incrementally, with a fast refresh method for an explicit session review.
-export function sessionsService(env, home) {
+export function sessionsService(env, home, configFile) {
   // Setup's explicit home is also the boundary for session import. Without this fallback,
   // a test or secondary BrainLink profile that supplies an isolated home but no HOME variable
   // can silently scan the OS user's real Claude/Codex history.
-  const sessionEnv = env.HOME ? env : { ...env, HOME: home || env.USERPROFILE || homedir() };
+  const sessionEnv = { ...env, HOME: env.HOME || home || env.USERPROFILE || homedir(), ...(configFile ? { BRAINLINK_CONFIG: configFile } : {}) };
   let ready = null;
   const store = () => ready ||= openSessionStore(sessionEnv);
   const refresh = createSessionRefresher({ getStore: store, env: sessionEnv });
@@ -61,7 +61,7 @@ function settingsService({ env, configFile }) {
 
 function services({ env, os, home, configFile }) {
   const clientOpts = () => ({ home, os, env, launch: launchSpec(env) });
-  return { connectors: connectorService(clientOpts), settings: settingsService({ env, configFile }), sessions: sessionsService(env, home) };
+  return { connectors: connectorService(clientOpts), settings: settingsService({ env, configFile }), sessions: sessionsService(env, home, configFile) };
 }
 
 // The real host: store backed by every vault in config.json.

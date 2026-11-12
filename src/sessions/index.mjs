@@ -25,8 +25,13 @@ export const openSessionStore = (env = process.env) => createSessionStore({ dir:
 export function createSessionRefresher({ getStore, env = process.env, clock = () => Date.now(), cooldownMs = 15_000 }) {
   let lastImportedAt = null;
   let inFlight = null;
-  return async ({ force = false } = {}) => {
-    if (inFlight) return inFlight;
+  return async function refresh({ force = false } = {}) {
+    if (inFlight) {
+      await inFlight;
+      // An explicit refresh can follow a setting change while an older import is still
+      // running. Re-read the current setting rather than returning that stale result.
+      return force ? refresh({ force: true }) : getStore();
+    }
     if (!force && lastImportedAt !== null && clock() - lastImportedAt < cooldownMs) return getStore();
     const pending = (async () => {
       const store = await getStore();
@@ -43,12 +48,14 @@ export function createSessionRefresher({ getStore, env = process.env, clock = ()
 // Runs every local, read-only importer once. Each is independent and incremental; one failing
 // does not stop the other.
 export async function importAll({ store, env = process.env } = {}) {
+  if (env.BRAINLINK_DISABLE_HISTORY_IMPORT === '1') return { disabled: true };
   const dir = sessionsDir(env);
   const s = store || await openSessionStore(env);
   // Use the same caller-supplied home in tests and subprocesses. os.homedir() on Windows
   // ignores HOME, which previously caused a fictional test to import the user's real history.
   const sourceHome = env.HOME || env.USERPROFILE || homedir();
   const config = await loadConfig(configPath(env)).catch(() => null);
+  if (config?.sessions?.importHistory !== true) return { disabled: true };
   const selectedHermesHome = config?.sessions?.hermesHome;
   const [claudeCode, codex, deepSeekHarness, hermes] = await Promise.all([
     importClaudeCode({ store: s, root: claudeRoot(sourceHome), cursorsFile: path.join(dir, 'cursors-claude-code.json') }),

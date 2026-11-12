@@ -1,11 +1,13 @@
 // Identity-aware writes. Every write is a new file or an append (never an overwrite), carries
 // attribution in the vault's frontmatter schema, passes a secret scan, and returns a preview
 // unless confirm=true.
-import { writeFile, appendFile, readdir, readFile, stat, open, mkdir, realpath } from 'node:fs/promises';
+import { writeFile, appendFile, readdir, readFile, stat, lstat, open, mkdir, realpath } from 'node:fs/promises';
+import { createHash } from 'node:crypto';
 import path from 'node:path';
 import { TEMPLATES, renderTemplate } from './templates.mjs';
 import { suggestLinks, relatedSection, safeUpdateMap } from './links.mjs';
-import { vault, vaultRoot, safeJoin, findSecrets, zonedNow, parseFrontmatter, isExcludedPath, isPrivateMeta, fmSaysPrivate, readNote, loadVault } from './core.mjs';
+import { vault, vaultRoot, safeJoin, findSecrets, zonedNow, parseFrontmatter, isExcludedPath, isPrivateMeta, fmSaysPrivate, readNote, loadVault, assertRegularWritePath as checkWritePath } from './core.mjs';
+export { assertRegularWritePath as checkWritePath } from './core.mjs';
 import { typedEntityMetadataMap, typedRelationAllowed } from './typed-graph.mjs';
 import { createHandoffGitVerifier } from './handoff-git.mjs';
 
@@ -155,11 +157,15 @@ export async function proposeNote(ctx, a, now = new Date()) {
   return r.ok ? { ...r, linked_to: links.map((l) => l.target) } : r;
 }
 
-export async function commitNew(ctx, vaultName, rel, content, confirm) {
+export async function commitNew(ctx, vaultName, rel, content, confirm, { ownerApproved = false } = {}) {
   const v = vault(ctx, vaultName);
-  const full = safeJoin(vaultRoot(ctx, vaultName), rel);
+  if (ctx.readOnly || v.writes === 'off') return { ok: false, errors: [`${vaultName} is read-only; no file was created.`] };
+  let full;
+  try { full = await checkWritePath(vaultRoot(ctx, vaultName), rel); }
+  catch { return { ok: false, errors: ['Destination is excluded or not a regular path in the vault.'] }; }
   if (await exists(full)) return { ok: false, conflict: true, path: `${vaultName}/${rel}`, errors: [`refused: ${vaultName}/${rel} already exists; never overwrite — choose a new path`] };
-  if (v.writes === 'proposal-only') return { ok: true, written: false, path: `${vaultName}/${rel}`, preview: content, next: `${vaultName} is proposal-only: show this to the user; do not write it elsewhere.` };
+  if (((v.private && !ctx.trustedLocal) || v.writes === 'proposal-only') && !ownerApproved) return { ok: true, written: false, path: `${vaultName}/${rel}`, preview: content, next: `${vaultName} is proposal-only: show this to the user; do not write it elsewhere.` };
+  if (ownerApproved && !ctx.trustedLocal) return { ok: false, errors: ['Only the local vault owner can approve a saved proposal.'] };
   if (!confirm) return { ok: true, written: false, path: `${vaultName}/${rel}`, preview: content, next: 'Show the preview to the user; call again with confirm=true after approval.' };
   try { await writeFile(full, content, { flag: 'wx' }); }
   catch (error) {
@@ -185,6 +191,11 @@ export async function appendTo(root, rel, text) {
   await appendFile(full, text);
 }
 
+export async function appendProposalState(root, rel, header = '') {
+  try { return { proposal_action: 'append', proposal_expected_hash: createHash('sha256').update(await readFile(safeJoin(root, rel))).digest('hex'), proposal_header: header }; }
+  catch (error) { if (error.code === 'ENOENT') return { proposal_action: 'append', proposal_expected_hash: null, proposal_header: header }; throw error; }
+}
+
 // ---- remember: durable facts the user wants every AI to know ----
 
 export const MEMORY_NOTE = 'BrainLink/Memories.md';
@@ -202,8 +213,10 @@ function memoryFact(line) {
 
 export async function readMemories(ctx, vaultName, limit = 30) {
   try {
-    const raw = await readFile(safeJoin(vaultRoot(ctx, vaultName), MEMORY_NOTE), 'utf8');
-    return raw.split('\n').map(memoryFact).filter(Boolean).slice(-limit);
+    // Memory activation must obey the same private-note, exclusion, Twin and symlink
+    // checks as any other direct note read. A configured vault is not a bypass.
+    const { body } = await readNote(ctx, vaultName, MEMORY_NOTE);
+    return body.split('\n').map(memoryFact).filter(Boolean).slice(-limit);
   } catch { return []; }
 }
 
@@ -219,6 +232,19 @@ export async function remember(ctx, a, now = new Date()) {
   if (!facts.length) errors.push('fact is required (one short sentence the user wants remembered)');
   if (facts.some((f) => f.length > 300)) errors.push('keep each fact under 300 characters');
   if (errors.length) return { ok: false, errors };
+  // Reject link-backed or excluded destinations before even returning a preview. Existing
+  // memory notes also pass the ordinary private-note and Twin memory checks before append.
+  const memoryDir = safeJoin(root, 'BrainLink');
+  const dirInfo = await lstat(memoryDir).catch((error) => { if (error.code === 'ENOENT') return null; throw error; });
+  if (dirInfo && (dirInfo.isSymbolicLink() || !dirInfo.isDirectory())) return { ok: false, errors: ['Memory destination is not a regular directory.'] };
+  const memoryFile = safeJoin(root, MEMORY_NOTE);
+  const fileInfo = dirInfo ? await lstat(memoryFile).catch((error) => { if (error.code === 'ENOENT') return null; throw error; }) : null;
+  if (fileInfo && (fileInfo.isSymbolicLink() || !fileInfo.isFile())) return { ok: false, errors: ['Memory destination is not a regular file.'] };
+  if (await isExcludedPath(root, MEMORY_NOTE)) return { ok: false, errors: ['Memory destination is excluded.'] };
+  if (fileInfo) {
+    try { await readNote(ctx, vaultName, MEMORY_NOTE); }
+    catch { return { ok: false, errors: ['Memory destination is not accessible to this connection.'] }; }
+  }
   const known = new Set((await readMemories(ctx, vaultName, 1000)).map(normFact));
   const fresh = facts.filter((f) => !known.has(normFact(f)));
   if (!fresh.length) return { ok: true, written: false, already_known: facts };
@@ -226,7 +252,7 @@ export async function remember(ctx, a, now = new Date()) {
   // A user-requested memory is user-reported, not independently verified. Preserve its origin
   // beside the compact fact so later reviewers can trace it without retaining the conversation.
   const text = fresh.map((f) => `- ${f} _(BrainLink memory; date: ${date}; platform: ${q(id.ai_platform)}; source: ${q(source)}; confidence: reported)_`).join('\n') + '\n';
-  if (vault(ctx, vaultName).writes === 'proposal-only') return { ok: true, written: false, preview: text, next: 'This vault is proposal-only: show the memory to the user.' };
+  if ((vault(ctx, vaultName).private && !ctx.trustedLocal) || vault(ctx, vaultName).writes === 'proposal-only') return { ok: true, written: false, path: `${vaultName}/${MEMORY_NOTE}`, preview: text, ...await appendProposalState(root, MEMORY_NOTE, '# Memories\n\nFacts every connected AI should know. Added by AIs when you say "remember".\n\n'), next: 'This vault is proposal-only: show the memory to the user.' };
   if (!a.confirm) return { ok: true, written: false, path: `${vaultName}/${MEMORY_NOTE}`, preview: text, next: 'Confirm with the user (or their "remember this" already did), then call again with confirm=true.' };
   const full = safeJoin(root, MEMORY_NOTE);
   if (!(await exists(full))) { await mkdir(path.dirname(full), { recursive: true }); await writeFile(full, '# Memories\n\nFacts every connected AI should know. Added by AIs when you say "remember".\n\n', { flag: 'wx' }); }
@@ -260,10 +286,14 @@ export async function appendDaily(ctx, a, now = new Date()) {
   const ds = await dailySettings(root);
   const name = /[^\w\s.-]/.test(ds.format) ? ts.slice(0, 10) : formatDate(ds.format, ts);
   const rel = `${ds.folder ? ds.folder + '/' : ''}${name}.md`;
+  let full;
+  try {
+    full = await checkWritePath(root, rel);
+    if (await exists(full)) await readNote(ctx, vaultName, rel);
+  } catch { return { ok: false, errors: ['Daily note destination is not accessible to this connection.'] }; }
   const entry = `${text.split('\n').map((l, i) => (i ? `  ${l}` : `- ${ts.slice(11, 16)} ${l}`)).join('\n')} _(${id.ai_platform})_\n`;
-  if (vault(ctx, vaultName).writes === 'proposal-only') return { ok: true, written: false, path: `${vaultName}/${rel}`, preview: entry, next: 'This vault is proposal-only.' };
+  if ((vault(ctx, vaultName).private && !ctx.trustedLocal) || vault(ctx, vaultName).writes === 'proposal-only') return { ok: true, written: false, path: `${vaultName}/${rel}`, preview: entry, ...await appendProposalState(root, rel, `# ${ts.slice(0, 10)}\n\n`), next: 'This vault is proposal-only.' };
   if (!a.confirm) return { ok: true, written: false, path: `${vaultName}/${rel}`, preview: entry, next: 'Call again with confirm=true to add it to today\'s note.' };
-  const full = safeJoin(root, rel);
   if (!(await exists(full))) { await mkdir(path.dirname(full), { recursive: true }); await writeFile(full, `# ${ts.slice(0, 10)}\n\n`, { flag: 'wx' }); }
   await appendTo(root, rel, entry);
   await safeUpdateMap(ctx, vaultName);

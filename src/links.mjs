@@ -5,7 +5,7 @@
 import { readFile, writeFile, mkdir, stat } from 'node:fs/promises';
 import path from 'node:path';
 import { findMentions, suggestRelated, terms, collection, makeResolver } from './graph.mjs';
-import { loadVault, noteTerms, eligibleFor, vault, vaultRoot, safeJoin, parseFrontmatter, zonedNow } from './core.mjs';
+import { loadVault, noteTerms, eligibleFor, vault, vaultRoot, parseFrontmatter, isPrivateMeta, fmSaysPrivate, zonedNow, assertRegularWritePath } from './core.mjs';
 
 // How to write a link to note i: by title when the title is unique, else by path.
 export const linkTarget = (index, i) => (index.byTitle.get(index.notes[i].title)?.length === 1 ? index.notes[i].title : index.notes[i].rel.replace(/\.md$/i, ''));
@@ -96,10 +96,11 @@ export async function updateHomeMap(ctx, vaultName, now = new Date()) {
   const v = vault(ctx, vaultName);
   const rel = mapPath(v);
   if (!rel || v.writes !== 'on') return null;
-  const full = safeJoin(vaultRoot(ctx, vaultName), rel);
+  const full = await assertRegularWritePath(vaultRoot(ctx, vaultName), rel);
   try {
     const existing = await readFile(full, 'utf8');
-    if (parseFrontmatter(existing).meta.generated_by !== 'brainlink') return null;
+    const parsed = parseFrontmatter(existing);
+    if (parsed.meta.generated_by !== 'brainlink' || isPrivateMeta(parsed.meta) || fmSaysPrivate(parsed.frontmatter)) return null;
   } catch (e) { if (e.code !== 'ENOENT') throw e; }
   const md = await buildHomeMap(ctx, vaultName, now);
   await mkdir(path.dirname(full), { recursive: true });

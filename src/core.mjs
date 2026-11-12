@@ -33,7 +33,7 @@ export function createContext(cfg, { env = process.env, trustedLocal = false } =
     ? configuredEnabled.filter((name) => twinScope.grants.some((grant) => grant.name === name))
     : twinScope.mode === 'unassigned' ? [] : configuredEnabled;
   return {
-    cfg, features: FEATURES, byName, enabled, readOnly, env, twinScope,
+    cfg, features: FEATURES, byName, enabled, readOnly, env, twinScope, trustedLocal,
     platform: String(env.BRAINLINK_AI_PLATFORM || '').trim() || (matchedAgent ? matchedAgent.name : ''),
     agentRole: String(env.BRAINLINK_AGENT_ROLE || 'direct assistant').trim(),
     connectorPrivate: truthy(env.BRAINLINK_CONNECTOR_PRIVATE),
@@ -255,6 +255,21 @@ export async function isExcludedPath(root, rel) {
   return false;
 }
 
+// Refuse excluded destinations and link-backed path components before writing within a vault.
+export async function assertRegularWritePath(root, rel) {
+  const full = safeJoin(root, rel);
+  const parts = path.relative(root, full).split(path.sep);
+  if (await isExcludedPath(root, parts.join('/'))) throw new Error('Destination is excluded.');
+  let current = root;
+  for (let i = 0; i < parts.length; i++) {
+    current = path.join(current, parts[i]);
+    const info = await lstat(current).catch((error) => { if (error.code === 'ENOENT') return null; throw error; });
+    if (!info) break;
+    if (info.isSymbolicLink() || (i < parts.length - 1 ? !info.isDirectory() : !info.isFile())) throw new Error('Destination is not a regular path in the vault.');
+  }
+  return full;
+}
+
 // Inspect only a bounded frontmatter prefix before reading/indexing a note body. A malformed
 // or overlong frontmatter is hidden until the owner fixes it; never guess "public" when the
 // privacy marker might be beyond the bounded header.
@@ -388,28 +403,38 @@ export async function loadVaultGraph(ctx, name) {
   let cache = graphVaultCache.get(ctx);
   if (!cache) { cache = new Map(); graphVaultCache.set(ctx, cache); }
   const cached = cache.get(name);
-  if (cached && cached.until > Date.now()) return cached.value;
   if (cached?.pending) return cached.pending;
   const pending = (async () => {
     const root = vaultRoot(ctx, name), notes = [], files = await walk(root);
+    // Check the current eligible paths and metadata on each request. A time-only cache could
+    // continue showing a note immediately after it was made private or its folder excluded.
+    const states = [];
+    for (let start = 0; start < files.length; start += 32) states.push(...await Promise.all(files.slice(start, start + 32).map(async (full) => {
+      const st = await stat(full, { bigint: true });
+      return { full, rel: path.relative(root, full).split(path.sep).join('/'), mtime: Number(st.mtimeNs) / 1e6, bytes: Number(st.size),
+        signature: `${st.size}:${st.mtimeNs}:${st.ctimeNs}` };
+    })));
+    const signatures = new Map(states.map((item) => [item.rel, item.signature]));
+    if (cached?.value && cached.signatures?.size === signatures.size && [...signatures].every(([rel, value]) => cached.signatures.get(rel) === value)) {
+      cache.set(name, { value: cached.value, signatures });
+      return cached.value;
+    }
     for (let start = 0; start < files.length; start += 32) {
-      const batch = await Promise.all(files.slice(start, start + 32).map(async (full) => {
-        const rel = path.relative(root, full).split(path.sep).join('/');
+      const batch = await Promise.all(states.slice(start, start + 32).map(async ({ full, rel, mtime, bytes }) => {
         if (!twinNoteMemoryAllowed(ctx, name, rel)) return null;
-        const st = await stat(full, { bigint: true });
-        const header = await readIndexableHeader(full, Number(st.size));
+        const header = await readIndexableHeader(full, bytes);
         if (!header.indexable || !twinNoteMemoryAllowed(ctx, name, rel, header.meta)) return null;
         const raw = await readFile(full, 'utf8');
-        const { meta } = parseFrontmatter(raw);
-        if (isPrivateMeta(meta) || !twinNoteMemoryAllowed(ctx, name, rel, meta)) return null;
-        return { rel, title: path.posix.basename(rel).replace(/\.md$/i, ''), aliases: listValue(meta.aliases), raw, meta,
+        const { meta, body, frontmatter } = parseFrontmatter(raw);
+        if (isPrivateMeta(meta) || fmSaysPrivate(frontmatter) || !twinNoteMemoryAllowed(ctx, name, rel, meta)) return null;
+        return { rel, title: path.posix.basename(rel).replace(/\.md$/i, ''), aliases: listValue(meta.aliases), raw, meta, body, mtime,
           tags: extractTags(raw, meta), generated: meta.generated_by === 'brainlink' || /^BrainLink\/Commands\//i.test(rel), private: false };
       }));
       notes.push(...batch.filter(Boolean));
     }
     notes.sort((a, b) => a.rel.localeCompare(b.rel));
     const value = { notes, noteEdges: linkGraph(notes).edges, typedRelations: deriveTypedRelations(notes) };
-    cache.set(name, { value, until: Date.now() + 15000 });
+    cache.set(name, { value, signatures });
     return value;
   })();
   cache.set(name, { pending });
@@ -662,10 +687,10 @@ export async function searchWithVerdict(ctx, name, query, opts = {}) {
   const results = await search(ctx, name, query, opts);
   const index = await loadVault(ctx, name);
   const v = verdict(index, String(query || ''), results, opts.queries || []);
-  const note = v.status === 'not_in_brain' ? 'Nothing in this vault answers this. Tell the user it is not in their notes rather than guessing from these results.'
+  const note = v.status === 'not_in_brain' ? 'This search did not find a sufficiently strong match. Do not infer that the information is absent from the vault; suggest a rephrasing or another permitted source rather than guessing.'
     : v.needs_translation ? 'Most notes here are not in the language of this question. Search again with an English (or the notes\' language) translation in queries before answering or saying it is not in the notes.'
-    : v.status === 'weak' ? `Only partial matches${v.missing_words ? ` (these words appear nowhere in the notes: ${v.missing_words.join(', ')})` : ''}. Answer only if a snippet clearly answers; otherwise say it is not in the notes.` : null;
-  return { status: v.status, coverage: v.coverage, ...(v.vault_words ? { vault_words: v.vault_words } : {}), ...(v.missing_words ? { missing_words: v.missing_words } : {}), ...(note ? { note } : {}), results };
+    : v.status === 'weak' ? `Only partial matches${v.missing_words ? ` (these words were not found in the indexed notes: ${v.missing_words.join(', ')})` : ''}. Answer only if a snippet clearly answers; otherwise explain that this search did not find a reliable answer, and suggest another search.` : null;
+  return { status: v.status, coverage: v.coverage, ...(v.vault_words ? { vault_words: v.vault_words } : {}), ...(v.missing_words ? { missing_words: v.missing_words } : {}), ...(v.needs_translation ? { needs_translation: true } : {}), ...(note ? { note } : {}), results };
 }
 
 // Semantic layer: detect a local embedder once per context; embed a slice of missing chunks

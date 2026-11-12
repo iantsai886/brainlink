@@ -30,6 +30,10 @@ test('every native installer bundles all production dependencies and portable Br
   const windowsPreview = await read('packaging/windows/build-portable-zip.sh');
   assert.match(windowsPreview, /skills/, 'Windows portable preview must ship versioned BrainLink skills');
   assert.match(windowsPreview, /ui[\\/]app[\\/]test/, 'Windows portable preview must exclude development UI tests');
+  assert.doesNotMatch(windowsPreview, /"\$ROOT\/docs"/, 'Windows portable preview must not copy internal and private docs wholesale');
+  for (const doc of ['PRODUCT-SPEC.md', 'GRAPH-KNOWLEDGE-MODEL.md', 'SESSION-INDEX.md', 'RELEASE-READINESS.md', 'STORE-RECOVERY.md']) {
+    assert.ok(windowsPreview.includes(doc), `Windows portable preview must include its documented public README reference: ${doc}`);
+  }
   assert.ok(pkg.dependencies.yaml, 'YAML connector dependency must remain a production dependency');
   assert.ok(pkg.dependencies['pdfjs-dist'], 'local PDF text extraction must remain a production dependency');
   assert.ok(pkg.dependencies['@napi-rs/canvas'], 'scanned PDF rendering must use the pinned local canvas runtime');

@@ -81,6 +81,7 @@ export function normalize(raw = {}) {
   cfg.sessions = upgrading
     ? { shareSummaries: false, shareFullText: false, hermesHome: null, localSummary: { enabled: false, model: '', autoDraftOnEnd: false, autoFileOnEnd: false } }
     : { shareSummaries: false, shareFullText: false, hermesHome: null, localSummary: { enabled: false, model: '', autoDraftOnEnd: false, autoFileOnEnd: false }, ...(raw.sessions || {}), localSummary: { enabled: false, model: '', autoDraftOnEnd: false, autoFileOnEnd: false, ...(raw.sessions?.localSummary || {}) } };
+  cfg.sessions.importHistory = raw.sessions?.importHistory === true;
   cfg.version = CONFIG_SCHEMA_VERSION;
   return cfg;
 }
@@ -188,6 +189,7 @@ export function validate(cfg) {
   if (cfg.timezone) { try { new Intl.DateTimeFormat('en', { timeZone: cfg.timezone }); } catch { errors.push(`unknown timezone "${cfg.timezone}"`); } }
   if (cfg.locale && !LOCALES.includes(cfg.locale)) errors.push(`locale must be one of ${LOCALES.join(', ')}`);
   if (typeof cfg.sessions?.shareSummaries !== 'boolean') errors.push('sessions.shareSummaries must be a boolean');
+  if (cfg.sessions?.importHistory !== undefined && typeof cfg.sessions.importHistory !== 'boolean') errors.push('sessions.importHistory must be a boolean');
   if (typeof cfg.sessions?.shareFullText !== 'boolean') errors.push('sessions.shareFullText must be a boolean');
   if (cfg.sessions?.hermesHome !== null && (typeof cfg.sessions?.hermesHome !== 'string' || !path.isAbsolute(cfg.sessions.hermesHome) || cfg.sessions.hermesHome.length > 4096)) errors.push('sessions.hermesHome must be null or an absolute folder path');
   if (typeof cfg.sessions?.localSummary?.enabled !== 'boolean' || typeof cfg.sessions?.localSummary?.model !== 'string' || cfg.sessions.localSummary.model.length > 160 || typeof cfg.sessions.localSummary?.autoDraftOnEnd !== 'boolean' || typeof cfg.sessions.localSummary?.autoFileOnEnd !== 'boolean' || (cfg.sessions.localSummary.enabled && !/^[A-Za-z0-9][A-Za-z0-9._:/-]{0,159}$/.test(cfg.sessions.localSummary.model)) || (cfg.sessions.localSummary.autoDraftOnEnd && !cfg.sessions.localSummary.enabled) || (cfg.sessions.localSummary.autoFileOnEnd && (!cfg.sessions.localSummary.enabled || !cfg.sessions.localSummary.autoDraftOnEnd))) errors.push('sessions.localSummary must contain valid enabled, model, autoDraftOnEnd, and autoFileOnEnd settings');

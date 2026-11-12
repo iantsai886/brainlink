@@ -5,11 +5,13 @@ Obsidian / Markdown vaults that authorized AI agents can search and write to saf
 ## For customers
 
 1. Install `BrainLink-<version>.pkg` (macOS), `BrainLink-Setup-<version>.exe` (Windows), or on Linux the `.deb` or `brainlink-<version>-linux-<arch>.tar.gz` (run `./install.sh`).
-2. Setup opens in a dedicated Edge app window on Windows (or your default browser if Edge is unavailable); on macOS/Linux it opens in your default browser. Choose your vault folder and a rule pack, then name your agent.
-3. Press **Connect** for each AI app. Then fully quit and reopen each app so it loads the new BrainLink tools. Closing a window may leave the app running in the background.
-4. Start a new chat and say **"Connect to <agent>"**. Existing chats may still show an older tool list. Say **"<agent> close loop"** to save the session to your vault.
+2. Setup opens in a dedicated Edge app window on Windows (or your default browser if Edge is unavailable); on macOS/Linux it opens in your default browser. Choose a vault folder or create one, then review the confirmation before BrainLink adds setup files and attempts to configure detected AI apps.
+3. Review the connection for each AI app. Fully quit and reopen each app so it loads the new BrainLink tools. Closing a window may leave the app running in the background.
+4. Start a new chat and say **"Connect to <agent>"**. Existing chats may still show an older tool list. Say **"<agent> close loop"** to prepare a session capture. Depending on vault and agent settings, the AI may only return a proposal for you to review.
 
 If an agent name is missing, check **BrainLink → Connect** first. A successful local connection check confirms BrainLink has that agent configured; a full app quit, reopen, and new chat are still needed for the AI app to load the updated tool list.
+
+Running BrainLink MCP connections re-read saved access settings before subsequent requests. A request already underway is not cancelled, and an AI client may need a new chat or restart to refresh its displayed tools. If the saved HTTP bearer token is rotated, restart the HTTP listener to use the new token.
 
 ## Command line
 
@@ -25,6 +27,10 @@ vault; BrainLink does not authenticate to Google or guess among Drive folders. T
 folder ID and local path can be recorded in Setup for auditability.
 
 ## Smart features
+
+Importing local AI session history is off by default. Enable it explicitly in the Sessions panel if needed; session sharing with connected AIs is a separate choice. Demo mode does not import local AI session history. Existing imported records are retained when import is turned off.
+
+Use **Review and correct memories** in Setup to open a vault's `BrainLink/Memories.md`, review AI suggestions and edit its list yourself. Saving requires the vault to permit direct edits; BrainLink checks whether the note changed since you opened it. Keep source details when correcting a memory. Changes made simultaneously by another application can still require manual conflict resolution.
 
 - **Auto-linking:** every note an AI writes links the notes it mentions or is about, and `BrainLink/Home.md` links everything, so notes connect even without Obsidian.
 - **Search:** keyword (stemmed, filters, `#tag`, `[[Note]]`, fused rephrasings) plus meaning-based search when Ollama is installed (`ollama pull nomic-embed-text`).
@@ -60,8 +66,9 @@ npm install               # uses the checked-in store implementation (file:./ven
 npm test                  # core suite (Node 22+)
 npm run test:ui           # local UI-model suite
 npm run test:all          # core + UI suites
-node bin/brainlink.mjs demo   # try the milestone UI on a throwaway sample vault, nothing real touched
+node bin/brainlink.mjs setup  # guided first run; creates an empty vault unless you choose an existing one
 node bin/brainlink.mjs ui     # same UI on the vaults in config.json
+node bin/brainlink.mjs demo   # optional: try a throwaway sample vault; history import is disabled
 npm run build:mac        # dist/BrainLink-<version>.pkg (unsigned build: packaging/macos/INSTALL-UNSIGNED.md)
 npm run build:win        # dist/BrainLink-Setup-<version>.exe + portable zip (needs makensis)
 npm run build:win-preview # dist/BrainLink-Preview-<version>-windows.zip — no installer, no bundled Node, Node 22+ required

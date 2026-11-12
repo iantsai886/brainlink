@@ -7,10 +7,18 @@
   const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 
   async function api(path, body) {
-    const r = await fetch(path, { method: 'POST', headers: { 'Content-Type': 'application/json', 'X-BrainLink-Token': T }, body: JSON.stringify(body || {}) });
-    const j = await r.json().catch(() => ({}));
-    if (!r.ok) throw new Error(j.error || r.statusText);
-    return j;
+    const isGraphRead = path === '/api/graph3d' || path === '/api/graph3d/vaults';
+    const controller = isGraphRead ? new AbortController() : null;
+    const timer = controller ? setTimeout(() => controller.abort(), 90000) : null;
+    try {
+      const r = await fetch(path, { method: 'POST', headers: { 'Content-Type': 'application/json', 'X-BrainLink-Token': T }, body: JSON.stringify(body || {}), ...(controller ? { signal: controller.signal } : {}) });
+      const j = await r.json().catch(() => ({}));
+      if (!r.ok) throw new Error(j.error || r.statusText);
+      return j;
+    } catch (error) {
+      if (controller?.signal.aborted) throw new Error('The map request timed out.');
+      throw error;
+    } finally { if (timer) clearTimeout(timer); }
   }
   function toast(msg, bad) {
     const t = document.getElementById('toast');
@@ -155,7 +163,9 @@
         const params = new URLSearchParams({ vault: detail.vault, file: detail.path });
         edit.href = `obsidian://open?${params.toString()}`;
         edit.textContent = window.t?.('notes3d.editInObsidian') || 'Edit in Obsidian';
-        edit.hidden = false;
+        // A syntactically valid URI is not enough: Obsidian must know this exact folder as a vault.
+        // Demo/temp folders are intentionally not registered, so don't offer a link that errors.
+        edit.hidden = !detail.obsidian_registered;
         currentDetail = detail;
         const editToggle = document.getElementById('notes3d-edit-toggle');
         editToggle.hidden = !detail.writable;
@@ -311,6 +321,7 @@
     });
 
     root.addEventListener('click', (e) => {
+      if (e.target.closest('[data-notes3d-retry]')) { loadGraph(); return; }
       if (e.target.closest('#notes3d-reset-view')) { graphInstance?.zoomToFit(700, 50); return; }
       if (e.target.closest('[data-review-load-more]')) { loadReviewQueue({ append: true }); return; }
       const graphNote = e.target.closest('[data-graph-note-id]');
@@ -504,7 +515,7 @@
       const canvas = document.getElementById('notes3d-canvas');
       const resetView = document.getElementById('notes3d-reset-view');
       if (resetView) resetView.disabled = true;
-      if (!graphInstance) canvas.innerHTML = '<p class="skeleton">Loading your 3D brain map…</p>';
+      if (!graphInstance) canvas.innerHTML = `<p class="skeleton">${esc(tr('notes3d.loading'))}</p>`;
       let g;
       try {
         const optionData = await api('/api/graph3d/vaults', {});
@@ -514,7 +525,12 @@
         renderVaultOptions();
         g = await api('/api/graph3d', { vault: vaultFilter && vaultFilter !== '*' ? vaultFilter : undefined });
       }
-      catch (e) { canvas.innerHTML = `<p class="error-box">Could not load the map: ${esc(e.message)}</p>`; return; }
+      catch (e) {
+        try { graphInstance?._destructor?.(); } catch {}
+        graphInstance = null; loadedOk = false;
+        canvas.innerHTML = `<p class="error-box">${esc(tr('notes3d.loadError', { error: e.message }))}</p><button type="button" data-notes3d-retry>${esc(tr('boot.retry'))}</button>`;
+        return;
+      }
       // The health endpoint builds the full search index, and review suggestions can be slow on
       // large vaults. Neither should hold the 3D canvas behind a loading message.
       const refreshAuxiliary = () => {
@@ -528,7 +544,7 @@
       renderNodeList();
       if (!g.nodes.length) {
         if (graphInstance) graphInstance.graphData({ nodes: [], links: [] });
-        else canvas.innerHTML = '<p class="muted">No notes yet — once you add some, their links show up here.</p>';
+        else canvas.innerHTML = `<p class="muted" data-i18n="notes3d.empty">${esc(tr('notes3d.empty'))}</p>`;
         loadedOk = false; refreshAuxiliary(); return;
       }
       if (graphInstance) {
@@ -621,11 +637,12 @@
     ro.observe(root);
 
     function maybeLoad() {
-      if (brainPanel.hidden) return;
+      if (brainPanel.hidden || (brainPanel.tagName === 'DETAILS' && !brainPanel.open)) return;
       if (!loaded) { loaded = true; loadGraph().then(() => requestAnimationFrame(resizeToContainer)); }
       else if (pendingVaultRefresh) { pendingVaultRefresh = false; refreshGraph(); }
     }
     maybeLoad();
+    brainPanel.addEventListener('toggle', maybeLoad);
     new MutationObserver(maybeLoad).observe(brainPanel, { attributes: true, attributeFilter: ['hidden'] });
   }
 
