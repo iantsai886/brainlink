@@ -398,11 +398,25 @@ async function loadVaultFresh(ctx, name) {
 // A graph view needs note text only to resolve links and typed records. Building the full search
 // index first tokenizes and chunks every body, which can consume over a gigabyte on large vaults.
 // Keep this lightweight path independent so opening the graph does not require a search index.
-const graphVaultCache = new WeakMap();
+// Setup creates a short-lived request context for each local API call. Keep the lightweight
+// graph index across those contexts, keyed by vault path and the exact Twin visibility policy.
+const graphVaultCache = new Map();
+function graphVaultCacheKey(ctx, name) {
+  const scope = ctx.twinScope || { mode: 'legacy' };
+  const grants = (scope.grants || []).filter((grant) => grant.name === name)
+    .map(({ name: vaultName, operations, memory_policy }) => ({ name: vaultName, operations: [...(operations || [])].sort(), memory_policy }))
+    .sort((a, b) => a.name.localeCompare(b.name));
+  const rolePaths = (ctx.agents || []).filter((agent) => agent.vault === name).map((agent) => ({
+    connect_notes: [...(agent.connect_notes || [])], tail_notes: [...(agent.tail_notes || [])],
+    close_target: agent.close_target || null,
+  }));
+  const vault = ctx.byName.get(name);
+  const handoffFolder = ctx.cfg?.handoff?.vault === name ? ctx.cfg.handoff.folder : null;
+  return `${path.resolve(vaultRoot(ctx, name))}\0${JSON.stringify({ mode: scope.mode, grants, rolePaths, read_first: vault?.read_first || [], handoffFolder })}`;
+}
 export async function loadVaultGraph(ctx, name) {
-  let cache = graphVaultCache.get(ctx);
-  if (!cache) { cache = new Map(); graphVaultCache.set(ctx, cache); }
-  const cached = cache.get(name);
+  const key = graphVaultCacheKey(ctx, name);
+  const cached = graphVaultCache.get(key);
   if (cached?.pending) return cached.pending;
   const pending = (async () => {
     const root = vaultRoot(ctx, name), notes = [], files = await walk(root);
@@ -416,7 +430,7 @@ export async function loadVaultGraph(ctx, name) {
     })));
     const signatures = new Map(states.map((item) => [item.rel, item.signature]));
     if (cached?.value && cached.signatures?.size === signatures.size && [...signatures].every(([rel, value]) => cached.signatures.get(rel) === value)) {
-      cache.set(name, { value: cached.value, signatures });
+      graphVaultCache.set(key, { value: cached.value, signatures });
       return cached.value;
     }
     for (let start = 0; start < files.length; start += 32) {
@@ -433,13 +447,13 @@ export async function loadVaultGraph(ctx, name) {
       notes.push(...batch.filter(Boolean));
     }
     notes.sort((a, b) => a.rel.localeCompare(b.rel));
-    const value = { notes, noteEdges: linkGraph(notes).edges, typedRelations: deriveTypedRelations(notes) };
-    cache.set(name, { value, signatures });
+    const value = { notes, noteEdges: linkGraph(notes).edges, byRel: new Map(notes.map((note, index) => [note.rel, index])) };
+    graphVaultCache.set(key, { value, signatures });
     return value;
   })();
-  cache.set(name, { pending });
+  graphVaultCache.set(key, { pending });
   try { return await pending; }
-  catch (error) { if (cache.get(name)?.pending === pending) cache.delete(name); throw error; }
+  catch (error) { if (graphVaultCache.get(key)?.pending === pending) graphVaultCache.delete(key); throw error; }
 }
 
 export function buildIndex(notes) {

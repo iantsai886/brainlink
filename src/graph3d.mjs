@@ -2,8 +2,8 @@
 // local view, but are never combined with public vaults. Frontmatter-private notes and excluded
 // folders stay hidden in every view.
 import { createHash } from 'node:crypto';
-import { loadVault, loadVaultGraph, summarize } from './core.mjs';
-import { deriveTypedRelations, typedEntityMetadataMap, typedEntityFields, deriveProposedTypedRelations, deriveRejectedTypedRelations, deriveWithdrawnTypedRelations, discoverTypedRelationshipCandidates, discoverTypedRelationshipCandidatesForSources } from './typed-graph.mjs';
+import { loadVaultGraph, summarize } from './core.mjs';
+import { deriveTypedRelations, typedEntityMetadataMap, typedEntityFields, deriveProposedTypedRelations, deriveRejectedTypedRelations, deriveWithdrawnTypedRelations, discoverTypedRelationshipCandidatesForSources } from './typed-graph.mjs';
 
 const GRAPH3D_LINK_LIMIT = 10_000;
 
@@ -55,7 +55,8 @@ export async function buildGraph3D(ctx, vaultName, { limit = 2000, includePrivat
       const from = visibleIndex.get(source), to = visibleIndex.get(target);
       return from === undefined || to === undefined ? [] : [{ source: from, target: to, kind: 'note_link' }];
     });
-    const typedEdges = (index.typedRelations || deriveTypedRelations(index.notes)).flatMap((edge) => {
+    const typedRelations = index.typedRelations || (index.typedRelations = deriveTypedRelations(index.notes));
+    const typedEdges = typedRelations.flatMap((edge) => {
       const source = visibleIndex.get(edge.source), target = visibleIndex.get(edge.target);
       return source === undefined || target === undefined ? [] : [{ ...edge, source, target, kind: 'typed' }];
     });
@@ -64,7 +65,7 @@ export async function buildGraph3D(ctx, vaultName, { limit = 2000, includePrivat
     const degree = new Array(visible.length).fill(0);
     for (const edge of edges) { degree[edge.source]++; degree[edge.target]++; }
     unlinked += degree.filter((value) => value === 0).length;
-    const entityMetadata = typedEntityMetadataMap(visible);
+    const entityMetadata = index.entityMetadata || (index.entityMetadata = typedEntityMetadataMap(visible));
     graphByVault.set(name, { visible, edges, degree, entityMetadata });
     for (let i = 0; i < visible.length; i++) keep.push({ name, visibleIndex: i, note: visible[i], degree: degree[i], entityMetadata });
   }
@@ -76,7 +77,7 @@ export async function buildGraph3D(ctx, vaultName, { limit = 2000, includePrivat
   shown.forEach((k, pIdx) => pos.set(`${k.name}::${k.visibleIndex}`, pIdx));
   for (const k of shown) {
     const n = k.note;
-    nodes.push({ id: pos.get(`${k.name}::${k.visibleIndex}`), title: n.title, path: n.rel, vault: k.name, group: n.rel.includes('/') ? n.rel.split('/')[0] : '', tags: [...n.tags], degree: k.degree, ...(k.entityMetadata.get(n) || {}) });
+    nodes.push({ id: pos.get(`${k.name}::${k.visibleIndex}`), title: n.title, path: n.rel, vault: k.name, group: n.rel.includes('/') ? n.rel.split('/')[0] : '', modified: n.mtime || 0, tags: [...n.tags], degree: k.degree, ...(k.entityMetadata.get(n) || {}) });
   }
   const links = [];
   const includedPairs = new Map();
@@ -175,34 +176,49 @@ export async function noteDetail3D(ctx, vaultName, rel, { includePrivateVault = 
   const v = ctx.byName.get(vaultName);
   if (!v || !ctx.enabled.includes(vaultName)) throw new Error(`Unknown vault "${vaultName}".`);
   if (v.private && !includePrivateVault) throw new Error('This note is in a private vault and can only be shown in its local vault-only graph.');
-  const index = await loadVault(ctx, vaultName);
+  // The 3D view uses this lightweight graph index already. Rebuilding the full search
+  // index here used to parse/chunk every note just to open one note from the graph.
+  const index = await loadVaultGraph(ctx, vaultName);
   const i = index.byRel.get(rel);
   if (i === undefined) throw new Error(`Note not found: ${rel}`);
   const n = index.notes[i];
   if (isPrivateNote(n)) throw new Error('This note is private and cannot be shown in the graph.');
   const visible = (j) => !index.notes[j].generated && !isPrivateNote(index.notes[j]);
-  const relationships = index.typedRelations.flatMap((edge) => {
-    if (edge.source === i && visible(edge.target)) return [{ direction: 'outgoing', relation_index: edge.relation_index, target_id: index.notes[edge.target].meta.id, predicate: edge.predicate, evidence: edge.evidence, confidence: edge.confidence, note: summarize(index, edge.target) }];
-    if (edge.target === i && visible(edge.source)) return [{ direction: 'incoming', predicate: edge.predicate, evidence: edge.evidence, confidence: edge.confidence, note: summarize(index, edge.source) }];
+  const nodes = index.notes;
+  const typedRelations = index.typedRelations || (index.typedRelations = deriveTypedRelations(nodes));
+  const metadata = index.entityMetadata || (index.entityMetadata = typedEntityMetadataMap(nodes));
+  const summarizeNode = (j) => ({ title: nodes[j].title, path: nodes[j].rel, ...(metadata.get(nodes[j]) || {}) });
+  const relationships = typedRelations.flatMap((edge) => {
+    if (edge.source === i && visible(edge.target)) return [{ direction: 'outgoing', relation_index: edge.relation_index, target_id: index.notes[edge.target].meta.id, predicate: edge.predicate, evidence: edge.evidence, confidence: edge.confidence, note: summarizeNode(edge.target) }];
+    if (edge.target === i && visible(edge.source)) return [{ direction: 'incoming', predicate: edge.predicate, evidence: edge.evidence, confidence: edge.confidence, note: summarizeNode(edge.source) }];
     return [];
   });
-  const proposedRelationships = deriveProposedTypedRelations(index.notes).flatMap((edge) => {
-    if (edge.source !== i || !visible(edge.target)) return [];
-    return [{ relation_index: edge.relation_index, target_id: index.notes[edge.target].meta.id, predicate: edge.predicate, evidence: edge.evidence, confidence: edge.confidence, note: summarize(index, edge.target) }];
+  const reviewRelations = index.reviewRelations || (index.reviewRelations = {
+    proposed: deriveProposedTypedRelations(nodes),
+    rejected: deriveRejectedTypedRelations(nodes),
+    withdrawn: deriveWithdrawnTypedRelations(nodes),
   });
-  const rejectedRelationships = deriveRejectedTypedRelations(index.notes).flatMap((edge) => {
+  const proposedRelationships = reviewRelations.proposed.filter((edge) => edge.source === i).flatMap((edge) => {
     if (edge.source !== i || !visible(edge.target)) return [];
-    return [{ relation_index: edge.relation_index, target_id: index.notes[edge.target].meta.id, predicate: edge.predicate, evidence: edge.evidence, confidence: edge.confidence, note: summarize(index, edge.target) }];
+    return [{ relation_index: edge.relation_index, target_id: index.notes[edge.target].meta.id, predicate: edge.predicate, evidence: edge.evidence, confidence: edge.confidence, note: summarizeNode(edge.target) }];
   });
-  const withdrawnRelationships = deriveWithdrawnTypedRelations(index.notes).flatMap((edge) => {
+  const rejectedRelationships = reviewRelations.rejected.filter((edge) => edge.source === i).flatMap((edge) => {
     if (edge.source !== i || !visible(edge.target)) return [];
-    return [{ relation_index: edge.relation_index, target_id: index.notes[edge.target].meta.id, predicate: edge.predicate, evidence: edge.evidence, confidence: edge.confidence, note: summarize(index, edge.target) }];
+    return [{ relation_index: edge.relation_index, target_id: index.notes[edge.target].meta.id, predicate: edge.predicate, evidence: edge.evidence, confidence: edge.confidence, note: summarizeNode(edge.target) }];
   });
-  const discoveredRelationships = discoverTypedRelationshipCandidates(index.notes, i).map(({ target_index, ...candidate }) => ({ ...candidate, note: summarize(index, target_index) }));
+  const withdrawnRelationships = reviewRelations.withdrawn.filter((edge) => edge.source === i).flatMap((edge) => {
+    if (edge.source !== i || !visible(edge.target)) return [];
+    return [{ relation_index: edge.relation_index, target_id: index.notes[edge.target].meta.id, predicate: edge.predicate, evidence: edge.evidence, confidence: edge.confidence, note: summarizeNode(edge.target) }];
+  });
+  const discoveredRelationships = metadata.has(n) ? (index.discoveryCandidates ||= new Map()).get(i)
+    || discoverTypedRelationshipCandidatesForSources(nodes, [i]).get(i) || [] : [];
+  if (metadata.has(n) && !(index.discoveryCandidates instanceof Map)) index.discoveryCandidates = new Map();
+  if (metadata.has(n)) index.discoveryCandidates.set(i, discoveredRelationships);
+  const discoveredWithNotes = discoveredRelationships.map(({ target_index, ...candidate }) => ({ ...candidate, note: summarizeNode(target_index) }));
   return {
     vault: vaultName, path: n.rel, title: n.title, body: n.body, tags: [...n.tags], graph_record: typedEntityFields(n.raw),
-    backlinks: [...index.backlinks[i]].filter(visible).map((j) => summarize(index, j)),
-    outlinks: [...index.outlinks[i]].filter(visible).map((j) => summarize(index, j)),
-    relationships, proposed_relationships: proposedRelationships, rejected_relationships: rejectedRelationships, withdrawn_relationships: withdrawnRelationships, discovered_relationships: discoveredRelationships,
+    backlinks: (index.noteEdges || []).filter(([, target]) => target === i).map(([source]) => source).filter(visible).map(summarizeNode),
+    outlinks: (index.noteEdges || []).filter(([source]) => source === i).map(([, target]) => target).filter(visible).map(summarizeNode),
+    relationships, proposed_relationships: proposedRelationships, rejected_relationships: rejectedRelationships, withdrawn_relationships: withdrawnRelationships, discovered_relationships: discoveredWithNotes,
   };
 }

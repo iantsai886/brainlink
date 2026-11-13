@@ -132,10 +132,35 @@
     const brainPanel = document.getElementById('brain-panel');
     const root = document.getElementById('notes3d-root');
     if (!brainPanel || !root) return;
-    let graphInstance = null, nodesById = [], byTitle = new Map(), loaded = false, loadedOk = false, selectedId = null, currentDetail = null, currentNode = null, pendingVaultRefresh = false, vaultFilter = null, graphVaultOptions = [];
+    let graphInstance = null, nodesById = [], byTitle = new Map(), loaded = false, loadedOk = false, selectedId = null, currentDetail = null, currentDetailComplete = false, currentNode = null, pendingVaultRefresh = false, vaultFilter = null, graphVaultOptions = [], graphDataAll = { nodes: [], links: [] }, legendGroups = [], activeGroup = null;
     const relationTargets = { owned_by: ['team','person'], runs: ['workflow'], consumes: ['dataset','artifact'], produces: ['dataset','artifact'], depends_on: ['workflow','dataset','project'], part_of: ['team','project'], assigned_to: ['person','team'], informed_by: ['artifact','dataset','concept'], communicates_with: ['person','team'] };
 
     function stat(id, v) { const el = document.getElementById(id); if (el) el.textContent = v; }
+
+    function graphPayloadForActiveGroup() {
+      const nodes = graphDataAll.nodes.filter((node) => activeGroup === null || node.group === activeGroup);
+      const ids = new Set(nodes.map((node) => node.id));
+      const endpointId = (endpoint) => typeof endpoint === 'object' ? endpoint.id : endpoint;
+      const links = graphDataAll.links.filter((link) => ids.has(endpointId(link.source)) && ids.has(endpointId(link.target)))
+        .map((link) => ({ ...link, source: endpointId(link.source), target: endpointId(link.target) }));
+      return { nodes, links };
+    }
+
+    function applyGraphFilter() {
+      if (!graphInstance) return;
+      graphInstance.graphData(graphPayloadForActiveGroup());
+      requestAnimationFrame(() => graphInstance?.zoomToFit(650, 55));
+    }
+
+    function renderGraphLegend(ranked, colorOf) {
+      legendGroups = ranked.slice(0, 8);
+      const legend = document.getElementById('notes3d-legend');
+      if (!legend) return;
+      legend.innerHTML = legendGroups.map((group, index) => {
+        const label = group || (window.brainlinkT?.('notes3d.ungrouped') || 'No folder');
+        return `<button type="button" class="notes3d-legend-item" data-graph-group-index="${index}" aria-pressed="${activeGroup === group ? 'true' : 'false'}" title="${esc(label)}"><i style="--legend-color:${esc(colorOf(group))}"></i><span>${esc(label)}</span></button>`;
+      }).join('') + (ranked.length > 8 ? `<span class="notes3d-legend-more">+${ranked.length - 8}</span>` : '');
+    }
 
     function renderVaultOptions() {
       const select = document.getElementById('notes3d-vault-select');
@@ -154,13 +179,22 @@
       document.getElementById('notes3d-links').innerHTML = '';
       const edit = document.getElementById('notes3d-edit');
       edit.hidden = true;
-      currentDetail = null; currentNode = node;
+      currentDetail = null; currentDetailComplete = false; currentNode = node;
       document.getElementById('notes3d-edit-toggle').hidden = true;
       document.getElementById('notes3d-editor').hidden = true;
       document.getElementById('notes3d-editor-actions').hidden = true;
       document.getElementById('notes3d-body').hidden = false;
+      api('/api/graph3d/note/preview', { vault: node.vault, path: node.path }).then((preview) => {
+        if (selectedId !== node.id || currentDetailComplete) return;
+        currentDetail = preview;
+        document.getElementById('notes3d-body').innerHTML = renderMarkdown(preview.body) || '<p class="muted">(This note is empty.)</p>';
+        document.getElementById('notes3d-links').innerHTML = `<p class="skeleton">${esc(tr('notes3d.loadingConnections'))}</p>`;
+      }).catch((error) => {
+        if (selectedId === node.id && !currentDetailComplete) document.getElementById('notes3d-body').innerHTML = `<p class="error-box">Could not open this note: ${esc(error.message)}</p>`;
+      });
       api('/api/graph3d/note', { vault: node.vault, path: node.path }).then((detail) => {
         if (selectedId !== node.id) return; // ignore a slower response after the user selected another node
+        currentDetailComplete = true;
         const params = new URLSearchParams({ vault: detail.vault, file: detail.path });
         edit.href = `obsidian://open?${params.toString()}`;
         edit.textContent = window.t?.('notes3d.editInObsidian') || 'Edit in Obsidian';
@@ -201,7 +235,11 @@
         }
         document.getElementById('notes3d-links').innerHTML = parts.join('');
         document.getElementById('notes3d-links').querySelectorAll('details:has([data-manual-target])').forEach(updateManualTargetOptions);
-      }).catch((e) => { if (selectedId === node.id) document.getElementById('notes3d-body').innerHTML = `<p class="error-box">Could not open this note: ${esc(e.message)}</p>`; });
+      }).catch((e) => {
+        if (selectedId !== node.id) return;
+        if (currentDetail) document.getElementById('notes3d-links').innerHTML = `<p class="error-box">${esc(e.message)}</p>`;
+        else document.getElementById('notes3d-body').innerHTML = `<p class="error-box">Could not open this note: ${esc(e.message)}</p>`;
+      });
     }
     function openById(id) {
       const node = nodesById[id];
@@ -230,7 +268,7 @@
       if (!list || !status || !input) return;
       const query = input.value.trim().toLocaleLowerCase();
       const matches = nodesById.filter((node) => !query || `${node.title} ${node.type || ''} ${node.group || ''}`.toLocaleLowerCase().includes(query))
-        .sort((a, b) => a.title.localeCompare(b.title));
+        .sort((a, b) => (b.modified || 0) - (a.modified || 0) || a.title.localeCompare(b.title));
       const visible = matches.slice(0, 50);
       const groupColor = (group) => {
         const counts = new Map();
@@ -248,7 +286,7 @@
         if (!folders.has(folder)) folders.set(folder, []);
         folders.get(folder).push(node);
       }
-      list.innerHTML = [...folders.entries()].map(([folder, nodes]) => `<section class="notes3d-folder-group" role="group" aria-label="${esc(folder)}"><h4><i style="--legend-color:${esc(groupColor(nodes[0].group))}"></i><span title="${esc(folder)}">${esc(folder)}</span><small>${nodes.length}</small></h4><div>${nodes.map((node) => `<div role="listitem"><button type="button" class="notes3d-node" data-graph-note-id="${esc(node.id)}" aria-pressed="${node.id === selectedId ? 'true' : 'false'}"><span>${esc(node.title)}</span><small>${esc(node.type || node.group || '')}</small></button></div>`).join('')}</div></section>`).join('');
+      list.innerHTML = [...folders.entries()].map(([folder, nodes]) => `<section class="notes3d-folder-group" role="group" aria-label="${esc(folder)}"><h4><i style="--legend-color:${esc(groupColor(nodes[0].group))}"></i><span title="${esc(folder)}">${esc(folder)}</span><small>${nodes.length}</small></h4><div>${nodes.map((node) => `<div role="listitem"><button type="button" class="notes3d-node" data-graph-note-id="${esc(node.id)}" aria-pressed="${node.id === selectedId ? 'true' : 'false'}"><span>${esc(node.title)}</span><small>${esc(node.type || node.group || '')}${node.modified ? ` · ${new Date(node.modified).toLocaleDateString()}` : ''}</small></button></div>`).join('')}</div></section>`).join('');
       status.textContent = matches.length > 50 ? tr('notes3d.browseMore', { count: matches.length, limit: 50 }) : tr('notes3d.browseCount', { count: matches.length });
       if (query && !matches.length) status.textContent = tr('notes3d.browseEmpty');
     }
@@ -339,6 +377,18 @@
 
     root.addEventListener('click', (e) => {
       if (e.target.closest('[data-notes3d-retry]')) { loadGraph(); return; }
+      const groupButton = e.target.closest('[data-graph-group-index]');
+      if (groupButton) {
+        const group = legendGroups[Number(groupButton.dataset.graphGroupIndex)];
+        if (group !== undefined) {
+          activeGroup = activeGroup === group ? null : group;
+          root.querySelectorAll('[data-graph-group-index]').forEach((button) => {
+            button.setAttribute('aria-pressed', String(legendGroups[Number(button.dataset.graphGroupIndex)] === activeGroup));
+          });
+          applyGraphFilter();
+        }
+        return;
+      }
       if (e.target.closest('#notes3d-reset-view')) { graphInstance?.zoomToFit(700, 50); return; }
       if (e.target.closest('[data-review-load-more]')) { loadReviewQueue({ append: true }); return; }
       const graphNote = e.target.closest('[data-graph-note-id]');
@@ -555,8 +605,19 @@
       stat('st-links', g.linkCount ?? g.links.length);
       stat('st-orphans', g.unlinked ?? g.nodes.filter((node) => node.degree === 0).length);
       nodesById = g.nodes;
+      graphDataAll = { nodes: g.nodes, links: g.links };
       byTitle = new Map(g.nodes.map((n) => [n.title.toLowerCase(), n]));
       renderNodeList();
+      const css = getComputedStyle(document.documentElement);
+      const colorVars = ['c1', 'c2', 'c3', 'c4', 'c5', 'c6', 'c7', 'c8'];
+      const counts = new Map();
+      for (const n of g.nodes) counts.set(n.group, (counts.get(n.group) || 0) + 1);
+      const ranked = [...counts.entries()].sort((a, b) => b[1] - a[1]).map(([k]) => k);
+      const colorOf = (grp) => { const r = ranked.indexOf(grp); return r >= 0 && r < 8 ? css.getPropertyValue(`--${colorVars[r]}`).trim() : css.getPropertyValue('--muted').trim(); };
+      const selectedColor = css.getPropertyValue('--accent').trim() || css.getPropertyValue('--ink').trim() || '#fff';
+      renderGraphLegend(ranked, colorOf);
+      if (activeGroup !== null && !ranked.includes(activeGroup)) activeGroup = null;
+      if (activeGroup !== null) root.querySelectorAll('[data-graph-group-index]').forEach((button) => button.setAttribute('aria-pressed', String(ranked[Number(button.dataset.graphGroupIndex)] === activeGroup)));
       if (!g.nodes.length) {
         if (graphInstance) graphInstance.graphData({ nodes: [], links: [] });
         else canvas.innerHTML = `<p class="muted" data-i18n="notes3d.empty">${esc(tr('notes3d.empty'))}</p>`;
@@ -564,7 +625,7 @@
       }
       if (graphInstance) {
         try {
-          graphInstance.graphData({ nodes: g.nodes, links: g.links });
+          graphInstance.graphData(graphPayloadForActiveGroup());
           loadedOk = true;
           if (resetView) resetView.disabled = false;
           fitGraphAfterLayout();
@@ -578,25 +639,13 @@
       }
       if (typeof ForceGraph3D !== 'function') { canvas.innerHTML = '<p class="error-box">Could not load the 3D map (missing viewer). Try reloading.</p>'; return; }
       canvas.innerHTML = '';
-      const css = getComputedStyle(document.documentElement);
-      const colorVars = ['c1', 'c2', 'c3', 'c4', 'c5', 'c6', 'c7', 'c8'];
-      const counts = new Map();
-      for (const n of g.nodes) counts.set(n.group, (counts.get(n.group) || 0) + 1);
-      const ranked = [...counts.entries()].sort((a, b) => b[1] - a[1]).map(([k]) => k);
-      const colorOf = (grp) => { const r = ranked.indexOf(grp); return r >= 0 && r < 8 ? css.getPropertyValue(`--${colorVars[r]}`).trim() : css.getPropertyValue('--muted').trim(); };
-      const selectedColor = css.getPropertyValue('--accent').trim() || css.getPropertyValue('--ink').trim() || '#fff';
-      const legend = document.getElementById('notes3d-legend');
-      if (legend) legend.innerHTML = ranked.slice(0, 8).map((group) => {
-        const label = group || (window.brainlinkT?.('notes3d.ungrouped') || 'No folder');
-        return `<span class="notes3d-legend-item"><i style="--legend-color:${esc(colorOf(group))}"></i><span title="${esc(label)}">${esc(label)}</span></span>`;
-      }).join('') + (ranked.length > 8 ? `<span class="notes3d-legend-more">+${ranked.length - 8}</span>` : '');
       // nodeLabel is rendered as the hover tooltip's innerHTML (3d-force-graph's documented
       // behavior), so a note title must be escaped the same way any other note-derived text going
       // into innerHTML is (see renderInline/renderMarkdown above) — otherwise a crafted title could
       // inject HTML into the tooltip.
       try {
         graphInstance = ForceGraph3D()(canvas)
-          .graphData({ nodes: g.nodes, links: g.links })
+          .graphData(graphPayloadForActiveGroup())
           .backgroundColor(css.getPropertyValue('--bg').trim() || '#000')
           .nodeLabel((n) => `${esc(n.title)}${n.type ? `<br><small>${esc(n.type)}</small>` : ''}`)
           .nodeColor((n) => (n.id === selectedId ? selectedColor : colorOf(n.group)))

@@ -2,6 +2,14 @@
 
 This log covers the development branch. Entries marked **unreleased** are not published product releases. See [release readiness](docs/RELEASE-READINESS.md) for the current evidence and remaining release gates.
 
+## 1.3.3 — Development, unreleased
+
+- Opening a note in the 3D map now reuses the lightweight graph index across requests and caches its relationship metadata, avoiding a full search-index rebuild for one note.
+- The note text now appears as soon as it is safely read; graph relationship details load afterward so they do not hold the note window behind the loading indicator.
+- 3D folder-color legend entries are clickable filters; click again to restore the full graph. Browse notes are ordered by most recently modified and grouped by their first two folder levels.
+- Added a multilingual Help guide covering vaults, Twin Profiles, agents, AI permissions, notes, 3D maps, local reranking errors, sources, sessions, backups and sync.
+- Verification: JavaScript syntax, locale JSON and `git diff --check` passed; Windows installer built and installed; installed CLI and `/health` both report 1.3.3. Full test suites and browser-rendered visual QA were not run.
+
 ## 1.3.2 — Development, unreleased
 
 - Fixed 3D map startup: attach the note dialog's close handler only after building the dialog. Previously, initialization stopped before the 3D graph mounted.

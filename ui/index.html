@@ -143,6 +143,7 @@ main #ready, main #ask-panel, main #brain-panel, main #sessions-panel, main #s-c
   <a href="#s-connect" data-main-nav="s-connect" data-i18n="nav.connect"></a>
   <a href="#s-backup" data-main-nav="s-backup" data-i18n="nav.backup"></a>
   <a href="#rsi-panel" data-main-nav="rsi-panel" data-i18n="nav.improve"></a>
+  <a href="#help-panel" data-main-nav="help-panel" data-i18n="nav.help"></a>
 </nav>
 <div id="boot-loading" role="status" data-i18n="boot.loading"></div>
 <div id="boot-error" hidden role="alert"><b data-i18n="boot.errorTitle"></b> <span id="boot-error-msg"></span> <button id="boot-retry" data-i18n="boot.retry"></button></div>
@@ -326,6 +327,25 @@ main #ready, main #ask-panel, main #brain-panel, main #sessions-panel, main #s-c
     <p class="hint" data-i18n="handoffs.hint"></p>
     <div id="handoffs-list" class="cards"></div>
   </details>
+
+  <section class="card" id="help-panel" aria-labelledby="help-title">
+    <h2 id="help-title" data-i18n="help.title"></h2>
+    <p class="hint" data-i18n="help.intro"></p>
+    <div class="grid2">
+      <article class="card"><h3 data-i18n="help.vaultsTitle"></h3><p data-i18n="help.vaultsBody"></p></article>
+      <article class="card"><h3 data-i18n="help.twinsTitle"></h3><p data-i18n="help.twinsBody"></p></article>
+      <article class="card"><h3 data-i18n="help.agentsTitle"></h3><p data-i18n="help.agentsBody"></p></article>
+      <article class="card"><h3 data-i18n="help.permissionsTitle"></h3><p data-i18n="help.permissionsBody"></p></article>
+      <article class="card"><h3 data-i18n="help.searchTitle"></h3><p data-i18n="help.searchBody"></p></article>
+      <article class="card"><h3 data-i18n="help.graphTitle"></h3><p data-i18n="help.graphBody"></p></article>
+      <article class="card"><h3 data-i18n="help.connectTitle"></h3><p data-i18n="help.connectBody"></p></article>
+      <article class="card"><h3 data-i18n="help.sourcesTitle"></h3><p data-i18n="help.sourcesBody"></p></article>
+      <article class="card"><h3 data-i18n="help.sessionsTitle"></h3><p data-i18n="help.sessionsBody"></p></article>
+      <article class="card"><h3 data-i18n="help.backupTitle"></h3><p data-i18n="help.backupBody"></p></article>
+      <article class="card"><h3 data-i18n="help.rerankTitle"></h3><p data-i18n="help.rerankBody"></p></article>
+      <article class="card"><h3 data-i18n="help.privacyTitle"></h3><p data-i18n="help.privacyBody"></p></article>
+    </div>
+  </section>
 
   <details class="card" id="rsi-panel" hidden>
     <summary data-i18n="rsi.title">Improve BrainLink</summary>

@@ -14,6 +14,7 @@ import { loadConfig, saveConfig, configPath, normalize, validate, LOCALES, appHo
 import { PACKS, buildPack, scaffold, mergePack } from './packs.mjs';
 import { CLIENTS, resolveClient, detect, connectClient, disconnectClient, readClientAgentToken, test, deepSeekSessionCueStatus, setDeepSeekSessionCue } from './connectors.mjs';
 import { createContext, search, searchWithVerdict, readNote, related as relatedNotes, relatedText, ensureDefaultIgnore, readExcludedFolders, writeExcludedFolders, DEFAULT_EXCLUDED_FOLDERS, SUGGESTED_EXCLUDED_FOLDERS, safeJoin, vaultRoot, countVisibleNotes, parseFrontmatter } from './core.mjs';
+import { extractTags } from './graph.mjs';
 import { ROOT, launchSpec, readActivity, refreshMap, logActivity } from './runtime.mjs';
 import { detectEmbedder } from './embed.mjs';
 import { validateRerankerSettings, testReranker } from './rerank.mjs';
@@ -2195,6 +2196,20 @@ export async function startSetup(opts = {}) {
       const vaultPath = path.resolve(ctx.byName.get(b.vault).path);
       const obsidianRegistered = (await findObsidianVaults({ home, os, env })).some((item) => path.resolve(item.path) === vaultPath);
       return { ...detail, etag: createHash('sha256').update(raw).digest('hex'), writable: !ctx.readOnly && ctx.byName.get(b.vault).writes === 'on', obsidian_registered: obsidianRegistered };
+    },
+    'POST /api/graph3d/note/preview': async (b) => {
+      const cfg = await loadConfig(file);
+      const ctx = localContext(cfg, { ...env, BRAINLINK_SEMANTIC: '0' });
+      if (!b.vault || !ctx.enabled.includes(b.vault)) throw new Error('Unknown vault.');
+      const rel = String(b.path || '');
+      const note = await readNote(ctx, b.vault, rel);
+      const raw = await readFile(safeJoin(vaultRoot(ctx, b.vault), note.path), 'utf8');
+      return {
+        vault: b.vault, path: note.path, title: path.posix.basename(note.path).replace(/\.md$/i, ''),
+        body: note.body, tags: extractTags(note.body, note.meta), graph_record: typedEntityFields(raw),
+        etag: createHash('sha256').update(raw).digest('hex'),
+        writable: !ctx.readOnly && ctx.byName.get(b.vault).writes === 'on',
+      };
     },
     'POST /api/graph3d/note/save': async (b) => {
       const cfg = await loadConfig(file);
