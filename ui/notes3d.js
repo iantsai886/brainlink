@@ -161,6 +161,15 @@
       applyGraphFilter();
     }
 
+    function resetGraphView() {
+      if (activeGroup !== null) {
+        activeGroup = null;
+        document.getElementById('notes3d-legend')?.querySelectorAll('[data-graph-group-index]').forEach((button) => button.setAttribute('aria-pressed', 'false'));
+        graphInstance?.graphData(graphPayloadForActiveGroup());
+      }
+      requestAnimationFrame(() => graphInstance?.zoomToFit(700, 50));
+    }
+
     function renderGraphLegend(ranked, colorOf) {
       legendGroups = ranked.slice(0, 8);
       const legend = document.getElementById('notes3d-legend');
@@ -393,7 +402,6 @@
 
     root.addEventListener('click', (e) => {
       if (e.target.closest('[data-notes3d-retry]')) { loadGraph(); return; }
-      if (e.target.closest('#notes3d-reset-view')) { graphInstance?.zoomToFit(700, 50); return; }
       if (e.target.closest('[data-review-load-more]')) { loadReviewQueue({ append: true }); return; }
       const graphNote = e.target.closest('[data-graph-note-id]');
       if (graphNote) { openById(graphNote.dataset.graphNoteId); return; }
@@ -580,6 +588,7 @@
       const chip = e.target.closest('[data-focus-title]');
       if (chip) { openByTitle(chip.dataset.focusTitle); return; }
     });
+    document.getElementById('notes3d-reset-view')?.addEventListener('click', resetGraphView);
     let graphLoadSequence = 0;
     async function loadGraph() {
       const sequence = ++graphLoadSequence;

@@ -2,6 +2,11 @@
 
 This log covers the development branch. Entries marked **unreleased** are not published product releases. See [release readiness](docs/RELEASE-READINESS.md) for the current evidence and remaining release gates.
 
+## 1.3.5 — Development, unreleased
+
+- Reset view now sits above the 3D graph and responds directly; it clears an active color filter and fits the full graph back into view.
+- Verification: JavaScript syntax, package JSON and `git diff --check` passed; Windows installer built and installed; installed CLI and `/health` report 1.3.5; served UI contains the direct Reset view handler. Full test suites and browser-rendered visual QA were not run.
+
 ## 1.3.4 — Development, unreleased
 
 - Make 3D folder-color legend filters reliably clickable, clear old filters when changing vaults, and ignore delayed graph responses from a previously selected vault.
