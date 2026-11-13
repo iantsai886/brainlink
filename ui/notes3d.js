@@ -152,14 +152,29 @@
       requestAnimationFrame(() => graphInstance?.zoomToFit(650, 55));
     }
 
+    function toggleGraphGroup(group) {
+      if (!legendGroups.includes(group)) return;
+      activeGroup = activeGroup === group ? null : group;
+      document.getElementById('notes3d-legend')?.querySelectorAll('[data-graph-group-index]').forEach((button) => {
+        button.setAttribute('aria-pressed', String(legendGroups[Number(button.dataset.graphGroupIndex)] === activeGroup));
+      });
+      applyGraphFilter();
+    }
+
     function renderGraphLegend(ranked, colorOf) {
       legendGroups = ranked.slice(0, 8);
       const legend = document.getElementById('notes3d-legend');
       if (!legend) return;
       legend.innerHTML = legendGroups.map((group, index) => {
         const label = group || (window.brainlinkT?.('notes3d.ungrouped') || 'No folder');
-        return `<button type="button" class="notes3d-legend-item" data-graph-group-index="${index}" aria-pressed="${activeGroup === group ? 'true' : 'false'}" title="${esc(label)}"><i style="--legend-color:${esc(colorOf(group))}"></i><span>${esc(label)}</span></button>`;
+        return `<button type="button" class="notes3d-legend-item" data-graph-group-index="${index}" aria-pressed="${activeGroup === group ? 'true' : 'false'}" aria-label="Filter graph by ${esc(label)}" title="Filter graph by ${esc(label)}"><i style="--legend-color:${esc(colorOf(group))}"></i><span>${esc(label)}</span></button>`;
       }).join('') + (ranked.length > 8 ? `<span class="notes3d-legend-more">+${ranked.length - 8}</span>` : '');
+      legend.querySelectorAll('[data-graph-group-index]').forEach((button) => {
+        button.addEventListener('click', (event) => {
+          event.stopPropagation();
+          toggleGraphGroup(legendGroups[Number(button.dataset.graphGroupIndex)]);
+        });
+      });
     }
 
     function renderVaultOptions() {
@@ -195,8 +210,8 @@
       api('/api/graph3d/note', { vault: node.vault, path: node.path }).then((detail) => {
         if (selectedId !== node.id) return; // ignore a slower response after the user selected another node
         currentDetailComplete = true;
-        const params = new URLSearchParams({ vault: detail.vault, file: detail.path });
-        edit.href = `obsidian://open?${params.toString()}`;
+        const notePath = detail.path.replace(/\.md$/i, '');
+        edit.href = `obsidian://open?vault=${encodeURIComponent(detail.vault)}&file=${encodeURIComponent(notePath)}`;
         edit.textContent = window.t?.('notes3d.editInObsidian') || 'Edit in Obsidian';
         // A syntactically valid URI is not enough: Obsidian must know this exact folder as a vault.
         // Demo/temp folders are intentionally not registered, so don't offer a link that errors.
@@ -360,6 +375,7 @@
       if (e.target.matches('[data-manual-predicate]')) { updateManualTargetOptions(e.target.closest('details')); return; }
       if (e.target.id !== 'notes3d-vault-select') return;
       vaultFilter = e.target.value || '*';
+      activeGroup = null;
       selectedId = null; currentDetail = null; currentNode = null;
       document.getElementById('notes3d-panel-detail').close();
       const suggestions = document.getElementById('notes3d-discover-list');
@@ -377,18 +393,6 @@
 
     root.addEventListener('click', (e) => {
       if (e.target.closest('[data-notes3d-retry]')) { loadGraph(); return; }
-      const groupButton = e.target.closest('[data-graph-group-index]');
-      if (groupButton) {
-        const group = legendGroups[Number(groupButton.dataset.graphGroupIndex)];
-        if (group !== undefined) {
-          activeGroup = activeGroup === group ? null : group;
-          root.querySelectorAll('[data-graph-group-index]').forEach((button) => {
-            button.setAttribute('aria-pressed', String(legendGroups[Number(button.dataset.graphGroupIndex)] === activeGroup));
-          });
-          applyGraphFilter();
-        }
-        return;
-      }
       if (e.target.closest('#notes3d-reset-view')) { graphInstance?.zoomToFit(700, 50); return; }
       if (e.target.closest('[data-review-load-more]')) { loadReviewQueue({ append: true }); return; }
       const graphNote = e.target.closest('[data-graph-note-id]');
@@ -576,7 +580,9 @@
       const chip = e.target.closest('[data-focus-title]');
       if (chip) { openByTitle(chip.dataset.focusTitle); return; }
     });
+    let graphLoadSequence = 0;
     async function loadGraph() {
+      const sequence = ++graphLoadSequence;
       const canvas = document.getElementById('notes3d-canvas');
       const resetView = document.getElementById('notes3d-reset-view');
       if (resetView) resetView.disabled = true;
@@ -591,11 +597,13 @@
         g = await api('/api/graph3d', { vault: vaultFilter && vaultFilter !== '*' ? vaultFilter : undefined });
       }
       catch (e) {
+        if (sequence !== graphLoadSequence) return;
         try { graphInstance?._destructor?.(); } catch {}
         graphInstance = null; loadedOk = false;
         canvas.innerHTML = `<p class="error-box">${esc(tr('notes3d.loadError', { error: e.message }))}</p><button type="button" data-notes3d-retry>${esc(tr('boot.retry'))}</button>`;
         return;
       }
+      if (sequence !== graphLoadSequence) return;
       // The health endpoint builds the full search index, and review suggestions can be slow on
       // large vaults. Neither should hold the 3D canvas behind a loading message.
       const refreshAuxiliary = () => {

@@ -2,6 +2,12 @@
 
 This log covers the development branch. Entries marked **unreleased** are not published product releases. See [release readiness](docs/RELEASE-READINESS.md) for the current evidence and remaining release gates.
 
+## 1.3.4 — Development, unreleased
+
+- Make 3D folder-color legend filters reliably clickable, clear old filters when changing vaults, and ignore delayed graph responses from a previously selected vault.
+- Encode spaces in Obsidian note links as `%20`, so vaults and note paths containing spaces open correctly.
+- Verification: JavaScript syntax, package JSON and `git diff --check` passed; Windows installer built and installed; installed CLI and `/health` report 1.3.4; the running UI serves the Help guide, direct legend click handler, vault-load guard and `%20` Obsidian URI encoding. Full test suites and browser-rendered visual QA were not run.
+
 ## 1.3.3 — Development, unreleased
 
 - Opening a note in the 3D map now reuses the lightweight graph index across requests and caches its relationship metadata, avoiding a full search-index rebuild for one note.
