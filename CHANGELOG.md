@@ -6,7 +6,7 @@ This log covers the development branch. Entries marked **unreleased** are not pu
 
 - Limited the 3D map's Browse notes result area to a scrollable panel so large vaults do not stretch the page indefinitely.
 - Opening a note from the 3D map now uses a spacious modal viewer with a close button, Escape-key support, and backdrop click to close.
-- Verification: JavaScript syntax checks and Windows installer build pending; automated test suites will not be run.
+- Verification: `ui/notes3d.js` syntax check passed and the Windows installer compiled. Installed BrainLink health check confirms Claude Code now exposes both Anna and John without reading vault notes. Automated test suites were not run; Claude Code still needs a full restart to load its updated tool list.
 
 ## 1.3.0 — Development, unreleased
 
