@@ -34,6 +34,7 @@ export function createMcp(ctx, { onCall = () => {}, onProposal = null } = {}) {
   const roleScopeStorage = new AsyncLocalStorage();
   const roleScopes = new Map();
   const roleScopeTtlMs = 8 * 60 * 60 * 1000;
+  let activeRoleScopeId = null;
   ctx = new Proxy(baseCtx, {
     get(target, property, receiver) {
       const scoped = roleScopeStorage.getStore();
@@ -41,10 +42,19 @@ export function createMcp(ctx, { onCall = () => {}, onProposal = null } = {}) {
         ? Reflect.get(scoped, property, scoped)
         : Reflect.get(target, property, receiver);
     },
+    set(target, property, value, receiver) {
+      const scoped = roleScopeStorage.getStore();
+      return scoped && Object.hasOwn(scoped, property)
+        ? Reflect.set(scoped, property, value, scoped)
+        : Reflect.set(target, property, value, receiver);
+    },
   });
   const { cfg } = ctx;
   const rsiEvidence = ctx.dataDir ? createRsiWeekly({ home: ctx.dataDir }) : null;
-  const connectorVaults = () => ctx.enabled.filter((v) => !ctx.byName.get(v).private || ctx.connectorPrivate);
+  // In a role-scoped call, enabled contains exactly the one vault granted to the active
+  // role. That explicit grant also authorizes compatibility search/fetch in private vaults.
+  // Legacy, unscoped connectors still need the separate private-vault opt-in.
+  const connectorVaults = () => ctx.enabled.filter((v) => ctx.twinScope?.mode === 'scoped' || !ctx.byName.get(v).private || ctx.connectorPrivate);
   // Agent activation is a role directory action. A profile can disable procedural memory
   // while still allowing the role and its explicitly granted vault to be selected. The
   // connectAgent handler separately filters each note by memory policy.
@@ -130,7 +140,7 @@ export function createMcp(ctx, { onCall = () => {}, onProposal = null } = {}) {
     ctx.twinScope?.mode === 'scoped'
       ? `TWIN PROFILE SCOPE: session reads ${scopedSessionRead ? 'are limited to records explicitly owned by this profile' : 'are unavailable'}; session closeout ${scopedSessionClose ? 'is available only as a private, approval-gated summary in a granted vault' : 'is unavailable'}; handoff read/send each require a separate explicit grant.`
       : 'SESSIONS: session_list / session_read cover imported Claude Code, Codex, DeepSeek Harness, and ended Hermes CLI history plus anything logged with session_log (for clients with no readable local history). Hermes import reads only ended CLI sessions from the selected HERMES_HOME state.db; messaging, open sessions, archived messages, tools, and reasoning are excluded. When the user ends work, call session_close for preview. You may omit the vault only when project is the exact project identifier; BrainLink then uses the previously saved destination for that exact project. Otherwise pass an explicit enabled vault or ask the user to choose. If folder is omitted, BrainLink uses a saved choice for that exact project or a strong same-vault match when semantic search is permitted; otherwise it uses the configured intake folder. The preview reports the destination and any suggestion. Use session_filing_folders only if the user wants to choose a different folder. Never guess a vault or claim an unverified summary is fact. Whether private imported sessions are visible to you is the user\'s own choice in BrainLink Settings.',
-    ...(ctx.twinScope?.mode === 'scoped' ? [`TWIN PROFILE SCOPE: this connection can activate roles from these assigned Twin profiles (${ctx.twinScope.profiles.map((profile) => `${profile.profile_name}: ${profile.grants.map((grant) => grant.name).join(', ')}`).join('; ')}). First call the exact agent activation tool. It returns a role_scope_id; include that value in every following tool call until you switch roles by activating another one. BrainLink restricts each role_scope_id to that role's own vault and Twin profile, and rejects calls without a valid role scope. If a requested role is unavailable, the AI app must be assigned to that role's Twin profile in BrainLink Setup. Notes can be saved only in a vault with the explicit write_note grant; confirm=true is required and existing notes are never overwritten. Session closeouts are private and stay with their destination profile; no raw transcript is copied.`] : []),
+    ...(ctx.twinScope?.mode === 'scoped' ? [`TWIN PROFILE SCOPE: this connection can activate roles from these assigned Twin profiles (${ctx.twinScope.profiles.map((profile) => `${profile.profile_name}: ${profile.grants.map((grant) => grant.name).join(', ')}`).join('; ')}). First activate the role the user requested. BrainLink keeps that role active for this connector session and automatically limits later tool calls to that role's own vault and Twin profile; do not add role_scope_id to ordinary calls. A role_scope_id is returned for clients that explicitly support it, but it is session-local and replaced when you switch roles. If a requested role is unavailable, the AI app must be assigned to that role's Twin profile in BrainLink Setup. Notes can be saved only in a vault with the explicit write_note grant; confirm=true is required and existing notes are never overwritten. Session closeouts are private and stay with their destination profile; no raw transcript is copied.`] : []),
     agents.length ? `AGENTS: ${agents.map((a) => `${a.name} (${a.vault}) — "${a.activation[0]}" → ${activationTools.get(a.name)} (direct tool; preferred) or agent_connect; "${a.close[0]}" → agent_close_loop`).join('; ')}.` : '',
     guideHasHandoff ? `INTER-AI: ${ctx.twinScope?.mode === 'scoped' ? `${scopedHandoffWrite ? 'send_handoff' : ''}${scopedHandoffWrite && scopedHandoffRead ? ' / ' : ''}${scopedHandoffRead ? 'list_handoffs' : ''}` : 'send_handoff / list_handoffs'} use the ${cfg.handoff.vault}/${cfg.handoff.folder} mailbox.` : '',
   ].filter(Boolean).join('\n');
@@ -390,10 +400,9 @@ export function createMcp(ctx, { onCall = () => {}, onProposal = null } = {}) {
       if (!tool.inputSchema || tool.name === 'brainlink_guide' || tool.name === 'agent_connect' || activationToolNames.has(tool.name)) continue;
       tool.inputSchema.properties = {
         ...(tool.inputSchema.properties || {}),
-        role_scope_id: { type: 'string', minLength: 32, maxLength: 64, description: 'Required capability returned when activating the role this call is for. It restricts this call to that role’s Twin profile and vault.' },
+        role_scope_id: { type: 'string', minLength: 32, maxLength: 64, description: 'Optional session-local capability returned when activating a role. Normally omit it; BrainLink uses the currently active role for this connection.' },
       };
-      tool.inputSchema.required = [...new Set([...(tool.inputSchema.required || []), 'role_scope_id'])];
-      tool.description = `${tool.description} Requires the role_scope_id returned when activating the role for this call; calls are limited to that role's assigned vault.`;
+      tool.description = `${tool.description} Uses the currently active BrainLink role and is limited to that role's assigned vault. Do not pass role_scope_id unless the connector explicitly requires it.`;
     }
   }
 
@@ -531,10 +540,12 @@ This prompt does not change permissions, write sources, or run unattended AI pro
               activation = { role, profile_id: callCtx.twinScope.profile_id, profile_name: callCtx.twinScope.profile_name };
             } else if (baseCtx.twinScope?.mode === 'scoped' && tool.name !== 'brainlink_guide') {
               const roleScopeId = String(suppliedArgs.role_scope_id || '');
-              const roleScope = roleScopes.get(roleScopeId);
+              const selectedScopeId = roleScopeId || activeRoleScopeId;
+              const roleScope = roleScopes.get(selectedScopeId);
               if (!roleScope || roleScope.expires_at <= Date.now()) {
-                roleScopes.delete(roleScopeId);
-                throw new Error('Activate Anna, John, or another configured role first, then include the returned role_scope_id in this call. The role scope may have expired.');
+                if (selectedScopeId) roleScopes.delete(selectedScopeId);
+                if (activeRoleScopeId === selectedScopeId) activeRoleScopeId = null;
+                throw new Error('Activate Anna, John, or another configured BrainLink role first. The active role applies automatically to later calls in this connection.');
               }
               callCtx = roleScope.ctx;
               callArgs = { ...suppliedArgs };
@@ -546,13 +557,13 @@ This prompt does not change permissions, write sources, or run unattended AI pro
             const retrievalStarted = performance.now();
             const out = await runScoped(() => tool.run(callArgs));
             if (activation && out && typeof out === 'object') {
-              const now = Date.now();
-              for (const [id, entry] of roleScopes) if (entry.expires_at <= now) roleScopes.delete(id);
+              roleScopes.clear();
               const roleScopeId = randomBytes(32).toString('base64url');
-              roleScopes.set(roleScopeId, { ctx: callCtx, expires_at: now + roleScopeTtlMs });
+              roleScopes.set(roleScopeId, { ctx: callCtx, expires_at: Date.now() + roleScopeTtlMs });
+              activeRoleScopeId = roleScopeId;
               out.role_scope_id = roleScopeId;
               out.active_role_scope = { agent: activation.role.name, vault: activation.role.vault, twin_profile: activation.profile_name, expires_in_hours: 8 };
-              out.instructions = `${out.instructions || ''}\nFor every following BrainLink tool call while acting as ${activation.role.name}, pass the returned role_scope_id. It limits the call to the ${activation.role.vault} vault. To change roles, activate the other role and use its new role_scope_id.`.trim();
+              out.instructions = `${out.instructions || ''}\n${activation.role.name} is now active for this BrainLink connection. Later calls automatically use only the ${activation.role.vault} vault. Do not pass role_scope_id; activate another role to switch.`.trim();
             }
             if (!ctx.trustedLocal && typeof onProposal === 'function'
               && ['propose_note', 'send_handoff', 'remember', 'append_daily', 'agent_close_loop'].includes(tool.name)
@@ -572,7 +583,7 @@ This prompt does not change permissions, write sources, or run unattended AI pro
               }
             }
             if (rsiEvidence && ctx.twinScope?.mode === 'scoped' && ['vault_search', 'context_packet'].includes(tool.name) && typeof out?.status === 'string') {
-              await rsiEvidence.recordRetrievalObservation({ profileId: twinProfileForVault(ctx, args.vault)?.profile_id || ctx.twinScope.profile_ids?.[0], tool: tool.name, status: out.status, durationMs: performance.now() - retrievalStarted }).catch(() => {});
+              await rsiEvidence.recordRetrievalObservation({ profileId: twinProfileForVault(ctx, callArgs.vault)?.profile_id || ctx.twinScope.profile_ids?.[0], tool: tool.name, status: out.status, durationMs: performance.now() - retrievalStarted }).catch(() => {});
             }
             const failed = out?.ok === false;
             const serialized = JSON.stringify(out, null, 1);

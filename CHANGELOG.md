@@ -2,6 +2,12 @@
 
 This log covers the development branch. Entries marked **unreleased** are not published product releases. See [release readiness](docs/RELEASE-READINESS.md) for the current evidence and remaining release gates.
 
+## 1.3.8 — Development, unreleased
+
+- Fixed role-scoped retrieval failures: RSI observations now use the active tool arguments, and role-scoped runtime state is written to the selected role context.
+- BrainLink now keeps the activated role for the connector session, so Claude clients do not need to resend a fragile `role_scope_id` on each read. Switching roles revokes the previous capability; search and fetch remain restricted to the active role's granted vault, including an explicitly authorized private vault.
+- Verification: regression test covers Anna search/fetch in the shared Brain vault, John search in the explicitly granted Ian Personal vault, and rejection of Anna's stale scope after switching. Full test suites and real Claude app reconnection remain outstanding.
+
 ## 1.3.7 — Development, unreleased
 
 - Shared-vault notes no longer inherit `private: true` from the legacy Twin `private_default` setting. Visibility follows the selected vault and the agent's explicit vault grant; existing notes marked private remain private.

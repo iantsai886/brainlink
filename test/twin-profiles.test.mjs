@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtemp, mkdir, readFile, readdir, writeFile, stat } from 'node:fs/promises';
+import { mkdtemp, mkdir, readFile, readdir, writeFile, stat, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { normalize, validate, saveConfig } from '../src/config.mjs';
@@ -441,6 +441,59 @@ test('profile-scoped agents see only granted vaults and only supported read tool
   const unassigned = createContext(cfg, { env: { BRAINLINK_AGENT_TOKEN: 'unknown-token' } });
   assert.deepEqual(unassigned.enabled, []);
   assert.equal(unassigned.twinScope.mode, 'unassigned');
+});
+
+test('active Anna and John scopes route search and fetch without caller-carried scope IDs', async (t) => {
+  const root = await mkdtemp(path.join(tmpdir(), 'brainlink-active-role-scope-'));
+  t.after(() => rm(root, { recursive: true, force: true }));
+  const orgPath = path.join(root, 'brain');
+  const personalPath = path.join(root, 'personal');
+  await mkdir(orgPath);
+  await mkdir(personalPath);
+  await writeFile(path.join(orgPath, 'Company note.md'), '# Brain note\n\nShared organisation information.\n');
+  await writeFile(path.join(personalPath, 'Personal note.md'), '# Private note\n\nJOHN_PRIVATE_SCOPE_CANARY.\n');
+  const cfg = fixture(orgPath);
+  cfg.vaults.push({ name: 'Ian Personal', path: personalPath, private: true, writes: 'proposal-only' });
+  cfg.twin_profiles.push({
+    id: 'personal_twin_2', name: 'Ian Personal Twin', mode: 'personal', owner: 'fictional-person',
+    vaults: [{ name: 'Ian Personal', access: 'read' }],
+    source_policy: { private_default: true, provenance_required: true, session_capture: 'metadata-only' },
+    memory_policy: { working: true, semantic: true, procedural: true, episodic: true },
+    allowed_actions: ['search', 'read_note'],
+    agent_access: [{ agent_id: 'agent_codex', vaults: [{ name: 'Ian Personal', access: 'read', operations: ['search', 'read_note'] }] }],
+  });
+  cfg.agents = [
+    { name: 'Anna', vault: 'Fictional Org', role: 'Company role', activation: ['Connect to Anna'], close: ['Anna close loop'], connect_notes: [], tail_notes: [], close_target: { mode: 'new-note', dir: 'Inbox' } },
+    { name: 'John', vault: 'Ian Personal', role: 'Private finance role', activation: ['Connect to John'], close: ['John close loop'], connect_notes: [], tail_notes: [], close_target: { mode: 'new-note', dir: 'Inbox' } },
+  ];
+  const env = { HOME: root, BRAINLINK_HOME: path.join(root, 'app'), BRAINLINK_AGENT_TOKEN: 'fictional-agent-token', BRAINLINK_AI_PLATFORM: 'Fictional Claude', BRAINLINK_SEMANTIC: '0' };
+  const mcp = createMcp(createContext(cfg, { env }));
+  const call = async (name, args = {}) => mcp.handle({ jsonrpc: '2.0', id: name, method: 'tools/call', params: { name, arguments: args } });
+  const listed = (await mcp.handle({ jsonrpc: '2.0', id: 0, method: 'tools/list' })).result.tools;
+  for (const name of ['vault_search', 'vault_read_note', 'search', 'fetch']) {
+    assert.ok(!listed.find((tool) => tool.name === name).inputSchema.required?.includes('role_scope_id'), `${name} does not force a brittle scope-ID argument`);
+  }
+
+  const anna = await call('agent_connect_anna');
+  assert.equal(anna.result.structuredContent.active_role_scope.vault, 'Fictional Org');
+  const annaSearch = await call('vault_search', { vault: 'Fictional Org', query: 'organisation information' });
+  assert.match(JSON.stringify(annaSearch), /Shared organisation information/);
+  const compatSearch = await call('search', { query: 'Shared organisation information' });
+  const results = compatSearch.result.structuredContent.results;
+  assert.equal(results.length, 1);
+  assert.match(results[0].id, /^Fictional Org::/);
+  const compatFetch = await call('fetch', { id: results[0].id });
+  assert.match(JSON.stringify(compatFetch), /Shared organisation information/);
+  assert.doesNotMatch(JSON.stringify(compatSearch), /JOHN_PRIVATE_SCOPE_CANARY/);
+
+  const john = await call('agent_connect_john');
+  assert.equal(john.result.structuredContent.active_role_scope.vault, 'Ian Personal');
+  const johnSearch = await call('search', { query: 'JOHN_PRIVATE_SCOPE_CANARY' });
+  assert.equal(johnSearch.result.structuredContent.results.length, 1, 'the explicitly granted active role can use connector-compatible search in its private vault');
+  assert.match(johnSearch.result.structuredContent.results[0].id, /^Ian Personal::/);
+  const staleAnnaScope = await call('vault_search', { vault: 'Fictional Org', query: 'Shared organisation information', role_scope_id: anna.result.structuredContent.role_scope_id });
+  assert.equal(staleAnnaScope.result.isError, true, 'switching roles revokes the previous role scope');
+  assert.doesNotMatch(JSON.stringify(staleAnnaScope), /Shared organisation information/);
 });
 
 test('profile-scoped agents can save only private session notes owned by their Twin', async () => {
