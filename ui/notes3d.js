@@ -88,16 +88,16 @@
         <div class="notes3d-vault-picker"><label for="notes3d-vault-select" data-i18n="notes3d.vaultFilter"></label><select id="notes3d-vault-select" aria-label="Choose a vault"></select></div>
         <div class="notes3d-controls"><button type="button" class="chip" id="notes3d-reset-view" data-i18n="notes3d.resetView" disabled>Reset view</button></div>
         <div class="notes3d-canvas" id="notes3d-canvas"></div>
-        <aside class="notes3d-panel" id="notes3d-panel-detail" hidden>
-          <div class="notes3d-actions"><a class="chip" id="notes3d-edit" target="_blank" rel="noopener" hidden></a><button class="chip" id="notes3d-edit-toggle" hidden>Edit</button><button class="link notes3d-close" id="notes3d-close" data-i18n="notes3d.close">Close ✕</button></div>
+      </div>
+      <dialog class="notes3d-dialog" id="notes3d-panel-detail" aria-labelledby="notes3d-title">
+          <div class="notes3d-actions"><a class="chip" id="notes3d-edit" target="_blank" rel="noopener" hidden></a><button class="chip" id="notes3d-edit-toggle" hidden>Edit</button><button type="button" class="chip notes3d-close" id="notes3d-close" data-i18n="notes3d.close" aria-label="Close note">✕</button></div>
           <b id="notes3d-title"></b>
           <div class="notes3d-tags" id="notes3d-tags"></div>
           <div class="notes3d-body" id="notes3d-body"></div>
           <textarea id="notes3d-editor" class="notes3d-editor" hidden aria-label="Edit note"></textarea>
           <div class="notes3d-actions" id="notes3d-editor-actions" hidden><button class="chip" id="notes3d-save">Save</button><button class="chip" id="notes3d-cancel">Cancel</button><span class="muted" id="notes3d-save-status"></span></div>
           <div class="notes3d-links" id="notes3d-links"></div>
-        </aside>
-      </div>`;
+      </dialog>`;
     root.insertAdjacentHTML('beforeend', `
       <details class="notes3d-browse">
         <summary data-i18n="notes3d.browseNotes"></summary>
@@ -146,7 +146,7 @@
     function openPanel(node) {
       const panel = document.getElementById('notes3d-panel-detail');
       if (!panel) return;
-      panel.hidden = false;
+      if (!panel.open) panel.showModal();
       document.getElementById('notes3d-title').textContent = node.title;
       document.getElementById('notes3d-tags').innerHTML = (node.tags || []).map((t) => `<span class="pill">#${esc(t)}</span>`).join('');
       document.getElementById('notes3d-body').innerHTML = '<p class="skeleton">Loading…</p>';
@@ -306,7 +306,7 @@
       if (e.target.id !== 'notes3d-vault-select') return;
       vaultFilter = e.target.value || '*';
       selectedId = null; currentDetail = null; currentNode = null;
-      document.getElementById('notes3d-panel-detail').hidden = true;
+      document.getElementById('notes3d-panel-detail').close();
       const suggestions = document.getElementById('notes3d-discover-list');
       suggestions._nextOffset = 0; suggestions._done = true; suggestions._candidates = []; suggestions._scanId = null; suggestions.innerHTML = '';
       document.getElementById('notes3d-discover-status').textContent = '';
@@ -500,15 +500,20 @@
         return;
       }
       if (e.target.id === 'notes3d-close') {
-        document.getElementById('notes3d-panel-detail').hidden = true;
-        selectedId = null;
-        graphInstance?.refresh();
+        document.getElementById('notes3d-panel-detail').close();
         return;
       }
+      if (e.target.id === 'notes3d-panel-detail') { e.target.close(); return; }
       const wiki = e.target.closest('[data-wikilink]');
       if (wiki) { e.preventDefault(); openByTitle(wiki.dataset.wikilink); return; }
       const chip = e.target.closest('[data-focus-title]');
       if (chip) { openByTitle(chip.dataset.focusTitle); return; }
+    });
+    document.getElementById('notes3d-panel-detail').addEventListener('close', () => {
+      selectedId = null;
+      currentDetail = null;
+      currentNode = null;
+      graphInstance?.refresh();
     });
 
     async function loadGraph() {
@@ -607,7 +612,7 @@
       if (!selected) return;
       const updated = nodesById.find((node) => node.vault === selected.vault && node.path === selected.path);
       if (updated) openById(updated.id);
-      else { document.getElementById('notes3d-panel-detail').hidden = true; currentNode = null; currentDetail = null; }
+      else document.getElementById('notes3d-panel-detail').close();
     }
     window.addEventListener('brainlink:vault-changed', () => { pendingVaultRefresh = false; refreshGraph(); });
 

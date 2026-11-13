@@ -2,6 +2,12 @@
 
 This log covers the development branch. Entries marked **unreleased** are not published product releases. See [release readiness](docs/RELEASE-READINESS.md) for the current evidence and remaining release gates.
 
+## 1.3.1 — Development, unreleased
+
+- Limited the 3D map's Browse notes result area to a scrollable panel so large vaults do not stretch the page indefinitely.
+- Opening a note from the 3D map now uses a spacious modal viewer with a close button, Escape-key support, and backdrop click to close.
+- Verification: JavaScript syntax checks and Windows installer build pending; automated test suites will not be run.
+
 ## 1.3.0 — Development, unreleased
 
 - One connected AI app can now be assigned to multiple Twin profiles at once. Setup shows each profile and its vault permissions separately; every tool call, write policy, memory policy, session record, and closeout is resolved using the selected vault's owning profile. Different profiles still cannot share note-reading access to the same vault. Existing single-profile requests remain supported.
