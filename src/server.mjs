@@ -32,7 +32,13 @@ export function createMcp(ctx, { onCall = () => {}, onProposal = null } = {}) {
   const { cfg } = ctx;
   const rsiEvidence = ctx.dataDir ? createRsiWeekly({ home: ctx.dataDir }) : null;
   const connectorVaults = ctx.enabled.filter((v) => !ctx.byName.get(v).private || ctx.connectorPrivate);
-  const agents = twinMemoryAllowed(ctx, 'procedural') ? ctx.agents : [];
+  // Agent activation is a role directory action. A profile can disable procedural memory
+  // while still allowing the role and its explicitly granted vault to be selected. The
+  // connectAgent handler separately filters each note by memory policy.
+  const agents = ctx.twinScope?.mode === 'scoped'
+    ? ctx.agents.filter((agent) => ctx.twinScope.grants.some((grant) => grant.name === agent.vault
+      && grant.operations.includes('read_note')))
+    : ctx.agents;
   const agentSlug = (agent) => agent.name.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '') || 'agent';
   const activationTools = new Map();
   for (const agent of agents) {

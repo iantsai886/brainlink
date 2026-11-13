@@ -115,7 +115,7 @@ export function twinSessionProfileIds(ctx) {
 // describes what each surface exposes; it does not change storage or require users to classify
 // every note. Unknown or undeclared types fail closed for scoped agents.
 const READ_TOOL_MEMORY = Object.freeze({
-  brainlink_guide: 'procedural', agent_connect: 'procedural',
+  brainlink_guide: 'procedural', agent_connect: 'semantic',
   vault_search: 'semantic', context_packet: 'semantic', vault_read_note: 'semantic', vault_related: 'semantic', search: 'semantic', fetch: 'semantic', propose_note: 'semantic',
   remember: 'semantic', append_daily: 'episodic', agent_close_loop: 'episodic',
   vault_recent: 'semantic', open_loops: 'semantic', brain_brief: 'semantic', vault_health: 'semantic',
@@ -217,8 +217,11 @@ export function twinToolAuthorization(ctx, name, args = {}) {
   if (permissionName === 'brainlink_guide') return ctx.enabled.length > 0 && twinMemoryAllowed(ctx, memoryType)
     ? { allowed: true }
     : { allowed: false, reason: 'This Twin profile has no enabled vault grants.' };
+  // Listing/activating a named role returns metadata plus only the notes allowed by
+  // its memory policy. Do not hide the role itself just because procedural memory
+  // is disabled; each returned note is still filtered in connectAgent.
   if (permissionName === 'agent_connect') return scope.grants.some((grant) => ctx.enabled.includes(grant.name)
-    && grantAllows(grant, action) && twinMemoryAllowed(ctx, memoryType, grant.name))
+    && grantAllows(grant, action))
     ? { allowed: true }
     : { allowed: false, reason: 'No assigned agent role is available under this Twin profile scope.' };
   if (HANDOFF_TOOLS.has(permissionName)) return handoffGrant(ctx, action)
@@ -267,7 +270,7 @@ export function twinToolListed(ctx, name) {
   if (!action) return false;
   if (permissionName === 'brainlink_guide') return ctx.enabled.length > 0 && twinMemoryAllowed(ctx, READ_TOOL_MEMORY[permissionName]);
   if (permissionName === 'agent_connect') return scope.grants.some((grant) => ctx.enabled.includes(grant.name)
-    && grantAllows(grant, action) && twinMemoryAllowed(ctx, READ_TOOL_MEMORY[permissionName], grant.name));
+    && grantAllows(grant, action));
   if (['session_list', 'session_read'].includes(permissionName)) return scope.profiles.some((profile) => profile.memory_policy?.episodic === true
     && profile.grants.some((grant) => grant.operations.includes('read_session')));
   if (permissionName === 'session_log') return scope.grants.some((grant) => grant.operations.includes(action)

@@ -2,6 +2,14 @@
 
 This log covers the development branch. Entries marked **unreleased** are not published product releases. See [release readiness](docs/RELEASE-READINESS.md) for the current evidence and remaining release gates.
 
+## 1.3.2 — Development, unreleased
+
+- Fixed 3D map startup: attach the note dialog's close handler only after building the dialog. Previously, initialization stopped before the 3D graph mounted.
+- Agent activation now remains available when procedural memory is disabled; each role's notes still follow the active vault and memory permissions.
+- Replaced the low-detail single-size Windows taskbar icon with a crisp multi-size BrainLink mark.
+- Added a scrollable 3D graph color key, and grouped Browse notes by their top two folder levels.
+- Verification: Windows installer built and installed; `/health` reports 1.3.2, packaged icon has seven sizes, graph API returned 2,000 nodes and 3,161 links, and Claude Code's registered token successfully activated both Anna and John with Brain and Ian Personal in scope. JavaScript syntax and `git diff --check` passed; full browser rendering and automated test suites were not run.
+
 ## 1.3.1 — Development, unreleased
 
 - Limited the 3D map's Browse notes result area to a scrollable panel so large vaults do not stretch the page indefinitely.

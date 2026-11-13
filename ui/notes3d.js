@@ -86,6 +86,7 @@
     root.innerHTML = `
       <div class="notes3d-wrap">
         <div class="notes3d-vault-picker"><label for="notes3d-vault-select" data-i18n="notes3d.vaultFilter"></label><select id="notes3d-vault-select" aria-label="Choose a vault"></select></div>
+        <div class="notes3d-legend" id="notes3d-legend" aria-label="Graph color legend"></div>
         <div class="notes3d-controls"><button type="button" class="chip" id="notes3d-reset-view" data-i18n="notes3d.resetView" disabled>Reset view</button></div>
         <div class="notes3d-canvas" id="notes3d-canvas"></div>
       </div>
@@ -231,7 +232,23 @@
       const matches = nodesById.filter((node) => !query || `${node.title} ${node.type || ''} ${node.group || ''}`.toLocaleLowerCase().includes(query))
         .sort((a, b) => a.title.localeCompare(b.title));
       const visible = matches.slice(0, 50);
-      list.innerHTML = visible.map((node) => `<div role="listitem"><button type="button" class="notes3d-node" data-graph-note-id="${esc(node.id)}" aria-pressed="${node.id === selectedId ? 'true' : 'false'}"><span>${esc(node.title)}</span><small>${esc(node.type || node.group || '')}</small></button></div>`).join('');
+      const groupColor = (group) => {
+        const counts = new Map();
+        for (const node of nodesById) counts.set(node.group, (counts.get(node.group) || 0) + 1);
+        const ranked = [...counts.entries()].sort((a, b) => b[1] - a[1]).map(([name]) => name);
+        const rank = ranked.indexOf(group);
+        const vars = ['c1', 'c2', 'c3', 'c4', 'c5', 'c6', 'c7', 'c8'];
+        const css = getComputedStyle(document.documentElement);
+        return rank >= 0 && rank < vars.length ? css.getPropertyValue(`--${vars[rank]}`).trim() : css.getPropertyValue('--muted').trim();
+      };
+      const folders = new Map();
+      for (const node of visible) {
+        const parts = String(node.path || '').split('/').filter(Boolean);
+        const folder = parts.length > 1 ? `${parts[0]}/${parts[1]}` : (parts[0] || 'Root notes');
+        if (!folders.has(folder)) folders.set(folder, []);
+        folders.get(folder).push(node);
+      }
+      list.innerHTML = [...folders.entries()].map(([folder, nodes]) => `<section class="notes3d-folder-group" role="group" aria-label="${esc(folder)}"><h4><i style="--legend-color:${esc(groupColor(nodes[0].group))}"></i><span title="${esc(folder)}">${esc(folder)}</span><small>${nodes.length}</small></h4><div>${nodes.map((node) => `<div role="listitem"><button type="button" class="notes3d-node" data-graph-note-id="${esc(node.id)}" aria-pressed="${node.id === selectedId ? 'true' : 'false'}"><span>${esc(node.title)}</span><small>${esc(node.type || node.group || '')}</small></button></div>`).join('')}</div></section>`).join('');
       status.textContent = matches.length > 50 ? tr('notes3d.browseMore', { count: matches.length, limit: 50 }) : tr('notes3d.browseCount', { count: matches.length });
       if (query && !matches.length) status.textContent = tr('notes3d.browseEmpty');
     }
@@ -509,13 +526,6 @@
       const chip = e.target.closest('[data-focus-title]');
       if (chip) { openByTitle(chip.dataset.focusTitle); return; }
     });
-    document.getElementById('notes3d-panel-detail').addEventListener('close', () => {
-      selectedId = null;
-      currentDetail = null;
-      currentNode = null;
-      graphInstance?.refresh();
-    });
-
     async function loadGraph() {
       const canvas = document.getElementById('notes3d-canvas');
       const resetView = document.getElementById('notes3d-reset-view');
@@ -575,6 +585,11 @@
       const ranked = [...counts.entries()].sort((a, b) => b[1] - a[1]).map(([k]) => k);
       const colorOf = (grp) => { const r = ranked.indexOf(grp); return r >= 0 && r < 8 ? css.getPropertyValue(`--${colorVars[r]}`).trim() : css.getPropertyValue('--muted').trim(); };
       const selectedColor = css.getPropertyValue('--accent').trim() || css.getPropertyValue('--ink').trim() || '#fff';
+      const legend = document.getElementById('notes3d-legend');
+      if (legend) legend.innerHTML = ranked.slice(0, 8).map((group) => {
+        const label = group || (window.brainlinkT?.('notes3d.ungrouped') || 'No folder');
+        return `<span class="notes3d-legend-item"><i style="--legend-color:${esc(colorOf(group))}"></i><span title="${esc(label)}">${esc(label)}</span></span>`;
+      }).join('') + (ranked.length > 8 ? `<span class="notes3d-legend-more">+${ranked.length - 8}</span>` : '');
       // nodeLabel is rendered as the hover tooltip's innerHTML (3d-force-graph's documented
       // behavior), so a note title must be escaped the same way any other note-derived text going
       // into innerHTML is (see renderInline/renderMarkdown above) — otherwise a crafted title could
@@ -638,6 +653,12 @@
     }
 
     buildLayout(root);
+    document.getElementById('notes3d-panel-detail').addEventListener('close', () => {
+      selectedId = null;
+      currentDetail = null;
+      currentNode = null;
+      graphInstance?.refresh();
+    });
     const ro = new ResizeObserver(resizeToContainer);
     ro.observe(root);
 
