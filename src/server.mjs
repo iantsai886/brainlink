@@ -2,8 +2,9 @@
 // Any MCP client learns the read/write rules from `instructions`, the brainlink_guide tool,
 // resources and prompts.
 import { createServer as createHttpServer } from 'node:http';
+import { AsyncLocalStorage } from 'node:async_hooks';
 import { createRequire } from 'node:module';
-import { timingSafeEqual } from 'node:crypto';
+import { randomBytes, timingSafeEqual } from 'node:crypto';
 import { compactSearchResponse } from './search-projection.mjs';
 import { buildContextPacket } from './context-packet.mjs';
 import { search, searchWithVerdict, readNote, related, semanticStatus } from './core.mjs';
@@ -29,9 +30,21 @@ const RO = { readOnlyHint: true, destructiveHint: false, idempotentHint: true, o
 const WR = { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: false };
 const obsidianUrl = (v, p) => `obsidian://open?vault=${encodeURIComponent(v)}&file=${encodeURIComponent(p.replace(/\.md$/, ''))}`;
 export function createMcp(ctx, { onCall = () => {}, onProposal = null } = {}) {
+  const baseCtx = ctx;
+  const roleScopeStorage = new AsyncLocalStorage();
+  const roleScopes = new Map();
+  const roleScopeTtlMs = 8 * 60 * 60 * 1000;
+  ctx = new Proxy(baseCtx, {
+    get(target, property, receiver) {
+      const scoped = roleScopeStorage.getStore();
+      return scoped && Object.hasOwn(scoped, property)
+        ? Reflect.get(scoped, property, scoped)
+        : Reflect.get(target, property, receiver);
+    },
+  });
   const { cfg } = ctx;
   const rsiEvidence = ctx.dataDir ? createRsiWeekly({ home: ctx.dataDir }) : null;
-  const connectorVaults = ctx.enabled.filter((v) => !ctx.byName.get(v).private || ctx.connectorPrivate);
+  const connectorVaults = () => ctx.enabled.filter((v) => !ctx.byName.get(v).private || ctx.connectorPrivate);
   // Agent activation is a role directory action. A profile can disable procedural memory
   // while still allowing the role and its explicitly granted vault to be selected. The
   // connectAgent handler separately filters each note by memory policy.
@@ -47,6 +60,38 @@ export function createMcp(ctx, { onCall = () => {}, onProposal = null } = {}) {
     while ([...activationTools.values()].includes(name)) name = `${base.slice(0, 56)}_${suffix++}`;
     activationTools.set(agent.name, name);
   }
+  const activationToolNames = new Set(activationTools.values());
+  const activationRole = (toolName, args = {}) => {
+    const requested = toolName === 'agent_connect' ? String(args.agent || '').trim()
+      : [...activationTools].find(([, name]) => name === toolName)?.[0];
+    if (!requested) return null;
+    const norm = (value) => String(value || '').trim().toLowerCase().replace(/[，,。.!！]+$/u, '').replace(/\s+/g, ' ');
+    const target = norm(requested);
+    return baseCtx.cfg.agents.find((agent) => norm(agent.name) === target
+      || [...(agent.activation || [])].some((phrase) => norm(phrase) === target)) || null;
+  };
+  const scopedContextForRole = (role) => {
+    if (!baseCtx.enabled.includes(role.vault)) return null;
+    const matches = (baseCtx.twinScope?.profiles || []).flatMap((profile) => {
+      const grant = profile.grants.find((item) => item.name === role.vault && item.operations.includes('read_note'));
+      return grant ? [{ profile, grant }] : [];
+    });
+    if (matches.length !== 1) return null;
+    const { profile, grant } = matches[0];
+    const selectedGrant = { ...grant, memory_policy: { ...grant.memory_policy } };
+    const selectedProfile = { ...profile, grants: [selectedGrant], memory_policy: { ...profile.memory_policy } };
+    return {
+      ...baseCtx,
+      enabled: [role.vault],
+      agents: [role],
+      agentRole: role.name,
+      twinScope: {
+        mode: 'scoped', profile_id: profile.profile_id, profile_name: profile.profile_name,
+        profile_ids: [profile.profile_id], profiles: [selectedProfile], grants: [selectedGrant],
+        source_policy: { ...profile.source_policy }, memory_policy: { ...profile.memory_policy },
+      },
+    };
+  };
   const hasHandoff = Boolean(cfg.handoff && ctx.enabled.includes(cfg.handoff.vault));
   const scopedSessionRead = ctx.twinScope?.mode === 'scoped' && twinToolListed(ctx, 'session_list');
   const scopedSessionReview = scopedSessionRead && twinToolListed(ctx, 'session_read');
@@ -85,7 +130,7 @@ export function createMcp(ctx, { onCall = () => {}, onProposal = null } = {}) {
     ctx.twinScope?.mode === 'scoped'
       ? `TWIN PROFILE SCOPE: session reads ${scopedSessionRead ? 'are limited to records explicitly owned by this profile' : 'are unavailable'}; session closeout ${scopedSessionClose ? 'is available only as a private, approval-gated summary in a granted vault' : 'is unavailable'}; handoff read/send each require a separate explicit grant.`
       : 'SESSIONS: session_list / session_read cover imported Claude Code, Codex, DeepSeek Harness, and ended Hermes CLI history plus anything logged with session_log (for clients with no readable local history). Hermes import reads only ended CLI sessions from the selected HERMES_HOME state.db; messaging, open sessions, archived messages, tools, and reasoning are excluded. When the user ends work, call session_close for preview. You may omit the vault only when project is the exact project identifier; BrainLink then uses the previously saved destination for that exact project. Otherwise pass an explicit enabled vault or ask the user to choose. If folder is omitted, BrainLink uses a saved choice for that exact project or a strong same-vault match when semantic search is permitted; otherwise it uses the configured intake folder. The preview reports the destination and any suggestion. Use session_filing_folders only if the user wants to choose a different folder. Never guess a vault or claim an unverified summary is fact. Whether private imported sessions are visible to you is the user\'s own choice in BrainLink Settings.',
-    ...(ctx.twinScope?.mode === 'scoped' ? [`TWIN PROFILE SCOPE: this connection has separate Twin profiles (${ctx.twinScope.profiles.map((profile) => `${profile.profile_name}: ${profile.grants.map((grant) => grant.name).join(', ')}`).join('; ')}). Each tool call is restricted to the profile assigned to its selected vault. Notes can be saved only in a vault with the explicit write_note grant; confirm=true is required and existing notes are never overwritten. Without write_note, propose_note returns a preview. Session closeouts are private and stay with their destination profile; no raw transcript is copied.`] : []),
+    ...(ctx.twinScope?.mode === 'scoped' ? [`TWIN PROFILE SCOPE: this connection can activate roles from these assigned Twin profiles (${ctx.twinScope.profiles.map((profile) => `${profile.profile_name}: ${profile.grants.map((grant) => grant.name).join(', ')}`).join('; ')}). First call the exact agent activation tool. It returns a role_scope_id; include that value in every following tool call until you switch roles by activating another one. BrainLink restricts each role_scope_id to that role's own vault and Twin profile, and rejects calls without a valid role scope. If a requested role is unavailable, the AI app must be assigned to that role's Twin profile in BrainLink Setup. Notes can be saved only in a vault with the explicit write_note grant; confirm=true is required and existing notes are never overwritten. Session closeouts are private and stay with their destination profile; no raw transcript is copied.`] : []),
     agents.length ? `AGENTS: ${agents.map((a) => `${a.name} (${a.vault}) — "${a.activation[0]}" → ${activationTools.get(a.name)} (direct tool; preferred) or agent_connect; "${a.close[0]}" → agent_close_loop`).join('; ')}.` : '',
     guideHasHandoff ? `INTER-AI: ${ctx.twinScope?.mode === 'scoped' ? `${scopedHandoffWrite ? 'send_handoff' : ''}${scopedHandoffWrite && scopedHandoffRead ? ' / ' : ''}${scopedHandoffRead ? 'list_handoffs' : ''}` : 'send_handoff / list_handoffs'} use the ${cfg.handoff.vault}/${cfg.handoff.folder} mailbox.` : '',
   ].filter(Boolean).join('\n');
@@ -323,11 +368,11 @@ export function createMcp(ctx, { onCall = () => {}, onProposal = null } = {}) {
     ] : []),
     // ChatGPT connector / deep-research compatibility: id = "vault::path".
     { name: 'search', title: 'Search (connector-compatible)', annotations: RO,
-      description: `Search ${connectorVaults.join(', ') || 'no public vaults'}. Returns {results:[{id,title,url}]}; pass an id to fetch. Private vaults are excluded unless BRAINLINK_CONNECTOR_PRIVATE=1.`,
+      description: `Search ${connectorVaults().join(', ') || 'no public vaults'}. Returns {results:[{id,title,url}]}; pass an id to fetch. Private vaults are excluded unless BRAINLINK_CONNECTOR_PRIVATE=1.`,
       inputSchema: { type: 'object', properties: { query: { type: 'string' } }, required: ['query'] },
       run: async (a) => {
         const results = [];
-        for (const v of connectorVaults) for (const r of await search(ctx, v, a.query, 5)) results.push({ id: `${v}::${r.path}`, title: `${r.title} (${v})`, url: obsidianUrl(v, r.path), _score: r.score });
+        for (const v of connectorVaults()) for (const r of await search(ctx, v, a.query, 5)) results.push({ id: `${v}::${r.path}`, title: `${r.title} (${v})`, url: obsidianUrl(v, r.path), _score: r.score });
         return { results: results.sort((x, y) => y._score - x._score).slice(0, 10).map(({ _score, ...r }) => r) };
       } },
     { name: 'fetch', title: 'Fetch (connector-compatible)', annotations: RO,
@@ -335,21 +380,38 @@ export function createMcp(ctx, { onCall = () => {}, onProposal = null } = {}) {
       inputSchema: { type: 'object', properties: { id: { type: 'string' } }, required: ['id'] },
       run: async (a) => {
         const [v, p] = String(a.id).split('::');
-        if (!connectorVaults.includes(v)) throw new Error(`fetch is limited to ${connectorVaults.join(', ')}; use vault_read_note`);
+        if (!connectorVaults().includes(v)) throw new Error(`fetch is limited to ${connectorVaults().join(', ')}; use vault_read_note`);
         const n = await readNote(ctx, v, p);
         return { id: a.id, title: p.replace(/\.md$/, ''), text: n.body, url: obsidianUrl(v, p), metadata: n.meta };
       } },
   ].filter((t) => !(ctx.readOnly && t.annotations === WR));
 
+  if (ctx.twinScope?.mode === 'scoped') {
+    for (const tool of tools) {
+      if (!tool.inputSchema || tool.name === 'brainlink_guide' || tool.name === 'agent_connect' || activationToolNames.has(tool.name)) continue;
+      tool.inputSchema.properties = {
+        ...(tool.inputSchema.properties || {}),
+        role_scope_id: { type: 'string', minLength: 32, maxLength: 64, description: 'Required capability returned when activating the role this call is for. It restricts this call to that role’s Twin profile and vault.' },
+      };
+      tool.inputSchema.required = [...new Set([...(tool.inputSchema.required || []), 'role_scope_id'])];
+      tool.description = `${tool.description} Requires the role_scope_id returned when activating the role for this call; calls are limited to that role's assigned vault.`;
+    }
+  }
+
   const resources = async () => {
     if (!twinMemoryAllowed(ctx, 'procedural')) return [];
     const out = [{ uri: 'brainlink://guide', name: 'BrainLink guide', mimeType: 'application/json', description: 'Vaults, agents, identity and write rules' }];
+    // Resource requests do not carry tool arguments, so they cannot carry the per-role
+    // capability. Scoped clients get only the generic guide here; role notes are loaded by
+    // agent_connect under the selected role scope.
+    if (baseCtx.twinScope?.mode === 'scoped') return out;
     for (const v of ctx.enabled) for (const f of await visibleRules(v)) out.push({ uri: `brainlink://vault/${encodeURIComponent(v)}/${encodeURIComponent(f)}`, name: `${v}: ${f}`, mimeType: 'text/markdown' });
     return out;
   };
   const readResource = async (uri) => {
     if (!twinMemoryAllowed(ctx, 'procedural')) throw new Error('Twin profile policy does not allow procedural memory access.');
     if (uri === 'brainlink://guide') return { uri, mimeType: 'application/json', text: JSON.stringify(await safeGuide(), null, 1) };
+    if (baseCtx.twinScope?.mode === 'scoped') throw new Error('Role-specific vault notes are loaded through the selected agent activation, not generic resources.');
     const m = String(uri).match(/^brainlink:\/\/vault\/([^/]+)\/(.+)$/);
     if (!m) throw new Error(`Unknown resource ${uri}`);
     const v = decodeURIComponent(m[1]), f = decodeURIComponent(m[2]);
@@ -454,11 +516,45 @@ This prompt does not change permissions, write sources, or run unattended AI pro
           const tool = tools.find((t) => t.name === params?.name);
           if (!tool) return err(-32602, `Unknown tool ${params?.name}`);
           try {
-            const args = params.arguments || {};
-            const authorization = twinToolAuthorization(ctx, tool.name, args);
+            const suppliedArgs = params.arguments || {};
+            const isActivation = baseCtx.twinScope?.mode === 'scoped'
+              && (tool.name === 'agent_connect' || activationToolNames.has(tool.name));
+            let callArgs = suppliedArgs;
+            let callCtx = baseCtx;
+            let activation = null;
+            if (isActivation) {
+              const role = activationRole(tool.name, suppliedArgs);
+              if (!role) throw new Error('That agent role is not configured in BrainLink.');
+              callCtx = scopedContextForRole(role);
+              if (!callCtx) throw new Error(`${role.name}'s vault (${role.vault}) is not enabled and granted to this AI connection. Connect this AI app to that role's Twin profile and grant note-reading access in BrainLink Setup.`);
+              const activationAuthorization = await roleScopeStorage.run(callCtx, () => twinToolAuthorization(ctx, tool.name, suppliedArgs));
+              if (!activationAuthorization.allowed) throw new Error(activationAuthorization.reason);
+              activation = { role, profile_id: callCtx.twinScope.profile_id, profile_name: callCtx.twinScope.profile_name };
+            } else if (baseCtx.twinScope?.mode === 'scoped' && tool.name !== 'brainlink_guide') {
+              const roleScopeId = String(suppliedArgs.role_scope_id || '');
+              const roleScope = roleScopes.get(roleScopeId);
+              if (!roleScope || roleScope.expires_at <= Date.now()) {
+                roleScopes.delete(roleScopeId);
+                throw new Error('Activate Anna, John, or another configured role first, then include the returned role_scope_id in this call. The role scope may have expired.');
+              }
+              callCtx = roleScope.ctx;
+              callArgs = { ...suppliedArgs };
+              delete callArgs.role_scope_id;
+            }
+            const runScoped = (fn) => callCtx === baseCtx ? fn() : roleScopeStorage.run(callCtx, fn);
+            const authorization = await runScoped(() => twinToolAuthorization(ctx, tool.name, callArgs));
             if (!authorization.allowed) throw new Error(authorization.reason);
             const retrievalStarted = performance.now();
-            const out = await tool.run(args);
+            const out = await runScoped(() => tool.run(callArgs));
+            if (activation && out && typeof out === 'object') {
+              const now = Date.now();
+              for (const [id, entry] of roleScopes) if (entry.expires_at <= now) roleScopes.delete(id);
+              const roleScopeId = randomBytes(32).toString('base64url');
+              roleScopes.set(roleScopeId, { ctx: callCtx, expires_at: now + roleScopeTtlMs });
+              out.role_scope_id = roleScopeId;
+              out.active_role_scope = { agent: activation.role.name, vault: activation.role.vault, twin_profile: activation.profile_name, expires_in_hours: 8 };
+              out.instructions = `${out.instructions || ''}\nFor every following BrainLink tool call while acting as ${activation.role.name}, pass the returned role_scope_id. It limits the call to the ${activation.role.vault} vault. To change roles, activate the other role and use its new role_scope_id.`.trim();
+            }
             if (!ctx.trustedLocal && typeof onProposal === 'function'
               && ['propose_note', 'send_handoff', 'remember', 'append_daily', 'agent_close_loop'].includes(tool.name)
               && out?.written === false && typeof out.preview === 'string' && typeof out.path === 'string') {

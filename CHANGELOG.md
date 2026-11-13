@@ -2,6 +2,13 @@
 
 This log covers the development branch. Entries marked **unreleased** are not published product releases. See [release readiness](docs/RELEASE-READINESS.md) for the current evidence and remaining release gates.
 
+## 1.3.6 — Development, unreleased
+
+- Role activation now issues an expiring scope for that role's own Twin profile and vault. Profile-scoped tool calls require the returned `role_scope_id`; cross-role vault calls are denied, and activating Anna or John switches the scope without changing permissions manually.
+- Scoped MCP resources expose only the generic guide because resource reads cannot carry a role scope. Agent activation still loads the selected role's approved notes.
+- BrainLink Setup must assign the AI client to each Twin profile it needs to use, and the role's vault grant must include the specific read or write operation.
+- Verification: not run. Full test suites and external AI-client session switching remain unverified.
+
 ## 1.3.5 — Development, unreleased
 
 - Reset view now sits above the 3D graph and responds directly; it clears an active color filter and fits the full graph back into view.

@@ -231,11 +231,19 @@ export function twinToolAuthorization(ctx, name, args = {}) {
   if (permissionName === 'agent_connect') {
     const role = ctx.agents.find((item) => item.name === args.agent || item.activation?.includes(args.agent));
     agentVault = role?.vault || null;
+  } else if (permissionName === 'agent_close_loop') {
+    const requested = String(args.agent || '').trim().toLowerCase();
+    const role = ctx.agents.find((item) => item.name.toLowerCase() === requested
+      || item.activation?.some((phrase) => phrase.trim().toLowerCase() === requested));
+    agentVault = role?.vault || null;
+    if (!agentVault) return { allowed: false, reason: 'Close-loop role is not the role activated for this call.' };
   }
   const savedSessionVault = name === 'session_close' && !args.vault
     ? recommendSessionVault({ project: args.project }, ctx.cfg).vault
     : null;
-  const targetVault = args.vault || agentVault || savedSessionVault || (permissionName === 'fetch' ? String(args.id || '').split('::')[0] : null);
+  const targetVault = permissionName === 'agent_close_loop'
+    ? agentVault
+    : args.vault || agentVault || savedSessionVault || (permissionName === 'fetch' ? String(args.id || '').split('::')[0] : null);
   if (targetVault) {
     const grant = scope.grants.find((item) => item.name === targetVault);
     const captureAllowed = !['session_log', 'session_close'].includes(permissionName) || grant?.source_policy?.session_capture !== 'metadata-only';
