@@ -58,9 +58,15 @@ test('macOS pkg CLI link refuses to replace unrelated files or symlinks', { skip
 
 test('macOS pkg builder installs the safe CLI-link helper and postinstall never force-replaces a command', async () => {
   const builder = await readFile(path.join(ROOT, 'packaging', 'macos', 'build-pkg.sh'), 'utf8');
+  const appHost = await readFile(path.join(ROOT, 'packaging', 'macos', 'BrainLinkApp.swift'), 'utf8');
   const postinstall = await readFile(path.join(ROOT, 'packaging', 'macos', 'scripts', 'postinstall'), 'utf8');
   assert.match(builder, /scripts\/install-cli-link/);
   assert.match(builder, /chmod 755 "\$APP\/Contents\/Resources\/bin\/install-cli-link"/);
+  assert.match(builder, /swiftc .*BrainLinkApp\.swift/);
+  assert.match(builder, /lipo -create "\$WORK\/BrainLink-arm64" "\$WORK\/BrainLink-x86_64"/);
+  assert.match(appHost, /setActivationPolicy\(\.regular\)/);
+  assert.match(appHost, /runJavaScriptConfirmPanelWithMessage/);
+  assert.match(appHost, /applicationShouldHandleReopen/);
   assert.match(postinstall, /Resources\/bin\/install-cli-link/);
   assert.doesNotMatch(postinstall, /ln\s+-sf/);
 });

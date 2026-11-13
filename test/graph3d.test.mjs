@@ -247,6 +247,28 @@ test('/api/graph3d and /api/graph3d/note: same exclusion guarantee over HTTP', a
   } finally { s.server.close(); }
 });
 
+test('/api/graph3d/note builds an Obsidian URI for a BrainLink subfolder inside a registered vault', async () => {
+  const home = await tmp('graph3d-obsidian-home');
+  const obsidianRoot = path.join(home, 'Obsidian Vault');
+  const brainlinkRoot = path.join(obsidianRoot, '20 Iango');
+  await mkdir(path.join(obsidianRoot, '.obsidian'), { recursive: true });
+  await mkdir(brainlinkRoot, { recursive: true });
+  await writeFile(path.join(brainlinkRoot, 'Target Note.md'), '# Target\n');
+  const obsidianConfig = path.join(home, '.config', 'obsidian', 'obsidian.json');
+  await mkdir(path.dirname(obsidianConfig), { recursive: true });
+  await writeFile(obsidianConfig, JSON.stringify({ vaults: { 'stable-vault-id': { path: obsidianRoot, open: true } } }));
+  const env = { BRAINLINK_HOME: path.join(home, 'app'), BRAINLINK_SEMANTIC: '0' };
+  const s = await startSetup({ env, home, os: 'linux', port: 0, useCli: false });
+  const api = (p, body) => fetch(`http://127.0.0.1:${s.port}${p}`, { method: 'POST', headers: { 'X-BrainLink-Token': s.token, 'Content-Type': 'application/json' }, body: JSON.stringify(body || {}) }).then((r) => r.json());
+  try {
+    const added = await api('/api/vault', { path: brainlinkRoot, name: 'Company', pack: 'simple', scaffold: false });
+    assert.equal(added.ok, true, JSON.stringify(added));
+    const detail = await api('/api/graph3d/note', { vault: 'Company', path: 'Target Note.md' });
+    assert.equal(detail.obsidian_registered, true);
+    assert.equal(detail.obsidian_url, 'obsidian://open?vault=stable-vault-id&file=20%20Iango%2FTarget%20Note');
+  } finally { await s.server.close(); }
+});
+
 test('/api/graph3d/entity/save edits only the selected public note, checks unique IDs, and preserves its body', async () => {
   const home = await tmp('graph3d-entity-home');
   const vaultPath = await buildVault(path.join(home, 'vault'));

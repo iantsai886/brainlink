@@ -22,7 +22,7 @@ import { vaultHealth, brief as createBrief } from './insights.mjs';
 import { loadVault } from './core.mjs';
 import { resolveNoteWikilinks } from './links.mjs';
 import { VERSION, createMcp } from './server.mjs';
-import { findObsidianVaults, nestedVaults } from './obsidian.mjs';
+import { findObsidianVaults, nestedVaults, obsidianOpenUrl, obsidianVaultForPath } from './obsidian.mjs';
 import { syncSettings, chooseSync, suggestFolders, PROVIDERS, PROVIDER_LABELS } from './sync/settings.mjs';
 import { linuxDriveSetup, normalizeDriveSelection } from './sync/gdrive-linux.mjs';
 import { backupScheduleDue, normalizeBackupSchedule } from './backup-schedule.mjs';
@@ -2194,8 +2194,9 @@ export async function startSetup(opts = {}) {
       const detail = await noteDetail3D(ctx, b.vault, String(b.path || ''), { includePrivateVault });
       const raw = await readFile(safeJoin(vaultRoot(ctx, b.vault), detail.path), 'utf8');
       const vaultPath = path.resolve(ctx.byName.get(b.vault).path);
-      const obsidianRegistered = (await findObsidianVaults({ home, os, env })).some((item) => path.resolve(item.path) === vaultPath);
-      return { ...detail, etag: createHash('sha256').update(raw).digest('hex'), writable: !ctx.readOnly && ctx.byName.get(b.vault).writes === 'on', obsidian_registered: obsidianRegistered };
+      const obsidianVault = obsidianVaultForPath(vaultPath, await findObsidianVaults({ home, os, env }));
+      const obsidian_url = obsidianVault ? obsidianOpenUrl(obsidianVault, detail.path, vaultPath) : null;
+      return { ...detail, etag: createHash('sha256').update(raw).digest('hex'), writable: !ctx.readOnly && ctx.byName.get(b.vault).writes === 'on', obsidian_registered: Boolean(obsidian_url), obsidian_url };
     },
     'POST /api/graph3d/note/preview': async (b) => {
       const cfg = await loadConfig(file);

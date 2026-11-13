@@ -54,13 +54,7 @@ SELF="$0"; while [ -L "$SELF" ]; do T="$(readlink "$SELF")"; case "$T" in /*) SE
 RES="$(cd "$(dirname "$SELF")/.." && pwd)"
 exec "$RES/node/bin/node" "$RES/app/bin/brainlink.mjs" "$@"
 SH
-cat > "$APP/Contents/MacOS/BrainLink" <<'SH'
-#!/bin/bash
-# Finder launch: open Setup in the browser; it closes itself after 30 idle minutes or on Done.
-RES="$(cd "$(dirname "$0")/../Resources" && pwd)"
-exec "$RES/node/bin/node" "$RES/app/bin/brainlink.mjs" setup --app
-SH
-chmod +x "$APP/Contents/Resources/bin/brainlink" "$APP/Contents/MacOS/BrainLink"
+chmod +x "$APP/Contents/Resources/bin/brainlink"
 cp "$HERE/scripts/install-cli-link" "$APP/Contents/Resources/bin/install-cli-link"
 chmod 755 "$APP/Contents/Resources/bin/install-cli-link"
 
@@ -78,12 +72,19 @@ cat > "$APP/Contents/Info.plist" <<PLIST
   <key>CFBundleIconFile</key><string>BrainLink</string>
   <key>CFBundlePackageType</key><string>APPL</string>
   <key>LSMinimumSystemVersion</key><string>11.0</string>
-  <key>LSUIElement</key><true/>
+  <key>NSHighResolutionCapable</key><true/>
   <key>LSApplicationCategoryType</key><string>public.app-category.productivity</string>
   <key>NSHumanReadableCopyright</key><string>© $(date +%Y) Iango. All rights reserved.</string>
 </dict>
 </plist>
 PLIST
+
+# 2b. A native AppKit + WebKit host keeps one responsive BrainLink window in the Dock.
+SDK="$(xcrun --sdk macosx --show-sdk-path)"
+swiftc -O -parse-as-library -target arm64-apple-macos11.0 -sdk "$SDK" -framework AppKit -framework WebKit -framework Foundation "$HERE/BrainLinkApp.swift" -o "$WORK/BrainLink-arm64"
+swiftc -O -parse-as-library -target x86_64-apple-macos11.0 -sdk "$SDK" -framework AppKit -framework WebKit -framework Foundation "$HERE/BrainLinkApp.swift" -o "$WORK/BrainLink-x86_64"
+lipo -create "$WORK/BrainLink-arm64" "$WORK/BrainLink-x86_64" -output "$APP/Contents/MacOS/BrainLink"
+chmod 755 "$APP/Contents/MacOS/BrainLink"
 
 # 3. Code signing (hardened runtime for notarisation; ad-hoc otherwise).
 if [ -n "${DEVELOPER_ID_APP:-}" ]; then
@@ -97,7 +98,7 @@ codesign --verify --strict "$APP"
 
 # 4. Installer: component package (not relocatable) wrapped in a product archive.
 pkgbuild --analyze --root "$WORK/root" "$WORK/component.plist" >/dev/null
-/usr/libexec/PlistBuddy -c "Set :0:BundleIsRelocatable false" "$WORK/component.plist"
+/usr/libexec/PlistBuddy -c "Add :0:BundleIsRelocatable bool false" "$WORK/component.plist"
 pkgbuild --root "$WORK/root" --component-plist "$WORK/component.plist" --scripts "$HERE/scripts" --identifier "$BUNDLE_ID.pkg" --version "$VERSION" --install-location / "$WORK/BrainLink-component.pkg" >/dev/null
 cp "$ROOT/LICENSE.txt" "$HERE/resources/license.txt"
 cat > "$WORK/distribution.xml" <<XML

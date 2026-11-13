@@ -219,12 +219,11 @@
       api('/api/graph3d/note', { vault: node.vault, path: node.path }).then((detail) => {
         if (selectedId !== node.id) return; // ignore a slower response after the user selected another node
         currentDetailComplete = true;
-        const notePath = detail.path.replace(/\.md$/i, '');
-        edit.href = `obsidian://open?vault=${encodeURIComponent(detail.vault)}&file=${encodeURIComponent(notePath)}`;
+        edit.href = detail.obsidian_url || '';
         edit.textContent = window.t?.('notes3d.editInObsidian') || 'Edit in Obsidian';
         // A syntactically valid URI is not enough: Obsidian must know this exact folder as a vault.
         // Demo/temp folders are intentionally not registered, so don't offer a link that errors.
-        edit.hidden = !detail.obsidian_registered;
+        edit.hidden = !detail.obsidian_registered || !detail.obsidian_url;
         currentDetail = detail;
         const editToggle = document.getElementById('notes3d-edit-toggle');
         editToggle.hidden = !detail.writable;
