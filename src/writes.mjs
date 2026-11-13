@@ -151,7 +151,10 @@ export async function proposeNote(ctx, a, now = new Date()) {
   const date = zonedNow(ctx.tz, now).slice(0, 10);
   const name = `${date} — ${title}.md`;
   const rel = folder ? `${folder}/${name}` : name;
-  const fm = frontmatter(ctx, vaultName, id, { ...a, confidence: twinConfidence, private: twinSourcePolicy?.private_default === true ? true : a.private,
+  // Vault access is the visibility boundary for newly-created notes. A profile's legacy
+  // private_default setting must not silently turn notes in a shared vault into owner-only
+  // notes; private vaults are already isolated by their explicit per-agent vault grants.
+  const fm = frontmatter(ctx, vaultName, id, { ...a, confidence: twinConfidence, private: a.private === true,
     type: a.type || tpl?.type || (intake ? 'intake' : undefined), memory_type: a.memory_type,
     status: typed ? 'proposed' : a.status, relations: typed ? a.relations : undefined }, now);
   const decision = needsDecision ? `## Decision\n\n**${String(a.decision).toUpperCase()}**\n\n` : '';

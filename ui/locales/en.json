@@ -349,7 +349,7 @@
   "vault.agentNameLabel": "Agent name",
   "vault.agentNamePlaceholder": "e.g. Max",
   "vault.scaffold": "Create starter notes (never overwrites)",
-  "vault.privateLabel": "Private — AI access depends on connection permissions; AI writes are proposals only. Excluded from graph, sync and source scanning.",
+  "vault.privateLabel": "Private — only explicitly authorized AI agents can use this vault. New notes follow this vault's privacy; excluded from the shared graph, BrainLink sync and source scanning.",
   "vault.excludedLabel": "Excluded folders (one per line; never read, searched, answered from, graphed or synced)",
   "vault.excludedHint": "Suggestions: {list} — add any that apply to this vault.",
   "vault.addVault": "Add vault",

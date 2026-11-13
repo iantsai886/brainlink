@@ -349,7 +349,7 @@
   "vault.agentNameLabel": "代理人名稱",
   "vault.agentNamePlaceholder": "例如：小麥",
   "vault.scaffold": "建立起始筆記（絕不覆蓋既有內容）",
-  "vault.privateLabel": "私密 — AI 存取取決於連線權限；AI 寫入僅提供提案。不納入關係圖、同步及來源掃描。",
+  "vault.privateLabel": "私人 — 只有明確獲准的 AI agent 可以使用此 vault。新筆記沿用此 vault 的隱私設定；不納入共用關係圖、BrainLink 同步或來源掃描。",
   "vault.excludedLabel": "排除的資料夾（每行一個；永不讀取、搜尋、回答、繪圖或同步）",
   "vault.excludedHint": "建議：{list} — 把適用於這個筆記庫的項目加進去。",
   "vault.addVault": "新增筆記庫",

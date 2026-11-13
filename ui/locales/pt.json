@@ -349,7 +349,7 @@
   "vault.agentNameLabel": "Nome do agente",
   "vault.agentNamePlaceholder": "por exemplo, Max",
   "vault.scaffold": "Criar notas iniciais (nunca substitui as existentes)",
-  "vault.privateLabel": "Privado — o acesso da IA depende das permissões de ligação; escritas da IA são apenas propostas. Excluído do mapa, sincronização e análise de fontes.",
+  "vault.privateLabel": "Privado — apenas agentes de IA explicitamente autorizados podem usar este cofre. As novas notas seguem a privacidade do cofre; excluídas do grafo partilhado, da sincronização do BrainLink e da análise de fontes.",
   "vault.excludedLabel": "Pastas excluídas (uma por linha; nunca lidas, pesquisadas, usadas em respostas, mapeadas ou sincronizadas)",
   "vault.excludedHint": "Sugestões: {list} — adicione as que se aplicarem a este caderno.",
   "vault.addVault": "Adicionar caderno",

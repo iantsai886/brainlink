@@ -2,6 +2,12 @@
 
 This log covers the development branch. Entries marked **unreleased** are not published product releases. See [release readiness](docs/RELEASE-READINESS.md) for the current evidence and remaining release gates.
 
+## 1.3.7 — Development, unreleased
+
+- Shared-vault notes no longer inherit `private: true` from the legacy Twin `private_default` setting. Visibility follows the selected vault and the agent's explicit vault grant; existing notes marked private remain private.
+- Updated the note-writing guidance and private-vault setup text to describe the vault-based privacy boundary accurately.
+- Verification: targeted regression tests confirm an authorized agent can create a note in a shared vault and another authorized agent can read and search it. Full core and UI suites, shared-vault migration preview/apply, and cross-device validation remain outstanding.
+
 ## 1.3.6 — Development, unreleased
 
 - Role activation now issues an expiring scope for that role's own Twin profile and vault. Profile-scoped tool calls require the returned `role_scope_id`; cross-role vault calls are denied, and activating Anna or John switches the scope without changing permissions manually.

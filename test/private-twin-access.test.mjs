@@ -8,6 +8,8 @@ import { createContext } from '../src/core.mjs';
 import { createMcp } from '../src/server.mjs';
 import { hashToken } from '../src/mcp-agents.mjs';
 import { startSetup } from '../src/setup.mjs';
+import { proposeNote } from '../src/writes.mjs';
+import { loadVault, readNote } from '../src/core.mjs';
 
 test('an explicitly assigned Twin can read a private vault but cannot write to it', async (t) => {
   const root = await mkdtemp(path.join(tmpdir(), 'brainlink-private-twin-'));
@@ -45,6 +47,35 @@ test('an explicitly assigned Twin can read a private vault but cannot write to i
   assert.match(proposal.structuredContent.preview, /Fictional text/);
   assert.deepEqual(await readdir(path.join(vault, 'Inbox')), []);
   assert.deepEqual(createContext(saved, { env }).enabled, [], 'unassigned connections do not inherit the private vault');
+});
+
+test('shared vault notes stay shared even when the legacy profile private_default is true', async (t) => {
+  const root = await mkdtemp(path.join(tmpdir(), 'brainlink-shared-profile-'));
+  const vault = path.join(root, 'shared');
+  await mkdir(path.join(vault, 'Inbox'), { recursive: true });
+  const tokens = { writer: 'fictional-writer-token', reader: 'fictional-reader-token' };
+  const cfg = normalize({
+    vaults: [{ name: 'Shared Brain', path: vault, private: false, writes: 'on', intake_folder: 'Inbox' }],
+    ai_agents: Object.entries(tokens).map(([name, token]) => ({ id: `agent_${name}`, name, kind: 'local', tokenHash: hashToken(token) })),
+    twin_profiles: [{
+      id: 'shared_brain', name: 'Shared Brain', owner: 'fictional owner', mode: 'organisation',
+      vaults: [{ name: 'Shared Brain', access: 'write' }],
+      source_policy: { private_default: true, provenance_required: false, session_capture: 'metadata-only' },
+      memory_policy: { working: true, semantic: true, procedural: true, episodic: true },
+      allowed_actions: ['search', 'read_note', 'propose_note', 'write_note'],
+      agent_access: Object.keys(tokens).map((name) => ({ agent_id: `agent_${name}`, vaults: [{ name: 'Shared Brain', access: name === 'writer' ? 'write' : 'read', operations: name === 'writer' ? ['search', 'read_note', 'propose_note', 'write_note'] : ['search', 'read_note'] }] })),
+    }],
+  });
+  const env = { HOME: root, BRAINLINK_HOME: path.join(root, 'app'), BRAINLINK_SEMANTIC: '0' };
+  t.after(() => rm(root, { recursive: true, force: true }));
+  const writer = createContext(cfg, { env: { ...env, BRAINLINK_AGENT_TOKEN: tokens.writer, BRAINLINK_AI_PLATFORM: 'Writer' } });
+  const reader = createContext(cfg, { env: { ...env, BRAINLINK_AGENT_TOKEN: tokens.reader, BRAINLINK_AI_PLATFORM: 'Reader' } });
+  const result = await proposeNote(writer, { vault: 'Shared Brain', title: 'Shared operating fact', body: 'A fictional fact for every authorized agent.', source: 'fixture', session_or_task_id: 'shared-1', confirm: true, auto_link: false });
+  assert.equal(result.written, true, JSON.stringify(result));
+  const saved = await readFile(path.join(vault, 'Inbox', path.basename(result.path)), 'utf8');
+  assert.doesNotMatch(saved, /^private:\s*true/im);
+  assert.match((await readNote(reader, 'Shared Brain', `Inbox/${path.basename(result.path)}`)).body, /fictional fact for every authorized agent/i);
+  assert.match((await loadVault(reader, 'Shared Brain')).notes.map((note) => note.body).join('\n'), /fictional fact for every authorized agent/i);
 });
 
 test('a preset client receives private vault access only when it is explicitly selected', async (t) => {
