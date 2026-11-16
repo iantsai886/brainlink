@@ -123,6 +123,13 @@ body[data-nav-group="access"] [data-nav-group]:not([data-nav-group="access"]),
 body[data-nav-group="system"] [data-nav-group]:not([data-nav-group="system"]),
 body[data-nav-group="home"] #settings, body[data-nav-group="find"] #settings { display: none !important; }
 body[data-nav-group] #settings > summary { display: none; }
+/* Inside a destination, settings sections fold to their title and one-line hint. */
+body[data-nav-group] section[data-collapsed] > h2 { cursor: pointer; }
+body[data-nav-group] section[data-collapsed] > h2::after { content: "▾"; margin-left: auto; color: var(--muted); font-size: 13px; }
+body[data-nav-group] section[data-collapsed="true"] > h2::after { content: "▸"; }
+body[data-nav-group] section[data-collapsed] > h2:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; border-radius: 4px; }
+body[data-nav-group] section[data-collapsed="true"] > :not(h2):not(.hint) { display: none !important; }
+body[data-nav-group="review"] #proposal-review-panel { order: -1; }
 @media (max-width: 420px) { #main-nav { padding: 8px 10px; gap: 2px; } #main-nav a { padding: 5px 8px; } }
 #rsi-panel, #agents-panel, #memory-review-panel, #proposal-review-panel, #brain-panel, #sessions-panel, #handoffs-panel { display: block; }
 #rsi-panel[hidden], #agents-panel[hidden], #memory-review-panel[hidden], #proposal-review-panel[hidden], #brain-panel[hidden], #sessions-panel[hidden], #handoffs-panel[hidden] { display: none; }
@@ -982,6 +989,23 @@ function applyNavGroup() {
   }
   if (active && NAV_GROUPS[navGroup].some((id) => id.startsWith('s-'))) $('settings').open = true;
 }
+// Settings sections inside a destination start folded to a title and hint, so the destination
+// reads as a short list; the owner opens the one they need.
+const NAV_FOLDABLE = [...NAV_GROUPS.access, ...NAV_GROUPS.system].filter((id) => id.startsWith('s-') || id === 'help-panel');
+function setFolded(section, folded) {
+  section.dataset.collapsed = folded ? 'true' : 'false';
+  section.querySelector(':scope > h2')?.setAttribute('aria-expanded', folded ? 'false' : 'true');
+}
+for (const id of NAV_FOLDABLE) {
+  const section = $(id), heading = section?.querySelector(':scope > h2');
+  if (!heading) continue;
+  heading.tabIndex = 0;
+  heading.setAttribute('role', 'button');
+  setFolded(section, true);
+  const toggle = () => { if (document.body.dataset.navGroup) setFolded(section, section.dataset.collapsed !== 'true'); };
+  heading.addEventListener('click', (event) => { if (!event.target.closest('button, a, input, select')) toggle(); });
+  heading.addEventListener('keydown', (event) => { if (event.key === 'Enter' || event.key === ' ') { event.preventDefault(); toggle(); } });
+}
 function showNavGroup(group) {
   if (!NAV_GROUPS[group]) return;
   navGroup = group;
@@ -993,12 +1017,20 @@ if (navGroupOf(location.hash.slice(1))) navGroup = navGroupOf(location.hash.slic
 new MutationObserver(applyNavGroup).observe($('main-nav'), { attributes: true, attributeFilter: ['hidden'] });
 document.addEventListener('click', (event) => {
   const groupLink = event.target.closest('a[data-nav-group-link]');
-  if (groupLink) { event.preventDefault(); showNavGroup(groupLink.dataset.navGroupLink); window.scrollTo(0, 0); return; }
+  if (groupLink) {
+    event.preventDefault();
+    showNavGroup(groupLink.dataset.navGroupLink);
+    const first = $(groupLink.getAttribute('href').slice(1));
+    if (first?.tagName === 'DETAILS' && !first.hidden) first.open = true;
+    window.scrollTo(0, 0);
+    return;
+  }
   const link = event.target.closest('a[data-main-nav]');
   if (!link) return;
   const target = $(link.dataset.mainNav);
   if (!target || target.hidden) { event.preventDefault(); return; }
   if (navGroupOf(target.id)) showNavGroup(navGroupOf(target.id));
+  if (target.dataset.collapsed) setFolded(target, false);
   if (target.tagName === 'DETAILS') target.open = true;
   const settings = target.closest('details.settings');
   if (settings) settings.open = true;

@@ -4,6 +4,8 @@ This log covers the development branch. Entries marked **unreleased** are not pu
 
 ## 1.3.8 — Development, unreleased
 
+- Inside "AI access" and "System", settings sections now fold to a title and one-line hint and open on click or Enter/Space; "To review" opens with "Approve AI drafts" first and expanded. Folding applies only once setup is finished, so first-run screens are unchanged.
+- Verification (2026-11-16, Linux container, Node 22): headless Chrome at 1280 px and 390 px, no page errors; "AI access" is 900 px tall on desktop (was 5,580) and "System" 1,489 (was 4,030). Home and Find were also viewed in zh-TW and pt with no empty labels or overflow.
 - Setup navigation is now five destinations (Home, Find, To review, AI access, System) instead of eleven links over one long page. Each destination shows only its own sections; every earlier section is still reachable, and onboarding screens are never filtered. Home lists every vault and every role instead of only the vault added last. Ask excerpts no longer show `##` heading marks or `[[ ]]` link brackets.
 - Verification (2026-11-16, Linux container, Node 22): the navigation test was rewritten for the new structure and passes; all five destinations were opened in headless Chrome at 1280 px and 390 px with no page errors and no horizontal overflow. "AI access" and "System" are still long pages. zh-TW and pt screens were not viewed.
 - Added a read-only setup self-test (Setup "Check my setup", `brainlink selftest`, `POST /api/self-test`): reports rule notes and role notes that AIs cannot read, role notes that still hold starter template text, a missing or surprising mailbox location, a missing intake folder, and excluded folders that contain notes.
