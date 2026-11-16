@@ -10,6 +10,7 @@ import { compactSearchResponse } from './search-projection.mjs';
 import { buildAnswerReceipt } from './answer-receipt.mjs';
 import { buildContextPacket } from './context-packet.mjs';
 import { createSessionSeenStore, sessionSeenIdentity } from './since-last-session.mjs';
+import { listDecisionReviews } from './decision-reviews.mjs';
 import { search, searchWithVerdict, readNote, related, semanticStatus } from './core.mjs';
 import { proposeNote, sendHandoff, listHandoffs, remember, appendDaily } from './writes.mjs';
 import { recentNotes, openLoops, vaultHealth, brief } from './insights.mjs';
@@ -319,6 +320,10 @@ export function createMcp(ctx, { onCall = () => {}, onProposal = null } = {}) {
       description: 'Unchecked tasks, next actions, unresolved questions and decisions waiting, gathered from the whole vault (captures from the last N days).',
       inputSchema: { type: 'object', properties: { vault: vaultProp, days: { type: 'integer', minimum: 1, maximum: 365, default: 60 }, limit: { type: 'integer', minimum: 1, maximum: 100, default: 40 } }, required: ['vault'] },
       run: (a) => openLoops(ctx, a.vault, a) },
+    { name: 'decision_reviews', title: 'Decisions due for review', annotations: RO,
+      description: 'List visible decision notes whose valid review_date has arrived. Reschedules and retirements are recorded by appending dated lines; malformed dates are ignored.',
+      inputSchema: { type: 'object', properties: { vault: vaultProp, limit: { type: 'integer', minimum: 1, maximum: 50, default: 20 } }, required: ['vault'] },
+      run: (a) => listDecisionReviews(ctx, a.vault, { limit: a.limit }) },
     { name: 'brain_brief', title: 'Brief: what changed and what is open', annotations: RO,
       description: 'One call for "what\'s going on?": recent changes, open loops and link health. Good for daily or weekly reviews.',
       inputSchema: { type: 'object', properties: { vault: vaultProp, days: { type: 'integer', minimum: 1, maximum: 90, default: 7 } }, required: ['vault'] },

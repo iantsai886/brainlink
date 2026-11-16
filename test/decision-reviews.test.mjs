@@ -1,0 +1,73 @@
+import test from 'node:test';
+import assert from 'node:assert/strict';
+import { mkdtemp, mkdir, writeFile, readFile } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import path from 'node:path';
+import { createContext } from '../src/core.mjs';
+import { normalize } from '../src/config.mjs';
+import { listDecisionReviews, validReviewDate } from '../src/decision-reviews.mjs';
+import { openLoops, brief } from '../src/insights.mjs';
+import { startSetup } from '../src/setup.mjs';
+import { runSelfTest } from '../src/self-test.mjs';
+
+test('decision reviews accept only real ISO dates, honour appended reschedules and omit private notes', async () => {
+  assert.equal(validReviewDate('2026-11-15'), true);
+  assert.equal(validReviewDate('2026-02-30'), false);
+  assert.equal(validReviewDate('11/15/2026'), false);
+  const root = await mkdtemp(path.join(tmpdir(), 'bl-decision-review-'));
+  const vault = path.join(root, 'Vault');
+  await mkdir(vault);
+  await writeFile(path.join(vault, 'Due.md'), '---\ntype: decision\nreview_date: 2026-11-15\ncreated_date: 2026-10-01\n---\n# Due\nChoice.');
+  await writeFile(path.join(vault, 'Rescheduled.md'), '---\ntype: decision\nreview_date: 2026-11-01\n---\n# Rescheduled\nChoice.\n\nReview rescheduled: 2026-12-01\n');
+  await writeFile(path.join(vault, 'Malformed.md'), '---\ntype: decision\nreview_date: 2026-02-30\n---\n# Malformed\nChoice.');
+  await writeFile(path.join(vault, 'Private.md'), '---\ntype: decision\nreview_date: 2026-11-01\nprivate: true\n---\n# Private\nDECISION_PRIVATE_CANARY');
+  await writeFile(path.join(vault, 'Update.md'), '# Update\nA later update links [[Due]].');
+  const ctx = createContext(normalize({ vaults: [{ name: 'Shared', path: vault }] }), { env: { BRAINLINK_HOME: path.join(root, 'home') } });
+  const due = await listDecisionReviews(ctx, 'Shared', { today: '2026-11-16' });
+  assert.deepEqual(due.map((item) => item.path), ['Due.md']);
+  assert.ok(due[0].happened_since.some((item) => item.path === 'Update.md'));
+  assert.doesNotMatch(JSON.stringify(due), /DECISION_PRIVATE_CANARY|Private\.md|Malformed\.md/);
+  const selfTest = await runSelfTest(ctx);
+  assert.ok(selfTest.checks.some((check) => check.id === 'decision-review-date' && check.path === 'Malformed.md'));
+  const loops = await openLoops(ctx, 'Shared', { days: 60 });
+  assert.equal(loops.decisions_due_for_review.length, 1);
+  assert.equal((await brief(ctx, 'Shared')).open_loops.decisions_due_for_review.length, 1);
+});
+
+test('decision review Setup preview requires explicit confirmation and appends without replacing the decision', async () => {
+  const root = await mkdtemp(path.join(tmpdir(), 'bl-decision-review-ui-'));
+  const vault = path.join(root, 'Vault');
+  await mkdir(vault);
+  const original = '---\ntype: decision\nreview_date: 2026-11-15\n---\n# Decision\nOriginal decision content.\n';
+  await writeFile(path.join(vault, 'Decision.md'), original);
+  await writeFile(path.join(vault, 'Changed.md'), original.replace('# Decision', '# Changed decision'));
+  const env = { BRAINLINK_HOME: path.join(root, 'home'), BRAINLINK_SEMANTIC: '0' };
+  const app = await startSetup({ env, home: root, os: 'linux', port: 0, useCli: false });
+  const base = `http://127.0.0.1:${app.port}`;
+  const api = (route, body = {}) => fetch(base + route, { method: 'POST', headers: { 'X-BrainLink-Token': app.token, 'Content-Type': 'application/json' }, body: JSON.stringify(body) }).then((response) => response.json());
+  try {
+    await api('/api/vault', { path: vault, name: 'Shared', pack: 'simple', scaffold: false });
+    const { id, append_preview } = await api('/api/decision-reviews/preview', { vault: 'Shared', path: 'Decision.md', action: 'still_stands', review_date: '2026-12-20' });
+    assert.match(append_preview, /Review rescheduled: 2026-12-20/);
+    assert.equal(await readFile(path.join(vault, 'Decision.md'), 'utf8'), original, 'preview creates no file and changes no existing content');
+    assert.ok((await api('/api/decision-reviews/confirm', { id, confirm: false })).error);
+    const saved = await api('/api/decision-reviews/confirm', { id, confirm: true });
+    assert.equal(saved.ok, true, JSON.stringify(saved));
+    const updated = await readFile(path.join(vault, 'Decision.md'), 'utf8');
+    assert.ok(updated.startsWith(original));
+    assert.match(updated, /Review rescheduled: 2026-12-20/);
+    assert.ok(!(await listDecisionReviews(createContext(normalize({ vaults: [{ name: 'Shared', path: vault }] }), { env }), 'Shared', { today: '2026-11-16' })).some((item) => item.path === 'Decision.md'));
+    const changedPreview = await api('/api/decision-reviews/preview', { vault: 'Shared', path: 'Changed.md', action: 'changed', new_title: 'Revised decision', body: 'The new fictional decision after reviewing evidence.' });
+    assert.ok(changedPreview.new_note_preview, JSON.stringify(changedPreview));
+    assert.match(changedPreview.new_note_preview, /\[\[Changed decision\]\]/);
+    assert.equal(await readFile(path.join(vault, 'Changed.md'), 'utf8'), original.replace('# Decision', '# Changed decision'));
+    const changedSaved = await api('/api/decision-reviews/confirm', { id: changedPreview.id, confirm: true });
+    assert.equal(changedSaved.ok, true, JSON.stringify(changedSaved));
+    assert.match(await readFile(path.join(vault, 'Changed.md'), 'utf8'), /superseded_by: \[\[Revised decision\]\]/);
+    assert.match(await readFile(path.join(vault, changedSaved.new_note_path.split('/').slice(1).join('/')), 'utf8'), /Replaces the earlier decision \[\[Changed decision\]\]/);
+    const retirePreview = await api('/api/decision-reviews/preview', { vault: 'Shared', path: 'Decision.md', action: 'retire' });
+    const retired = await api('/api/decision-reviews/confirm', { id: retirePreview.id, confirm: true });
+    assert.equal(retired.ok, true);
+    assert.match(await readFile(path.join(vault, 'Decision.md'), 'utf8'), /Decision retired:/);
+  } finally { app.server.close(); }
+});

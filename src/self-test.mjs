@@ -4,7 +4,8 @@
 // Each check is pass | warn | fail with a plain message the owner can act on.
 import { readdir, stat } from 'node:fs/promises';
 import path from 'node:path';
-import { readNote, readExcludedFolders } from './core.mjs';
+import { readNote, readExcludedFolders, loadVault } from './core.mjs';
+import { validReviewDate } from './decision-reviews.mjs';
 
 // Text the starter packs write into scaffolded notes. A role whose notes still say this is
 // loading a template, not the owner's real context.
@@ -63,6 +64,11 @@ export async function runSelfTest(ctx) {
       if (TOOL_FOLDERS.test(folder)) continue;
       const count = await countMarkdown(path.join(v.path, folder));
       if (count > 0) add('excluded-notes', 'warn', `Vault "${v.name}": the excluded folder "${folder}" holds ${count >= 200 ? '200 or more' : count} note${count === 1 ? '' : 's'} that no AI can search or read. Keep it excluded only if that is intended.`, { vault: v.name, path: folder, notes: count });
+    }
+    const index = await loadVault(ctx, v.name);
+    for (const note of index.notes) if (String(note.meta.type || '').toLowerCase() === 'decision'
+      && note.meta.review_date !== undefined && !validReviewDate(note.meta.review_date)) {
+      add('decision-review-date', 'warn', `Vault "${v.name}": decision "${note.rel}" has a malformed review_date; BrainLink will ignore it until it is corrected.`, { vault: v.name, path: note.rel });
     }
   }
 

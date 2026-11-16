@@ -11,6 +11,7 @@ import { vault, vaultRoot, safeJoin, findSecrets, zonedNow, parseFrontmatter, is
 export { assertRegularWritePath as checkWritePath } from './core.mjs';
 import { typedEntityMetadataMap, typedRelationAllowed } from './typed-graph.mjs';
 import { createHandoffGitVerifier } from './handoff-git.mjs';
+import { validReviewDate } from './decision-reviews.mjs';
 
 export const slug = (s) => String(s || '').toLowerCase().replace(/[^a-z0-9㐀-鿿]+/g, '-').replace(/^-|-$/g, '') || 'unknown';
 
@@ -46,9 +47,11 @@ export function frontmatter(ctx, vaultName, id, f, now = new Date()) {
       `    source: ${q(r.source)}`, `    confidence: ${r.confidence}`,
     ])] : [])] : [];
   const memoryTypeField = MEMORY_TYPES.has(f.memory_type) ? [`memory_type: ${f.memory_type}`] : [];
+  const reviewDateField = f.type === 'decision' && /^\d{4}-\d{2}-\d{2}$/.test(String(f.review_date || ''))
+    ? [`review_date: ${q(f.review_date)}`] : [];
   if (v.schema === 'provenance') {
     const date = ts.slice(0, 10);
-    return ['---', `type: ${f.type || 'log'}`, `status: ${f.status || 'proposed'}`, ...memoryTypeField, `tags: ${tags}`, ...extra,
+    return ['---', `type: ${f.type || 'log'}`, `status: ${f.status || 'proposed'}`, ...memoryTypeField, ...reviewDateField, `tags: ${tags}`, ...extra,
       ...(f.private ? ['private: true'] : []),
       ...(twinProfile ? [`twin_profile_id: ${q(twinProfile.profile_id)}`] : []),
       `created_by_platform: ${slug(id.ai_platform)}`, `created_by_agent: ${slug(id.agent_or_role)}`, `created_session_or_task_id: ${q(id.session_or_task_id)}`, `created_date: ${date}`,
@@ -57,7 +60,7 @@ export function frontmatter(ctx, vaultName, id, f, now = new Date()) {
       ...sourceSession, ...typedFields,
       `provenance_confidence: ${['verified', 'reported', 'inferred'].includes(f.confidence) ? f.confidence : 'unknown'}`, `source: ${q(f.source)}`, '---'].join('\n');
   }
-  return ['---', `type: ${f.type || 'note'}`, `status: ${f.status || 'proposed'}`, ...memoryTypeField, `ai_platform: ${q(id.ai_platform)}`, `agent_or_role: ${q(id.agent_or_role)}`,
+  return ['---', `type: ${f.type || 'note'}`, `status: ${f.status || 'proposed'}`, ...memoryTypeField, ...reviewDateField, `ai_platform: ${q(id.ai_platform)}`, `agent_or_role: ${q(id.agent_or_role)}`,
     ...(f.private ? ['private: true'] : []),
     ...(twinProfile ? [`twin_profile_id: ${q(twinProfile.profile_id)}`] : []),
     `session_or_task_id: ${q(id.session_or_task_id)}`, `written_at: ${ts}`, `source: ${q(f.source)}`, `confidence: ${q(f.confidence || 'proposed')}`, `tags: ${tags}`, ...extra, ...sourceSession, ...typedFields, '---'].join('\n');
@@ -107,6 +110,8 @@ export async function proposeNote(ctx, a, now = new Date()) {
   const te = titleError(title); if (te) errors.push(te);
   const tpl = a.template ? TEMPLATES[a.template] : null;
   if (a.template && !tpl) errors.push(`template must be one of ${Object.keys(TEMPLATES).join(', ')}`);
+  const reviewDate = a.review_date || (a.template === 'decision' ? a.fields?.review_date : undefined);
+  if (reviewDate && (a.type || tpl?.type) === 'decision' && !validReviewDate(reviewDate)) errors.push('review_date must be a real date using YYYY-MM-DD');
   if (!tpl && (!a.body || !String(a.body).trim())) errors.push('body is required');
   const typed = TYPED_ENTITY_TYPES.has(a.type);
   if (typed) {
@@ -155,7 +160,7 @@ export async function proposeNote(ctx, a, now = new Date()) {
   // Vault access is the visibility boundary for newly-created notes. A profile's legacy
   // private_default setting must not silently turn notes in a shared vault into owner-only
   // notes; private vaults are already isolated by their explicit per-agent vault grants.
-  const fm = frontmatter(ctx, vaultName, id, { ...a, confidence: twinConfidence, private: a.private === true,
+  const fm = frontmatter(ctx, vaultName, id, { ...a, review_date: reviewDate, confidence: twinConfidence, private: a.private === true,
     type: a.type || tpl?.type || (intake ? 'intake' : undefined), memory_type: a.memory_type,
     status: typed ? 'proposed' : a.status, relations: typed ? a.relations : undefined }, now);
   const decision = needsDecision ? `## Decision\n\n**${String(a.decision).toUpperCase()}**\n\n` : '';

@@ -73,6 +73,17 @@ test('replay-miss teaching offers a preview-before-save flow in every locale', a
   assert.match(html, /replay-teach-confirm/);
 });
 
+test('decision review actions are localized and show append/new-note previews before confirmation', async () => {
+  const catalogs = Object.fromEntries(await Promise.all(LOCALES.map(async (id) => [id, await loadLocale(id)])));
+  const keys = ['decisionReviews.title', 'decisionReviews.hint', 'decisionReviews.empty', 'decisionReviews.stands', 'decisionReviews.changed', 'decisionReviews.retire', 'decisionReviews.confirm'];
+  for (const id of LOCALES) for (const key of keys) assert.ok(catalogs[id][key], `${id} defines ${key}`);
+  const html = await readFile(path.join(ROOT, 'ui', 'index.html'), 'utf8');
+  assert.match(html, /id="decision-reviews-panel"/);
+  assert.match(html, /decision-reviews\/preview/);
+  assert.match(html, /decision-reviews\/confirm/);
+  assert.match(html, /data-decision-preview/);
+});
+
 test('connection wording distinguishes configured settings from an AI app that loaded them', async () => {
   const catalogs = Object.fromEntries(await Promise.all(LOCALES.map(async (id) => [id, await loadLocale(id)])));
   const en = catalogs.en;

@@ -4,6 +4,7 @@
 import { loadVault, summarize, zonedNow } from './core.mjs';
 import { linkTarget } from './links.mjs';
 import { typedGraphHealth } from './typed-graph.mjs';
+import { listDecisionReviews } from './decision-reviews.mjs';
 
 const daysAgo = (tz, n, now = new Date()) => zonedNow(tz, new Date(now.getTime() - n * 86400e3)).slice(0, 10);
 
@@ -54,10 +55,12 @@ export async function openLoops(ctx, vaultName, { days = 60, limit = 40 } = {}, 
     if (/^yes$/i.test(n.meta.decision_needed || '') && !/^(done|closed|ack)/i.test(n.meta.status || '')) decisions.push({ decision: n.meta.subject || n.title, note: at, path: n.rel, date: n.date });
   });
   const newest = (a, b) => b.date.localeCompare(a.date);
+  const decisionsDueForReview = await listDecisionReviews(ctx, vaultName, { today: zonedNow(ctx.tz, now).slice(0, 10), limit });
   return {
     tasks: tasks.sort(newest).slice(0, limit), next_actions: next.sort(newest).slice(0, limit),
     unresolved_questions: questions.sort(newest).slice(0, limit), decisions_waiting: decisions.sort(newest).slice(0, limit),
-    counts: { tasks: tasks.length, next_actions: next.length, unresolved_questions: questions.length, decisions_waiting: decisions.length },
+    decisions_due_for_review: decisionsDueForReview,
+    counts: { tasks: tasks.length, next_actions: next.length, unresolved_questions: questions.length, decisions_waiting: decisions.length, decisions_due_for_review: decisionsDueForReview.length },
   };
 }
 
@@ -93,7 +96,7 @@ export async function brief(ctx, vaultName, { days = 7 } = {}, now = new Date())
   return {
     vault: vaultName, as_of: zonedNow(ctx.tz, now), period_days: days,
     changed: recent.map((r) => ({ title: r.title, path: r.path, changed: r.changed })),
-    open_loops: { counts: loops.counts, next_actions: loops.next_actions, decisions_waiting: loops.decisions_waiting, unresolved_questions: loops.unresolved_questions, tasks: loops.tasks },
+    open_loops: { counts: loops.counts, next_actions: loops.next_actions, decisions_waiting: loops.decisions_waiting, decisions_due_for_review: loops.decisions_due_for_review, unresolved_questions: loops.unresolved_questions, tasks: loops.tasks },
     health: { notes: health.notes, links: health.links, not_linked: health.orphan_count, broken_links: health.broken_count },
     instructions: 'Summarise for the user in a few lines: what changed, the most important open items, and one suggested next step. Cite note titles.',
   };

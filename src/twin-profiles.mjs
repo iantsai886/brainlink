@@ -121,7 +121,7 @@ export function twinSessionProfileIds(ctx) {
 // every note. Unknown or undeclared types fail closed for scoped agents.
 const READ_TOOL_MEMORY = Object.freeze({
   brainlink_guide: 'procedural', agent_connect: 'semantic',
-  vault_search: 'semantic', context_packet: 'semantic', vault_read_note: 'semantic', vault_related: 'semantic', search: 'semantic', fetch: 'semantic', propose_note: 'semantic',
+  vault_search: 'semantic', context_packet: 'semantic', decision_reviews: 'semantic', vault_read_note: 'semantic', vault_related: 'semantic', search: 'semantic', fetch: 'semantic', propose_note: 'semantic',
   remember: 'semantic', append_daily: 'episodic', agent_close_loop: 'episodic',
   vault_recent: 'semantic', since_last_session: 'semantic', open_loops: 'semantic', brain_brief: 'semantic', vault_health: 'semantic',
   ingestion_queue: 'semantic', ingestion_read_source: 'semantic', ingestion_record: 'semantic',
@@ -182,7 +182,7 @@ export function twinNoteMemoryAllowed(ctx, vaultName, rel, meta = {}) {
 
 const READ_TOOL_ACTION = Object.freeze({
   brainlink_guide: 'read_note',
-  vault_search: 'search', context_packet: 'search', vault_recent: 'search', since_last_session: 'search', open_loops: 'search', brain_brief: 'search',
+  vault_search: 'search', context_packet: 'search', decision_reviews: 'search', vault_recent: 'search', since_last_session: 'search', open_loops: 'search', brain_brief: 'search',
   vault_health: 'search', vault_related: 'search', vault_read_note: 'read_note', propose_note: 'propose_note',
   remember: 'propose_note', append_daily: 'propose_note', agent_close_loop: 'propose_note',
   ingestion_queue: 'search', ingestion_read_source: 'read_note', ingestion_record: 'propose_note',
@@ -190,7 +190,7 @@ const READ_TOOL_ACTION = Object.freeze({
   list_handoffs: 'handoff_read', send_handoff: 'write_handoff',
   session_filing_folders: 'search', agent_connect: 'read_note', search: 'search', fetch: 'read_note',
 });
-const VAULT_ARGUMENT_TOOLS = new Set(['vault_search', 'context_packet', 'vault_recent', 'since_last_session', 'ingestion_queue', 'ingestion_read_source', 'ingestion_record', 'open_loops', 'brain_brief', 'vault_health', 'vault_read_note', 'vault_related', 'propose_note', 'remember', 'append_daily', 'session_filing_folders', 'session_close']);
+const VAULT_ARGUMENT_TOOLS = new Set(['vault_search', 'context_packet', 'decision_reviews', 'vault_recent', 'since_last_session', 'ingestion_queue', 'ingestion_read_source', 'ingestion_record', 'open_loops', 'brain_brief', 'vault_health', 'vault_read_note', 'vault_related', 'propose_note', 'remember', 'append_daily', 'session_filing_folders', 'session_close']);
 const HANDOFF_TOOLS = new Set(['list_handoffs', 'send_handoff']);
 
 function grantAllows(grant, action) {
