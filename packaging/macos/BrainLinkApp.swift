@@ -120,7 +120,25 @@ final class BrainLinkAppDelegate: NSObject, NSApplicationDelegate, NSWindowDeleg
            let savedPort = value["port"] as? Int, (1...65535).contains(savedPort) {
             port = savedPort
         }
-        return URL(string: "http://127.0.0.1:\(port)/health")
+        guard let url = URL(string: "http://127.0.0.1:\(port)/health") else { return nil }
+        // A stale setup-instance marker can point to a dead process. Do not treat the
+        // URL's existence as readiness; the desktop shell must wait for BrainLink's
+        // authenticated Setup server to answer before replacing its Starting screen.
+        let readiness = DispatchSemaphore(value: 0)
+        let resultLock = NSLock()
+        var isReady = false
+        var request = URLRequest(url: url, cachePolicy: .reloadIgnoringLocalCacheData, timeoutInterval: 0.35)
+        request.httpMethod = "GET"
+        URLSession.shared.dataTask(with: request) { data, response, _ in
+            defer { readiness.signal() }
+            guard let response = response as? HTTPURLResponse, response.statusCode == 200,
+                  let data, let payload = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+                  payload["app"] as? String == "brainlink" else { return }
+            resultLock.lock(); isReady = true; resultLock.unlock()
+        }.resume()
+        _ = readiness.wait(timeout: .now() + 0.4)
+        resultLock.lock(); defer { resultLock.unlock() }
+        return isReady ? url : nil
     }
 
     private func loadSetupWhenReady() {

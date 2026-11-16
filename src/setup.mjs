@@ -1994,7 +1994,11 @@ export async function startSetup(opts = {}) {
       const a = cfg.agents.find((x) => x.name === b.name);
       if (!a) throw new Error(`Unknown agent ${b.name}`);
       const clean = (arr) => (Array.isArray(arr) ? arr : String(arr || '').split('\n')).map((s) => String(s).trim()).filter(Boolean).slice(0, 12);
-      if (b.role !== undefined) a.role = String(b.role).slice(0, 600);
+      if (b.role !== undefined) {
+        const role = String(b.role).trim();
+        if (role.length > 4000) throw new Error('Role text must be 4,000 characters or fewer.');
+        a.role = role;
+      }
       if (b.activation !== undefined && clean(b.activation).length) a.activation = clean(b.activation);
       if (b.close !== undefined && clean(b.close).length) a.close = clean(b.close);
       if (b.capture_approved !== undefined) a.capture_approved = Boolean(b.capture_approved);

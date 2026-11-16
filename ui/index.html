@@ -1845,7 +1845,7 @@ async function load() {
   $('role-agent-vault').innerHTML = roleVaults.map((v) => `<option value="${esc(v.name)}">${esc(v.name)}</option>`).join('');
   $('role-agent-add').disabled = !roleVaults.length;
   $('agents').innerHTML = S.agents.length ? S.agents.map((a, i) => `<div class="card"><b>${esc(a.name)} <span class="muted" style="font-weight:400">· ${esc(a.vault)} · close → ${esc(a.close_target.mode)} ${esc(a.close_target.path || a.close_target.dir || '')}</span></b>
-    <label>${esc(t('rolePack.roleLabel'))}<textarea data-a="${i}" data-f="role">${esc(a.role)}</textarea></label>
+    <label>${esc(t('rolePack.roleLabel'))} <small>(up to 4,000 characters)</small><textarea data-a="${i}" data-f="role" maxlength="4000">${esc(a.role)}</textarea></label>
     <div class="grid2"><label>${esc(t('rolePack.activationLabel'))}<textarea data-a="${i}" data-f="activation">${esc(a.activation.join('\n'))}</textarea></label>
     <label>${esc(t('rolePack.closeLabel'))}<textarea data-a="${i}" data-f="close">${esc(a.close.join('\n'))}</textarea></label></div>
     ${a.close_target.mode === 'proposal-only' ? `<label class="muted"><span><input type="checkbox" data-a="${i}" data-f="capture_approved" style="width:auto" ${a.capture_approved ? 'checked' : ''}> ${esc(t('rolePack.allowCaptures', { name: a.name }))}</span></label>` : ''}
