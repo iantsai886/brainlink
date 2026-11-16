@@ -1,0 +1,20 @@
+{
+  "schema": 1,
+  "fixture": "fictional-rsi-fix-selection-v1",
+  "training": [
+    { "id": "train-01", "fix_needed": "file_missing_fact" }, { "id": "train-02", "fix_needed": "file_missing_fact" }, { "id": "train-03", "fix_needed": "file_missing_fact" }, { "id": "train-04", "fix_needed": "file_missing_fact" }, { "id": "train-05", "fix_needed": "file_missing_fact" },
+    { "id": "train-06", "fix_needed": "replace_stale_note" }, { "id": "train-07", "fix_needed": "replace_stale_note" }, { "id": "train-08", "fix_needed": "replace_stale_note" }, { "id": "train-09", "fix_needed": "replace_stale_note" },
+    { "id": "train-10", "fix_needed": "add_link" }, { "id": "train-11", "fix_needed": "add_link" }, { "id": "train-12", "fix_needed": "add_link" },
+    { "id": "train-13", "fix_needed": "add_index_entry" }, { "id": "train-14", "fix_needed": "add_index_entry" },
+    { "id": "train-15", "fix_needed": "other" }
+  ],
+  "fresh_cases": [
+    { "id": "fresh-01", "fix_needed": "file_missing_fact" }, { "id": "fresh-02", "fix_needed": "replace_stale_note" },
+    { "id": "fresh-03", "fix_needed": "add_link" }, { "id": "fresh-04", "fix_needed": "add_link" }, { "id": "fresh-05", "fix_needed": "add_link" }, { "id": "fresh-06", "fix_needed": "add_link" },
+    { "id": "fresh-07", "fix_needed": "add_index_entry" }, { "id": "fresh-08", "fix_needed": "add_index_entry" }, { "id": "fresh-09", "fix_needed": "add_index_entry" },
+    { "id": "fresh-10", "fix_needed": "other" }, { "id": "fresh-11", "fix_needed": "other" },
+    { "id": "fresh-12", "fix_needed": "file_missing_fact" }, { "id": "fresh-13", "fix_needed": "file_missing_fact" }, { "id": "fresh-14", "fix_needed": "replace_stale_note" }
+  ],
+  "fixed_list": ["add_link", "add_index_entry"],
+  "selection_limit": 2
+}

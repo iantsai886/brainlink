@@ -428,7 +428,7 @@ test('restore UI provides verified history, localized pickers and explicit resto
   assert.match(html, /recoveryKeyConfirmation: \$\('backup-key-confirm'\)\.value/);
   assert.match(html, /scheduleMode: \$\('backup-schedule-mode'\)\.value, time: \$\('backup-time'\)\.value/);
   assert.match(html, /id="backup-key-confirm-wrap" hidden/);
-  assert.match(html, /if \(!confirm\(t\('backup\.restoreConfirm'\)\)\) return/);
+  assert.match(html, /if \(!await confirmInPage\(t\('backup\.restoreConfirm'\)\)\) return/);
   for (const locale of ['en', 'zh-TW', 'pt']) {
     const catalog = JSON.parse(await readFile(new URL(`../ui/locales/${locale}.json`, import.meta.url), 'utf8'));
     assert.ok(catalog['backup.historyLabel'], `${locale} verified backup selector label`);

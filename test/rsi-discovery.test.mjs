@@ -744,8 +744,9 @@ test('Setup exposes discovery only through authenticated local APIs and runs the
     assert.equal(manual.run.trigger, 'manual');
     assert.equal(manual.run.duplicates, 1);
     const ideas = await fetch(base + '/api/rsi', { headers: { 'X-BrainLink-Token': app.token } }).then(r => r.json());
-    assert.equal(ideas.ideas.length, 1);
-    assert.equal(ideas.ideas[0].origin, 'discovery');
+    assert.equal(ideas.ideas.length, 2, 'the immediate daily self-test also records the expected empty-vault setup failure');
+    assert.equal(ideas.ideas.filter((idea) => idea.origin === 'discovery').length, 1);
+    assert.equal(ideas.ideas.filter((idea) => idea.origin === 'self_test' && idea.observation?.check === 'vaults').length, 1);
     const exported = await fetch(base + '/api/rsi/export', { headers: { 'X-BrainLink-Token': app.token } }).then(r => r.json());
     assert.equal(exported.schema, 1);
     assert.ok(exported.exported_at);

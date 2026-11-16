@@ -225,7 +225,7 @@ test('ingestion scan UI has manual, scheduled and startup guidance controls in e
   assert.match(html, /api\('POST', '\/api\/ingestion\/discard-draft'/, 'stale or unwanted local drafts can be removed');
   assert.match(html, /autoDrafts: \$\('ingestion-auto-drafts'\)\.checked/, 'scheduled local draft processing is a separate opt-in');
   assert.match(html, /autoFile: \$\('ingestion-auto-file'\)\.checked/, 'saving proposed notes is a separate opt-in');
-  assert.match(html, /window\.confirm\(t\(saveDraft\.dataset\.ingestionRetry === 'true' \? 'ingestion\.confirmRetryProposal' : 'ingestion\.confirmSaveProposal'\)\)/);
+  assert.match(html, /await confirmInPage\(t\(saveDraft\.dataset\.ingestionRetry === 'true' \? 'ingestion\.confirmRetryProposal' : 'ingestion\.confirmSaveProposal'\)\)/);
   assert.match(html, /data-ingestion-retry=.*ingestion\.retryProposal/, 'a partial filing shows a retry action and its saved destination');
   assert.match(html, /ingestion\.confirmRetryProposal/, 'retry asks for confirmation using a clear retry message');
   assert.match(html, /ingestion\.partialFiling/, 'the local draft view explains when a main note was saved but suggestions remain');

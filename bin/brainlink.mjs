@@ -11,12 +11,13 @@ import { CLIENTS, detect, connectClient, disconnectClient } from '../src/connect
 import { createMcp, serveStdio, serveHttp, VERSION } from '../src/server.mjs';
 import { createLiveMcp } from '../src/live-mcp.mjs';
 import { createProposalInbox } from '../src/proposal-inbox.mjs';
-import { openContext, launchSpec, logActivity, refreshMap, ROOT } from '../src/runtime.mjs';
+import { openContext, launchSpec, logActivity, readActivity, refreshMap, ROOT } from '../src/runtime.mjs';
 import { readGitSourceState } from '../src/git-source-state.mjs';
 import { createContext, warmSemantic } from '../src/core.mjs';
 import { brief } from '../src/insights.mjs';
 import { runSelfTest } from '../src/self-test.mjs';
 import { createReplayMisses } from '../src/replay-misses.mjs';
+import { retrievalUseReport } from '../src/retrieval-use.mjs';
 import { startSetup, openInBrowser, openInAppWindow } from '../src/setup.mjs';
 import { runSync } from '../src/sync-cli.mjs';
 import { PROVIDER_LABELS } from '../src/sync/settings.mjs';
@@ -253,6 +254,13 @@ async function main() {
       if (argv[1] === 'observations') { if (!opt('profile')) fail('--profile required'); out(JSON.stringify(await rsi.retrievalObservationReport(opt('profile'), opt('week')), null, 2)); return; }
       if (argv[1] === 'replay') { const { ctx } = await openContext(process.env, { trustedLocal: true }); out(JSON.stringify(await createReplayMisses({ home: appHome() }).replay(ctx), null, 2)); return; }
       fail('use miss add, import, list, observations or replay');
+    }
+    case 'retrieval-use': {
+      const { ctx } = await openContext(process.env, { trustedLocal: true });
+      const report = await retrievalUseReport(ctx, await readActivity(process.env, 20000), {
+        days: Number(opt('days', 60)), vault: opt('vault', ''),
+      });
+      out(JSON.stringify(report, null, 2)); return;
     }
     case 'bench': {
       const rsi = createRsiWeekly({ home: appHome() });

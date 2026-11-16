@@ -11,7 +11,7 @@ import { buildAnswerReceipt } from './answer-receipt.mjs';
 import { buildContextPacket } from './context-packet.mjs';
 import { createSessionSeenStore, sessionSeenIdentity } from './since-last-session.mjs';
 import { listDecisionReviews } from './decision-reviews.mjs';
-import { search, searchWithVerdict, readNote, related, semanticStatus } from './core.mjs';
+import { search, searchWithVerdict, readNote, related, semanticStatus, readExcludedFolders } from './core.mjs';
 import { proposeNote, sendHandoff, listHandoffs, remember, appendDaily } from './writes.mjs';
 import { recentNotes, openLoops, vaultHealth, brief } from './insights.mjs';
 import { listCommands, fillCommand } from './commands.mjs';
@@ -254,7 +254,10 @@ export function createMcp(ctx, { onCall = () => {}, onProposal = null } = {}) {
   };
   const safeGuide = async () => {
     const value = guide();
-    for (const name of ctx.enabled) value.vaults[name].read_first = await visibleRules(name);
+    for (const name of ctx.enabled) {
+      value.vaults[name].read_first = await visibleRules(name);
+      value.vaults[name].excluded_folders = (await readExcludedFolders(ctx.byName.get(name).path)).active;
+    }
     return value;
   };
   const idProps = {
@@ -329,9 +332,9 @@ export function createMcp(ctx, { onCall = () => {}, onProposal = null } = {}) {
       inputSchema: { type: 'object', properties: { vault: vaultProp, days: { type: 'integer', minimum: 1, maximum: 90, default: 7 } }, required: ['vault'] },
       run: (a) => brief(ctx, a.vault, a) },
     { name: 'vault_health', title: 'Link health', annotations: RO,
-      description: 'Notes with no links, links to missing notes, duplicate titles and stale active notes, with tips to fix them.',
-      inputSchema: { type: 'object', properties: { vault: vaultProp }, required: ['vault'] },
-      run: (a) => vaultHealth(ctx, a.vault) },
+      description: 'Counts first, then a small page of examples for unlinked notes, broken links, duplicate titles and stale active notes. Increase limit up to 30 for more examples; private and excluded notes are never counted or listed.',
+      inputSchema: { type: 'object', properties: { vault: vaultProp, limit: { type: 'integer', minimum: 1, maximum: 30, default: 5 } }, required: ['vault'] },
+      run: (a) => vaultHealth(ctx, a.vault, { limit: a.limit ?? 5 }) },
     { name: 'vault_read_note', title: 'Read a note', annotations: RO,
       description: 'Frontmatter + body of one note by vault-relative path.',
       inputSchema: { type: 'object', properties: { vault: vaultProp, path: { type: 'string' } }, required: ['vault', 'path'] },
@@ -673,7 +676,12 @@ This prompt does not change permissions, write sources, or run unattended AI pro
             const failed = out?.ok === false;
             const serialized = JSON.stringify(out, null, 1);
             const resultTokenEstimate = failed ? null : estimateReadResponseTokens(tool.name, serialized);
-            onCall({ tool: tool.name, ok: !failed, written: Boolean(out?.written), agent: ctx.mcpAgent?.name || null, ...(resultTokenEstimate === null ? {} : { result_token_estimate: resultTokenEstimate }) });
+            const retrieved = ['vault_search', 'context_packet'].includes(tool.name) && !ctx.byName.get(callArgs?.vault)?.private && Array.isArray(out?.results)
+              ? out.results.slice(0, 20).map(item => typeof item.path === 'string' ? `${callArgs?.vault || ''}/${item.path}` : '').filter(Boolean)
+              : [];
+            onCall({ tool: tool.name, ok: !failed, written: Boolean(out?.written), agent: ctx.mcpAgent?.name || null,
+              ...(retrieved.length ? { retrieved_notes: retrieved } : {}),
+              ...(resultTokenEstimate === null ? {} : { result_token_estimate: resultTokenEstimate }) });
             return ok({ content: [{ type: 'text', text: serialized }], structuredContent: Array.isArray(out) ? { items: out } : out, isError: failed });
           } catch (e) {
             onCall({ tool: tool.name, ok: false, agent: ctx.mcpAgent?.name || null });

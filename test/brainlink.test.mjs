@@ -1088,7 +1088,8 @@ test('published rule resources and guide omit private and excluded notes', async
   assert.match(JSON.stringify(resources), /AGENTS/);
   assert.doesNotMatch(JSON.stringify(resources), /Private%20Rule|Excluded%20Rules/);
   const guide = await call('tools/call', { name: 'brainlink_guide', arguments: {} });
-  assert.doesNotMatch(JSON.stringify(guide), /Private Rule|Excluded Rules/);
+  assert.match(JSON.stringify(guide), /Excluded Rules\//, 'the guide names the owner-excluded folder so clients can explain why its notes are unavailable');
+  assert.doesNotMatch(JSON.stringify(guide), /Private Rule|Hidden\.md|PRIVATE_RULE_CANARY|EXCLUDED_RULE_CANARY/);
   for (const file of ['Private Rule.md', 'Excluded Rules/Hidden.md']) {
     const reply = await call('resources/read', { uri: `brainlink://vault/${encodeURIComponent('Acme Studio')}/${encodeURIComponent(file)}` });
     assert.ok(reply.error);
@@ -1382,10 +1383,16 @@ test('packs: scaffold never overwrites; merge replaces same-named vault', async 
   assert.equal(await readFile(path.join(dir, 'AGENTS.md'), 'utf8'), 'mine');
   assert.ok(created.includes('Max Office/Session Captures.md'));
   assert.deepEqual(await scaffold(dir, b.scaffold), []);
-  const merged = mergePack(mergePack(normalize({}), b), b);
+  const first = mergePack(normalize({}), b);
+  const extraRole = { name: 'Advisor', vault: 'V', role: 'Review role', activation: ['Connect Advisor'], close: ['Advisor close loop'], connect_notes: ['Advisor Role.md'], close_target: { mode: 'append-section', path: 'Advisor Log.md' } };
+  const merged = mergePack({ ...first, agents: [...first.agents, extraRole] }, b);
   assert.equal(merged.vaults.length, 1);
-  assert.equal(merged.agents.length, 1);
+  assert.deepEqual(merged.agents.map((a) => a.name).sort(), ['Advisor', 'Max']);
   assert.deepEqual(validate(normalize(merged)), []);
+  assert.throws(() => mergePack({ ...first, agents: [...first.agents, { ...extraRole, name: 'Max', vault: 'Other' }] }, b), /Role name already belongs to another vault/);
+  const personal = buildPack('personal-os', { vaultName: 'Home', vaultPath: dir });
+  assert.equal(personal.vault.private, true);
+  assert.doesNotMatch(JSON.stringify(personal), /Company knowledge|No personal, family or finance data in the company vault/);
   assert.throws(() => buildPack('nope', {}), /Unknown rule pack/);
 });
 
@@ -1532,7 +1539,7 @@ test('CLI: `brainlink serve` speaks MCP over stdio and logs content-free activit
   child.stdout.on('data', (d) => { buf += d; let i; while ((i = buf.indexOf('\n')) !== -1) { lines.push(JSON.parse(buf.slice(0, i))); buf = buf.slice(i + 1); } });
   child.stdin.write(JSON.stringify({ jsonrpc: '2.0', id: 1, method: 'initialize', params: {} }) + '\n');
   child.stdin.write(JSON.stringify({ jsonrpc: '2.0', id: 2, method: 'tools/call', params: { name: 'brainlink_guide', arguments: {} } }) + '\n');
-  child.stdin.write(JSON.stringify({ jsonrpc: '2.0', id: 3, method: 'tools/call', params: { name: 'vault_search', arguments: { vault: 'Acme Studio', query: 'secret pricing words' } } }) + '\n');
+  child.stdin.write(JSON.stringify({ jsonrpc: '2.0', id: 3, method: 'tools/call', params: { name: 'vault_search', arguments: { vault: 'Acme Studio', query: 'hybrid retrieval reranking agent memory' } } }) + '\n');
   for (let i = 0; i < 300 && lines.length < 3 && child.exitCode === null; i++) await new Promise((r) => setTimeout(r, 50));
   assert.equal(lines.length, 3, `expected three MCP responses before timeout; received ${lines.length}, child exit=${child.exitCode}`);
   for (let i = 0; i < 40; i++) { if (await readFile(path.join(home, 'activity.log'), 'utf8').then((t) => t.includes('vault_search'), () => false)) break; await new Promise((r) => setTimeout(r, 50)); }
@@ -1545,6 +1552,8 @@ test('CLI: `brainlink serve` speaks MCP over stdio and logs content-free activit
   assert.match(log, /"platform":"Cursor"/);
   const searchActivity = log.trim().split(/\r?\n/).map(JSON.parse).find((entry) => entry.tool === 'vault_search');
   assert.ok(Number.isSafeInteger(searchActivity.result_token_estimate) && searchActivity.result_token_estimate > 0);
+  assert.ok(searchActivity.retrieved_notes?.some((rel) => rel.startsWith('Acme Studio/')), 'successful search activity records visible note paths for local use counts');
+  assert.doesNotMatch(JSON.stringify(searchActivity), /hybrid retrieval reranking agent memory/);
   const guideActivity = log.trim().split(/\r?\n/).map(JSON.parse).find((entry) => entry.tool === 'brainlink_guide');
   assert.ok(Number.isSafeInteger(guideActivity.result_token_estimate) && guideActivity.result_token_estimate > 0);
   assert.doesNotMatch(log, /secret pricing/);
@@ -1808,7 +1817,9 @@ test('remember, daily note, open loops, recent, health and brief', async () => {
   assert.ok(loops.next_actions.some((x) => /booking vendor/.test(x.action)), JSON.stringify(loops));
   const rec = await recentNotes(ctx, 'Acme Studio', { days: 1 });
   assert.ok(rec.some((x) => x.title === 'Lonely'));
-  const h = await vaultHealth(ctx, 'Acme Studio');
+  const hDefault = await vaultHealth(ctx, 'Acme Studio');
+  assert.ok(hDefault.orphans.length <= 5 && hDefault.broken_links.length <= 5 && hDefault.duplicate_titles.length <= 5 && hDefault.stale_active_notes.length <= 5);
+  const h = await vaultHealth(ctx, 'Acme Studio', { limit: 30 });
   assert.ok(h.orphans.some((o) => o.title === 'Lonely'));
   assert.ok(h.broken_links.some((b) => b.target === 'Missing Note'));
   const b = await brief(ctx, 'Acme Studio');
@@ -1836,6 +1847,9 @@ test('shared commands from BrainLink/Commands appear as prompts in every AI', as
   assert.match(got.result.messages[0].content.text, /template "meeting"[\s\S]*Dana: launch moved to Nov 3/);
   const tools = (await mcp.handle({ jsonrpc: '2.0', id: 3, method: 'tools/list' })).result.tools.map((t) => t.name);
   for (const n of ['vault_recent', 'open_loops', 'brain_brief', 'vault_health', 'remember', 'append_daily']) assert.ok(tools.includes(n), n);
+  const healthSchema = (await mcp.handle({ jsonrpc: '2.0', id: 4, method: 'tools/list' })).result.tools.find((tool) => tool.name === 'vault_health').inputSchema;
+  assert.equal(healthSchema.properties.limit.default, 5);
+  assert.equal(healthSchema.properties.limit.maximum, 30);
 });
 
 // ---- Windows code paths (run here with os = 'win32') ----
@@ -1944,7 +1958,7 @@ test('P0-2: a root .brainlinkignore exclusion applies at any depth, not only to 
   assert.ok(existsSync(path.join(dest, 'BrainLink Shared', 'Acme Studio', 'sub', 'Visible.md')));
 });
 
-test('default .brainlinkignore: shipped on a fresh real vault, never overwrites one already there, folders stay out of search and answers', async () => {
+test('default .brainlinkignore: entry folders are visible by default in new vaults and user exclusions stay private', async () => {
   const home = await tmp('excluded');
   const vaultDir = path.join(home, 'Notes');
   await mkdir(vaultDir, { recursive: true });
@@ -1959,7 +1973,7 @@ test('default .brainlinkignore: shipped on a fresh real vault, never overwrites 
   await cp(SAMPLE, company, { recursive: true });
   await ensureDefaultIgnore(company);
   await mkdir(path.join(company, '00 Home'));
-  await writeFile(path.join(company, '00 Home/Diary.md'), '# Diary\n\nzebracorn personal notes');
+  await writeFile(path.join(company, '00 Home/Diary.md'), '# Diary\n\nzebracorn entry notes');
   await mkdir(path.join(company, 'finance'));
   await writeFile(path.join(company, 'finance/Taxes.md'), '# Taxes\n\nzebracorn bank numbers');
   let cfg = normalize({ timezone: 'Asia/Taipei' });
@@ -1967,13 +1981,13 @@ test('default .brainlinkignore: shipped on a fresh real vault, never overwrites 
   await scaffold(company, built.scaffold);
   cfg = normalize(mergePack(cfg, built));
   const r = await search(ctxOf(cfg), 'Acme Studio', 'zebracorn');
-  assert.deepEqual(r.map((x) => x.path), ['finance/Taxes.md']); // "finance/" is a suggestion only (commented out) until the user opts in; "00 Home/" is excluded by default
+  assert.deepEqual(r.map((x) => x.path), ['00 Home/Diary.md', 'finance/Taxes.md']); // entry notes are visible; finance remains an opt-in exclusion suggestion
   const read = await readExcludedFolders(company);
   assert.deepEqual(read.active, DEFAULT_EXCLUDED_FOLDERS);
   assert.deepEqual(read.suggested, SUGGESTED_EXCLUDED_FOLDERS);
   await writeExcludedFolders(company, [...DEFAULT_EXCLUDED_FOLDERS, 'finance/']);
   const r2 = await search(ctxOf(cfg), 'Acme Studio', 'zebracorn');
-  assert.deepEqual(r2.map((x) => x.path), []); // still none: "00 Home" and now "finance" are both excluded
+  assert.deepEqual(r2.map((x) => x.path), ['00 Home/Diary.md']); // owner exclusion applies to finance without hiding the entry note
 });
 
 test('setup UI: connecting a real vault ships default excluded folders; private flag and excluded folders are editable after connecting', async () => {

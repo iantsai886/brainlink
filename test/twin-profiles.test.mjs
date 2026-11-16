@@ -8,6 +8,7 @@ import { twinProfileStatus, profileScopeEditable, resolveTwinAgentScope, twinMem
 import { startSetup } from '../src/setup.mjs';
 import { createContext, loadVault, readNote, search } from '../src/core.mjs';
 import { createMcp } from '../src/server.mjs';
+import { presetGrantActions, presetActionAllowed, twinActionAllowed, formatPresetPermissionSummary } from '../ui/permissions.js';
 import { hashToken } from '../src/mcp-agents.mjs';
 import { openSessionStore } from '../src/sessions/index.mjs';
 import { parse as parseYaml } from 'yaml';
@@ -246,125 +247,32 @@ test('Twin status shows limited runtime scope and never exposes agent credential
   assert.equal(noProceduralTools.result.tools.some((tool) => tool.name === 'brainlink_guide'), false);
 });
 
-test('Twin setup creates profiles from local UI choices and escapes every profile-provided label', async () => {
-  const html = await readFile(new URL('../ui/index.html', import.meta.url), 'utf8');
-  assert.match(html, /id="twin-profiles-panel"/);
-  assert.match(html, /id="twin-profiles"/);
-  assert.match(html, /id="twin-create"/);
-  assert.match(html, /data-twin-edit=/);
-  assert.match(html, /POST', '\/api\/twins\/update'/);
-  assert.match(html, /twinProfiles\.confirmUpdate/);
-  assert.match(html, /id="preset-connect-modal"/);
-  assert.match(html, /id="preset-connect-review" class="card" role="status" aria-live="polite"/);
-  assert.match(html, /function updatePresetPermissionControls\(\)/);
-  assert.match(html, /data-preset-profile-check/);
-  assert.match(html, /input\.disabled = !required \|\| profile\?\.memory_policy/);
-  assert.match(html, /grant\.actions\.push\(t\(actionKeys\[input\.value\]\)\)/);
-  assert.match(html, /data-connect-scope=/);
-  assert.match(html, /POST', '\/api\/connect'/);
-  assert.match(html, /twinProfiles\.identityHint/);
-  assert.match(html, /data-twin-vault/);
-  assert.match(html, /data-twin-agent/);
-  assert.match(html, /data-twin-agent-vault/);
-  assert.match(html, /data-twin-memory/);
-  assert.match(html, /function updateTwinPermissionControls\(\)/);
-  assert.match(html, /input\.disabled = !allowed;\s+if \(!memoryAllowed\) input\.checked = false;/);
-  assert.match(html, /twin-new-memory'\)\.addEventListener\('change', updateTwinPermissionControls\)/);
-  assert.match(html, /POST', '\/api\/twins\/create'/);
-  assert.match(html, /t\('twinProfiles\.confirmCreate'/);
-  assert.match(html, /confirm\(confirmText/);
-  assert.match(html, /esc\(p\.name\)/);
-  assert.match(html, /esc\(t\('twinProfiles\.owner', \{ owner: p\.owner \}\)\)/);
-  assert.match(html, /twinProfiles\.limits/);
-  assert.match(html, /data-sess-profile/);
-  assert.match(html, /data-sess-assign/);
-  assert.match(html, /sessions\.twinPrivate/);
+test('preset Twin connection choices expose only granted, memory-enabled operations', async () => {
+  const grant = { name: 'Shared', access: 'propose' };
+  assert.deepEqual(presetGrantActions(grant), ['search', 'read_note', 'read_session', 'propose_note']);
+  assert.deepEqual(presetGrantActions({ name: 'Shared', access: 'read' }), ['search', 'read_note', 'read_session']);
+  assert.deepEqual(presetGrantActions({ name: 'Shared', access: 'write' }, { mailboxVault: 'Shared' }), ['search', 'read_note', 'write_note', 'read_session', 'log_session', 'propose_note', 'handoff_read', 'write_handoff']);
+  assert.equal(presetActionAllowed({ action: 'propose_note', access: 'propose', memoryPolicy: { semantic: true }, selectedMemory: { semantic: true } }), true);
+  assert.equal(presetActionAllowed({ action: 'write_note', access: 'propose', memoryPolicy: { semantic: true }, selectedMemory: { semantic: true } }), false);
+  assert.equal(presetActionAllowed({ action: 'search', access: 'write', memoryPolicy: { semantic: true }, selectedMemory: { semantic: false } }), false);
 });
 
-test('AI connection review summary tracks selected profiles, memory ceilings and per-vault actions', async () => {
-  const html = await readFile(new URL('../ui/index.html', import.meta.url), 'utf8');
-  const start = html.indexOf('function updatePresetPermissionControls() {');
-  const end = html.indexOf('function openPresetConnect(clientId)', start);
-  assert.ok(start >= 0 && end > start, 'connection summary helper exists');
-  const memories = ['working', 'semantic', 'procedural', 'episodic'].map((key) => ({ dataset: { presetMemory: key }, checked: ['semantic', 'episodic'].includes(key) }));
-  const actions = [
-    { vault: 'Company Vault', profile: 'org', memory: 'semantic', access: 'write', value: 'search', checked: true },
-    { vault: 'Company Vault', profile: 'org', memory: 'semantic', access: 'write', value: 'read_note', checked: true },
-    { vault: 'Company Vault', profile: 'org', memory: 'semantic', access: 'write', value: 'propose_note', checked: false },
-    { vault: 'Personal Vault', profile: 'org', memory: 'episodic', access: 'write', value: 'read_session', checked: true },
-    { vault: 'Personal Vault', profile: 'org', memory: 'working', access: 'write', value: 'handoff_read', checked: true },
-  ].map((item) => ({ dataset: { presetVault: item.vault, presetProfile: item.profile, memory: item.memory }, value: item.value, checked: item.checked, disabled: false, closest: () => section }));
-  const profileCheck = { value: 'org', checked: true, closest: () => section };
-  const permissions = { hidden: false };
-  const section = {
-    dataset: { presetProfile: 'org' },
-    querySelector: (selector) => selector === '.preset-profile-permissions' ? permissions : profileCheck,
-    querySelectorAll: (selector) => selector === '[data-preset-memory]' ? memories : selector === '[data-preset-vault]' ? actions : selector === '[data-preset-vault]:checked' ? actions.filter((item) => item.checked) : [],
-  };
-  const review = { textContent: '' }, submit = { disabled: false };
-  const profiles = [{ id: 'org', name: 'Organisation', memory_policy: { working: true, semantic: true, procedural: true, episodic: true }, vaults: [{ name: 'Company Vault', access: 'write' }, { name: 'Personal Vault', access: 'write' }] }];
-  const document = {
-    querySelectorAll(selector) {
-      if (selector === '[data-preset-profile]') return [section];
-      if (selector === '[data-preset-vault]') return actions;
-      if (selector === '[data-preset-profile-check]:checked') return [profileCheck];
-      if (selector === '[data-preset-vault]:checked') return actions.filter((item) => item.checked);
-      throw new Error(`Unexpected selector: ${selector}`);
-    },
-  };
-  document.querySelector = (selector) => selector.startsWith('[data-preset-profile-check') ? profileCheck : null;
-  const $ = (id) => ({ 'preset-connect-review': review, 'preset-connect-submit': submit, 'preset-connect-summary': { textContent: '' } })[id] || null;
-  const t = (key) => key;
-  const S = { twin_profiles: { profiles } };
-  const update = new Function('$', 't', 'document', 'S', `${html.slice(start, end)}; return updatePresetPermissionControls;`)($, t, document, S);
-  update();
-  assert.match(review.textContent, /Organisation: Company Vault \(connect\.search, connect\.readNote\); Personal Vault \(connect\.readSession\)/);
-  assert.equal(actions.find((item) => item.value === 'handoff_read').disabled, true, 'working memory remains off unless explicitly selected');
-
-  memories.find((item) => item.dataset.presetMemory === 'semantic').checked = false;
-  update();
-  assert.deepEqual(actions.filter((item) => ['search', 'read_note', 'propose_note'].includes(item.value)).map((item) => ({ checked: item.checked, disabled: item.disabled })), [
-    { checked: false, disabled: true }, { checked: false, disabled: true }, { checked: false, disabled: true },
+test('connection review summarizes only selected profiles and checked per-vault actions', async () => {
+  const summary = formatPresetPermissionSummary([
+    { profile: 'Organisation', vaults: [{ name: 'Brain', actions: ['search', 'read_note'] }] },
+    { profile: 'Unselected', vaults: [] },
   ]);
-  assert.match(review.textContent, /Personal Vault \(connect\.readSession\)/);
+  assert.equal(summary, 'Organisation: Brain (search, read_note)');
+  assert.equal(formatPresetPermissionSummary([]), '');
 });
 
-test('Twin permission controls disable and clear actions when their memory type is off', async () => {
-  const html = await readFile(new URL('../ui/index.html', import.meta.url), 'utf8');
-  const start = html.indexOf('function twinActionMemoryAllowed(action, policy) {');
-  const end = html.indexOf("$('twin-apply-memory-to-agents').addEventListener", start);
-  assert.ok(start >= 0 && end > start, 'permission helper is connected to memory changes');
-  const memories = ['semantic', 'episodic', 'working', 'procedural'].map((key) => ({ dataset: { twinMemory: key }, checked: key === 'episodic' || key === 'procedural' }));
-  const agentMemories = ['working', 'semantic', 'procedural', 'episodic'].map((key) => ({ dataset: { twinAgentMemory: 'agent', memoryType: key }, checked: key === 'episodic' || key === 'procedural', disabled: false }));
-  const operations = ['search', 'read_note', 'read_session', 'log_session', 'propose_note', 'handoff_read', 'write_handoff'].map((value) => ({ value, checked: true, disabled: false }));
-  const agentOperations = operations.map((input) => ({ ...input, dataset: { twinOperation: 'agent', vaultName: 'Vault' } }));
-  const document = {
-    querySelectorAll: (selector) => selector === '[data-twin-memory]' ? memories : selector === '[data-twin-agent-memory]' ? agentMemories : selector === '[data-twin-operation]' ? agentOperations : operations,
-    querySelector: (selector) => selector.includes('data-twin-agent-vault') || selector.includes('data-twin-vault="')
-      ? { checked: true } : selector.includes('data-twin-vault-access') ? { value: 'write' } : null,
-  };
-  const CSS = { escape: (value) => String(value) };
-  const helpers = new Function('document', 'CSS', `${html.slice(start, end)}; return { updateTwinPermissionControls, twinActionMemoryAllowed };`)(document, CSS);
-  const update = helpers.updateTwinPermissionControls;
-  update();
-  assert.deepEqual(agentOperations.map(({ disabled, checked }) => ({ disabled, checked })), [
-    { disabled: true, checked: false }, { disabled: true, checked: false },
-    { disabled: false, checked: true }, { disabled: false, checked: true }, { disabled: true, checked: false },
-    { disabled: true, checked: false }, { disabled: true, checked: false },
-  ]);
-  memories.forEach((item) => { item.checked = true; });
-  agentMemories.forEach((item) => { item.checked = true; });
-  update();
-  assert.deepEqual(agentOperations.map(({ disabled }) => disabled), [false, false, false, false, false, false, false]);
-  memories.find((item) => item.dataset.twinMemory === 'episodic').checked = false;
-  update();
-  assert.deepEqual(agentOperations.map(({ disabled }) => disabled), [false, false, true, true, false, false, false], 'semantic note proposals remain available when episodic memory is off');
-  assert.equal(helpers.twinActionMemoryAllowed('log_session', { episodic: true }), true);
-  assert.equal(helpers.twinActionMemoryAllowed('log_session', { episodic: false }), false);
-  assert.equal(helpers.twinActionMemoryAllowed('propose_note', { semantic: true, episodic: false }), true);
-  assert.equal(helpers.twinActionMemoryAllowed('propose_note', { semantic: false, episodic: true }), false);
+test('Twin permission controls apply both profile-vault and agent-memory ceilings', async () => {
+  assert.equal(twinActionAllowed({ action: 'search', access: 'write', memoryPolicy: { semantic: true }, selected: true, profileVaultSelected: true }), true);
+  assert.equal(twinActionAllowed({ action: 'search', access: 'write', memoryPolicy: { semantic: false }, selected: true, profileVaultSelected: true }), false);
+  assert.equal(twinActionAllowed({ action: 'read_session', access: 'write', memoryPolicy: { episodic: false }, selected: true, profileVaultSelected: true }), false);
+  assert.equal(twinActionAllowed({ action: 'propose_note', access: 'read', memoryPolicy: { semantic: true }, selected: true, profileVaultSelected: true }), false);
+  assert.equal(twinActionAllowed({ action: 'search', access: 'write', memoryPolicy: { semantic: true }, selected: true, profileVaultSelected: false }), false);
 });
-
 test('Twin memory shortcut copies its ceiling only to selected agents and waits for normal review/save', async () => {
   const html = await readFile(new URL('../ui/index.html', import.meta.url), 'utf8');
   const start = html.indexOf('function twinActionMemoryAllowed(action, policy) {');

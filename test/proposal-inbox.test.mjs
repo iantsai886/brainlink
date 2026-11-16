@@ -21,6 +21,11 @@ test('proposal inbox deduplicates local drafts and rejects unsafe paths or secre
   const duplicate = await inbox.add(proposal);
   assert.equal(first.id, duplicate.id);
   assert.equal((await inbox.listPending()).length, 1);
+  const editToken = createHash('sha256').update(`${first.path}\0${first.content}`).digest('hex');
+  const edited = await inbox.updatePending({ id: first.id, expected: editToken, path: 'Inbox/Renamed.md', content: '# Renamed\n\nEdited fictional draft.\n' });
+  assert.equal(edited.path, 'Inbox/Renamed.md');
+  assert.match(edited.content, /Edited fictional draft/);
+  await assert.rejects(inbox.updatePending({ id: first.id, expected: editToken, path: 'Inbox/Stale.md', content: '# Stale' }), /changed/);
   assert.equal(await inbox.add({ ...proposal, path: '../outside.md' }), null);
   assert.equal(await inbox.add({ ...proposal, path: 'Inbox/Secret.md', content: 'sk-test-12345678901234567890' }), null);
   await inbox.resolve(first.id, 'rejected');
@@ -126,4 +131,35 @@ test('authenticated owner approval saves one new file, respects read-only mode, 
   const discarded = await inbox.add({ vault: 'Fictional', vaultPath, path: 'Inbox/Rejected.md', content: '# Discarded\n', tool: 'propose_note', agent: 'Fixture AI' });
   assert.equal((await api('POST', '/api/proposals/reject', { id: discarded.id, confirm: true })).json.ok, true);
   await assert.rejects(readFile(path.join(vaultPath, 'Inbox', 'Rejected.md')));
+});
+
+test('proposal edit preview names destination and similar notes, then saves only the review draft', async (t) => {
+  const root = await mkdtemp(path.join(tmpdir(), 'brainlink-proposal-edit-'));
+  t.after(() => rm(root, { recursive: true, force: true }));
+  const appHome = path.join(root, 'app'), vaultPath = path.join(root, 'vault');
+  await mkdir(path.join(vaultPath, 'Inbox'), { recursive: true });
+  await writeFile(path.join(vaultPath, 'Existing.md'), '# Fictional workflow\nCurrent shared dispatch workflow.');
+  const env = { BRAINLINK_HOME: appHome, BRAINLINK_SEMANTIC: '0' };
+  await saveConfig(normalize({ vaults: [{ name: 'Shared', path: vaultPath, writes: 'on' }] }), path.join(appHome, 'config.json'));
+  const inbox = createProposalInbox({ home: appHome });
+  const proposal = await inbox.add({ vault: 'Shared', vaultPath, path: 'Inbox/Draft.md', content: '# Draft\nOriginal proposal body.', tool: 'propose_note', agent: 'Fixture AI' });
+  const app = await startSetup({ env, home: root, os: 'linux', port: 0, useCli: false });
+  t.after(() => app.server.close());
+  const base = `http://127.0.0.1:${app.port}`;
+  const api = async (method, route, body = {}) => {
+    const response = await fetch(base + route, { method, headers: { 'Content-Type': 'application/json', 'X-BrainLink-Token': app.token }, body: method === 'GET' ? undefined : JSON.stringify(body) });
+    return { status: response.status, json: await response.json() };
+  };
+  const listed = (await api('GET', '/api/proposals')).json.proposals.find(item => item.id === proposal.id);
+  const edit = { id: proposal.id, edit_token: listed.edit_token, path: 'Inbox/Updated.md', content: '# Updated\nFictional workflow proposal.' };
+  const preview = await api('POST', '/api/proposals/edit-preview', edit);
+  assert.equal(preview.json.preview.path, 'Inbox/Updated.md');
+  assert.ok(preview.json.preview.similar.some(item => item.path === 'Existing.md'));
+  assert.equal(await readFile(path.join(vaultPath, 'Inbox', 'Draft.md')).then(() => true, () => false), false, 'preview writes nothing to the vault');
+  const savedDraft = await api('POST', '/api/proposals/edit-preview', { ...edit, confirm: true });
+  assert.equal(savedDraft.json.path, 'Inbox/Updated.md');
+  assert.equal(await readFile(path.join(vaultPath, 'Inbox', 'Updated.md')).then(() => true, () => false), false, 'saving the edited draft is still not approval');
+  const approved = await api('POST', '/api/proposals/approve', { id: proposal.id, confirm: true });
+  assert.equal(approved.json.path, 'Shared/Inbox/Updated.md');
+  assert.match(await readFile(path.join(vaultPath, 'Inbox', 'Updated.md'), 'utf8'), /Fictional workflow proposal/);
 });

@@ -36,6 +36,7 @@
     "smoke:upgrade:win": "pwsh -NoProfile -File scripts/smoke-upgrade-windows.ps1",
     "stage:canvas-platforms": "node scripts/stage-canvas-platforms.mjs",
     "evaluate:rsi-discovery": "node bin/rsi-discovery-eval.mjs",
+    "evaluate:rsi-fix-selection": "node scripts/evaluate-rsi-fix-selection.mjs",
     "setup": "node bin/brainlink.mjs setup",
     "build:mac": "bash packaging/macos/build-pkg.sh",
     "build:mac-zip": "bash packaging/macos/build-zip.sh",

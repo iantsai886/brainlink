@@ -488,7 +488,8 @@ test('scheduled local draft failures use bounded schedule retries and do not rep
     while (Date.now() < deadline) {
       state = await fetch(base + '/api/state', { headers }).then((r) => r.json());
       drafts = await fetch(base + '/api/ingestion/drafts', { headers }).then((r) => r.json());
-      if (modelCalls === 2 && drafts.drafts.length === 1 && state.ingestion_drafts.status.ok) break;
+      const savedConfig = JSON.parse(await readFile(path.join(appHome, 'config.json'), 'utf8'));
+      if (modelCalls === 2 && drafts.drafts.length === 1 && state.ingestion_drafts.status.ok && savedConfig.ingestion.retry_after === null) break;
       await new Promise((resolve) => setTimeout(resolve, 10));
     }
     assert.equal(modelCalls, 2, 'the local-model failure gets one bounded retry');

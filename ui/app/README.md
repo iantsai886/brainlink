@@ -1,5 +1,9 @@
 # BrainLink UI — milestone 2
 
+## Status (2026-11-16)
+
+This directory is retained as an isolated host-adapter prototype. It is not mounted by `brainlink setup` and is not the product's active Setup UI. Keep it separate until a host supplies the documented `BrainStore` and service contract; do not add a second Setup entry point or copy its screens into the active UI without an explicit integration plan. The running Setup continues to use `../index.html` and `src/setup.mjs`. The active UI's destination-based extraction is a separate unfinished refactor.
+
 Dependency-free ES modules for Node 22 hosts and modern browsers. Import `startApp(root, createApi({ store, services, access }))` from `app/app.mjs` and `app/lib/api.mjs`. Host injects a BrainStore and independent `services.connectors`; the browser UI does not use filesystem or network APIs. Without a host, `index.html` displays a configuration message.
 
 Routes: `#connect`, `#sessions`, `#search`, `#notes`. Connectors: `detect(): [{client,installed,connected}]`; `connect(client)`, `test(client)` and `disconnect(client)` return `{ok,message}`. Per-session privacy uses `store.setSessionPrivate` when available, else the legacy complete-history vault move; readout prefers `Session.private`. Imported sessions should be created with `private: true` by host importers and kept local-only by the store. Ranked search delegates directly to `store.search(query,{limit,scope?,includeSessions:false})` when available, or M1 scoring fallback otherwise.

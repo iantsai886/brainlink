@@ -224,6 +224,12 @@ main #ready, main #ask-panel, main #brain-panel, main #sessions-panel, main #s-c
       <div class="row"><button type="button" id="selftest-run" data-i18n="selftest.run"></button><span id="selftest-summary" class="muted" role="status" aria-live="polite"></span></div>
       <ul id="selftest-out" class="ask-sources" style="margin-top:10px"></ul>
     </div>
+    <div class="card" id="retrieval-use-card" style="margin-top:10px">
+      <b data-i18n="retrievalUse.title"></b>
+      <p class="muted" data-i18n="retrievalUse.hint"></p>
+      <div class="row"><button type="button" id="retrieval-use-run" data-i18n="retrievalUse.run"></button><span id="retrieval-use-summary" class="muted" role="status" aria-live="polite"></span></div>
+      <ul id="retrieval-use-out" class="ask-sources" style="margin-top:10px"></ul>
+    </div>
     <div class="card" id="replay-card">
       <b data-i18n="replay.title"></b>
       <p class="muted" data-i18n="replay.hint"></p>
@@ -398,6 +404,14 @@ main #ready, main #ask-panel, main #brain-panel, main #sessions-panel, main #s-c
   <details class="card" id="handoffs-panel" hidden>
     <summary data-i18n="handoffs.title"></summary>
     <p class="hint" data-i18n="handoffs.hint"></p>
+    <div class="card" id="handoff-mailbox-settings">
+      <b data-i18n="handoffs.mailboxSettings"></b>
+      <p class="muted" data-i18n="handoffs.mailboxFilesStay"></p>
+      <div class="grid2"><label><span data-i18n="handoffs.mailboxVault"></span><select id="handoff-mailbox-vault"></select></label><label><span data-i18n="handoffs.mailboxFolder"></span><select id="handoff-mailbox-folder"></select></label></div>
+      <div class="row"><button type="button" id="handoff-mailbox-preview-button" data-i18n="handoffs.mailboxPreview"></button><span id="handoff-mailbox-status" class="muted" role="status"></span></div>
+      <pre id="handoff-mailbox-preview" class="mono" hidden style="white-space:pre-wrap"></pre>
+      <button type="button" class="primary" id="handoff-mailbox-confirm" hidden data-i18n="handoffs.mailboxConfirm"></button>
+    </div>
     <div id="handoffs-list" class="cards"></div>
   </details>
 
@@ -518,6 +532,17 @@ main #ready, main #ask-panel, main #brain-panel, main #sessions-panel, main #s-c
         <div class="grid2">
           <label><span data-i18n="vault.folderLabel"></span><input id="v-path" class="mono"></label>
           <label><span data-i18n="vault.nameLabel"></span><input id="v-name"></label>
+        </div>
+        <div class="row" style="margin-top:8px"><button type="button" id="v-inspect" data-i18n="vault.inspectExisting"></button><span id="v-inspect-status" class="muted" role="status"></span></div>
+        <div id="v-adopt-options" class="card" hidden>
+          <p class="hint" data-i18n="vault.adoptHint"></p>
+          <div class="grid2"><label><span data-i18n="vault.intakeFolder"></span><select id="v-intake-folder"></select><small data-i18n="vault.intakeFolderHint"></small></label><label><span data-i18n="vault.mailboxFolder"></span><select id="v-mailbox-folder"></select><small data-i18n="vault.mailboxFolderHint"></small></label></div>
+          <label><span data-i18n="vault.ruleNotes"></span><select id="v-read-first" multiple size="5"></select></label>
+          <label><span data-i18n="vault.roleNotes"></span><select id="v-role-notes" multiple size="5"></select></label>
+          <label><span data-i18n="vault.closeTarget"></span><select id="v-close-target"></select></label>
+          <label id="v-move-mailbox-wrap" class="muted"><input type="checkbox" id="v-move-mailbox" style="width:auto"> <span data-i18n="vault.moveMailbox"></span></label>
+          <div class="row"><button type="button" id="v-preview-config" data-i18n="vault.previewConfig"></button><span id="v-adopt-warning" class="warning" role="alert" hidden></span></div>
+          <pre id="v-adopt-preview" class="mono" hidden style="white-space:pre-wrap;max-height:320px;overflow:auto"></pre>
         </div>
         <div class="grid2" style="margin-top:10px">
           <label><span data-i18n="vault.driveFolderId"></span><input id="v-drive-id" class="mono" data-i18n-placeholder="vault.driveFolderIdPlaceholder"></label>
@@ -755,6 +780,10 @@ main #ready, main #ask-panel, main #brain-panel, main #sessions-panel, main #s-c
   </div>
 </div>
 <div id="toast" role="status" aria-live="polite"></div>
+<div id="app-error" class="error-box" role="alert" aria-live="assertive" hidden style="position:sticky;top:0;z-index:1000"><span id="app-error-message"></span> <button type="button" id="app-error-dismiss" class="link">Dismiss</button></div>
+<button type="button" id="cancel-requests" hidden data-i18n="system.cancelRequests" style="position:fixed;right:18px;bottom:18px;z-index:999">Cancel current requests</button>
+<dialog id="confirm-dialog" aria-labelledby="confirm-dialog-message"><p id="confirm-dialog-message" style="white-space:pre-wrap"></p><div class="row"><button type="button" id="confirm-dialog-cancel" data-i18n="system.cancel"></button><button type="button" id="confirm-dialog-accept" class="primary" data-i18n="system.confirm"></button></div></dialog>
+<script src="permissions.js"></script>
 <script>
 const T = new URLSearchParams(location.search).get('t') || '';
 const latestVaultNoteCounts = new Map();
@@ -790,11 +819,38 @@ const clientLabel = (id) => CLIENT_LABEL[id] || (id ? id[0].toUpperCase() + id.s
 const CLIENT_COLOR_VARS = ['c1', 'c2', 'c3', 'c4', 'c5', 'c6', 'c7', 'c8'];
 function clientColor(id) { let h = 0; for (const c of String(id)) h = (h * 31 + c.charCodeAt(0)) >>> 0; return `var(--${CLIENT_COLOR_VARS[h % CLIENT_COLOR_VARS.length]})`; }
 
-async function api(method, url, body) {
-  const r = await fetch(url, { method, headers: { 'Content-Type': 'application/json', 'X-BrainLink-Token': T }, body: body ? JSON.stringify(body) : undefined });
-  const j = await r.json().catch(() => ({}));
-  if (!r.ok) throw new Error(j.error || r.statusText);
-  return j;
+const activeApiRequests = new Set();
+async function api(method, url, body, { signal, timeoutMs = 60_000 } = {}) {
+  const controller = new AbortController(); activeApiRequests.add(controller);
+  const cancel = $('cancel-requests'); if (cancel) cancel.hidden = false;
+  const timer = setTimeout(() => controller.abort(new DOMException('Request timed out.', 'TimeoutError')), timeoutMs);
+  const abortFromCaller = () => controller.abort(signal.reason || new DOMException('Request cancelled.', 'AbortError'));
+  if (signal?.aborted) abortFromCaller(); else signal?.addEventListener('abort', abortFromCaller, { once: true });
+  try {
+    const r = await fetch(url, { method, headers: { 'Content-Type': 'application/json', 'X-BrainLink-Token': T }, body: body ? JSON.stringify(body) : undefined, signal: controller.signal });
+    const j = await r.json().catch(() => ({}));
+    if (!r.ok) throw new Error(j.error || r.statusText);
+    return j;
+  } catch (error) {
+    if (controller.signal.aborted) throw new Error(controller.signal.reason?.name === 'TimeoutError' ? 'The request timed out. Try again.' : 'The request was cancelled.');
+    throw error;
+  } finally {
+    clearTimeout(timer); signal?.removeEventListener('abort', abortFromCaller); activeApiRequests.delete(controller);
+    if (cancel) cancel.hidden = activeApiRequests.size === 0;
+  }
+}
+$('cancel-requests')?.addEventListener('click', () => { for (const controller of activeApiRequests) controller.abort(new DOMException('Request cancelled.', 'AbortError')); });
+$('app-error-dismiss')?.addEventListener('click', () => { $('app-error').hidden = true; $('app-error-message').textContent = ''; });
+function confirmInPage(message) {
+  const dialog = $('confirm-dialog'), prompt = $('confirm-dialog-message');
+  prompt.textContent = String(message || '');
+  return new Promise(resolve => {
+    const finish = (value) => { dialog.close(); resolve(value); };
+    $('confirm-dialog-cancel').onclick = () => finish(false);
+    $('confirm-dialog-accept').onclick = () => finish(true);
+    dialog.oncancel = (event) => { event.preventDefault(); finish(false); };
+    dialog.showModal(); $('confirm-dialog-cancel').focus();
+  });
 }
 document.getElementById('updates-check')?.addEventListener('click', async (event) => {
   const button = event.currentTarget;
@@ -861,7 +917,7 @@ document.addEventListener('click', async (event) => {
     $('updates-result').append(document.createTextNode(` ${t('updates.openFailed')}`));
   }
 });
-function toast(msg, bad) { const t = $('toast'); t.textContent = msg; t.className = 'show' + (bad ? ' bad' : ''); clearTimeout(t._h); t._h = setTimeout(() => (t.className = ''), bad ? 6000 : 3500); }
+function toast(msg, bad) { const t = $('toast'); t.textContent = msg; t.className = 'show' + (bad ? ' bad' : ''); if (bad && $('app-error')) { $('app-error-message').textContent = msg; $('app-error').hidden = false; } clearTimeout(t._h); t._h = setTimeout(() => (t.className = ''), bad ? 6000 : 3500); }
 async function act(fn) { try { await fn(); await load(); } catch (e) { toast(e.message, true); } }
 $('reranker-form').addEventListener('submit', (event) => {
   event.preventDefault();
@@ -1288,7 +1344,7 @@ $('memory-review-vault').onchange = () => {
   $('memory-review-save').disabled = !memoryReview?.writable || $('memory-review-vault').value !== memoryReview.vault;
 };
 $('memory-review-open').onclick = async () => {
-  if (memoryReview && $('memory-review-text').value !== memoryReview.text && !confirm(t('memoryReview.discard'))) return;
+  if (memoryReview && $('memory-review-text').value !== memoryReview.text && !await confirmInPage(t('memoryReview.discard'))) return;
   const vault = $('memory-review-vault').value;
   if (!vault) return;
   try {
@@ -1481,10 +1537,49 @@ async function loadHandoffs() {
   $('handoffs-list').innerHTML = `<p class="skeleton">${esc(t('handoffs.loading'))}</p>`;
   try {
     const r = await api('POST', '/api/handoffs', {});
-    $('handoffs-panel').hidden = !r.enabled;
+    $('handoffs-panel').hidden = !(S?.vaults || []).some((vault) => vault.exists);
     if (r.enabled) renderHandoffs(r.receipts);
+    else $('handoffs-list').innerHTML = `<p class="muted">${esc(t('handoffs.noMailbox'))}</p>`;
+    if (!$('handoffs-panel').hidden) await loadMailboxSettings();
   } catch (e) { $('handoffs-list').innerHTML = `<p class="error-box">${esc(t('handoffs.loadError', { msg: e.message }))}</p>`; }
 }
+
+let handoffMailboxPreview = null;
+async function loadMailboxSettings() {
+  const select = $('handoff-mailbox-vault'), old = select.value || S.handoff?.vault || '';
+  select.innerHTML = (S.vaults || []).filter((vault) => vault.exists).map((vault) => `<option value="${esc(vault.name)}">${esc(vault.name)}${vault.private ? ` (${esc(t('vault.private'))})` : ''}</option>`).join('');
+  if ([...select.options].some((option) => option.value === old)) select.value = old;
+  await loadMailboxFolders();
+}
+async function loadMailboxFolders() {
+  handoffMailboxPreview = null; $('handoff-mailbox-preview').hidden = true; $('handoff-mailbox-confirm').hidden = true;
+  const vault = (S.vaults || []).find((item) => item.name === $('handoff-mailbox-vault').value);
+  if (!vault) { $('handoff-mailbox-folder').innerHTML = ''; return; }
+  const structure = await api('POST', '/api/vault/inspect', { path: vault.path });
+  const folders = structure.folders || [];
+  $('handoff-mailbox-folder').innerHTML = folders.map((folder) => `<option value="${esc(folder)}">${esc(folder)}</option>`).join('');
+  const current = S.handoff?.vault === vault.name ? S.handoff.folder : '';
+  if (current && folders.includes(current)) $('handoff-mailbox-folder').value = current;
+  if (!folders.length) $('handoff-mailbox-status').textContent = t('handoffs.mailboxNoFolders');
+}
+$('handoff-mailbox-vault')?.addEventListener('change', () => act(loadMailboxFolders));
+$('handoff-mailbox-folder')?.addEventListener('change', () => { handoffMailboxPreview = null; $('handoff-mailbox-preview').hidden = true; $('handoff-mailbox-confirm').hidden = true; });
+$('handoff-mailbox-preview-button')?.addEventListener('click', () => act(async () => {
+  const preview = await api('POST', '/api/handoff-mailbox/preview', { vault: $('handoff-mailbox-vault').value, folder: $('handoff-mailbox-folder').value });
+  handoffMailboxPreview = preview;
+  const display = { from: preview.from, to: preview.to, ...(preview.private_vault ? { warning: t('handoffs.mailboxPrivateWarning') } : {}), note: t('handoffs.mailboxFilesStay') };
+  $('handoff-mailbox-preview').textContent = JSON.stringify(display, null, 2); $('handoff-mailbox-preview').hidden = false; $('handoff-mailbox-confirm').hidden = false;
+  $('handoff-mailbox-status').textContent = t('handoffs.mailboxReviewFirst');
+}));
+$('handoff-mailbox-confirm')?.addEventListener('click', () => act(async () => {
+  if (!handoffMailboxPreview) throw new Error(t('handoffs.mailboxPreviewRequired'));
+  $('handoff-mailbox-confirm').disabled = true;
+  try {
+    await api('POST', '/api/handoff-mailbox/confirm', { id: handoffMailboxPreview.id, confirm: true });
+    handoffMailboxPreview = null; $('handoff-mailbox-preview').hidden = true; $('handoff-mailbox-confirm').hidden = true;
+    $('handoff-mailbox-status').textContent = t('handoffs.mailboxSaved'); await load();
+  } finally { $('handoff-mailbox-confirm').disabled = false; }
+}));
 
 async function loadProposals() {
   $('proposal-review-list').innerHTML = `<p class="skeleton">${esc(t('proposals.loading'))}</p>`;
@@ -1502,11 +1597,33 @@ function renderProposals(proposals) {
     <div class="row" style="justify-content:space-between"><b>${esc(proposal.path)}</b><span class="pill">${esc(proposal.vault)}</span></div>
     <div class="muted" style="font-size:13px">${esc(t(proposal.agent_verified ? 'proposals.fromVerified' : 'proposals.fromUnverified', { agent: proposal.agent || t('proposals.unknownAgent'), tool: proposal.tool, when: new Date(proposal.created_at).toLocaleString(LOCALE) }))}</div>
     <pre class="mono" style="white-space:pre-wrap;max-height:360px;overflow:auto">${esc(proposal.content)}</pre>
+    <details><summary>${esc(t('proposals.edit'))}</summary><label>${esc(t('proposals.destination'))}<input data-proposal-path value="${esc(proposal.path)}"></label><label>${esc(t('proposals.draft'))}<textarea data-proposal-content rows="8">${esc(proposal.content)}</textarea></label><div class="row"><button type="button" data-proposal-edit-preview>${esc(t('proposals.previewEdit'))}</button><span class="muted">${esc(t('proposals.reason', { agent: proposal.agent || t('proposals.unknownAgent'), tool: proposal.tool }))}</span></div><div data-proposal-edit-result class="muted"></div><button type="button" class="primary" data-proposal-edit-confirm data-token="${esc(proposal.edit_token)}" hidden>${esc(t('proposals.saveDraft'))}</button></details>
     <div class="row"><button class="primary" type="button" data-proposal-approve="${esc(proposal.id)}">${esc(t('proposals.approve'))}</button><button type="button" data-proposal-reject="${esc(proposal.id)}">${esc(t('proposals.reject'))}</button></div>
   </article>`).join('');
 }
 
 document.addEventListener('click', (event) => {
+  const editPreview = event.target.closest('[data-proposal-edit-preview]');
+  const editConfirm = event.target.closest('[data-proposal-edit-confirm]');
+  if (editPreview || editConfirm) {
+    const card = event.target.closest('[data-owner-proposal]');
+    act(async () => {
+      const path = card.querySelector('[data-proposal-path]').value;
+      const content = card.querySelector('[data-proposal-content]').value;
+      const button = editPreview || editConfirm; button.disabled = true;
+      try {
+        const payload = { id: card.dataset.ownerProposal, path, content, edit_token: card.querySelector('[data-proposal-edit-confirm]').dataset.token };
+        if (editConfirm) payload.confirm = true;
+        const result = await api('POST', '/api/proposals/edit-preview', payload);
+        if (editConfirm) { await loadProposals(); toast(t('proposals.draftSaved')); return; }
+        const preview = result.preview;
+        card.querySelector('[data-proposal-edit-result]').innerHTML = `<p>${esc(t('proposals.previewDestination', { vault: preview.vault, path: preview.path }))}</p><p>${esc(preview.reason)}</p><p>${esc(t('proposals.similar'))}: ${preview.similar.length ? preview.similar.map(item => `${esc(item.path)} (${esc(item.status || '')})`).join(', ') : esc(t('proposals.noSimilar'))}</p><pre class="mono" style="white-space:pre-wrap;max-height:240px;overflow:auto">${esc(preview.content)}</pre>`;
+        card.querySelector('[data-proposal-edit-confirm]').hidden = false;
+      } catch (error) { card.querySelector('[data-proposal-edit-result]').textContent = error.message; }
+      finally { button.disabled = false; }
+    });
+    return;
+  }
   const approve = event.target.closest('[data-proposal-approve]');
   const reject = event.target.closest('[data-proposal-reject]');
   const button = approve || reject;
@@ -1555,7 +1672,7 @@ $('rsi-idea-form').addEventListener('submit', (e) => act(async () => {
   const sources = sourceUrl ? [{ url: sourceUrl, title: String(data.get('source_title') || ''), published_at: String(data.get('source_published') || ''), accessed_at: new Date().toISOString(), claim: String(data.get('source_claim') || ''), confidence: String(data.get('source_confidence') || ''), limitations: String(data.get('source_limitations') || '') }] : [];
   const proposal = { title: String(data.get('title')), user_problem: String(data.get('user_problem')), hypothesis: String(data.get('hypothesis') || ''), memory_types: [...form.querySelector('[name="memory_types"]').selectedOptions].map(x => x.value), sources };
   const { similar } = await api('POST', '/api/rsi/ideas/check', proposal);
-  if (similar.length && !window.confirm(t('rsi.duplicates') + '\n\n' + similar.map(x => x.title + ' (' + x.score + '%)').join('\n'))) return;
+  if (similar.length && !await confirmInPage(t('rsi.duplicates') + '\n\n' + similar.map(x => x.title + ' (' + x.score + '%)').join('\n'))) return;
   await api('POST', '/api/rsi/ideas', proposal);
   form.reset(); await loadRsi(); toast(t('rsi.saved'));
 }));
@@ -1566,7 +1683,7 @@ document.addEventListener('click', (e) => {
       const card = rollbackButton.closest('[data-rsi-id]');
       const invalid = [...card.querySelectorAll('[data-rsi-rollback]')].find(input => !input.checkValidity());
       if (invalid) { invalid.reportValidity(); return; }
-      if (!window.confirm(t('rsi.rollback.confirm'))) return;
+      if (!await confirmInPage(t('rsi.rollback.confirm'))) return;
       const rollback = Object.fromEntries([...card.querySelectorAll('[data-rsi-rollback]')].map(input => [input.dataset.rsiRollback, input.value.trim()]));
       await api('POST', '/api/rsi/ideas/rollback', { id: card.dataset.rsiId, expected_revision: Number(card.dataset.rsiRevision), rollback });
       await loadRsi(); toast(t('rsi.rollback.saved'));
@@ -1985,6 +2102,16 @@ $('selftest-run').onclick = async () => {
   } catch (error) { $('selftest-summary').textContent = error.message; }
   finally { button.disabled = false; }
 };
+async function loadRetrievalUse() {
+  const button = $('retrieval-use-run'); button.disabled = true;
+  try {
+    const report = await api('POST', '/api/retrieval-use', { days: 60 });
+    $('retrieval-use-summary').textContent = t('retrievalUse.summary', { total: report.visible_notes, used: report.retrieved_notes, unused: report.never_retrieved });
+    $('retrieval-use-out').innerHTML = report.folders.map(row => `<li><b>${esc(row.folder)}</b> · ${esc(t('retrievalUse.folder', { unused: row.never_retrieved, total: row.visible_notes }))}${row.examples.length ? ` <span class="muted">${row.examples.map(esc).join(', ')}</span>` : ''}</li>`).join('') || `<li class="muted">${esc(t('retrievalUse.empty'))}</li>`;
+  } catch (error) { $('retrieval-use-summary').textContent = error.message; }
+  finally { button.disabled = false; }
+}
+$('retrieval-use-run').addEventListener('click', loadRetrievalUse);
 async function loadReplay() {
   try {
     const r = await api('GET', '/api/replay-misses');
@@ -2003,7 +2130,9 @@ function renderReplay(items) {
     const result = item.fixed_by
       ? `<span class="muted">${esc(t('replay.teachFixedBy', { path: item.fixed_by }))}</span>`
       : `<button type="button" class="link" data-teach-miss="${esc(item.id)}">${esc(t('replay.teach'))}</button>`;
-    return `<li><span class="${item.now === 'hits' ? 'pill on' : 'pill ask-old'}">${esc(t(state))}</span> ${esc(item.query)} <span class="muted">${esc(item.vault)}${item.top ? ` › ${esc(item.top.title)}` : ''}</span> ${result}</li>`;
+    const pin = item.now === 'hits' && item.top && !item.expected_path ? ` <button type="button" class="link" data-pin-miss="${esc(item.id)}">${esc(t('replay.pin'))}</button>` : '';
+    const pinned = item.expected_path ? ` <span class="muted">${esc(t('replay.pinned', { path: item.expected_path }))}</span>` : '';
+    return `<li><span class="${item.now === 'hits' ? 'pill on' : 'pill ask-old'}">${esc(t(state))}</span> ${esc(item.query)} <span class="muted">${esc(item.vault)}${item.top ? ` › ${esc(item.top.title)}` : ''}</span> ${result}${pin}${pinned}</li>`;
   }).join('');
 }
 function closeTeach() {
@@ -2014,6 +2143,12 @@ function closeTeach() {
   $('replay-teach-status').textContent = '';
 }
 $('replay-out').addEventListener('click', (event) => {
+  const pin = event.target.closest('[data-pin-miss]');
+  if (pin) act(async () => {
+    pin.disabled = true;
+    try { await api('POST', '/api/replay-misses/pin', { id: pin.dataset.pinMiss }); await loadReplay(); }
+    catch (error) { $('replay-summary').textContent = error.message; pin.disabled = false; }
+  });
   const button = event.target.closest('[data-teach-miss]');
   if (!button) return;
   const item = replayCache.get(button.dataset.teachMiss);
@@ -2081,7 +2216,7 @@ $('replay-run').onclick = async () => {
   $('replay-summary').textContent = t('replay.running');
   try {
     const r = await api('POST', '/api/replay-misses/run', {});
-    $('replay-summary').textContent = t('replay.result', { fixed: r.fixed, weak: r.still_weak, missing: r.still_missing, total: r.total });
+    $('replay-summary').textContent = t('replay.result', { fixed: r.fixed, weak: r.still_weak, missing: r.still_missing, total: r.total }) + (r.regression_count ? ` · ${t('replay.regressions', { n: r.regression_count })}` : '');
     replayCache.clear();
     for (const item of r.results) replayCache.set(item.id, item);
     renderReplay(r.results);
@@ -2089,7 +2224,7 @@ $('replay-run').onclick = async () => {
   finally { button.disabled = false; }
 };
 $('replay-clear').onclick = async () => {
-  if (!confirm(t('replay.clearConfirm'))) return;
+  if (!await confirmInPage(t('replay.clearConfirm'))) return;
   try { await api('POST', '/api/replay-misses/clear', {}); replayCache.clear(); closeTeach(); $('replay-out').innerHTML = ''; }
   catch (error) { toast(error.message, true); }
   await loadReplay();
@@ -2216,7 +2351,7 @@ async function quick(getBody) {
   try {
     const body = await getBody();
     if (!body) return;
-    if (!window.confirm(t('firstRun.createConfirm'))) return;
+    if (!await confirmInPage(t('firstRun.createConfirm'))) return;
     const r = await api('POST', '/api/quick/prepare', body);
     if (!r.ok && r.nested) { renderStart(r.nested); return; }
     if (!r.ok) throw new Error(r.error);
@@ -2226,7 +2361,7 @@ async function quick(getBody) {
     await load();
   } catch (e) { toast(e.message, true); } finally { box.classList.remove('working'); }
 }
-document.addEventListener('click', (e) => {
+document.addEventListener('click', async (e) => {
   const b = e.target.closest('[data-quick],[data-quick-new]');
   if (!b) return;
   if (b.dataset.quickNew) quick(async () => ({ mode: 'new' })); else quick(async () => ({ mode: 'folder', path: b.dataset.quick }));
@@ -2399,7 +2534,7 @@ async function load() {
   $('n4').className = 'step' + (observedClientCall(S.activity) ? ' done' : '');
   $('activity').innerHTML = activityRows(S.activity);
   renderObservedClientCalls(S.activity);
-  $('packs').innerHTML = S.packs.map((p) => `<label class="pack ${p.id === pack ? 'sel' : ''}"><span><input type="radio" name="pack" value="${p.id}" ${p.id === pack ? 'checked' : ''}><b>${esc(p.title)}</b></span><small>${esc(p.description)}</small></label>`).join('');
+  $('packs').innerHTML = S.packs.map((p) => { const title = p.id === 'personal-os' ? t('packs.personal.title') : p.title, description = p.id === 'personal-os' ? t('packs.personal.description') : p.description; return `<label class="pack ${p.id === pack ? 'sel' : ''}"><span><input type="radio" name="pack" value="${p.id}" ${p.id === pack ? 'checked' : ''}><b>${esc(title)}</b></span><small>${esc(description)}</small></label>`; }).join('');
   const SY = S.sync;
   $('sync-provider').innerHTML = SY.providers.map((p) => `<option value="${esc(p)}" ${p === SY.provider ? 'selected' : ''}>${esc(t('sync.provider.' + p))}</option>`).join('');
   const syncVaults = S.vaults.filter((v) => !v.private && v.exists);
@@ -2510,6 +2645,9 @@ function renderBackupSchedule() {
 }
 $('backup-schedule-mode').onchange = renderBackupSchedule;
 
+let adoptedVault = null, adoptReviewed = false;
+function selectedOptions(id) { return [...$(id).selectedOptions].map((option) => option.value).filter(Boolean); }
+function invalidateAdoptPreview() { adoptReviewed = false; $('v-adopt-preview').hidden = true; }
 function openForm(p) {
   $('vault-form').hidden = false;
   $('v-path').value = p;
@@ -2518,20 +2656,63 @@ function openForm(p) {
   $('v-excluded').value = (S.default_excluded_folders || []).join('\n');
   $('v-drive-id').value = '';
   $('v-drive-parent-id').value = '';
+  adoptedVault = null; adoptReviewed = false;
+  $('v-adopt-options').hidden = true; $('v-inspect-status').textContent = '';
+  $('v-inspect').hidden = false; $('v-scaffold').checked = true;
   $('v-excluded-hint').textContent = t('vault.excludedHint', { list: (S.suggested_excluded_folders || []).join(', ') });
 }
+$('v-inspect').onclick = () => act(async () => {
+  const path = $('v-path').value.trim();
+  if (!path) throw new Error(t('vault.inspectPathRequired'));
+  const result = await api('POST', '/api/vault/inspect', { path });
+  $('v-inspect-status').textContent = t('vault.inspectComplete', { notes: result.note_count, folders: result.folder_count });
+  if (!result.existing) { adoptedVault = null; $('v-adopt-options').hidden = true; return; }
+  adoptedVault = result; adoptReviewed = false; $('v-adopt-options').hidden = false; $('v-scaffold').checked = false;
+  const folderOptions = [`<option value="">${esc(t('vault.rootFolder'))}</option>`, ...(result.folders || []).map((folder) => `<option value="${esc(folder)}">${esc(folder)}</option>`) ].join('');
+  $('v-intake-folder').innerHTML = folderOptions;
+  $('v-mailbox-folder').innerHTML = `<option value="">${esc(t('vault.noMailbox'))}</option>` + (result.folders || []).map((folder) => `<option value="${esc(folder)}">${esc(folder)}</option>`).join('');
+  const noteOptions = (result.notes || []).map((note) => `<option value="${esc(note.path)}">${esc(note.title)} · ${esc(note.path)}</option>`).join('');
+  $('v-read-first').innerHTML = noteOptions; $('v-role-notes').innerHTML = noteOptions;
+  $('v-close-target').innerHTML = `<option value="">${esc(t('vault.noCaptureTarget'))}</option>` + noteOptions;
+  $('v-move-mailbox-wrap').hidden = !S.handoff; $('v-move-mailbox').checked = false;
+});
+$('vault-form').addEventListener('change', () => { if (adoptedVault) invalidateAdoptPreview(); });
+$('vault-form').addEventListener('input', () => { if (adoptedVault) invalidateAdoptPreview(); });
+$('v-preview-config').onclick = () => {
+  if (!adoptedVault) return;
+  const mailboxFolder = $('v-mailbox-folder').value;
+  if (S.handoff && mailboxFolder && (S.handoff.vault !== $('v-name').value.trim() || S.handoff.folder !== mailboxFolder) && !$('v-move-mailbox').checked) {
+    $('v-adopt-warning').hidden = false; $('v-adopt-warning').textContent = t('vault.moveMailboxRequired'); return;
+  }
+  const privateMailboxWarning = mailboxFolder && $('v-private').checked;
+  $('v-adopt-warning').hidden = !privateMailboxWarning;
+  $('v-adopt-warning').textContent = privateMailboxWarning ? t('vault.privateMailboxWarning') : '';
+  const preview = {
+    vault: $('v-name').value.trim(), path: adoptedVault.path, private: $('v-private').checked,
+    intake_folder: $('v-intake-folder').value || '(vault root)', read_first: selectedOptions('v-read-first'),
+    role_notes: selectedOptions('v-role-notes'), close_target: $('v-close-target').value || '(new capture in intake folder)',
+    handoff_mailbox: mailboxFolder ? `${$('v-name').value.trim()}/${mailboxFolder}` : (S.handoff ? `${S.handoff.vault}/${S.handoff.folder}` : null),
+    existing_visible_notes: adoptedVault.note_count, create_starter_files: $('v-scaffold').checked,
+    ...(privateMailboxWarning ? { warning: t('vault.privateMailboxWarning') } : {}),
+  };
+  $('v-adopt-preview').textContent = JSON.stringify(preview, null, 2); $('v-adopt-preview').hidden = false; adoptReviewed = true;
+};
 $('pick').onclick = () => act(async () => { const r = await api('POST', '/api/pick-folder'); const p = r.path || (r.unavailable ? await window.promptForFolder() : ''); if (p) openForm(p); });
 $('sample').onclick = () => act(async () => { const r = await api('POST', '/api/sample'); openForm(r.path); $('v-name').value = 'Acme Studio'; $('v-agent').value = 'Chief of Staff'; pack = 'founder-os'; });
 $('cancel-vault').onclick = () => ($('vault-form').hidden = true);
-$('packs').onchange = (e) => { if (e.target.name === 'pack') { pack = e.target.value; document.querySelectorAll('.pack').forEach((el) => el.classList.toggle('sel', el.querySelector('input').checked)); } };
+$('packs').onchange = (e) => { if (e.target.name === 'pack') { pack = e.target.value; if (['private-journal','personal-os'].includes(pack)) $('v-private').checked = true; document.querySelectorAll('.pack').forEach((el) => el.classList.toggle('sel', el.querySelector('input').checked)); } };
 $('save-vault').onclick = () => act(async () => {
+  if (adoptedVault && !adoptReviewed) throw new Error(t('vault.previewRequired'));
   const excludedFolders = $('v-excluded').value.split('\n').map((s) => s.trim()).filter(Boolean);
   const drive = $('v-drive-id').value.trim() || $('v-drive-parent-id').value.trim() ? { remote: 'brainlink-gdrive', root_folder_id: $('v-drive-id').value.trim(), parent_folder_id: $('v-drive-parent-id').value.trim(), folder_name: $('v-name').value.trim() } : null;
-  const r = await api('POST', '/api/vault', { path: $('v-path').value, name: $('v-name').value, pack, agentName: $('v-agent').value, scaffold: $('v-scaffold').checked, private: $('v-private').checked, excludedFolders, drive });
+  const body = { path: $('v-path').value, name: $('v-name').value, pack, agentName: $('v-agent').value, scaffold: $('v-scaffold').checked, private: $('v-private').checked, drive };
+  if (adoptedVault) Object.assign(body, { adoptExisting: true, reviewed: adoptReviewed, intakeFolder: $('v-intake-folder').value, readFirst: selectedOptions('v-read-first'), roleNotes: selectedOptions('v-role-notes'), closeTarget: $('v-close-target').value, mailboxFolder: $('v-mailbox-folder').value, moveHandoff: $('v-move-mailbox').checked });
+  else body.excludedFolders = excludedFolders;
+  const r = await api('POST', '/api/vault', body);
   $('vault-form').hidden = true;
   toast(t('vault.addedToast', { vault: r.vault, extra: r.created.length ? t('vault.createdExtra', { n: r.created.length }) : '' }) + (r.handoff_kept && r.handoff_mailbox ? ' ' + t('vault.handoffKept', { vault: r.handoff_mailbox.vault, folder: r.handoff_mailbox.folder }) : ''));
 });
-document.addEventListener('click', (e) => {
+document.addEventListener('click', async (e) => {
   const d = e.target.dataset;
   if (e.target.id === 'role-agent-add') act(async () => {
     const name = $('role-agent-name').value.trim();
@@ -2542,7 +2723,7 @@ document.addEventListener('click', (e) => {
     await load();
   });
   if (d.removeRoleAgent) act(async () => {
-    if (!confirm(t('rolePack.removeConfirm', { name: d.removeRoleAgent }))) return;
+    if (!await confirmInPage(t('rolePack.removeConfirm', { name: d.removeRoleAgent }))) return;
     await api('POST', '/api/agent/remove', { name: d.removeRoleAgent });
     toast(t('rolePack.removedToast', { name: d.removeRoleAgent }));
     await load();
@@ -2553,7 +2734,7 @@ document.addEventListener('click', (e) => {
     toast(t('skills.installedToast', { count: changed, unchanged: result.unchanged.length }));
     await load();
   });
-  if (d.skillRemove && confirm(t('skills.confirmRemove'))) act(async () => {
+  if (d.skillRemove && await confirmInPage(t('skills.confirmRemove'))) act(async () => {
     const result = await api('POST', '/api/skills/remove', { client: d.skillRemove });
     toast(result.changed.length ? t('skills.removedChangedToast', { removed: result.removed.length, names: result.changed.join(', ') }) : t('skills.removedToast', { count: result.removed.length }));
     await load();
@@ -2568,7 +2749,7 @@ document.addEventListener('click', (e) => {
   if (d.connectScope) openPresetConnect(d.connectScope);
   if (d.disconnect) act(async () => { await api('POST', '/api/disconnect', { client: d.disconnect }); delete healthByClient[d.disconnect]; toast(t('connect.disconnectedToast')); });
   if (d.health) act(async () => { const r = await api('POST', '/api/client-health', { client: d.health }); healthByClient[d.health] = r; toast(r.message, !r.ok); });
-  if (d.remove && confirm(t('vault.removeConfirm', { name: d.remove }))) act(() => api('POST', '/api/vault/remove', { name: d.remove }));
+  if (d.remove && await confirmInPage(t('vault.removeConfirm', { name: d.remove }))) act(() => api('POST', '/api/vault/remove', { name: d.remove }));
   if (d.vaultPrivate !== undefined) act(async () => {
     const v = S.vaults[+d.vaultPrivate];
     await api('POST', '/api/vault/private', { name: v.name, private: e.target.checked });
@@ -2586,7 +2767,7 @@ document.addEventListener('click', (e) => {
     toast(t('rolePack.savedToast', { name: a.name }));
   });
   if (d.hookClient) act(async () => {
-    if (d.hookClient === 'hermes' && d.hookEnable === '1' && !confirm(t('sessions.hookHermesConfirm'))) return;
+    if (d.hookClient === 'hermes' && d.hookEnable === '1' && !await confirmInPage(t('sessions.hookHermesConfirm'))) return;
     await api('POST', '/api/sessions/hooks/set', { client: d.hookClient, enabled: d.hookEnable === '1' });
     await loadSessionHookSettings();
   });
@@ -2707,7 +2888,7 @@ document.addEventListener('click', (e) => {
   });
   if (d.filedWithdraw) act(async () => {
     if (!activeFiledSummary?.etag) throw new Error('Reload the filed summary before withdrawing it.');
-    if (!confirm(t('sessions.withdrawConfirm'))) return;
+    if (!await confirmInPage(t('sessions.withdrawConfirm'))) return;
     const result = await api('POST', '/api/sessions/filed-summary', { ...activeFiledSummary, action: 'withdraw' });
     activeFiledSummary = { ...activeFiledSummary, etag: result.etag, status: result.status };
     document.querySelector('[data-filed-edit]').hidden = true;
@@ -2718,7 +2899,7 @@ document.addEventListener('click', (e) => {
     const select = [...document.querySelectorAll('[data-sess-profile]')].find((item) => item.dataset.sessProfile === d.sessAssign);
     const profile = (S.twin_profiles?.profiles || []).find((item) => item.id === select?.value);
     if (!profile) { toast(t('sessions.invalidTwinChoice')); return; }
-    if (!confirm(t('sessions.assignTwinWarning', { profile: profile.name }))) return;
+    if (!await confirmInPage(t('sessions.assignTwinWarning', { profile: profile.name }))) return;
     await api('POST', '/api/sessions/assign-twin', { id: d.sessAssign, profile_id: profile.id });
     toast(t('sessions.assignedTwin', { profile: profile.name }));
     await loadSessions();
@@ -2737,7 +2918,8 @@ function renderPresetConnectOptions() {
     const vaults = (profile.vaults || []).filter((grant) => S.vaults.some((vault) => vault.name === grant.name && vault.exists));
     return `<section class="card" data-preset-profile="${esc(profile.id)}"><label style="display:flex;align-items:center;gap:8px"><input type="checkbox" data-preset-profile-check value="${esc(profile.id)}" ${assigned ? 'checked' : ''} style="width:auto"><b>${esc(profile.name)} · ${esc(t('twinProfiles.mode.' + profile.mode))}</b></label><div class="preset-profile-permissions" ${assigned ? '' : 'hidden'}><p class="muted" style="margin-top:10px">${esc(t('connect.memoryHint'))}</p><div class="grid2">${['working','semantic','procedural','episodic'].map((key) => `<label class="card" style="display:flex;flex-direction:row;align-items:center;gap:6px;margin:0"><input type="checkbox" data-preset-memory="${key}" ${defaultMemory[key] ? 'checked' : ''} ${profile.memory_policy?.[key] === true ? '' : 'disabled'} style="width:auto">${esc(t('twinProfiles.memory.' + key))}</label>`).join('')}</div><div class="cards" style="margin-top:10px">${vaults.map((grant) => {
     const isPrivate = S.vaults.some((vault) => vault.name === grant.name && vault.private);
-    const available = labels.filter(([action]) => !['handoff_read','write_handoff'].includes(action) || S.handoff?.vault === grant.name);
+    const allowedActions = new Set(BrainLinkPermissions.presetGrantActions(grant, { mailboxVault: S.handoff?.vault }));
+    const available = labels.filter(([action]) => allowedActions.has(action));
     return `<div class="card"><b>${esc(grant.name)}${isPrivate ? ` (${esc(t('twinProfiles.privateVault'))})` : ''}</b><div class="row" style="margin-top:7px">${available.map(([action,key]) => {
       const memory = { search:'semantic', read_note:'semantic', write_note:'semantic', read_session:'episodic', log_session:'episodic', propose_note:'semantic', handoff_read:'working', write_handoff:'working' }[action];
       const assignedActions = assigned?.vaults?.find((item) => item.name === grant.name)?.operations || [];
@@ -2755,10 +2937,9 @@ function updatePresetPermissionControls() {
     const section = input.closest('[data-preset-profile]');
     const profile = S?.twin_profiles?.profiles?.find((item) => item.id === section.dataset.presetProfile);
     const selectedMemory = Object.fromEntries([...section.querySelectorAll('[data-preset-memory]')].map((memory) => [memory.dataset.presetMemory, memory.checked]));
-    const required = input.dataset.memory;
     const vaultAccess = profile?.vaults?.find((grant) => grant.name === input.dataset.presetVault)?.access;
-    const vaultAllowed = input.value === 'write_note' ? vaultAccess === 'write' : input.value === 'propose_note' ? ['propose', 'write'].includes(vaultAccess) : true;
-    input.disabled = !required || profile?.memory_policy?.[required] !== true || selectedMemory[required] !== true || !vaultAllowed;
+    const required = input.dataset.memory;
+    input.disabled = !required || !BrainLinkPermissions.presetActionAllowed({ action: input.value, access: vaultAccess, memoryPolicy: profile?.memory_policy, selectedMemory, selected: section.querySelector('[data-preset-profile-check]').checked });
     if (input.disabled) input.checked = false;
   });
   const actionKeys = { search: 'connect.search', read_note: 'connect.readNote', write_note: 'twinProfiles.operation.write_note', read_session: 'connect.readSession', log_session: 'twinProfiles.operation.log_session', propose_note: 'twinProfiles.operation.propose_note', handoff_read: 'connect.readHandoffs', write_handoff: 'connect.sendHandoffs' };
@@ -2771,9 +2952,9 @@ function updatePresetPermissionControls() {
     grant.actions.push(t(actionKeys[input.value]));
     return items;
     }, []);
-    return `${S.twin_profiles.profiles.find((profile) => profile.id === check.value)?.name}: ${vaults.map((grant) => `${grant.name} (${grant.actions.join(', ')})`).join('; ')}`;
+    return { profile: S.twin_profiles.profiles.find((profile) => profile.id === check.value)?.name || '', vaults };
   });
-  $('preset-connect-review').textContent = grants.length ? grants.join(' · ') : t('connect.reviewEmpty');
+  $('preset-connect-review').textContent = BrainLinkPermissions.formatPresetPermissionSummary(grants) || t('connect.reviewEmpty');
   $('preset-connect-submit').disabled = !grants.length || !document.querySelector('[data-preset-vault]:checked');
 }
 function openPresetConnect(clientId) {
@@ -3008,7 +3189,7 @@ $('github-clone').onclick = async () => {
   const profile_id = githubProfileId();
   const vault = $('github-vault').value;
   if (!profile_id || !vault) { $('github-clone-status').textContent = t('github.cloneChooseProfile'); return; }
-  if (!confirm(t('github.cloneConfirm', { remote }))) return;
+  if (!await confirmInPage(t('github.cloneConfirm', { remote }))) return;
   $('github-clone').disabled = true;
   $('github-clone-status').textContent = t('github.cloneRunning');
   try {
@@ -3034,13 +3215,13 @@ $('github-repository-pick').onclick = () => act(async () => {
 $('github-assign-confirm').onclick = () => act(async () => {
   if (!githubInspected) return;
   const scope = githubInspected.whole_vault ? t('github.wholeVault') : githubInspected.folders.join(', ');
-  if (!confirm(t('github.assignConfirmPrompt', { remote: githubInspected.remote, profile: githubInspected.profile_name, vault: githubInspected.vault, scope }))) return;
+  if (!await confirmInPage(t('github.assignConfirmPrompt', { remote: githubInspected.remote, profile: githubInspected.profile_name, vault: githubInspected.vault, scope }))) return;
   await api('POST', '/api/github/assignment/set', { ...githubAssignInput(), confirm_remote: githubInspected.remote });
   githubResetState(); $('github-repository').value = ''; $('github-assign-folders').value = '';
   toast(t('github.assignSaved'));
 });
 $('github-assign-clear').onclick = () => act(async () => {
-  if (!confirm(t('github.assignClearPrompt'))) return;
+  if (!await confirmInPage(t('github.assignClearPrompt'))) return;
   await api('POST', '/api/github/assignment/clear', { profile_id: githubProfileId() });
   githubResetState();
   toast(t('github.assignCleared'));
@@ -3065,7 +3246,7 @@ $('github-preview').onclick = async () => {
 };
 $('github-commit').onclick = async () => {
   const paths = githubSelection();
-  if (!paths.length || !confirm(t('github.confirmCommit', { count: paths.length, paths: paths.join('\n') }))) return;
+  if (!paths.length || !await confirmInPage(t('github.confirmCommit', { count: paths.length, paths: paths.join('\n') }))) return;
   $('github-status').textContent = t('github.committing'); $('github-commit').disabled = true;
   try {
     const r = await api('POST', '/api/github/commit-selected', { vault: $('github-vault').value, repository: githubRepoValue(), profile_id: githubProfileId(), paths });
@@ -3079,7 +3260,7 @@ $('github-push').onclick = async () => {
   if (!githubPendingPush) return;
   if (githubPendingPush.profile !== githubProfileId()) { githubPendingPush = null; $('github-push').hidden = true; return; }
   const paths = githubPendingPush.paths;
-  if (!confirm(t('github.confirmPush', { count: paths.length, paths: paths.join('\n') }))) return;
+  if (!await confirmInPage(t('github.confirmPush', { count: paths.length, paths: paths.join('\n') }))) return;
   $('github-status').textContent = t('github.pushing'); $('github-push').disabled = true;
   try {
     const r = await api('POST', '/api/github/push-selected', { vault: $('github-vault').value, repository: githubRepoValue(), profile_id: githubProfileId(), paths, commit: githubPendingPush.commit });
@@ -3091,7 +3272,7 @@ $('github-auto-save').onclick = async () => {
   const assignment = githubAssignment()?.assignment;
   const enabled = $('github-auto-enabled').checked;
   if (!assignment) return;
-  if (enabled && !window.confirm(t('github.autoConfirm', { name: githubAssignment().name, remote: assignment.remote }))) {
+  if (enabled && !await confirmInPage(t('github.autoConfirm', { name: githubAssignment().name, remote: assignment.remote }))) {
     $('github-auto-enabled').checked = false;
     return;
   }
@@ -3123,7 +3304,7 @@ $('github-pull-check').onclick = async () => {
 };
 $('github-pull-import').onclick = async () => {
   const paths = githubPullSelection('add,update');
-  if (!paths.length || !confirm(t('github.confirmImport', { count: paths.length, paths: paths.join('\n') }))) return;
+  if (!paths.length || !await confirmInPage(t('github.confirmImport', { count: paths.length, paths: paths.join('\n') }))) return;
   $('github-status').textContent = t('github.importing'); $('github-pull-import').disabled = true;
   try {
     const r = await api('POST', '/api/github/import-selected', { vault: $('github-vault').value, repository: githubRepoValue(), profile_id: githubProfileId(), paths });
@@ -3133,7 +3314,7 @@ $('github-pull-import').onclick = async () => {
 };
 $('github-pull-conflict-copy').onclick = async () => {
   const paths = githubPullSelection('conflict');
-  if (!paths.length || !confirm(t('github.confirmConflictCopy', { count: paths.length, paths: paths.join('\n') }))) return;
+  if (!paths.length || !await confirmInPage(t('github.confirmConflictCopy', { count: paths.length, paths: paths.join('\n') }))) return;
   $('github-status').textContent = t('github.savingConflictCopy'); $('github-pull-conflict-copy').disabled = true;
   try {
     const r = await api('POST', '/api/github/save-conflict-copies', { vault: $('github-vault').value, repository: githubRepoValue(), profile_id: githubProfileId(), paths });
@@ -3194,7 +3375,7 @@ document.addEventListener('click', async (event) => {
     const draftId = saveDraft.dataset.ingestionSaveDraft;
     const selector = document.querySelector(`[data-ingestion-destination="${CSS.escape(draftId)}"]`);
     if (!selector?.value) { toast(t('ingestion.chooseDestination'), true); return; }
-  if (!window.confirm(t(saveDraft.dataset.ingestionRetry === 'true' ? 'ingestion.confirmRetryProposal' : 'ingestion.confirmSaveProposal'))) return;
+  if (!await confirmInPage(t(saveDraft.dataset.ingestionRetry === 'true' ? 'ingestion.confirmRetryProposal' : 'ingestion.confirmSaveProposal'))) return;
     try {
       saveDraft.disabled = true;
       const related_note_paths = [...document.querySelectorAll(`[data-ingestion-related="${CSS.escape(draftId)}"]:checked`)].map((item) => item.value);
@@ -3220,7 +3401,7 @@ document.addEventListener('click', async (event) => {
   }
   const discardDraft = event.target.closest('[data-ingestion-discard-draft]');
   if (discardDraft) {
-    if (!window.confirm(t('ingestion.confirmDiscardDraft'))) return;
+    if (!await confirmInPage(t('ingestion.confirmDiscardDraft'))) return;
     try {
       discardDraft.disabled = true;
       await api('POST', '/api/ingestion/discard-draft', { draft_id: discardDraft.dataset.ingestionDiscardDraft, confirm: true });
@@ -3238,8 +3419,7 @@ document.addEventListener('click', async (event) => {
 });
 $('twin-edit-cancel').onclick = async () => { editingTwinId = null; await load(); };
 function twinActionMemoryAllowed(action, policy) {
-  const required = { search: 'semantic', read_note: 'semantic', write_note: 'semantic', read_session: 'episodic', log_session: 'episodic', propose_note: 'semantic', handoff_read: 'working', write_handoff: 'working' };
-  return policy?.[required[action]] === true;
+  return BrainLinkPermissions.twinActionAllowed({ action, access: 'write', memoryPolicy: policy });
 }
 function updateTwinPermissionControls() {
   const enabled = Object.fromEntries([...document.querySelectorAll('[data-twin-memory]')].map((input) => [input.dataset.twinMemory, input.checked]));
@@ -3258,9 +3438,7 @@ function updateTwinPermissionControls() {
     const vaultSelected = document.querySelector(`[data-twin-agent-vault="${CSS.escape(input.dataset.twinOperation)}"][data-vault-name="${CSS.escape(vaultName)}"]`)?.checked;
     const profileVaultSelected = document.querySelector(`[data-twin-vault="${CSS.escape(vaultName)}"]`)?.checked;
     const access = document.querySelector(`[data-twin-vault-access="${CSS.escape(vaultName)}"]`)?.value;
-    const vaultAllows = input.value === 'write_note' ? access === 'write' : input.value === 'propose_note' ? ['propose', 'write'].includes(access) : true;
-    const memoryAllowed = twinActionMemoryAllowed(input.value, agentMemory.get(input.dataset.twinOperation));
-    const allowed = vaultSelected && profileVaultSelected && vaultAllows && memoryAllowed;
+    const allowed = BrainLinkPermissions.twinActionAllowed({ action: input.value, access, memoryPolicy: agentMemory.get(input.dataset.twinOperation), selected: vaultSelected, profileVaultSelected });
     input.disabled = !allowed;
     if (!memoryAllowed) input.checked = false;
   });
@@ -3357,7 +3535,7 @@ $('twin-create').onclick = async () => {
   const editingProfile = editingTwinId && S.twin_profiles?.profiles?.find((profile) => profile.id === editingTwinId);
   const firstProfileWithConnections = !editingProfile && !S.twin_profiles?.profiles?.length && (Object.values(S.clients || {}).some((client) => client.connected) || (S.ai_agents || []).some((agent) => agent.connected && !agent.revoked));
   const confirmText = editingProfile ? t('twinProfiles.confirmUpdate', { name, vaults: vaultNames, agents: agentNames, memory: selectedMemories }) : t('twinProfiles.confirmCreate', { name, vaults: vaultNames, agents: agentNames, memory: selectedMemories });
-  if (!confirm(confirmText + (firstProfileWithConnections ? `\n\n${t('twinProfiles.firstProfileWarning')}` : ''))) return;
+  if (!await confirmInPage(confirmText + (firstProfileWithConnections ? `\n\n${t('twinProfiles.firstProfileWarning')}` : ''))) return;
   $('twin-create').disabled = true;
   $('twin-create-status').textContent = t('twinProfiles.creating');
   try {
@@ -3495,8 +3673,8 @@ $('backup-run').onclick = () => act(async () => {
   const r = await api('POST', '/api/backup/run');
   toast(t('backup.lastVerified', { count: r.file_count, folder: r.folder }));
 });
-$('backup-restore').onclick = () => {
-  if (!confirm(t('backup.restoreConfirm'))) return;
+$('backup-restore').onclick = async () => {
+  if (!await confirmInPage(t('backup.restoreConfirm'))) return;
   act(async () => {
     const r = await api('POST', '/api/backup/restore', { backupFolder: $('backup-restore-source').value,
       destination: $('backup-restore-destination').value, confirm: true, recoveryKey: $('backup-restore-key').value || undefined });

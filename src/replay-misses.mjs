@@ -20,15 +20,17 @@ export function createReplayMisses({ home }) {
     try { raw = await readFile(file, 'utf8'); } catch { return []; }
     const entries = [];
     const fixedBy = new Map();
+    const pinned = new Map();
     for (const line of raw.split('\n')) {
       if (!line.trim()) continue;
       try {
         const item = JSON.parse(line);
         if (item?.kind === 'fixed_by' && typeof item.id === 'string' && typeof item.fixed_by === 'string') fixedBy.set(item.id, item.fixed_by);
+        else if (item?.kind === 'pinned' && typeof item.id === 'string' && typeof item.expected_path === 'string') pinned.set(item.id, item.expected_path);
         else if (item && typeof item.vault === 'string' && typeof item.query === 'string') entries.push({ ...item, id: idOf(item) });
       } catch { /* skip a damaged line */ }
     }
-    return entries.map((item) => fixedBy.has(item.id) ? { ...item, fixed_by: fixedBy.get(item.id) } : item);
+    return entries.map((item) => ({ ...item, ...(fixedBy.has(item.id) ? { fixed_by: fixedBy.get(item.id) } : {}), ...(pinned.has(item.id) ? { expected_path: pinned.get(item.id) } : {}) }));
   }
   return {
     file,
@@ -58,7 +60,16 @@ export function createReplayMisses({ home }) {
         results.push({ ...item, now: r.status, top: r.results[0] ? { path: r.results[0].path, title: r.results[0].title } : null });
       }
       const count = (status) => results.filter((item) => item.now === status).length;
-      return { total: results.length, fixed: count('hits'), still_weak: count('weak'), still_missing: count('not_in_brain'), unavailable: count('vault_unavailable'), results };
+      const regressions = results.filter(item => item.expected_path && (item.now !== 'hits' || item.top?.path !== item.expected_path)).map(item => ({ id: item.id, expected_path: item.expected_path, actual_path: item.top?.path || null, status: item.now }));
+      return { total: results.length, fixed: count('hits'), still_weak: count('weak'), still_missing: count('not_in_brain'), unavailable: count('vault_unavailable'), regression_count: regressions.length, regressions, results };
+    },
+    async pin(id, expectedPath) {
+      const item = await this.get(id);
+      if (!item || typeof expectedPath !== 'string' || !expectedPath.trim() || expectedPath.length > 500 || expectedPath.split(/[\\/]/).includes('..')) return false;
+      await mkdir(path.dirname(file), { recursive: true });
+      await appendFile(file, `${JSON.stringify({ kind: 'pinned', id: item.id, expected_path: expectedPath.replace(/\\/g, '/') })}\n`, { mode: 0o600 });
+      await chmod(file, 0o600).catch(() => {});
+      return true;
     },
     async markFixed(id, notePath) {
       const items = await list();

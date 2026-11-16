@@ -7,6 +7,7 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 import { LOCALES } from '../src/config.mjs';
+import { presetGrantActions, presetActionAllowed } from '../ui/permissions.js';
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const LOCALES_DIR = path.join(ROOT, 'ui', 'locales');
@@ -46,22 +47,17 @@ test('Twin read-and-propose preset affects only chosen agents and vaults and doe
   assert.doesNotMatch(handler, /api\(|\.click\(\)|connect/);
 });
 
-test('connection dialog offers read-and-propose only when the Twin grants it', async () => {
-  const html = await readFile(path.join(ROOT, 'ui', 'index.html'), 'utf8');
-  const start = html.indexOf('function renderPresetConnectOptions()');
-  const end = html.indexOf('function updatePresetPermissionControls()', start);
-  assert.ok(start >= 0 && end > start, 'per-profile connection permission renderer is present');
-  const renderer = html.slice(start, end);
-  assert.match(renderer, /const vaults = \(profile\.vaults \|\| \[\]\)\.filter\(\(grant\) => S\.vaults\.some\(\(vault\) => vault\.name === grant\.name && vault\.exists\)\)/,
-    'only existing Twin-granted vaults are offered');
-  assert.match(renderer, /data-preset-vault="\$\{esc\(grant\.name\)\}"/,
-    'operations are selected explicitly per granted vault');
-  assert.match(renderer, /grant\.access === 'propose' && \['search','read_note'\]\.includes\(action\)/,
-    'proposal-level Twin access defaults to search and read only');
-  assert.match(renderer, /grant\.access === 'write' && \['search','read_note','write_note'\]\.includes\(action\)/,
-    'write access is offered only when the Twin grant allows it');
+test('connection grant controls keep read, propose and write capabilities separate', async () => {
+  const catalogs = Object.fromEntries(await Promise.all(LOCALES.map(async (id) => [id, await loadLocale(id)])));
+  for (const id of LOCALES) {
+    assert.ok(catalogs[id]['connect.readNote'], `${id} explains read access`);
+    assert.ok(catalogs[id]['twinProfiles.operation.propose_note'], `${id} explains proposal access`);
+    assert.ok(catalogs[id]['twinProfiles.operation.write_note'], `${id} explains write access`);
+  }
+  assert.deepEqual(presetGrantActions({ name: 'Shared', access: 'propose' }), ['search', 'read_note', 'read_session', 'propose_note']);
+  assert.equal(presetActionAllowed({ action: 'write_note', access: 'propose', memoryPolicy: { semantic: true }, selectedMemory: { semantic: true } }), false);
+  assert.equal(presetActionAllowed({ action: 'write_note', access: 'write', memoryPolicy: { semantic: true }, selectedMemory: { semantic: true } }), true);
 });
-
 test('replay-miss teaching offers a preview-before-save flow in every locale', async () => {
   const catalogs = Object.fromEntries(await Promise.all(LOCALES.map(async (id) => [id, await loadLocale(id)])));
   const keys = ['replay.teach', 'replay.teachHeading', 'replay.teachAnswer', 'replay.teachFolderHint', 'replay.teachPreview', 'replay.teachConfirm', 'replay.teachFound'];

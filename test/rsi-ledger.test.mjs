@@ -30,6 +30,22 @@ test('RSI ledger appends proposals, enforces transitions and optimistic revision
   assert.equal((await readFile(ledger.file, 'utf8')).trim().split(/\r?\n/).length, 3);
 });
 
+test('daily self-test failures create one content-free discovered proposal per opaque failure key', async () => {
+  const ledger = createRsiLedger({ home: await temp('self-test') });
+  const failure = { check: 'role-notes', key: 'a'.repeat(64) };
+  const first = await ledger.appendSelfTestFailures([failure]);
+  const second = await ledger.appendSelfTestFailures([failure]);
+  assert.equal(first.created.length, 1);
+  assert.equal(second.created.length, 0);
+  assert.equal(second.duplicates.length, 1);
+  const [idea] = await ledger.list();
+  assert.equal(idea.origin, 'self_test');
+  assert.equal(idea.status, 'discovered');
+  const raw = await readFile(ledger.file, 'utf8');
+  assert.match(raw, /failure_key/);
+  assert.doesNotMatch(raw, /TEMPLATE_PRIVATE_CANARY|ACTUAL_QUESTION_VALUE/);
+});
+
 test('RSI acceptance requires recorded evidence, reviewer, promotion commit and rollback', async () => {
   let availableCommits = new Set();
   const ledger = createRsiLedger({ home: await temp('accept'), verifyCommit: (sha) => availableCommits.has(sha) });
@@ -319,7 +335,7 @@ test('Setup exposes the RSI ledger only through authenticated local APIs', async
     assert.equal(similar.similar[0].id, created.idea.id);
     assert.equal((await fetch(base + '/api/rsi', { headers: { 'X-BrainLink-Token': 'wrong-token' } })).status, 401);
     const listed = await fetch(base + '/api/rsi', { headers: { 'X-BrainLink-Token': app.token } }).then(r => r.json());
-    assert.equal(listed.ideas.length, 1);
+    assert.ok(listed.ideas.some(idea => idea.id === created.idea.id && idea.origin === 'manual'), 'the manually created proposal remains present alongside any daily self-test review item');
     const bad = await post('/api/rsi/ideas/update', { id: created.idea.id, expected_revision: 1, status: 'accepted' }).then(r => r.json());
     assert.match(bad.error, /cannot move/);
     assert.equal((await post('/api/rsi/experiments/run', { idea_id: created.idea.id, suite: 'retrieval-rsi-v1' }, 'wrong-token')).status, 401);

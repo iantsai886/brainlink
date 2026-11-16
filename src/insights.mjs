@@ -64,8 +64,9 @@ export async function openLoops(ctx, vaultName, { days = 60, limit = 40 } = {}, 
   };
 }
 
-export async function vaultHealth(ctx, vaultName, { staleDays = 180 } = {}, now = new Date()) {
+export async function vaultHealth(ctx, vaultName, { staleDays = 180, limit = 5 } = {}, now = new Date()) {
   const index = await loadVault(ctx, vaultName);
+  const boundedLimit = Math.max(0, Math.min(30, Number.isSafeInteger(limit) ? limit : 5));
   const visible = (i) => !index.notes[i].generated && !index.notes[i].private;
   const real = index.notes.map((_, i) => i).filter(visible);
   const linked = (i) => [...index.backlinks[i], ...index.outlinks[i]].some(visible);
@@ -77,12 +78,14 @@ export async function vaultHealth(ctx, vaultName, { staleDays = 180 } = {}, now 
   const links = index.edges.filter(([a, b]) => visible(a) && visible(b)).length;
   return {
     notes: real.length, links, orphan_count: orphans.length,
-    orphans: orphans.slice(0, 30).map((i) => summarize(index, i)),
-    broken_links: broken.slice(0, 30).map((b) => ({ in: index.notes[b.from].rel, target: b.target })), broken_count: broken.length,
+    limit: boundedLimit,
+    orphans: orphans.slice(0, boundedLimit).map((i) => summarize(index, i)),
+    broken_links: broken.slice(0, boundedLimit).map((b) => ({ in: index.notes[b.from].rel, target: b.target })), broken_count: broken.length,
     duplicate_title_count: dupes.length, stale_active_count: stale.length,
     ...typedGraphHealth(index.notes),
-    duplicate_titles: dupes.slice(0, 20),
-    stale_active_notes: stale.slice(0, 20).map((i) => summarize(index, i)),
+    duplicate_titles: dupes.slice(0, boundedLimit),
+    stale_active_notes: stale.slice(0, boundedLimit).map((i) => summarize(index, i)),
+    returned: { orphans: Math.min(boundedLimit, orphans.length), broken_links: Math.min(boundedLimit, broken.length), duplicate_titles: Math.min(boundedLimit, dupes.length), stale_active_notes: Math.min(boundedLimit, stale.length) },
     tips: [
       orphans.length ? `${orphans.length} notes have no links: open each with vault_related and add links in a new note, or mention them by name in your next notes (BrainLink links mentions automatically).` : null,
       broken.length ? `${broken.length} links point to notes that do not exist yet: create those notes or fix the names.` : null,
@@ -92,7 +95,7 @@ export async function vaultHealth(ctx, vaultName, { staleDays = 180 } = {}, now 
 }
 
 export async function brief(ctx, vaultName, { days = 7 } = {}, now = new Date()) {
-  const [recent, loops, health] = await Promise.all([recentNotes(ctx, vaultName, { days, limit: 10 }, now), openLoops(ctx, vaultName, { days: 30, limit: 8 }, now), vaultHealth(ctx, vaultName, {}, now)]);
+  const [recent, loops, health] = await Promise.all([recentNotes(ctx, vaultName, { days, limit: 10 }, now), openLoops(ctx, vaultName, { days: 30, limit: 8 }, now), vaultHealth(ctx, vaultName, { limit: 0 }, now)]);
   return {
     vault: vaultName, as_of: zonedNow(ctx.tz, now), period_days: days,
     changed: recent.map((r) => ({ title: r.title, path: r.path, changed: r.changed })),

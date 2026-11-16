@@ -176,7 +176,7 @@ async function ignoreRules(dir) {
 // Shipped in every newly connected real vault's root .brainlinkignore (never overwrites one
 // already there). These folders are never read, chunked, searched, answered from, graphed,
 // surfaced in sessions or synced — same as the rest of .brainlinkignore (see walk(), below).
-export const DEFAULT_EXCLUDED_FOLDERS = ['.obsidian/', '.trash/', '.git/', 'node_modules/', '00 Home/'];
+export const DEFAULT_EXCLUDED_FOLDERS = ['.obsidian/', '.trash/', '.git/', 'node_modules/'];
 // Common personal folders people keep out of an AI-connected vault; shipped as commented-out
 // suggestions so the user opts in rather than losing folders silently.
 export const SUGGESTED_EXCLUDED_FOLDERS = ['finance/', 'personal/', 'home/'];
@@ -240,6 +240,19 @@ async function walk(root, dir = root, out = [], inherited = []) {
   return out;
 }
 
+async function visibleFolderPaths(root, dir = root, out = [], inherited = []) {
+  const rules = inherited.concat(await ignoreRules(dir));
+  if (rules.some((re) => re.test('*') || re.source === '^.*$')) return out;
+  for (const entry of await readdir(dir, { withFileTypes: true })) {
+    if (entry.name.startsWith('.') || SKIP_DIRS.has(entry.name)) continue;
+    if (rules.some((re) => re.test(entry.name)) || !entry.isDirectory()) continue;
+    const full = path.join(dir, entry.name), rel = path.relative(root, full).split(path.sep).join('/');
+    out.push(rel);
+    await visibleFolderPaths(root, full, out, rules);
+  }
+  return out;
+}
+
 // Same accumulated-rule logic as walk(), for a single already-known relative path (readNote()):
 // true if any ancestor folder, or the file itself, is excluded at any depth.
 export async function isExcludedPath(root, rel) {
@@ -296,6 +309,27 @@ async function readIndexableHeader(full, size) {
   try { ({ bytesRead } = await fd.read(buffer, 0, buffer.length, 0)); }
   finally { await fd.close(); }
   return inspectIndexableHeader(buffer.subarray(0, bytesRead).toString('utf8'), size, bytesRead);
+}
+
+// Owner-only Setup helper for adopting an existing Markdown folder. Returns paths, not note
+// bodies, and omits private, excluded, hidden and malformed-frontmatter notes.
+export async function inspectVaultStructure(vaultPath, { limit = 1000 } = {}) {
+  const root = await realpath(path.resolve(String(vaultPath || '')));
+  if (!(await stat(root)).isDirectory()) throw new Error('Choose an existing folder.');
+  const files = await walk(root), notes = [], folders = new Set(await visibleFolderPaths(root));
+  for (const full of files) {
+    const rel = path.relative(root, full).split(path.sep).join('/');
+    const info = await stat(full);
+    const header = await readIndexableHeader(full, Number(info.size));
+    if (!header.indexable) continue;
+    notes.push({ path: rel, title: path.posix.basename(rel).replace(/\.md$/i, '') });
+    let folder = path.posix.dirname(rel);
+    while (folder && folder !== '.') { folders.add(folder); folder = path.posix.dirname(folder); }
+  }
+  notes.sort((a, b) => a.path.localeCompare(b.path));
+  const sortedFolders = [...folders].sort((a, b) => a.localeCompare(b));
+  const cap = Math.max(1, Math.min(2000, Number.isSafeInteger(limit) ? limit : 1000));
+  return { path: root, existing: files.length > 0 || (await readdir(root)).length > 0, note_count: notes.length, folder_count: sortedFolders.length, notes: notes.slice(0, cap), folders: sortedFolders.slice(0, cap), truncated: notes.length > cap || sortedFolders.length > cap };
 }
 
 // Setup needs a useful note count, but building the full search index just to display that

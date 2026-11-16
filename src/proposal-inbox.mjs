@@ -74,6 +74,21 @@ export function createProposalInbox({ home, now = () => new Date() }) {
       if (!SAFE_ID.test(String(id || ''))) return null;
       return readFileRecord(path.join(pendingDir, `${id}.json`));
     },
+    async updatePending({ id, expected, path: nextPath, content: nextContent }) {
+      if (!SAFE_ID.test(String(id || '')) || typeof expected !== 'string' || !/^[a-f0-9]{64}$/.test(expected)) throw new Error('Reload the proposal before editing it.');
+      const full = path.join(pendingDir, `${id}.json`), item = await readFileRecord(full);
+      if (!item) throw new Error('This proposal is no longer pending. Refresh the review list.');
+      const current = digest(`${item.path}\0${item.content}`);
+      if (current !== expected) throw new Error('This proposal changed while you were editing it. Reload it before saving your draft.');
+      const rel = String(nextPath || '').replace(/\\/g, '/').replace(/^\/+|\/+$/g, '');
+      if (!rel.endsWith('.md') || rel.split('/').some(part => !part || part === '.' || part === '..') || typeof nextContent !== 'string' || !nextContent.trim() || nextContent.length > MAX_CONTENT || findSecrets(nextContent).length) throw new Error('Enter a safe Markdown destination and non-empty draft without secrets.');
+      if (item.action === 'append' && rel !== item.path) throw new Error('An append proposal must keep its original destination.');
+      const updated = { ...item, path: rel, content: nextContent, updated_at: now().toISOString(), dedupe_key: digest(`${item.vault}\0${item.vault_ref}\0${item.action}\0${item.expected_hash || ''}\0${rel}\0${nextContent}`) };
+      const temp = `${full}.${randomUUID()}.tmp`;
+      await writeFile(temp, `${JSON.stringify(updated)}\n`, { flag: 'wx', mode: 0o600 });
+      await rename(temp, full);
+      return updated;
+    },
     async resolve(id, outcome) {
       if (!SAFE_ID.test(String(id || '')) || !['approved', 'rejected'].includes(outcome)) throw new Error('Invalid proposal review action.');
       const source = path.join(pendingDir, `${id}.json`);

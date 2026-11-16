@@ -82,6 +82,24 @@ export const PACKS = {
       ],
     }),
   },
+  'personal-os': {
+    title: 'Personal vault with roles',
+    description: 'Private personal vault with a companion role, private intake and no company rules.',
+    build: ({ vaultName, vaultPath, agentName = 'Personal Assistant' }) => ({
+      vault: { name: vaultName, path: vaultPath, purpose: 'Private personal knowledge, decisions and projects.', private: true, schema: 'provenance', intake_folder: 'Inbox', decisions: [], read_first: [], rules: [...RULES, 'Personal and family information belongs here; do not copy it to a shared company vault.'] },
+      agents: [{
+        name: agentName, vault: vaultName, role: 'Private personal operating partner: organize personal knowledge and prepare recommendations. No financial transactions, account changes, purchases or binding commitments.',
+        activation: [`Connect to ${agentName}`], close: [`${agentName} close loop`], connect_notes: [`${agentName} Office/${agentName} Role.md`],
+        close_target: { mode: 'append-section', path: `${agentName} Office/Session Captures.md` },
+      }],
+      handoff: null,
+      scaffold: [
+        { dir: 'Inbox' }, { dir: `${agentName} Office` },
+        { rel: `${agentName} Office/${agentName} Role.md`, content: roleNote(agentName, 'Private personal operating partner: organize personal knowledge and prepare recommendations.', '\nNo transactions, purchases, account changes or commitments without explicit approval.') },
+        { rel: `${agentName} Office/Session Captures.md`, content: `# ${agentName} Session Captures\n\nPrivate close-loop captures.\n` },
+      ],
+    }),
+  },
 };
 
 export function buildPack(id, opts) {
@@ -111,9 +129,13 @@ export async function scaffold(vaultPath, items) {
 // second vault from a mailbox-bearing pack would redirect every later send_handoff into
 // the new vault without the user ever choosing that.
 export function mergePack(cfg, built, { moveHandoff = false } = {}) {
-  const vaults = cfg.vaults.filter((v) => v.name !== built.vault.name).concat(built.vault);
   const names = new Set(built.agents.map((a) => a.name.toLowerCase()));
-  const agents = cfg.agents.filter((a) => a.vault !== built.vault.name && !names.has(a.name.toLowerCase())).concat(built.agents);
+  if (cfg.agents.some((agent) => agent.vault !== built.vault.name && names.has(agent.name.toLowerCase()))) {
+    throw new Error('Role name already belongs to another vault.');
+  }
+  const vaults = cfg.vaults.filter((v) => v.name !== built.vault.name).concat(built.vault);
+  // Reapplying a pack updates only roles it defines in this vault. Other roles remain intact.
+  const agents = cfg.agents.filter((a) => a.vault !== built.vault.name || !names.has(a.name.toLowerCase())).concat(built.agents);
   const current = cfg.handoff && cfg.handoff.vault !== built.vault.name && cfg.vaults.some((v) => v.name === cfg.handoff.vault) ? cfg.handoff : null;
   const keepCurrent = Boolean(current && built.handoff && !moveHandoff);
   if (keepCurrent && built.vault.folders && built.handoff.folder in built.vault.folders) {

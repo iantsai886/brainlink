@@ -15,7 +15,7 @@ import path from 'node:path';
 import { loadConfig, saveConfig, configPath, normalize, validate, LOCALES, appHome, emptyConfig } from './config.mjs';
 import { PACKS, buildPack, scaffold, mergePack } from './packs.mjs';
 import { CLIENTS, resolveClient, detect, connectClient, disconnectClient, readClientAgentToken, test, deepSeekSessionCueStatus, setDeepSeekSessionCue } from './connectors.mjs';
-import { createContext, search, searchWithVerdict, semanticStatus, readNote, related as relatedNotes, relatedText, ensureDefaultIgnore, readExcludedFolders, writeExcludedFolders, DEFAULT_EXCLUDED_FOLDERS, SUGGESTED_EXCLUDED_FOLDERS, safeJoin, vaultRoot, countVisibleNotes, parseFrontmatter } from './core.mjs';
+import { createContext, search, searchWithVerdict, semanticStatus, readNote, related as relatedNotes, relatedText, ensureDefaultIgnore, readExcludedFolders, writeExcludedFolders, DEFAULT_EXCLUDED_FOLDERS, SUGGESTED_EXCLUDED_FOLDERS, safeJoin, vaultRoot, countVisibleNotes, parseFrontmatter, inspectVaultStructure, findSecrets } from './core.mjs';
 import { extractTags } from './graph.mjs';
 import { ROOT, launchSpec, readActivity, refreshMap, logActivity } from './runtime.mjs';
 import { detectEmbedder } from './embed.mjs';
@@ -58,6 +58,7 @@ import { createConflictReviewStore, listConflictCandidates } from './conflict-re
 import { buildTidyBatch, createTidyState, tidyAppendBlock } from './tidy.mjs';
 import { createRsiDiscovery } from './rsi-discovery.mjs';
 import { createRsiObservationSchedule } from './rsi-observation-schedule.mjs';
+import { retrievalUseReport } from './retrieval-use.mjs';
 import { createRsiWeekly, taipeiWeek } from './rsi-weekly.mjs';
 import { validateWeeklyBenchmarkSchedule, weeklyBenchmarkScheduleDue, weeklyScheduleWeek } from './rsi-weekly-schedule.mjs';
 import { hasGitCommit, readGitSourceState } from './git-source-state.mjs';
@@ -291,6 +292,29 @@ export async function startSetup(opts = {}) {
   const tidyState = createTidyState(appHome(env));
   const sessions = sessionsService(env, home); // src/host.mjs: imports only from this Setup user's home
   const rsiLedger = createRsiLedger({ home: appHome(env), verifyCommit: opts.rsiVerifyCommit || ((sha) => hasGitCommit(ROOT, sha)) });
+  let selfTestTickRunning = false;
+  let selfTestLastDate = null;
+  async function runDailySelfTest() {
+    if (selfTestTickRunning) return;
+    selfTestTickRunning = true;
+    try {
+      const cfg = normalize(await loadConfig(file));
+      const local = localContext(cfg, { ...env, BRAINLINK_AI_PLATFORM: '' });
+      const today = localDateAndTime(opts.selfTestNow?.() || new Date(), cfg.timezone).date;
+      if (selfTestLastDate === today) return;
+      const result = await runSelfTest(local);
+      selfTestLastDate = today;
+      const failures = result.checks.filter(check => check.status === 'fail').slice(0, 200).map(check => ({
+        check: String(check.id || 'unknown').replace(/[^a-z0-9-]/gi, '-').toLowerCase().slice(0, 64) || 'unknown',
+        key: createHash('sha256').update(JSON.stringify({ id: check.id || '', vault: check.vault || '', agent: check.agent || '', path: check.path || '' })).digest('hex'),
+      }));
+      await rsiLedger.appendSelfTestFailures(failures);
+    } catch { /* Self-test failures stay local and never affect BrainLink's serving lifecycle. */ }
+    finally { selfTestTickRunning = false; }
+  }
+  const selfTestTimer = setInterval(runDailySelfTest, opts.selfTestTickMs ?? 15 * 60e3);
+  selfTestTimer.unref?.();
+  runDailySelfTest().catch(() => {});
   const rsiWeekly = createRsiWeekly({ home: appHome(env) });
   const rsiExperiments = createRsiExperiments({
     env,
@@ -1558,6 +1582,7 @@ export async function startSetup(opts = {}) {
   const teachPreviews = new Map();
   const decisionReviewPreviews = new Map();
   const conflictReviewPreviews = new Map();
+  const handoffMailboxPreviews = new Map();
   const tidyBatches = new Map(), tidyPreviews = new Map();
   const routes = {
     'GET /api/state': () => state(),
@@ -1683,6 +1708,33 @@ export async function startSetup(opts = {}) {
     'POST /api/rsi/discovery/run': async () => ({ run: await runDiscovery('manual'), discovery: await rsiDiscovery.status() }),
     'POST /api/rsi/discovery/refresh-source': async (b) => ({ check: await rsiDiscovery.refreshSource(b.idea_id), discovery: await rsiDiscovery.status() }),
     'POST /api/pick-folder': async () => { const p = await pick(); return p === undefined ? { path: null, unavailable: true } : { path: p }; },
+    'POST /api/vault/inspect': async (b) => inspectVaultStructure(String(b.path || '')),
+    'POST /api/handoff-mailbox/preview': async (b) => {
+      const cfg = await loadConfig(file), vault = cfg.vaults.find((item) => item.name === String(b.vault || ''));
+      if (!vault) throw new Error('Choose a configured vault.');
+      const folder = String(b.folder || '').replace(/^\/+|\/+$/g, '');
+      if (!folder || !(await inspectVaultStructure(vault.path)).folders.includes(folder)) throw new Error('Choose an existing, non-excluded mailbox folder.');
+      const preview = { id: randomBytes(24).toString('base64url'), from: cfg.handoff || null, to: { vault: vault.name, folder }, private_vault: Boolean(vault.private), expires_at: Date.now() + 15 * 60_000 };
+      handoffMailboxPreviews.set(preview.id, preview);
+      return { id: preview.id, from: preview.from, to: preview.to, private_vault: preview.private_vault, existing_files_stay_in_place: true, expires_in_minutes: 15 };
+    },
+    'POST /api/handoff-mailbox/confirm': async (b) => {
+      if (b.confirm !== true) throw new Error('Review the mailbox change preview before confirming.');
+      const id = String(b.id || ''), preview = handoffMailboxPreviews.get(id);
+      if (!preview || preview.expires_at < Date.now()) throw new Error('This mailbox preview expired.');
+      handoffMailboxPreviews.delete(id);
+      const cfg = await withConfigMutation(async () => {
+        const current = await loadConfig(file);
+        if (JSON.stringify(current.handoff || null) !== JSON.stringify(preview.from)) throw new Error('The current mailbox changed after preview. Review the change again.');
+        const vault = current.vaults.find((item) => item.name === preview.to.vault);
+        if (!vault || !(await inspectVaultStructure(vault.path)).folders.includes(preview.to.folder)) throw new Error('The selected mailbox folder is no longer available.');
+        current.handoff = preview.to;
+        await saveConfig(current, file);
+        return current;
+      });
+      refreshVaultWatcher(cfg);
+      return { ok: true, handoff: cfg.handoff, private_vault: Boolean(cfg.vaults.find((item) => item.name === cfg.handoff.vault)?.private), existing_files_stay_in_place: true };
+    },
     'POST /api/quick': (b) => quickStart(b),
     'POST /api/quick/prepare': (b) => quickStart(b, { connect: false }),
     'POST /api/graph': async (b) => {
@@ -1704,26 +1756,59 @@ export async function startSetup(opts = {}) {
     },
     'POST /api/connect-all': async () => connectAll(await loadConfig(file)),
     'POST /api/vault': async (b) => {
-      const cfg = await loadConfig(file);
-      const vaultPath = path.resolve(String(b.path || '').replace(/^~(?=$|[\/\\])/, home));
-      if (!(await stat(vaultPath).then((s) => s.isDirectory(), () => false))) throw new Error(`Folder not found: ${vaultPath}`);
-      const name = String(b.name || path.basename(vaultPath)).trim();
-      // A real vault folder: write the shipped default excluded-folder list (unless the caller
-      // already chose one, e.g. from the "connect a vault" form), or keep an existing one as-is.
-      if (Array.isArray(b.excludedFolders)) await writeExcludedFolders(vaultPath, b.excludedFolders);
-      else await ensureDefaultIgnore(vaultPath);
-      const built = buildPack(b.pack || 'simple', { vaultName: name, vaultPath, agentName: String(b.agentName || '').trim() || undefined });
-      const drive = normalizeDriveSelection(b.drive);
-      if (drive) built.vault.drive = drive;
-      if (b.private !== undefined) built.vault.private = Boolean(b.private);
-      const created = b.scaffold === false ? [] : await scaffold(vaultPath, built.scaffold);
-      const next = mergePack(cfg, built, { moveHandoff: b.moveHandoff === true });
-      if (!next.timezone) next.timezone = Intl.DateTimeFormat().resolvedOptions().timeZone;
-      await saveConfig(next, file);
+      const saved = await withConfigMutation(async () => {
+        const cfg = await loadConfig(file);
+        const vaultPath = path.resolve(String(b.path || '').replace(/^~(?=$|[\/\\])/, home));
+        if (!(await stat(vaultPath).then((s) => s.isDirectory(), () => false))) throw new Error(`Folder not found: ${vaultPath}`);
+        const name = String(b.name || path.basename(vaultPath)).trim();
+        let adopted = null;
+        if (b.adoptExisting === true) {
+          adopted = await inspectVaultStructure(vaultPath);
+          const folderSet = new Set(['', ...adopted.folders]), noteSet = new Set(adopted.notes.map((note) => note.path));
+          if (b.intakeFolder !== undefined && !folderSet.has(String(b.intakeFolder))) throw new Error('The selected intake folder is not an existing visible folder.');
+          if (b.mailboxFolder && !folderSet.has(String(b.mailboxFolder))) throw new Error('The selected handoff folder is not an existing visible folder.');
+          if (b.closeTarget && !noteSet.has(String(b.closeTarget))) throw new Error('The selected role capture note is not an existing visible note.');
+          for (const key of ['readFirst', 'roleNotes']) {
+            if (b[key] !== undefined && (!Array.isArray(b[key]) || b[key].some((rel) => !noteSet.has(String(rel))))) throw new Error(`Selected ${key} must use existing visible notes.`);
+          }
+          if (b.reviewed !== true) throw new Error('Preview the existing-vault configuration before saving.');
+        }
+        // A real vault folder: write the default exclusions unless the owner supplied an
+        // existing ignore file or an explicit list. Existing vault adoption never creates files.
+        if (!adopted && Array.isArray(b.excludedFolders)) await writeExcludedFolders(vaultPath, b.excludedFolders);
+        else if (!b.adoptExisting) await ensureDefaultIgnore(vaultPath);
+        let agentName = String(b.agentName || '').trim();
+        if (!agentName) {
+          const usedNames = new Set(cfg.agents.map(agent => String(agent.name).toLowerCase()));
+          agentName = usedNames.has('brain') ? name : 'Brain';
+          const baseName = agentName;
+          for (let suffix = 2; usedNames.has(agentName.toLowerCase()); suffix++) agentName = `${baseName} ${suffix}`;
+        }
+        const built = buildPack(b.pack || 'simple', { vaultName: name, vaultPath, agentName });
+        const drive = normalizeDriveSelection(b.drive);
+        if (drive) built.vault.drive = drive;
+        if (b.private !== undefined) built.vault.private = Boolean(b.private);
+        if (adopted) {
+          if (b.intakeFolder !== undefined) { built.vault.intake_folder = String(b.intakeFolder); built.vault.flat = !b.intakeFolder; }
+          if (Array.isArray(b.readFirst)) built.vault.read_first = b.readFirst.map(String);
+          if (Array.isArray(b.roleNotes) && built.agents[0]) built.agents[0].connect_notes = b.roleNotes.map(String);
+          if (b.closeTarget && built.agents[0]) built.agents[0].close_target = { mode: 'append-section', path: String(b.closeTarget) };
+          if (b.mailboxFolder) {
+            built.vault.folders = { ...(built.vault.folders || {}), [String(b.mailboxFolder)]: 'Inter-AI mailbox (use send_handoff)' };
+            built.handoff = { vault: name, folder: String(b.mailboxFolder) };
+          }
+        }
+        const created = b.scaffold === false || adopted && b.scaffold !== true ? [] : await scaffold(vaultPath, built.scaffold);
+        const next = mergePack(cfg, built, { moveHandoff: b.moveHandoff === true });
+        if (!next.timezone) next.timezone = Intl.DateTimeFormat().resolvedOptions().timeZone;
+        await saveConfig(next, file);
+        return { next, name, created, handoffOffered: Boolean(built.handoff), adopted: Boolean(adopted) };
+      });
+      const { next, name, created, handoffOffered, adopted } = saved;
       refreshVaultWatcher(next);
-      await refreshMap(next, name, env);
+      if (!adopted) await refreshMap(next, name, env);
       // Tell the owner when this vault's pack offered a mailbox but the existing one was kept.
-      const handoffKept = Boolean(built.handoff && next.handoff && next.handoff.vault !== name);
+      const handoffKept = Boolean(handoffOffered && next.handoff && next.handoff.vault !== name);
       return { ok: true, vault: name, created, handoff_mailbox: next.handoff ? { vault: next.handoff.vault, folder: next.handoff.folder } : null, handoff_kept: handoffKept };
     },
     'POST /api/vault/remove': async (b) => {
@@ -2143,7 +2228,28 @@ export async function startSetup(opts = {}) {
       const cfg = await loadConfig(file);
       return saveMemoryForReview(localContext(cfg, { ...env, BRAINLINK_SEMANTIC: '0' }), String(b.vault || ''), b.text, b.etag);
     },
-    'GET /api/proposals': async () => ({ proposals: (await proposalInbox.listPending()).map(({ id, vault, path: rel, content, tool, agent, agent_verified, created_at }) => ({ id, vault, path: rel, content, tool, agent, agent_verified, created_at })) }),
+    'GET /api/proposals': async () => ({ proposals: (await proposalInbox.listPending()).map(({ id, vault, path: rel, content, tool, agent, agent_verified, created_at }) => ({ id, vault, path: rel, content, tool, agent, agent_verified, created_at, edit_token: createHash('sha256').update(`${rel}\0${content}`).digest('hex') })) }),
+    'POST /api/proposals/edit-preview': async (b) => {
+      const proposal = await proposalInbox.getPending(String(b.id || ''));
+      if (!proposal) throw new Error('This proposal is no longer pending. Refresh the review list.');
+      const cfg = normalize(await loadConfig(file)), ctx = localContext(cfg, { ...env, BRAINLINK_SEMANTIC: '0' });
+      const vault = ctx.byName.get(proposal.vault);
+      if (!vault || !ctx.enabled.includes(proposal.vault) || vault.private || vault.writes === 'off') throw new Error('This proposal destination is not available for owner review.');
+      const rel = String(b.path || proposal.path).replace(/\\/g, '/').replace(/^\/+|\/+$/g, '');
+      const content = String(b.content ?? proposal.content);
+      if (!rel.endsWith('.md') || rel.split('/').some(part => !part || part === '.' || part === '..') || !content.trim() || content.length > 100_000 || findSecrets(content).length) throw new Error('Enter a safe Markdown destination and non-empty draft without secrets.');
+      if (proposal.action === 'append' && rel !== proposal.path) throw new Error('An append proposal must keep its original destination.');
+      const parent = path.posix.dirname(rel);
+      if (parent !== '.' && !(await stat(path.join(vault.path, parent)).then(s => s.isDirectory(), () => false))) throw new Error('Choose an existing destination folder in this vault.');
+      if (b.confirm === true) {
+        const updated = await proposalInbox.updatePending({ id: proposal.id, expected: String(b.edit_token || ''), path: rel, content });
+        return { ok: true, path: updated.path, content: updated.content };
+      }
+      const title = content.match(/^#\s+(.+)$/m)?.[1] || path.posix.basename(rel, '.md');
+      const similarityQuery = `${title} ${content.replace(/^#.*$/m, ' ').replace(/[^\p{L}\p{N}\s]/gu, ' ').replace(/\s+/g, ' ').trim()}`.slice(0, 500);
+      const similar = (await search(ctx, proposal.vault, similarityQuery, 5)).filter(note => note.path !== rel).slice(0, 3).map(note => ({ path: note.path, title: note.title, status: note.status }));
+      return { preview: { vault: proposal.vault, path: rel, content, reason: `Requested by ${proposal.agent || 'an AI agent'} through ${proposal.tool || 'BrainLink'}.`, similar, action: proposal.action } };
+    },
     'POST /api/decision-reviews/list': async (b) => {
       const cfg = await loadConfig(file);
       const ctx = localContext(cfg, { ...env, BRAINLINK_SEMANTIC: '0' });
@@ -3142,6 +3248,11 @@ export async function startSetup(opts = {}) {
       const cfg = normalize(await loadConfig(file));
       return runSelfTest(localContext(cfg, { ...env, BRAINLINK_AI_PLATFORM: '' }));
     },
+    'POST /api/retrieval-use': async (b) => {
+      const cfg = normalize(await loadConfig(file));
+      const ctx = localContext(cfg, { ...env, BRAINLINK_AI_PLATFORM: '' });
+      return retrievalUseReport(ctx, await readActivity(env, 20000), { days: b.days === undefined ? 60 : Number(b.days), vault: String(b.vault || '') });
+    },
     // Replayable misses (opt-in, local only, question text kept on this computer).
     'GET /api/replay-misses': async () => {
       const cfg = normalize(await loadConfig(file));
@@ -3160,6 +3271,18 @@ export async function startSetup(opts = {}) {
       const cfg = normalize(await loadConfig(file));
       const ctx = localContext(cfg, { ...env, BRAINLINK_AI_PLATFORM: '' });
       return createReplayMisses({ home: ctx.dataDir }).replay(ctx);
+    },
+    'POST /api/replay-misses/pin': async (b) => {
+      const cfg = normalize(await loadConfig(file));
+      const ctx = localContext(cfg, { ...env, BRAINLINK_AI_PLATFORM: '' });
+      const misses = createReplayMisses({ home: ctx.dataDir });
+      const miss = await misses.get(b.id);
+      if (!miss || !ctx.enabled.includes(miss.vault) || ctx.byName.get(miss.vault)?.private) throw new Error('That miss is unavailable in the current shared-vault scope.');
+      const replay = await misses.replay(ctx);
+      const current = replay.results.find(item => item.id === miss.id);
+      if (current?.now !== 'hits' || !current.top?.path) throw new Error('Pinning requires a current successful result with a top note.');
+      if (!await misses.pin(miss.id, current.top.path)) throw new Error('The regression case could not be pinned.');
+      return { ok: true, expected_path: current.top.path };
     },
     'POST /api/replay-misses/teach': async (b) => {
       const cfg = normalize(await loadConfig(file));
@@ -3365,7 +3488,7 @@ export async function startSetup(opts = {}) {
       json(res, 200, result);
     } catch (e) { json(res, 400, { error: String(e.message || e) }); }
   });
-  server.once('close', () => { snapshotWatcher?.stop(); vaultWatcher?.stop(); for (const client of eventClients) client.end(); eventClients.clear(); for (const pending of updateDownloads.values()) { clearTimeout(pending.timer); if (!pending.opened) rm(pending.folder, { recursive: true, force: true }).catch(() => {}); } updateDownloads.clear(); clearInterval(discoveryTimer); clearInterval(observationTimer); clearInterval(weeklyBenchmarkTimer); clearInterval(ingestionTimer); clearInterval(githubAutoTimer); clearInterval(localSummaryAutoDraftTimer); if (backupTimer) { clearTimeout(backupTimer); clearInterval(backupTimer); } if (syncTimer) { clearTimeout(syncTimer); clearInterval(syncTimer); } });
+  server.once('close', () => { snapshotWatcher?.stop(); vaultWatcher?.stop(); for (const client of eventClients) client.end(); eventClients.clear(); for (const pending of updateDownloads.values()) { clearTimeout(pending.timer); if (!pending.opened) rm(pending.folder, { recursive: true, force: true }).catch(() => {}); } updateDownloads.clear(); clearInterval(selfTestTimer); clearInterval(discoveryTimer); clearInterval(observationTimer); clearInterval(weeklyBenchmarkTimer); clearInterval(ingestionTimer); clearInterval(githubAutoTimer); clearInterval(localSummaryAutoDraftTimer); if (backupTimer) { clearTimeout(backupTimer); clearInterval(backupTimer); } if (syncTimer) { clearTimeout(syncTimer); clearInterval(syncTimer); } });
   await new Promise((resolve, reject) => { server.once('error', reject); server.listen(port, '127.0.0.1', resolve); });
   port = server.address().port;
   const startupConfig = await loadConfig(file);
