@@ -95,6 +95,18 @@ test('conflict review is localized and queues supersession for owner approval', 
   assert.match(html, /data-conflicts-more/);
 });
 
+test('on-demand tidy review is localized and previews append-only changes before confirmation', async () => {
+  const catalogs = Object.fromEntries(await Promise.all(LOCALES.map(async (id) => [id, await loadLocale(id)])));
+  const keys = ['tidy.title', 'tidy.hint', 'tidy.generate', 'tidy.previewApply', 'tidy.previewDismiss', 'tidy.confirm', 'tidy.loadMore'];
+  for (const id of LOCALES) for (const key of keys) assert.ok(catalogs[id][key], `${id} defines ${key}`);
+  const html = await readFile(path.join(ROOT, 'ui', 'index.html'), 'utf8');
+  assert.match(html, /id="tidy-panel"/);
+  assert.match(html, /tidy\/apply-preview/);
+  assert.match(html, /tidy\/apply-confirm/);
+  assert.match(html, /tidy\/dismiss-preview/);
+  assert.match(html, /data-tidy-select/);
+});
+
 test('connection wording distinguishes configured settings from an AI app that loaded them', async () => {
   const catalogs = Object.fromEntries(await Promise.all(LOCALES.map(async (id) => [id, await loadLocale(id)])));
   const en = catalogs.en;

@@ -8,8 +8,8 @@ const folder = (rel) => path.posix.dirname(rel);
 const dateToken = (value) => value.match(/(?:^|\D)(20\d{2}(?:[-_. ]?\d{2}){0,2})(?=\D|$)/g)?.map((x) => x.replace(/\D/g, '')) || [];
 const stem = (value) => value.toLocaleLowerCase().replace(/\b20\d{2}(?:[-_. ]?\d{2}){0,2}\b/g, ' ').replace(/[^\p{L}\p{N}]+/gu, ' ').trim().replace(/\s+/g, ' ');
 
-export async function listConflictCandidates(ctx, vaultName, { limit = 50, offset = 0, dismissed = [] } = {}) {
-  const index = await loadVault(ctx, vaultName);
+export async function listConflictCandidates(ctx, vaultName, { limit = 50, offset = 0, dismissed = [], index: suppliedIndex } = {}) {
+  const index = suppliedIndex || await loadVault(ctx, vaultName);
   const visible = index.notes.filter((note) => !note.private && !note.generated && !ROUTING_NOTE.test(note.title));
   const pairs = new Map();
   const add = (left, right, reason) => {
@@ -31,9 +31,11 @@ export async function listConflictCandidates(ctx, vaultName, { limit = 50, offse
   const stems = group(visible, (note) => stem(note.title));
   for (const [titleStem, notes] of stems) {
     if (!titleStem || notes.length < 2) continue;
-    for (let i = 0; i < notes.length; i++) for (let j = i + 1; j < notes.length; j++) {
-      const datesA = dateToken(notes[i].title), datesB = dateToken(notes[j].title);
-      if (datesA.some((date) => datesB.some((other) => date !== other))) add(notes[i], notes[j], `similar dated title: ${titleStem}`);
+    const dated = notes.map((note) => ({ note, dates: dateToken(note.title) })).filter((item) => item.dates.length);
+    const distinctDates = new Set(dated.flatMap((item) => item.dates));
+    if (distinctDates.size < 2) continue;
+    for (let i = 0; i < dated.length; i++) for (let j = i + 1; j < dated.length; j++) {
+      if (dated[i].dates.some((date) => dated[j].dates.some((other) => date !== other))) add(dated[i].note, dated[j].note, `similar dated title: ${titleStem}`);
     }
   }
   for (const [, notes] of group(visible.filter((note) => note.meta.id && note.meta.type), (note) => `${String(note.meta.type).toLowerCase()}\0${String(note.meta.id).toLowerCase()}`)) {

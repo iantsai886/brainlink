@@ -55,6 +55,7 @@ import { createRsiLedger } from './rsi-ledger.mjs';
 import { createRsiExperiments } from './rsi-experiments.mjs';
 import { listDecisionReviews, readDecisionReview, validReviewDate } from './decision-reviews.mjs';
 import { createConflictReviewStore, listConflictCandidates } from './conflict-review.mjs';
+import { buildTidyBatch, createTidyState, tidyAppendBlock } from './tidy.mjs';
 import { createRsiDiscovery } from './rsi-discovery.mjs';
 import { createRsiObservationSchedule } from './rsi-observation-schedule.mjs';
 import { createRsiWeekly, taipeiWeek } from './rsi-weekly.mjs';
@@ -287,6 +288,7 @@ export async function startSetup(opts = {}) {
   const localContext = (cfg, contextEnv = env) => createContext(cfg, { env: contextEnv, trustedLocal: true });
   const proposalInbox = createProposalInbox({ home: appHome(env) });
   const conflictReviewStore = createConflictReviewStore(appHome(env));
+  const tidyState = createTidyState(appHome(env));
   const sessions = sessionsService(env, home); // src/host.mjs: imports only from this Setup user's home
   const rsiLedger = createRsiLedger({ home: appHome(env), verifyCommit: opts.rsiVerifyCommit || ((sha) => hasGitCommit(ROOT, sha)) });
   const rsiWeekly = createRsiWeekly({ home: appHome(env) });
@@ -1556,6 +1558,7 @@ export async function startSetup(opts = {}) {
   const teachPreviews = new Map();
   const decisionReviewPreviews = new Map();
   const conflictReviewPreviews = new Map();
+  const tidyBatches = new Map(), tidyPreviews = new Map();
   const routes = {
     'GET /api/state': () => state(),
     'GET /api/updates/check': async () => checkForUpdate({
@@ -2245,6 +2248,76 @@ export async function startSetup(opts = {}) {
       await conflictReviewStore.dismiss(preview.candidate.id);
       await logActivity(env, { tool: 'conflict_review', ok: true });
       return { ok: true, proposal_id, dismissed: true, choice: preview.choice };
+    },
+    'POST /api/tidy/generate': async (b) => {
+      const cfg = await loadConfig(file), ctx = localContext(cfg, { ...env, BRAINLINK_SEMANTIC: '0' });
+      const vault = String(b.vault || '');
+      if (!ctx.enabled.includes(vault)) throw new Error('Choose an enabled vault.');
+      const offset = b.offset === undefined ? 0 : b.offset;
+      if (!Number.isSafeInteger(offset) || offset < 0 || offset > 100_000) throw new Error('Tidy batch offset is invalid.');
+      const result = await buildTidyBatch(ctx, vault, { dismissed: await tidyState.resolved(), limit: 50, offset });
+      const batch_id = randomBytes(24).toString('base64url');
+      tidyBatches.set(batch_id, { ...result, expires_at: Date.now() + 30 * 60_000 });
+      return { batch_id, ...result };
+    },
+    'POST /api/tidy/dismiss-preview': async (b) => {
+      const batch = tidyBatches.get(String(b.batch_id || ''));
+      if (!batch || batch.expires_at < Date.now()) throw new Error('This tidy batch expired. Generate it again.');
+      const ids = Array.isArray(b.item_ids) ? [...new Set(b.item_ids.map(String))] : [];
+      if (!ids.length || ids.length > 50 || ids.some((id) => !batch.items.some((item) => item.id === id))) throw new Error('Choose valid tidy items from this batch.');
+      const id = randomBytes(24).toString('base64url');
+      tidyPreviews.set(id, { action: 'dismiss', item_ids: ids, expires_at: Date.now() + 15 * 60_000 });
+      return { id, items: batch.items.filter((item) => ids.includes(item.id)).map(({ id: itemId, kind, source, target }) => ({ id: itemId, kind, source, target })), message: 'The selected suggestions will be dismissed in local BrainLink state. No vault note will change.', expires_in_minutes: 15 };
+    },
+    'POST /api/tidy/dismiss-confirm': async (b) => {
+      if (b.confirm !== true) throw new Error('Review the dismissal preview before confirming.');
+      const id = String(b.id || ''), preview = tidyPreviews.get(id);
+      if (!preview || preview.action !== 'dismiss' || preview.expires_at < Date.now()) throw new Error('This tidy preview expired.');
+      tidyPreviews.delete(id);
+      await tidyState.resolve(preview.item_ids);
+      return { ok: true, dismissed: preview.item_ids.length };
+    },
+    'POST /api/tidy/apply-preview': async (b) => {
+      const batch = tidyBatches.get(String(b.batch_id || ''));
+      if (!batch || batch.expires_at < Date.now()) throw new Error('This tidy batch expired. Generate it again.');
+      const ids = Array.isArray(b.item_ids) ? [...new Set(b.item_ids.map(String))] : [];
+      if (!ids.length || ids.length > 50 || ids.some((id) => !batch.items.some((item) => item.id === id))) throw new Error('Choose valid tidy items from this batch.');
+      const selected = batch.items.filter((item) => ids.includes(item.id));
+      if (selected.some((item) => item.kind === 'conflict')) throw new Error('Resolve duplicate candidates in Possible conflicts, where you can choose which note stands.');
+      const cfg = await loadConfig(file), ctx = localContext(cfg, { ...env, BRAINLINK_SEMANTIC: '0' });
+      if (!ctx.enabled.includes(batch.vault)) throw new Error('The destination vault is no longer enabled.');
+      const groups = new Map();
+      for (const item of selected) { const rows = groups.get(item.source.path) || []; rows.push(item); groups.set(item.source.path, rows); }
+      const files = [];
+      for (const [rel, items] of groups) {
+        await readNote(ctx, batch.vault, rel);
+        for (const item of items) await readNote(ctx, batch.vault, item.target.path);
+        const full = safeJoin(vaultRoot(ctx, batch.vault), rel);
+        const bytes = await readFile(full);
+        files.push({ path: rel, expected_hash: createHash('sha256').update(bytes).digest('hex'), append: tidyAppendBlock(items), item_ids: items.map((item) => item.id), items: items.map(({ kind, source, target, reason }) => ({ kind, source, target, reason })) });
+      }
+      const id = randomBytes(24).toString('base64url');
+      tidyPreviews.set(id, { action: 'apply', vault: batch.vault, files, item_ids: selected.map((item) => item.id), expires_at: Date.now() + 15 * 60_000 });
+      return { id, vault: batch.vault, files: files.map(({ path: rel, append, items }) => ({ path: rel, append, items })), item_count: selected.length, expires_in_minutes: 15 };
+    },
+    'POST /api/tidy/apply-confirm': async (b) => {
+      if (b.confirm !== true) throw new Error('Review the exact append blocks before confirming.');
+      const id = String(b.id || ''), preview = tidyPreviews.get(id);
+      if (!preview || preview.action !== 'apply' || preview.expires_at < Date.now()) throw new Error('This tidy preview expired.');
+      tidyPreviews.delete(id);
+      const cfg = await loadConfig(file), ctx = localContext(cfg, { ...env, BRAINLINK_SEMANTIC: '0' });
+      if (!ctx.enabled.includes(preview.vault)) throw new Error('The destination vault is no longer enabled.');
+      const root = vaultRoot(ctx, preview.vault);
+      for (const item of preview.files) {
+        await readNote(ctx, preview.vault, item.path);
+        for (const suggestion of item.items) await readNote(ctx, preview.vault, suggestion.target.path);
+        const current = await readFile(safeJoin(root, item.path));
+        if (createHash('sha256').update(current).digest('hex') !== item.expected_hash) throw new Error(`The note ${item.path} changed after preview. Generate and review a new tidy batch.`);
+      }
+      for (const item of preview.files) await appendTo(root, item.path, item.append);
+      await tidyState.resolve(preview.item_ids);
+      await logActivity(env, { tool: 'tidy_apply', ok: true });
+      return { ok: true, files_changed: preview.files.map((item) => `${preview.vault}/${item.path}`), items_applied: preview.item_ids.length };
     },
     'POST /api/proposals/approve': async (b) => {
       if (b.confirm !== true) throw new Error('Review the full draft, then explicitly approve it.');
