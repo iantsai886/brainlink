@@ -1324,5 +1324,10 @@
   "replay.nowFound": "Agora respondida",
   "replay.nowWeak": "Parcial",
   "replay.nowMissing": "Ainda não encontrada",
-  "replay.nowUnavailable": "Cofre indisponível"
+  "replay.nowUnavailable": "Cofre indisponível",
+  "nav.find": "Buscar",
+  "nav.review": "Para revisar",
+  "nav.access": "Acesso das IAs",
+  "nav.system": "Sistema",
+  "ready.otherRoles": "Suas outras funções e o cofre em que cada uma trabalha:"
 }

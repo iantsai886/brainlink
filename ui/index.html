@@ -114,6 +114,16 @@ ol.todo li { padding-left: 4px; }
 #main-nav { position: sticky; top: 0; z-index: 40; max-width: var(--content-width); margin: 0 auto; padding: 8px 20px; display: flex; gap: 6px; overflow-x: auto; background: var(--bg); border-bottom: 1px solid var(--line); scrollbar-width: none; }
 #main-nav::-webkit-scrollbar { display: none; }
 #main-nav[hidden] { display: none; }
+#main-nav a[aria-current="page"] { color: var(--accent); border-color: var(--line); background: var(--panel); font-weight: 600; }
+/* Five destinations: once setup is done, only the chosen group's sections are shown. */
+body[data-nav-group="home"] [data-nav-group]:not([data-nav-group="home"]),
+body[data-nav-group="find"] [data-nav-group]:not([data-nav-group="find"]),
+body[data-nav-group="review"] [data-nav-group]:not([data-nav-group="review"]),
+body[data-nav-group="access"] [data-nav-group]:not([data-nav-group="access"]),
+body[data-nav-group="system"] [data-nav-group]:not([data-nav-group="system"]),
+body[data-nav-group="home"] #settings, body[data-nav-group="find"] #settings { display: none !important; }
+body[data-nav-group] #settings > summary { display: none; }
+@media (max-width: 420px) { #main-nav { padding: 8px 10px; gap: 2px; } #main-nav a { padding: 5px 8px; } }
 #rsi-panel, #agents-panel, #memory-review-panel, #proposal-review-panel, #brain-panel, #sessions-panel, #handoffs-panel { display: block; }
 #rsi-panel[hidden], #agents-panel[hidden], #memory-review-panel[hidden], #proposal-review-panel[hidden], #brain-panel[hidden], #sessions-panel[hidden], #handoffs-panel[hidden] { display: none; }
 #main-nav a { flex: none; border: 1px solid transparent; border-radius: 999px; padding: 5px 11px; color: var(--muted); font-size: 13px; text-decoration: none; white-space: nowrap; }
@@ -135,17 +145,11 @@ main #ready, main #ask-panel, main #brain-panel, main #sessions-panel, main #s-c
 <body>
 <header><h1>BrainLink</h1><span id="app-version" class="pill" aria-label="BrainLink version"></span><select id="lang" aria-label="Language" style="margin-left:auto"></select><button class="link" id="done" data-i18n="header.done"></button></header>
 <nav id="main-nav" aria-label="BrainLink sections" hidden>
-  <a href="#ready" data-main-nav="ready" data-i18n="nav.home"></a>
-  <a href="#ask-panel" data-main-nav="ask-panel" data-i18n="nav.ask"></a>
-  <a href="#brain-panel" data-main-nav="brain-panel" data-i18n="nav.notes"></a>
-  <a href="#memory-review-panel" data-main-nav="memory-review-panel" data-i18n="memoryReview.title"></a>
-  <a href="#proposal-review-panel" data-main-nav="proposal-review-panel" data-i18n="proposals.title"></a>
-  <a href="#sessions-panel" data-main-nav="sessions-panel" data-i18n="nav.sessions"></a>
-  <a href="#s-ingestion" data-main-nav="s-ingestion" data-i18n="nav.sources"></a>
-  <a href="#s-connect" data-main-nav="s-connect" data-i18n="nav.connect"></a>
-  <a href="#s-backup" data-main-nav="s-backup" data-i18n="nav.backup"></a>
-  <a href="#rsi-panel" data-main-nav="rsi-panel" data-i18n="nav.improve"></a>
-  <a href="#help-panel" data-main-nav="help-panel" data-i18n="nav.help"></a>
+  <a href="#ready" data-nav-group-link="home" data-i18n="nav.home"></a>
+  <a href="#ask-panel" data-nav-group-link="find" data-i18n="nav.find"></a>
+  <a href="#proposal-review-panel" data-nav-group-link="review" data-i18n="nav.review"></a>
+  <a href="#s-connect" data-nav-group-link="access" data-i18n="nav.access"></a>
+  <a href="#s-backup" data-nav-group-link="system" data-i18n="nav.system"></a>
 </nav>
 <div id="boot-loading" role="status" data-i18n="boot.loading"></div>
 <div id="boot-error" hidden role="alert"><b data-i18n="boot.errorTitle"></b> <span id="boot-error-msg"></span> <button id="boot-retry" data-i18n="boot.retry"></button></div>
@@ -204,6 +208,7 @@ main #ready, main #ask-panel, main #brain-panel, main #sessions-panel, main #s-c
       <li><span data-i18n="ready.sayConnectIntro"></span> <span class="say" id="say-connect">Connect to my brain</span></li>
       <li><span data-i18n="ready.sayCloseIntro"></span> <span class="say" id="say-close">Close loop</span> <span data-i18n="ready.sayCloseSuffix"></span></li>
     </ol>
+    <div id="ready-roles" hidden style="margin-top:14px"><p class="muted" data-i18n="ready.otherRoles" style="margin:0 0 4px"></p><ul id="ready-roles-list" class="ask-sources"></ul></div>
     <div class="row" style="margin-top:18px" id="more-apps"></div>
     <table style="margin-top:18px"><thead><tr><th data-i18n="ready.colWhen"></th><th data-i18n="ready.colAI"></th><th data-i18n="ready.colTool"></th><th data-i18n="ready.colResult"></th></tr></thead><tbody id="activity"></tbody></table>
     <div class="card" id="selftest-card" style="margin-top:18px">
@@ -713,11 +718,7 @@ vaultEvents.addEventListener('vault-counts-updated', (event) => {
     if (vault) {
       vault.notes = result.status === 'ready' ? result.notes : null;
       vault.notes_status = result.status;
-      if ($('ready-sub') && S.vaults.at(-1)?.name === vault.name) {
-        const apps = Object.values(S.clients).filter((c) => c.connected).map((c) => c.title);
-        const count = vault.notes == null ? t('vault.counting') : `${vault.notes} ${t('brain.notes')}`;
-        $('ready-sub').textContent = `${vault.name} · ${count}${apps.length ? ' · ' + apps.join(', ') : ''}`;
-      }
+      if ($('ready-sub')) $('ready-sub').textContent = readySubText();
     }
   } catch {}
 });
@@ -966,11 +967,38 @@ async function ensureLocale(saved) {
   await setLocale(SUPPORTED_LOCALES.includes(saved) ? saved : detectLocale(), { persist: !saved });
   resolveLocaleBooted();
 }
+// Five top-level destinations. Every section belongs to exactly one group; choosing a group
+// shows only its sections, so the page is no longer one long scroll. Groups apply only while
+// the main navigation is visible, so onboarding screens are never filtered.
+const NAV_GROUPS = {"home":["ready","handoffs-panel"],"find":["ask-panel","brain-panel"],"review":["proposal-review-panel","memory-review-panel","sessions-panel","s-ingestion"],"access":["s-connect","s-vault","s-agents","agents-panel","twin-profiles-panel","s-test"],"system":["s-backup","s-sync","s-background","s-brief","s-updates","s-reranker","s-share","rsi-panel","help-panel"]};
+const navGroupOf = (id) => Object.keys(NAV_GROUPS).find((group) => NAV_GROUPS[group].includes(id)) || null;
+for (const [group, ids] of Object.entries(NAV_GROUPS)) for (const id of ids) $(id)?.setAttribute('data-nav-group', group);
+let navGroup = 'home';
+function applyNavGroup() {
+  const active = !$('main-nav').hidden;
+  if (active) document.body.dataset.navGroup = navGroup; else delete document.body.dataset.navGroup;
+  for (const link of document.querySelectorAll('[data-nav-group-link]')) {
+    if (link.dataset.navGroupLink === navGroup) link.setAttribute('aria-current', 'page'); else link.removeAttribute('aria-current');
+  }
+  if (active && NAV_GROUPS[navGroup].some((id) => id.startsWith('s-'))) $('settings').open = true;
+}
+function showNavGroup(group) {
+  if (!NAV_GROUPS[group]) return;
+  navGroup = group;
+  try { sessionStorage.setItem('brainlink-nav-group', group); } catch { /* storage unavailable */ }
+  applyNavGroup();
+}
+try { const saved = sessionStorage.getItem('brainlink-nav-group'); if (NAV_GROUPS[saved]) navGroup = saved; } catch { /* storage unavailable */ }
+if (navGroupOf(location.hash.slice(1))) navGroup = navGroupOf(location.hash.slice(1));
+new MutationObserver(applyNavGroup).observe($('main-nav'), { attributes: true, attributeFilter: ['hidden'] });
 document.addEventListener('click', (event) => {
+  const groupLink = event.target.closest('a[data-nav-group-link]');
+  if (groupLink) { event.preventDefault(); showNavGroup(groupLink.dataset.navGroupLink); window.scrollTo(0, 0); return; }
   const link = event.target.closest('a[data-main-nav]');
   if (!link) return;
   const target = $(link.dataset.mainNav);
   if (!target || target.hidden) { event.preventDefault(); return; }
+  if (navGroupOf(target.id)) showNavGroup(navGroupOf(target.id));
   if (target.tagName === 'DETAILS') target.open = true;
   const settings = target.closest('details.settings');
   if (settings) settings.open = true;
@@ -1060,14 +1088,22 @@ document.addEventListener('click', (event) => {
   button.disabled = true;
   api('POST', '/api/connect', { client: button.dataset.firstConnect }).then(() => load()).catch((error) => { toast(error.message, true); button.disabled = false; });
 });
+// Home summarises every vault and every role, not only the one added last.
+function readySubText() {
+  const apps = Object.values(S.clients).filter((c) => c.connected).map((c) => c.title);
+  const vaults = S.vaults.map((v) => `${v.name} · ${v.notes == null ? t('vault.counting') : `${v.notes} ${t('brain.notes')}`}`).join('   |   ');
+  return `${vaults}${apps.length ? '   |   ' + apps.join(', ') : ''}`;
+}
 function renderReady(r) {
-  const v = S.vaults[S.vaults.length - 1];
+  const v = S.vaults[0];
   const agent = S.agents.find((a) => a.vault === v.name) || S.agents[0];
   const apps = Object.values(S.clients).filter((c) => c.connected).map((c) => c.title);
   const fresh = r?.connected?.length ? r.connected : apps;
   $('ready-title').textContent = apps.length ? t('ready.set') : t('ready.almost');
-  const count = v.notes == null ? t('vault.counting') : `${v.notes} ${t('brain.notes')}`;
-  $('ready-sub').textContent = `${v.name} · ${count}${apps.length ? ' · ' + apps.join(', ') : ''}`;
+  $('ready-sub').textContent = readySubText();
+  const otherRoles = S.agents.filter((a) => a !== agent);
+  $('ready-roles').hidden = !otherRoles.length;
+  $('ready-roles-list').innerHTML = otherRoles.map((a) => `<li><b>${esc(a.activation[0])}</b> <span class="muted">${esc(a.vault)}</span></li>`).join('');
   const missing = Object.values(S.clients).filter((c) => c.present && !c.connected);
   $('todo-restart').innerHTML = fresh.length ? t('ready.restartQuit', { apps: `<b>${esc(fresh.join(', '))}</b>` })
     : missing.length && S.twin_profiles?.profiles?.length ? t('ready.assignAccess')

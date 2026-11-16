@@ -4,6 +4,8 @@ This log covers the development branch. Entries marked **unreleased** are not pu
 
 ## 1.3.8 — Development, unreleased
 
+- Setup navigation is now five destinations (Home, Find, To review, AI access, System) instead of eleven links over one long page. Each destination shows only its own sections; every earlier section is still reachable, and onboarding screens are never filtered. Home lists every vault and every role instead of only the vault added last. Ask excerpts no longer show `##` heading marks or `[[ ]]` link brackets.
+- Verification (2026-11-16, Linux container, Node 22): the navigation test was rewritten for the new structure and passes; all five destinations were opened in headless Chrome at 1280 px and 390 px with no page errors and no horizontal overflow. "AI access" and "System" are still long pages. zh-TW and pt screens were not viewed.
 - Added a read-only setup self-test (Setup "Check my setup", `brainlink selftest`, `POST /api/self-test`): reports rule notes and role notes that AIs cannot read, role notes that still hold starter template text, a missing or surprising mailbox location, a missing intake folder, and excluded folders that contain notes.
 - Added opt-in replayable misses (off by default): when the owner turns it on, questions that a search answered weakly or not at all are kept in `BRAINLINK_HOME/rsi/replay-misses.jsonl` (owner-only file, private vaults never recorded, at most 500, clearable). "Try them again" and `brainlink miss replay` re-run them against current notes. This is separate from the RSI ledger, which still stores no question text.
 - Ask now shows a reviewed note before an unreviewed `proposed`/`draft` note among its top three sources.

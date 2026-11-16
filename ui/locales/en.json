@@ -1324,5 +1324,10 @@
   "replay.nowFound": "Now answered",
   "replay.nowWeak": "Partial",
   "replay.nowMissing": "Still not found",
-  "replay.nowUnavailable": "Vault unavailable"
+  "replay.nowUnavailable": "Vault unavailable",
+  "nav.find": "Find",
+  "nav.review": "To review",
+  "nav.access": "AI access",
+  "nav.system": "System",
+  "ready.otherRoles": "Your other roles, and the vault each one works in:"
 }

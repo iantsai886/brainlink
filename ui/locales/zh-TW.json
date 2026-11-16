@@ -1324,5 +1324,10 @@
   "replay.nowFound": "現在找得到",
   "replay.nowWeak": "部分符合",
   "replay.nowMissing": "仍找不到",
-  "replay.nowUnavailable": "筆記庫無法使用"
+  "replay.nowUnavailable": "筆記庫無法使用",
+  "nav.find": "尋找",
+  "nav.review": "待審核",
+  "nav.access": "AI 存取",
+  "nav.system": "系統",
+  "ready.otherRoles": "其他角色，以及各自使用的筆記庫："
 }

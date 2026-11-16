@@ -244,7 +244,7 @@ export function pickFolder(os = process.platform, prompt = 'Choose your Obsidian
 
 // A search snippet is raw note text (headings, **bold**, `code`); strip the Markdown so the
 // instant answer reads as prose instead of exposing the source's formatting.
-const plainText = (s) => String(s || '').replace(/^#+\s*/gm, '').replace(/\*\*([^*]+)\*\*/g, '$1').replace(/`([^`]+)`/g, '$1').replace(/\s+/g, ' ').trim();
+const plainText = (s) => String(s || '').replace(/^#+\s*/gm, '').replace(/\s#{1,6}\s+/g, ' · ').replace(/\[\[(?:[^\]|]*\|)?([^\]]+)\]\]/g, '$1').replace(/\*\*([^*]+)\*\*/g, '$1').replace(/`([^`]+)`/g, '$1').replace(/\s+/g, ' ').trim();
 
 // opts: { env, home, os, port, pick, openUrl }
 export async function startSetup(opts = {}) {
