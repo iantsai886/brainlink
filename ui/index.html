@@ -303,6 +303,18 @@ main #ready, main #ask-panel, main #brain-panel, main #sessions-panel, main #s-c
     <div id="conflicts-list" class="cards"></div>
   </details>
 
+  <details class="card" id="tidy-panel" hidden>
+    <summary data-i18n="tidy.title"></summary>
+    <p class="hint" data-i18n="tidy.hint"></p>
+    <label><span data-i18n="tidy.vault"></span><select id="tidy-vault"></select></label>
+    <div class="row"><button id="tidy-generate" type="button" class="primary" data-i18n="tidy.generate"></button><span role="status" id="tidy-status"></span></div>
+    <div id="tidy-list" class="cards"></div>
+    <button id="tidy-more" type="button" hidden data-i18n="tidy.loadMore"></button>
+    <div class="row"><button id="tidy-preview-apply" type="button" data-i18n="tidy.previewApply"></button><button id="tidy-preview-dismiss" type="button" data-i18n="tidy.previewDismiss"></button></div>
+    <pre id="tidy-preview" class="mono" hidden style="white-space:pre-wrap;max-height:420px;overflow:auto"></pre>
+    <button id="tidy-confirm" class="primary" type="button" hidden data-i18n="tidy.confirm"></button>
+  </details>
+
   <details class="card" id="twin-profiles-panel" style="margin-top:12px" hidden>
     <summary data-i18n="twinProfiles.title"></summary>
     <p class="hint" data-i18n="twinProfiles.hint"></p>
@@ -1067,6 +1079,72 @@ document.addEventListener('click', (event) => {
   if (target.tagName === 'DETAILS') target.open = true;
   const settings = target.closest('details.settings');
   if (settings) settings.open = true;
+});
+
+let activeTidyBatch = null, activeTidyPreview = null;
+async function loadTidy() {
+  const panel = $('tidy-panel'); panel.hidden = !S.vaults?.length;
+  if (panel.hidden) return;
+  const select = $('tidy-vault'), selected = select.value;
+  select.innerHTML = (S.vaults || []).map((vault) => `<option value="${esc(vault.name)}">${esc(vault.name)}</option>`).join('');
+  if ((S.vaults || []).some((vault) => vault.name === selected)) select.value = selected;
+}
+$('tidy-vault')?.addEventListener('change', () => { activeTidyBatch = null; activeTidyPreview = null; $('tidy-list').innerHTML = ''; $('tidy-preview').hidden = true; $('tidy-confirm').hidden = true; });
+
+function renderTidyBatch(batch) {
+  activeTidyBatch = batch;
+  $('tidy-list').innerHTML = (batch.items || []).length ? batch.items.map((item) => `<article class="card" data-tidy-item="${esc(item.id)}">
+    ${item.kind === 'conflict' ? `<b>${esc(t('tidy.conflict'))}</b><p>${esc(item.a.title)} · ${esc(item.a.path)} ↔ ${esc(item.b.title)} · ${esc(item.b.path)}</p><p class="muted">${esc(item.reason)}</p><button type="button" data-tidy-open-conflicts>${esc(t('tidy.openConflicts'))}</button>` : `<label class="row"><input type="checkbox" data-tidy-select><span><b>${esc(item.kind === 'broken' ? t('tidy.broken') : t('tidy.link'))}</b> ${esc(item.source.title)} · <span class="mono">${esc(item.source.path)}</span> → ${esc(item.target.title)} · <span class="mono">${esc(item.target.path)}</span></span></label><p class="muted">${esc(item.reason)}</p><button type="button" data-tidy-dismiss="${esc(item.id)}">${esc(t('tidy.dismiss'))}</button>`}
+  </article>`).join('') : `<p class="muted">${esc(t('tidy.empty'))}</p>`;
+  $('tidy-status').textContent = `${t('tidy.shown', { count: batch.items?.length || 0 })}${batch.more ? ` · ${t('tidy.more', { count: batch.more })}` : ''} · ${t('tidy.archiveOmitted')}`;
+  $('tidy-more').hidden = !batch.more || batch.next_offset === batch.offset;
+}
+
+async function generateTidy(offset = 0) {
+  $('tidy-generate').disabled = true; $('tidy-more').disabled = true;
+  try { renderTidyBatch(await api('POST', '/api/tidy/generate', { vault: $('tidy-vault').value, offset })); }
+  catch (error) { $('tidy-status').textContent = error.message; }
+  finally { $('tidy-generate').disabled = false; $('tidy-more').disabled = false; }
+}
+$('tidy-generate')?.addEventListener('click', () => act(() => generateTidy(0)));
+$('tidy-more')?.addEventListener('click', () => act(() => generateTidy(activeTidyBatch?.next_offset || 0)));
+
+async function previewTidy(action, itemIds) {
+  if (!activeTidyBatch || !itemIds.length) throw new Error(t('tidy.choose'));
+  const preview = await api('POST', action === 'apply' ? '/api/tidy/apply-preview' : '/api/tidy/dismiss-preview', { batch_id: activeTidyBatch.batch_id, item_ids: itemIds });
+  activeTidyPreview = { ...preview, action };
+  $('tidy-preview').textContent = action === 'apply' ? preview.files.map((file) => `--- ${file.path} ---\n${file.append}`).join('\n') : preview.message;
+  $('tidy-preview').hidden = false; $('tidy-confirm').hidden = false;
+  $('tidy-status').textContent = t('tidy.reviewFirst');
+}
+$('tidy-preview-apply')?.addEventListener('click', () => act(async () => {
+  try { await previewTidy('apply', [...$('tidy-list').querySelectorAll('[data-tidy-select]:checked')].map((box) => box.closest('[data-tidy-item]').dataset.tidyItem)); }
+  catch (error) { $('tidy-status').textContent = error.message; }
+}));
+$('tidy-preview-dismiss')?.addEventListener('click', () => act(async () => {
+  try { await previewTidy('dismiss', [...$('tidy-list').querySelectorAll('[data-tidy-select]:checked')].map((box) => box.closest('[data-tidy-item]').dataset.tidyItem)); }
+  catch (error) { $('tidy-status').textContent = error.message; }
+}));
+$('tidy-confirm')?.addEventListener('click', () => act(async () => {
+  $('tidy-confirm').disabled = true;
+  try {
+    const route = activeTidyPreview.action === 'apply' ? '/api/tidy/apply-confirm' : '/api/tidy/dismiss-confirm';
+    const result = await api('POST', route, { id: activeTidyPreview.id, confirm: true });
+    $('tidy-status').textContent = activeTidyPreview.action === 'apply' ? t('tidy.saved', { count: result.items_applied }) : t('tidy.dismissed', { count: result.dismissed });
+    $('tidy-preview').hidden = true; $('tidy-confirm').hidden = true; activeTidyPreview = null;
+    await generateTidy(0);
+  } catch (error) { $('tidy-status').textContent = error.message; }
+  finally { $('tidy-confirm').disabled = false; }
+}));
+
+document.addEventListener('click', (event) => {
+  const openConflicts = event.target.closest('[data-tidy-open-conflicts]');
+  if (openConflicts) { $('conflicts-panel').open = true; $('conflicts-panel').scrollIntoView({ behavior: 'smooth', block: 'start' }); return; }
+  const dismiss = event.target.closest('[data-tidy-dismiss]');
+  if (!dismiss) return;
+  const card = dismiss.closest('[data-tidy-item]');
+  const checkbox = card.querySelector('[data-tidy-select]');
+  if (checkbox) { checkbox.checked = true; act(async () => { try { await previewTidy('dismiss', [dismiss.dataset.tidyDismiss]); } catch (error) { $('tidy-status').textContent = error.message; } }); }
 });
 
 async function loadDecisionReviews() {
@@ -2223,13 +2301,14 @@ async function load() {
   if (hasVault && !onboardingSync) loadProposals().catch(() => {});
   if (hasVault && !onboardingSync) loadDecisionReviews().catch(() => {});
   if (hasVault && !onboardingSync) loadConflicts().catch(() => {});
+  if (hasVault && !onboardingSync) loadTidy().catch(() => {});
   $('rsi-panel').hidden = !hasVault || onboardingSync;
   if (hasVault && !onboardingSync) loadRsi().catch(e => { $('rsi-ideas').innerHTML = '<p class="error-box">' + esc(e.message) + '</p>'; });
   if (hasVault && !onboardingSync) loadWeeklyBenchmark().catch(e => { $('rsi-weekly-status').textContent = e.message; });
   if (hasVault && !onboardingSync) loadDiscovery().catch(e => { $('rsi-discovery-status').textContent = e.message; });
   if (hasVault && !onboardingSync) loadObservations().catch(e => { $('rsi-observe-status').textContent = e.message; });
   if (guidedFirstRun) {
-    for (const id of ['ready','brain-panel','memory-review-panel','proposal-review-panel','decision-reviews-panel','conflicts-panel','twin-profiles-panel','ask-panel','sessions-panel','handoffs-panel','rsi-panel','sync-onboarding']) $(id).hidden = true;
+    for (const id of ['ready','brain-panel','memory-review-panel','proposal-review-panel','decision-reviews-panel','conflicts-panel','tidy-panel','twin-profiles-panel','ask-panel','sessions-panel','handoffs-panel','rsi-panel','sync-onboarding']) $(id).hidden = true;
   }
   $('cfgpath').textContent = S.config_path;
   $('n1').className = 'step' + (S.vaults.length ? ' done' : '');
