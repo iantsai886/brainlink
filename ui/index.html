@@ -230,6 +230,25 @@ main #ready, main #ask-panel, main #brain-panel, main #sessions-panel, main #s-c
       <label class="muted" style="display:flex;gap:8px;align-items:center;justify-content:flex-start"><input type="checkbox" id="replay-enabled" style="width:auto;flex:none"><span data-i18n="replay.enable"></span></label>
       <div class="row"><button type="button" id="replay-run" data-i18n="replay.run"></button><button type="button" class="link" id="replay-clear" data-i18n="replay.clear"></button><span id="replay-summary" class="muted" role="status" aria-live="polite"></span></div>
       <ul id="replay-out" class="ask-sources" style="margin-top:10px"></ul>
+      <div id="replay-teach" class="card" hidden style="margin-top:12px">
+        <b data-i18n="replay.teachHeading"></b>
+        <p id="replay-teach-question" class="muted"></p>
+        <label><span data-i18n="replay.teachTitle"></span><input id="replay-teach-title" maxlength="120"></label>
+        <label><span data-i18n="replay.teachAnswer"></span><textarea id="replay-teach-answer" rows="6" maxlength="24000"></textarea></label>
+        <label><span data-i18n="replay.teachFolder"></span><input id="replay-teach-folder" autocomplete="off"></label>
+        <p class="muted" data-i18n="replay.teachFolderHint"></p>
+        <div id="replay-teach-preview" hidden>
+          <p><b data-i18n="replay.teachDestination"></b> <span id="replay-teach-destination"></span></p>
+          <p id="replay-teach-links" class="muted"></p>
+          <pre id="replay-teach-markdown" style="white-space:pre-wrap;max-height:300px;overflow:auto"></pre>
+        </div>
+        <div class="row">
+          <button type="button" id="replay-teach-preview-button" data-i18n="replay.teachPreview"></button>
+          <button type="button" id="replay-teach-confirm" data-i18n="replay.teachConfirm" hidden></button>
+          <button type="button" class="link" id="replay-teach-cancel" data-i18n="replay.teachCancel"></button>
+          <span id="replay-teach-status" class="muted" role="status" aria-live="polite"></span>
+        </div>
+      </div>
     </div>
   </section>
 
@@ -1729,6 +1748,8 @@ async function ask() {
 // Setup self-test and replayable misses. Both only read; the self-test changes nothing, and
 // the miss list is stored on this computer only after the owner turns it on.
 const SELFTEST_PILL = { pass: 'pill on', warn: 'pill ask-old', fail: 'pill ask-old' };
+const replayCache = new Map();
+let teachPreviewId = '';
 $('selftest-run').onclick = async () => {
   const button = $('selftest-run');
   button.disabled = true;
@@ -1746,12 +1767,88 @@ $('selftest-run').onclick = async () => {
 async function loadReplay() {
   try {
     const r = await api('GET', '/api/replay-misses');
+    replayCache.clear();
+    for (const item of r.items) replayCache.set(item.id, item);
     $('replay-enabled').checked = r.enabled;
     $('replay-summary').textContent = t('replay.count', { n: r.count });
     $('replay-run').disabled = !r.count;
     $('replay-clear').hidden = !r.count;
+    renderReplay(r.items);
   } catch (error) { $('replay-summary').textContent = error.message; }
 }
+function renderReplay(items) {
+  $('replay-out').innerHTML = items.map((item) => {
+    const state = item.now === 'hits' ? 'replay.nowFound' : item.now === 'weak' ? 'replay.nowWeak' : item.now === 'not_in_brain' ? 'replay.nowMissing' : 'replay.needsAnswer';
+    const result = item.fixed_by
+      ? `<span class="muted">${esc(t('replay.teachFixedBy', { path: item.fixed_by }))}</span>`
+      : `<button type="button" class="link" data-teach-miss="${esc(item.id)}">${esc(t('replay.teach'))}</button>`;
+    return `<li><span class="${item.now === 'hits' ? 'pill on' : 'pill ask-old'}">${esc(t(state))}</span> ${esc(item.query)} <span class="muted">${esc(item.vault)}${item.top ? ` › ${esc(item.top.title)}` : ''}</span> ${result}</li>`;
+  }).join('');
+}
+function closeTeach() {
+  teachPreviewId = '';
+  $('replay-teach').hidden = true;
+  $('replay-teach-preview').hidden = true;
+  $('replay-teach-confirm').hidden = true;
+  $('replay-teach-status').textContent = '';
+}
+$('replay-out').addEventListener('click', (event) => {
+  const button = event.target.closest('[data-teach-miss]');
+  if (!button) return;
+  const item = replayCache.get(button.dataset.teachMiss);
+  if (!item) return;
+  closeTeach();
+  $('replay-teach').hidden = false;
+  $('replay-teach-question').textContent = item.query;
+  $('replay-teach-title').value = item.query.slice(0, 120);
+  $('replay-teach-answer').value = '';
+  $('replay-teach-folder').value = '';
+  $('replay-teach').dataset.missId = item.id;
+});
+$('replay-teach-cancel').onclick = closeTeach;
+$('replay-teach-preview-button').onclick = async () => {
+  const button = $('replay-teach-preview-button');
+  button.disabled = true;
+  $('replay-teach-status').textContent = t('replay.teachPreparing');
+  try {
+    const draft = await api('POST', '/api/replay-misses/teach', {
+      miss_id: $('replay-teach').dataset.missId,
+      title: $('replay-teach-title').value,
+      answer: $('replay-teach-answer').value,
+      folder: $('replay-teach-folder').value,
+    });
+    teachPreviewId = draft.preview_id;
+    $('replay-teach-destination').textContent = draft.destination;
+    $('replay-teach-links').textContent = draft.linked_to?.length ? `${t('replay.teachLinks')}: ${draft.linked_to.join(', ')}` : t('replay.teachNoLinks');
+    $('replay-teach-markdown').textContent = draft.preview;
+    $('replay-teach-preview').hidden = false;
+    $('replay-teach-confirm').hidden = false;
+    $('replay-teach-status').textContent = t('replay.teachReviewFirst');
+  } catch (error) { $('replay-teach-status').textContent = error.message; }
+  finally { button.disabled = false; }
+};
+$('replay-teach-confirm').onclick = async () => {
+  if (!teachPreviewId) return;
+  const button = $('replay-teach-confirm');
+  button.disabled = true;
+  try {
+    const result = await api('POST', '/api/replay-misses/teach', {
+      miss_id: $('replay-teach').dataset.missId,
+      title: $('replay-teach-title').value,
+      answer: $('replay-teach-answer').value,
+      folder: $('replay-teach-folder').value,
+      preview_id: teachPreviewId,
+      confirm: true,
+    });
+    closeTeach();
+    await loadReplay();
+    const replayState = result.replay.status === 'hits' ? t('replay.nowFound') : result.replay.status === 'weak' ? t('replay.nowWeak') : t('replay.nowMissing');
+    $('replay-summary').textContent = result.fixed_by
+      ? t('replay.teachFound', { path: result.path })
+      : t('replay.teachSavedUnconfirmed', { path: result.path, status: replayState, top: result.replay.top?.title || t('replay.teachNoTop') });
+  } catch (error) { $('replay-teach-status').textContent = error.message; }
+  finally { button.disabled = false; }
+};
 $('replay-enabled').onchange = async () => {
   try { await api('POST', '/api/replay-misses/settings', { enabled: $('replay-enabled').checked }); }
   catch (error) { toast(error.message, true); }
@@ -1764,13 +1861,15 @@ $('replay-run').onclick = async () => {
   try {
     const r = await api('POST', '/api/replay-misses/run', {});
     $('replay-summary').textContent = t('replay.result', { fixed: r.fixed, weak: r.still_weak, missing: r.still_missing, total: r.total });
-    $('replay-out').innerHTML = r.results.map((item) => `<li><span class="${item.now === 'hits' ? 'pill on' : 'pill ask-old'}">${esc(t(item.now === 'hits' ? 'replay.nowFound' : item.now === 'weak' ? 'replay.nowWeak' : item.now === 'not_in_brain' ? 'replay.nowMissing' : 'replay.nowUnavailable'))}</span> ${esc(item.query)} <span class="muted">${esc(item.vault)}${item.top ? ` › ${esc(item.top.title)}` : ''}</span></li>`).join('');
+    replayCache.clear();
+    for (const item of r.results) replayCache.set(item.id, item);
+    renderReplay(r.results);
   } catch (error) { $('replay-summary').textContent = error.message; }
   finally { button.disabled = false; }
 };
 $('replay-clear').onclick = async () => {
   if (!confirm(t('replay.clearConfirm'))) return;
-  try { await api('POST', '/api/replay-misses/clear', {}); $('replay-out').innerHTML = ''; }
+  try { await api('POST', '/api/replay-misses/clear', {}); replayCache.clear(); closeTeach(); $('replay-out').innerHTML = ''; }
   catch (error) { toast(error.message, true); }
   await loadReplay();
 };
