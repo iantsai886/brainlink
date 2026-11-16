@@ -1553,7 +1553,7 @@ test('one-click setup: new brain, every found AI app connected; multi-vault fold
     assert.equal(r.phrase, 'Connect to Brain');
     assert.deepEqual(r.connected.sort(), ['Claude Desktop', 'Cursor', 'Gemini CLI']);
     assert.match(await readFile(path.join(r.path, 'BrainLink', 'Brain Role.md'), 'utf8'), /Brain/);
-    assert.match(await readFile(path.join(r.path, 'BrainLink', 'Home.md'), 'utf8'), /generated_by: brainlink[\s\S]*\[\[Welcome\]\]/, 'Home map created at setup');
+    assert.match(await readFile(path.join(r.path, 'BrainLink', 'Home.md'), 'utf8'), /generated_by: brainlink[\s\S]*\[\[Brain Role\]\]/, 'Home map created at setup');
     const st = await api('/api/state');
     assert.equal(st.agents[0].name, 'Brain');
     // The brain works straight away in a connected AI: no licence, no trial, nothing to unlock.

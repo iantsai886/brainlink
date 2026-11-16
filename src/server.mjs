@@ -539,7 +539,11 @@ This prompt does not change permissions, write sources, or run unattended AI pro
               const activationAuthorization = await roleScopeStorage.run(callCtx, () => twinToolAuthorization(ctx, tool.name, suppliedArgs));
               if (!activationAuthorization.allowed) throw new Error(activationAuthorization.reason);
               activation = { role, profile_id: callCtx.twinScope.profile_id, profile_name: callCtx.twinScope.profile_name };
-            } else if (baseCtx.twinScope?.mode === 'scoped' && tool.name !== 'brainlink_guide') {
+            } else if (baseCtx.twinScope?.mode === 'scoped' && tool.name !== 'brainlink_guide' && !(agents.length === 0 && baseCtx.twinScope.profiles?.length === 1 && !suppliedArgs.role_scope_id)) {
+              // A role scope keeps Twins apart when one connection holds several. A connection
+              // with a single Twin profile and no role it can activate has nothing to switch
+              // between, so it keeps working inside that profile's own grants instead of being
+              // told to activate a role that does not exist.
               const roleScopeId = String(suppliedArgs.role_scope_id || '');
               const selectedScopeId = roleScopeId || activeRoleScopeId;
               const roleScope = roleScopes.get(selectedScopeId);

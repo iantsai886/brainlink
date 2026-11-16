@@ -9,10 +9,12 @@ import { startSetup } from '../src/setup.mjs';
 const { publicKey, privateKey } = generateKeyPairSync('ed25519');
 const publicPem = publicKey.export({ type: 'spki', format: 'pem' });
 const keyId = createHash('sha256').update(publicKey.export({ type: 'spki', format: 'der' })).digest('hex').slice(0, 16);
+// The fictional release must be newer than the running version, or the update check rightly
+// refuses it as a downgrade; 99.0.0 stays ahead of package.json.
 const packageBytes = Buffer.from('fictional signed package bytes');
 const payload = {
-  schema: 1, channel: 'stable', version: '1.2.9', published_at: '2026-10-28T11:00:00Z',
-  assets: [{ platform: 'linux', arch: 'x64', format: 'deb', url: 'https://github.com/iantsai886/brainlink/releases/download/v1.2.9/brainlink_1.2.9_amd64.deb', sha256: createHash('sha256').update(packageBytes).digest('hex'), size: packageBytes.length }],
+  schema: 1, channel: 'stable', version: '99.0.0', published_at: '2026-10-28T11:00:00Z',
+  assets: [{ platform: 'linux', arch: 'x64', format: 'deb', url: 'https://github.com/iantsai886/brainlink/releases/download/v99.0.0/brainlink_99.0.0_amd64.deb', sha256: createHash('sha256').update(packageBytes).digest('hex'), size: packageBytes.length }],
 };
 const bytes = Buffer.from(JSON.stringify(payload));
 const envelope = { schema: 1, key_id: keyId, payload: bytes.toString('base64url'), signature: sign(null, bytes, privateKey).toString('base64url') };
@@ -47,7 +49,7 @@ test('Setup update check requires its local token and returns only signed releas
     assert.equal(response.status, 200);
     const result = await response.json();
     assert.equal(result.status, 'available');
-    assert.equal(result.version, '1.2.9');
+    assert.equal(result.version, '99.0.0');
     assert.equal(result.asset.format, 'deb');
     assert.equal(result.asset.sha256, payload.assets[0].sha256);
     assert.equal(JSON.stringify(result).includes('signature'), false);
@@ -64,7 +66,7 @@ test('Setup update check requires its local token and returns only signed releas
     assert.equal((await fetch(`${base}/api/updates/open`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ ticket: prepared.ticket }) })).status, 401);
     const opened = await fetch(`${base}/api/updates/open`, { method: 'POST', headers: { 'X-BrainLink-Token': app.token, 'Content-Type': 'application/json' }, body: JSON.stringify({ ticket: prepared.ticket }) });
     assert.equal(opened.status, 200);
-    assert.deepEqual(await opened.json(), { status: 'opened', version: '1.2.9', format: 'deb' });
+    assert.deepEqual(await opened.json(), { status: 'opened', version: '99.0.0', format: 'deb' });
     assert.equal(launched.format, 'deb');
     assert.equal(launched.platform, 'linux');
     assert.equal(path.dirname(launched.file).startsWith(home), true);
@@ -84,7 +86,7 @@ test('Setup update check requires its local token and returns only signed releas
     assert.equal((await fetch(fileUrl)).status, 401, 'a bad local token must not consume the one-time download ticket');
     const file = await fetch(new URL(manual.download_url, base));
     assert.equal(file.status, 200);
-    assert.equal(file.headers.get('content-disposition'), 'attachment; filename="brainlink_1.2.9_amd64.deb"');
+    assert.equal(file.headers.get('content-disposition'), 'attachment; filename="brainlink_99.0.0_amd64.deb"');
     assert.deepEqual(Buffer.from(await file.arrayBuffer()), packageBytes);
     assert.equal((await fetch(new URL(manual.download_url, base))).status, 409, 'the verified download can be used only once');
     const manualOpen = await fetch(`${base}/api/updates/open`, { method: 'POST', headers: { 'X-BrainLink-Token': app.token, 'Content-Type': 'application/json' }, body: JSON.stringify({ ticket: manual.ticket }) });
@@ -96,7 +98,7 @@ test('Setup update check requires its local token and returns only signed releas
     const tamperedResponse = await fetch(`${base}/api/updates/download`, { method: 'POST', headers: { 'X-BrainLink-Token': app.token, 'Content-Type': 'application/json' }, body: '{}' });
     const tampered = await tamperedResponse.json();
     const packageFolder = (await readdir(home, { withFileTypes: true })).find((entry) => entry.isDirectory() && entry.name.startsWith('brainlink-update-') && !previousFolders.has(entry.name));
-    await writeFile(path.join(home, packageFolder.name, 'brainlink_1.2.9_amd64.deb'), Buffer.from('tampered bytes'));
+    await writeFile(path.join(home, packageFolder.name, 'brainlink_99.0.0_amd64.deb'), Buffer.from('tampered bytes'));
     const tamperedOpen = await fetch(`${base}/api/updates/open`, { method: 'POST', headers: { 'X-BrainLink-Token': app.token, 'Content-Type': 'application/json' }, body: JSON.stringify({ ticket: tampered.ticket }) });
     assert.equal(tamperedOpen.status, 400);
     assert.match((await tamperedOpen.json()).error, /changed after download/);

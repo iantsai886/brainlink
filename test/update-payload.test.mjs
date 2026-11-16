@@ -1,3 +1,4 @@
+import { readFileSync } from 'node:fs';
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { createHash, generateKeyPairSync } from 'node:crypto';
@@ -10,17 +11,18 @@ import { createUpdatePayload } from '../scripts/create-update-payload.mjs';
 import { signUpdateManifest } from '../src/update-signing.mjs';
 import { verifyUpdateManifest } from '../src/update-manifest.mjs';
 
-const VERSION = '1.2.8';
+// Follow package.json, which the payload script reads, instead of a fixed past version.
+const VERSION = JSON.parse(readFileSync(new URL('../package.json', import.meta.url), 'utf8')).version;
 const PUBLISHED = '2026-10-30T12:00:00Z';
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const PACKAGES = [
-  ['BrainLink-Setup-1.2.8.exe', 'win32', 'x64', 'exe'],
-  ['BrainLink-1.2.8.pkg', 'darwin', 'x64', 'pkg'],
-  ['BrainLink-1.2.8.pkg', 'darwin', 'arm64', 'pkg'],
-  ['brainlink_1.2.8_amd64.deb', 'linux', 'x64', 'deb'],
-  ['brainlink_1.2.8_arm64.deb', 'linux', 'arm64', 'deb'],
-  ['brainlink-1.2.8-linux-x64.tar.gz', 'linux', 'x64', 'tar.gz'],
-  ['brainlink-1.2.8-linux-arm64.tar.gz', 'linux', 'arm64', 'tar.gz'],
+  [`BrainLink-Setup-${VERSION}.exe`, 'win32', 'x64', 'exe'],
+  [`BrainLink-${VERSION}.pkg`, 'darwin', 'x64', 'pkg'],
+  [`BrainLink-${VERSION}.pkg`, 'darwin', 'arm64', 'pkg'],
+  [`brainlink_${VERSION}_amd64.deb`, 'linux', 'x64', 'deb'],
+  [`brainlink_${VERSION}_arm64.deb`, 'linux', 'arm64', 'deb'],
+  [`brainlink-${VERSION}-linux-x64.tar.gz`, 'linux', 'x64', 'tar.gz'],
+  [`brainlink-${VERSION}-linux-arm64.tar.gz`, 'linux', 'arm64', 'tar.gz'],
 ];
 
 async function fixture() {
@@ -62,7 +64,7 @@ test('creates exact platform payload hashes and release URLs without overwriting
     const publicKey = pair.publicKey.export({ type: 'spki', format: 'pem' });
     const envelope = signUpdateManifest(payload, privateKey, { now: Date.parse(PUBLISHED) });
     const verified = verifyUpdateManifest(envelope, publicKey, {
-      currentVersion: '1.2.7', channel: 'beta', platform: 'linux', arch: 'arm64', now: Date.parse(PUBLISHED),
+      currentVersion: '0.0.1', channel: 'beta', platform: 'linux', arch: 'arm64', now: Date.parse(PUBLISHED),
     });
     assert.equal(verified.version, VERSION);
     assert.equal(verified.selected_asset.format, 'deb');
@@ -77,17 +79,17 @@ test('refuses missing, linked, or non-file release packages and leaves no payloa
   const f = await fixture();
   try {
     const outputPath = path.join(f.root, 'payload.json');
-    const linuxAsset = path.join(f.distDir, 'brainlink-1.2.8-linux-arm64.tar.gz');
+    const linuxAsset = path.join(f.distDir, `brainlink-${VERSION}-linux-arm64.tar.gz`);
     await unlink(linuxAsset);
     await assert.rejects(createUpdatePayload({ distDir: f.distDir, outputPath, publishedAt: PUBLISHED }), /Missing release package/);
     await mkdir(linuxAsset);
     await assert.rejects(createUpdatePayload({ distDir: f.distDir, outputPath, publishedAt: PUBLISHED }), /regular file, not a link/);
     await rm(linuxAsset, { recursive: true });
     if (process.platform === 'win32') {
-      try { await symlink(path.join(f.distDir, 'brainlink_1.2.8_amd64.deb'), linuxAsset); }
+      try { await symlink(path.join(f.distDir, `brainlink_${VERSION}_amd64.deb`), linuxAsset); }
       catch (error) { if (['EPERM', 'EACCES'].includes(error.code)) { t.skip('Windows symlink privilege unavailable'); return; } throw error; }
     } else {
-      await symlink(path.join(f.distDir, 'brainlink_1.2.8_amd64.deb'), linuxAsset);
+      await symlink(path.join(f.distDir, `brainlink_${VERSION}_amd64.deb`), linuxAsset);
     }
     await assert.rejects(createUpdatePayload({ distDir: f.distDir, outputPath, publishedAt: PUBLISHED }), /regular file, not a link/);
     await assert.rejects(readFile(outputPath), { code: 'ENOENT' });
@@ -112,7 +114,7 @@ test('payload CLI reports the version and does not ask for a signing key', async
       '--channel', 'stable', '--published-at', PUBLISHED,
     ], { cwd: ROOT, encoding: 'utf8' });
     assert.equal(result.status, 0, result.stderr);
-    assert.match(result.stdout, /stable update payload for BrainLink 1\.2\.8 with 7 platform entries/);
+    assert.ok(result.stdout.includes(`stable update payload for BrainLink ${VERSION} with 7 platform entries`), result.stdout);
     assert.match(result.stdout, /No key was read and nothing was published/);
     assert.equal(JSON.parse(await readFile(outputPath, 'utf8')).assets.length, 7);
   } finally { await rm(f.root, { recursive: true, force: true }); }
