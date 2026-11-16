@@ -7,13 +7,14 @@ import { promisify } from 'node:util';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { normalize, saveConfig } from '../src/config.mjs';
-import { createContext, loadVault, searchWithVerdict } from '../src/core.mjs';
+import { compareReviewTrust, createContext, loadVault, searchWithVerdict } from '../src/core.mjs';
 import { createMcp } from '../src/server.mjs';
 import { VectorStore, fillVectors } from '../src/embed.mjs';
 import { evaluateRetrieval, validateRetrievalFixture, decideIndependentComparison, decideRetrievalComparison } from '../src/retrieval-eval.mjs';
 import { estTokens } from '../src/sessions/tokens.mjs';
 import { compactSearchResponse } from '../src/search-projection.mjs';
 import { buildContextPacket } from '../src/context-packet.mjs';
+import { buildAnswerReceipt } from '../src/answer-receipt.mjs';
 const execFileAsync = promisify(execFile);
 
 test('RSI comparison gates prioritize privacy, sample size, and quality before efficiency', () => {
@@ -200,6 +201,50 @@ test('default context packet preserves frozen-set task success and source recall
   assert.equal(packetRecall, baseRecall);
   assert.equal(privacyHits, 0);
   assert.ok(packetTokens < baseTokens * 0.85, `packet tokens ${packetTokens} should be at least 15% below compact search ${baseTokens}`);
+});
+
+test('answer receipts cite only permission-filtered sources and stay compact', async () => {
+  const root = await mkdtemp(path.join(tmpdir(), 'bl-answer-receipt-'));
+  const vaultPath = path.join(root, 'Company');
+  await mkdir(vaultPath);
+  await writeFile(path.join(vaultPath, 'Reviewed.md'), '---\nstatus: active\nconfidence: reported\n---\n# Shipping policy\nFictional shipping takes two business days.');
+  await writeFile(path.join(vaultPath, 'Private.md'), '---\nprivate: true\nstatus: verified\nconfidence: verified\n---\n# Shipping policy\nRECEIPT_PRIVATE_CANARY');
+  const ctx = createContext(normalize({ vaults: [{ name: 'Company', path: vaultPath }] }), { env: { BRAINLINK_HOME: path.join(root, 'home'), BRAINLINK_SEMANTIC: '0' } });
+  const search = createMcp(ctx).tools.find((item) => item.name === 'vault_search');
+  const packetTool = createMcp(ctx).tools.find((item) => item.name === 'context_packet');
+  const found = await search.run({ vault: 'Company', query: 'shipping policy' });
+  assert.equal(found.receipt.searched_vault, 'Company');
+  assert.equal(found.receipt.search_mode, 'keyword');
+  assert.equal(found.receipt.basis, 'reviewed');
+  assert.deepEqual(found.receipt.sources.map((source) => source.path), found.results.map((source) => source.path));
+  assert.ok(found.receipt.sources.every((source) => source.path !== 'Private.md'));
+  assert.doesNotMatch(JSON.stringify(found), /RECEIPT_PRIVATE_CANARY|Private\.md/);
+  assert.ok(estTokens(JSON.stringify(found.receipt)) < 150);
+  const packet = await packetTool.run({ vault: 'Company', query: 'shipping policy' });
+  assert.deepEqual(packet.receipt.sources.map((source) => source.path), packet.sources.map((source) => source.path));
+  assert.doesNotMatch(JSON.stringify(packet), /RECEIPT_PRIVATE_CANARY|Private\.md/);
+  const none = buildAnswerReceipt({ status: 'not_in_brain', results: [], missing_words: ['unmatched'] }, { vault: 'Company' });
+  assert.equal(none.basis, 'none');
+  assert.deepEqual(none.sources, []);
+  assert.deepEqual(none.missing_words, ['unmatched']);
+});
+
+test('equal-relevance retrieval prefers reviewed notes without changing the frozen top-five quality', async () => {
+  const root = await mkdtemp(path.join(tmpdir(), 'bl-trust-rank-'));
+  const vaultPath = path.join(root, 'Company');
+  await mkdir(vaultPath);
+  await writeFile(path.join(vaultPath, 'A Proposed.md'), '---\nstatus: proposed\nconfidence: reported\n---\n# Dispatch cadence\nFictional dispatch occurs every Thursday.');
+  await writeFile(path.join(vaultPath, 'Z Active.md'), '---\nstatus: active\nconfidence: reported\n---\n# Dispatch cadence\nFictional dispatch occurs every Thursday.');
+  const ctx = createContext(normalize({ vaults: [{ name: 'Company', path: vaultPath }] }), { env: { BRAINLINK_HOME: path.join(root, 'home'), BRAINLINK_SEMANTIC: '0' } });
+  assert.ok(compareReviewTrust({ meta: { status: 'active' } }, { meta: { status: 'proposed' } }) < 0, 'active wins an exact score tie');
+  assert.ok(compareReviewTrust({ meta: { confidence: 'verified' } }, { meta: { status: 'draft' } }) < 0, 'verified wins an exact score tie');
+  const found = await searchWithVerdict(ctx, 'Company', 'dispatch cadence', { semantic: false, limit: 2 });
+  assert.deepEqual(new Set(found.results.map((source) => source.path)), new Set(['Z Active.md', 'A Proposed.md']));
+  const fixture = JSON.parse(await readFile(path.resolve('samples/evaluation/retrieval-independent-v1.json'), 'utf8'));
+  const evalCtx = createContext(normalize({ vaults: [{ name: fixture.vault, path: path.resolve('samples/evaluation/independent-vault') }] }), { env: { BRAINLINK_HOME: path.join(root, 'eval-home'), BRAINLINK_SEMANTIC: '0' } });
+  const report = await evaluateRetrieval(evalCtx, fixture);
+  assert.equal(report.candidate.hit_at_k, report.baseline.hit_at_k);
+  assert.equal(report.candidate.reciprocal_rank, report.baseline.reciprocal_rank);
 });
 
 test('independent retrieval CLI accepts an explicit fictional vault and emits an exact-byte reproducibility receipt', async () => {
