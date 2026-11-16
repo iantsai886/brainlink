@@ -1,5 +1,7 @@
 // Setup UI backend: a local-only web app (127.0.0.1, random session token) that picks the
 // vault folder, applies a rule pack and connects AI clients.
+import { runSelfTest } from './self-test.mjs';
+import { createReplayMisses } from './replay-misses.mjs';
 import { createServer } from 'node:http';
 import { createReadStream } from 'node:fs';
 import { existsSync } from 'node:fs';
@@ -2950,6 +2952,33 @@ export async function startSetup(opts = {}) {
     },
     // Cited instant answer: the same ranked search + status verdict the vault_search MCP tool uses,
     // reshaped for a one-paragraph answer with clickable source chips (/api/note opens each one).
+    // Read-only setup check: can connected AIs actually reach the rules, role notes and
+    // mailbox this configuration points them at? Changes nothing.
+    'POST /api/self-test': async () => {
+      const cfg = normalize(await loadConfig(file));
+      return runSelfTest(localContext(cfg, { ...env, BRAINLINK_AI_PLATFORM: '' }));
+    },
+    // Replayable misses (opt-in, local only, question text kept on this computer).
+    'GET /api/replay-misses': async () => {
+      const cfg = normalize(await loadConfig(file));
+      const items = await createReplayMisses({ home: localContext(cfg).dataDir }).list();
+      return { enabled: cfg.replay_misses.enabled, count: items.length, items: items.slice(-50).reverse() };
+    },
+    'POST /api/replay-misses/settings': async (b) => withConfigMutation(async () => {
+      const cfg = await loadConfig(file);
+      const next = { ...cfg, replay_misses: { enabled: b.enabled === true } };
+      await saveConfig(next, file);
+      return { ok: true, enabled: next.replay_misses.enabled };
+    }),
+    'POST /api/replay-misses/run': async () => {
+      const cfg = normalize(await loadConfig(file));
+      const ctx = localContext(cfg, { ...env, BRAINLINK_AI_PLATFORM: '' });
+      return createReplayMisses({ home: ctx.dataDir }).replay(ctx);
+    },
+    'POST /api/replay-misses/clear': async () => {
+      const cfg = normalize(await loadConfig(file));
+      return createReplayMisses({ home: localContext(cfg).dataDir }).clear();
+    },
     // Cited local search for the owner. One call searches one vault, or (vault: '*') every
     // non-private vault. Vaults are searched separately and never ranked against each other,
     // so each result group keeps its own verdict. Private vaults are searched only when the
@@ -2969,7 +2998,12 @@ export async function startSetup(opts = {}) {
       const groups = [];
       for (const v of scope) {
         const r = await searchWithVerdict(ctx, v, query, { limit: 5 });
-        const top = r.results.slice(0, 3);
+        if (cfg.replay_misses?.enabled === true) await createReplayMisses({ home: ctx.dataDir }).record({ vault: v, query, status: r.status, source: 'ask', isPrivate: Boolean(ctx.byName.get(v).private) }).catch(() => {});
+        // Among the three best matches, show reviewed notes before unreviewed drafts, so the
+        // excerpt the owner reads first is not an unapproved proposal. Superseded notes keep
+        // their rank (search already demotes them) and are flagged instead.
+        const lessTrusted = (x) => (/^(proposed|draft)$/i.test(x.status || '') ? 1 : 0);
+        const top = r.results.slice(0, 3).map((x, i) => ({ x, i })).sort((a, b) => lessTrusted(a.x) - lessTrusted(b.x) || a.i - b.i).map(({ x }) => x);
         groups.push({
           vault: v, private: Boolean(ctx.byName.get(v).private), status: r.status, coverage: r.coverage, note: r.note || null,
           answer: r.status === 'not_in_brain' ? null : plainText(top[0]?.snippet) || null,

@@ -63,6 +63,8 @@ export function normalize(raw = {}) {
   if (typeof cfg.ingestion.autoFile !== 'boolean') cfg.ingestion.autoFile = false;
   if (!Array.isArray(cfg.ingestion.targets)) cfg.ingestion.targets = [];
   if (!cfg.ingestion.targets.length && cfg.ingestion.vault && cfg.ingestion.folder) cfg.ingestion.targets = [{ vault: cfg.ingestion.vault, folder: cfg.ingestion.folder }];
+  // Opt-in, local-only list of questions a search could not answer (src/replay-misses.mjs).
+  cfg.replay_misses = { enabled: raw.replay_misses?.enabled === true };
   cfg.brief = { enabled: false, vault: null, time: '08:00', last_scheduled_date: null, ...(raw.brief || {}) };
   cfg.weekly_benchmark = { enabled: false, weekday: 1, time: '09:00', last_scheduled_week: null, last_run_at: null, last_run_ok: null, ...(raw.weekly_benchmark || {}) };
   cfg.session_filing = { projectVaults: {}, projectFolders: {}, ...(raw.session_filing || {}) };

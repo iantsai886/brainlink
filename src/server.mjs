@@ -1,6 +1,7 @@
 // BrainLink MCP server: JSON-RPC over stdio or token-protected local Streamable HTTP.
 // Any MCP client learns the read/write rules from `instructions`, the brainlink_guide tool,
 // resources and prompts.
+import { createReplayMisses } from './replay-misses.mjs';
 import { createServer as createHttpServer } from 'node:http';
 import { AsyncLocalStorage } from 'node:async_hooks';
 import { createRequire } from 'node:module';
@@ -581,6 +582,10 @@ This prompt does not change permissions, write sources, or run unattended AI pro
                   else out.owner_review_available = false;
                 } catch { out.owner_review_available = false; }
               }
+            }
+            if (ctx.cfg?.replay_misses?.enabled === true && ctx.dataDir && ['vault_search', 'context_packet'].includes(tool.name) && typeof out?.status === 'string' && typeof callArgs?.vault === 'string') {
+              // Owner opt-in only: keep the unanswered question locally so it can be re-run later.
+              await createReplayMisses({ home: ctx.dataDir }).record({ vault: callArgs.vault, query: callArgs.query, status: out.status, source: tool.name, isPrivate: Boolean(ctx.byName.get(callArgs.vault)?.private) }).catch(() => {});
             }
             if (rsiEvidence && ctx.twinScope?.mode === 'scoped' && ['vault_search', 'context_packet'].includes(tool.name) && typeof out?.status === 'string') {
               await rsiEvidence.recordRetrievalObservation({ profileId: twinProfileForVault(ctx, callArgs.vault)?.profile_id || ctx.twinScope.profile_ids?.[0], tool: tool.name, status: out.status, durationMs: performance.now() - retrievalStarted }).catch(() => {});

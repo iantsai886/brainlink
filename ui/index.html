@@ -206,6 +206,19 @@ main #ready, main #ask-panel, main #brain-panel, main #sessions-panel, main #s-c
     </ol>
     <div class="row" style="margin-top:18px" id="more-apps"></div>
     <table style="margin-top:18px"><thead><tr><th data-i18n="ready.colWhen"></th><th data-i18n="ready.colAI"></th><th data-i18n="ready.colTool"></th><th data-i18n="ready.colResult"></th></tr></thead><tbody id="activity"></tbody></table>
+    <div class="card" id="selftest-card" style="margin-top:18px">
+      <b data-i18n="selftest.title"></b>
+      <p class="muted" data-i18n="selftest.hint"></p>
+      <div class="row"><button type="button" id="selftest-run" data-i18n="selftest.run"></button><span id="selftest-summary" class="muted" role="status" aria-live="polite"></span></div>
+      <ul id="selftest-out" class="ask-sources" style="margin-top:10px"></ul>
+    </div>
+    <div class="card" id="replay-card">
+      <b data-i18n="replay.title"></b>
+      <p class="muted" data-i18n="replay.hint"></p>
+      <label class="muted" style="display:flex;gap:8px;align-items:center;justify-content:flex-start"><input type="checkbox" id="replay-enabled" style="width:auto;flex:none"><span data-i18n="replay.enable"></span></label>
+      <div class="row"><button type="button" id="replay-run" data-i18n="replay.run"></button><button type="button" class="link" id="replay-clear" data-i18n="replay.clear"></button><span id="replay-summary" class="muted" role="status" aria-live="polite"></span></div>
+      <ul id="replay-out" class="ask-sources" style="margin-top:10px"></ul>
+    </div>
   </section>
 
   <details class="card" id="brain-panel" hidden>
@@ -1645,6 +1658,54 @@ async function ask() {
   try { renderAsk(await api('POST', '/api/ask', { query, vault: $('ask-vault').value || '*' })); }
   catch (e) { renderAskError(e.message); }
 }
+// Setup self-test and replayable misses. Both only read; the self-test changes nothing, and
+// the miss list is stored on this computer only after the owner turns it on.
+const SELFTEST_PILL = { pass: 'pill on', warn: 'pill ask-old', fail: 'pill ask-old' };
+$('selftest-run').onclick = async () => {
+  const button = $('selftest-run');
+  button.disabled = true;
+  $('selftest-summary').textContent = t('selftest.running');
+  try {
+    const r = await api('POST', '/api/self-test', {});
+    const shown = r.checks.filter((check) => check.status !== 'pass');
+    $('selftest-summary').textContent = t('selftest.summary', { pass: r.summary.pass, warn: r.summary.warn, fail: r.summary.fail });
+    $('selftest-out').innerHTML = shown.length
+      ? shown.map((check) => `<li><span class="${SELFTEST_PILL[check.status] || 'pill'}">${esc(t(`selftest.${check.status}`))}</span> ${esc(check.message)}</li>`).join('')
+      : `<li class="muted">${esc(t('selftest.allGood'))}</li>`;
+  } catch (error) { $('selftest-summary').textContent = error.message; }
+  finally { button.disabled = false; }
+};
+async function loadReplay() {
+  try {
+    const r = await api('GET', '/api/replay-misses');
+    $('replay-enabled').checked = r.enabled;
+    $('replay-summary').textContent = t('replay.count', { n: r.count });
+    $('replay-run').disabled = !r.count;
+    $('replay-clear').hidden = !r.count;
+  } catch (error) { $('replay-summary').textContent = error.message; }
+}
+$('replay-enabled').onchange = async () => {
+  try { await api('POST', '/api/replay-misses/settings', { enabled: $('replay-enabled').checked }); }
+  catch (error) { toast(error.message, true); }
+  await loadReplay();
+};
+$('replay-run').onclick = async () => {
+  const button = $('replay-run');
+  button.disabled = true;
+  $('replay-summary').textContent = t('replay.running');
+  try {
+    const r = await api('POST', '/api/replay-misses/run', {});
+    $('replay-summary').textContent = t('replay.result', { fixed: r.fixed, weak: r.still_weak, missing: r.still_missing, total: r.total });
+    $('replay-out').innerHTML = r.results.map((item) => `<li><span class="${item.now === 'hits' ? 'pill on' : 'pill ask-old'}">${esc(t(item.now === 'hits' ? 'replay.nowFound' : item.now === 'weak' ? 'replay.nowWeak' : item.now === 'not_in_brain' ? 'replay.nowMissing' : 'replay.nowUnavailable'))}</span> ${esc(item.query)} <span class="muted">${esc(item.vault)}${item.top ? ` › ${esc(item.top.title)}` : ''}</span></li>`).join('');
+  } catch (error) { $('replay-summary').textContent = error.message; }
+  finally { button.disabled = false; }
+};
+$('replay-clear').onclick = async () => {
+  if (!confirm(t('replay.clearConfirm'))) return;
+  try { await api('POST', '/api/replay-misses/clear', {}); $('replay-out').innerHTML = ''; }
+  catch (error) { toast(error.message, true); }
+  await loadReplay();
+};
 $('ask-go').onclick = ask;
 $('ask-q').onkeydown = (e) => { if (e.key === 'Enter') ask(); };
 
@@ -1808,6 +1869,7 @@ async function load() {
   $('brain-panel').hidden = !hasVault || onboardingSync;
   $('memory-review-panel').hidden = !hasVault || onboardingSync;
   $('proposal-review-panel').hidden = !hasVault || onboardingSync;
+  loadReplay();
   const askVaults = S.vaults.filter((v) => v.exists);
   const askChoice = $('ask-vault').value || '*';
   $('ask-vault').innerHTML = `<option value="*">${esc(t('ask.allVaults'))}</option>` + askVaults.map((v) => `<option value="${esc(v.name)}">${esc(v.private ? t('ask.privateVault', { vault: v.name }) : v.name)}</option>`).join('');

@@ -15,6 +15,8 @@ import { openContext, launchSpec, logActivity, refreshMap, ROOT } from '../src/r
 import { readGitSourceState } from '../src/git-source-state.mjs';
 import { createContext, warmSemantic } from '../src/core.mjs';
 import { brief } from '../src/insights.mjs';
+import { runSelfTest } from '../src/self-test.mjs';
+import { createReplayMisses } from '../src/replay-misses.mjs';
 import { startSetup, openInBrowser, openInAppWindow } from '../src/setup.mjs';
 import { runSync } from '../src/sync-cli.mjs';
 import { PROVIDER_LABELS } from '../src/sync/settings.mjs';
@@ -217,6 +219,17 @@ async function main() {
       for (const a of ctx.agents) out(`agent  ${a.name} @ ${a.vault}: "${a.activation[0]}" / "${a.close[0]}"`);
       return;
     }
+    case 'selftest': {
+      const { ctx } = await openContext(process.env, { trustedLocal: true });
+      const report = await runSelfTest(ctx);
+      if (argv.includes('--json')) out(JSON.stringify(report, null, 2));
+      else {
+        for (const check of report.checks.filter((item) => item.status !== 'pass')) out(`${check.status.toUpperCase()}  ${check.message}`);
+        out(`${report.summary.pass} passed, ${report.summary.warn} to review, ${report.summary.fail} failed`);
+      }
+      if (!report.ok) process.exitCode = 1;
+      return;
+    }
     case 'brief': {
       const { ctx } = await openContext(process.env, { trustedLocal: true });
       const v = opt('vault', ctx.enabled[0]);
@@ -238,7 +251,8 @@ async function main() {
       if (argv[1] === 'import') { if (!opt('file')) fail('--file required'); out(JSON.stringify(await rsi.importMarkdown(path.resolve(opt('file'))))); return; }
       if (argv[1] === 'list') { if (!opt('profile')) fail('--profile required'); out(JSON.stringify({ misses: await rsi.listMisses(opt('profile'), opt('week')), summary: await rsi.aggregateMisses(opt('profile'), opt('week')) }, null, 2)); return; }
       if (argv[1] === 'observations') { if (!opt('profile')) fail('--profile required'); out(JSON.stringify(await rsi.retrievalObservationReport(opt('profile'), opt('week')), null, 2)); return; }
-      fail('use miss add, import, list or observations');
+      if (argv[1] === 'replay') { const { ctx } = await openContext(process.env, { trustedLocal: true }); out(JSON.stringify(await createReplayMisses({ home: appHome() }).replay(ctx), null, 2)); return; }
+      fail('use miss add, import, list, observations or replay');
     }
     case 'bench': {
       const rsi = createRsiWeekly({ home: appHome() });
