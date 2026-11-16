@@ -974,10 +974,12 @@ test('agent_connect applies each Twin memory-type switch to its mixed connection
 
   for (const disabled of ['working', 'semantic', 'episodic']) {
     const ctx = ctxOf(cfg, { BRAINLINK_VAULTS: 'Acme Studio' });
+    const memoryPolicy = { working: true, semantic: true, procedural: true, episodic: true, [disabled]: false };
+    const grant = { name: 'Acme Studio', operations: ['read_note', 'search'], memory_policy: memoryPolicy };
+    const profile = { profile_id: 'fictional-twin', profile_name: 'Fictional Twin', source_policy: { private_default: true, provenance_required: true, session_capture: 'metadata-only' }, memory_policy: memoryPolicy, grants: [grant] };
     ctx.twinScope = {
-      mode: 'scoped', profile_id: 'fictional-twin',
-      memory_policy: { working: true, semantic: true, procedural: true, episodic: true, [disabled]: false },
-      grants: [{ name: 'Acme Studio', operations: ['read_note', 'search'] }],
+      mode: 'scoped', profile_id: 'fictional-twin', profile_name: 'Fictional Twin',
+      memory_policy: memoryPolicy, profiles: [profile], grants: [grant],
     };
     const mcp = createMcp(ctx);
     const listed = await mcp.handle({ jsonrpc: '2.0', id: 2, method: 'tools/list' });
@@ -1223,12 +1225,15 @@ test('MCP: initialize, tools, prompts, resources, errors', async () => {
 });
 
 test('named agent activation tools keep the same Twin procedural and vault gates', async () => {
-  const { cfg } = await fixture();
+  const { cfg, company } = await fixture();
+  await writeFile(path.join(company, 'Role Canary.md'), '# Role Canary\n\nPROCEDURAL_ROLE_CANARY must stay hidden when procedural memory is off.');
+  cfg.agents[0].connect_notes = ['Role Canary.md'];
   const ctx = ctxOf(cfg, { BRAINLINK_VAULTS: 'Acme Studio' });
+  const grant = { name: 'Acme Studio', operations: ['read_note'], memory_policy: { working: false, semantic: true, procedural: true, episodic: false } };
+  const profile = { profile_id: 'fictional-org', profile_name: 'Fictional Organisation Twin', source_policy: { session_capture: 'metadata-only' }, memory_policy: { ...grant.memory_policy }, grants: [grant] };
   ctx.twinScope = {
     mode: 'scoped', profile_id: 'fictional-org', profile_name: 'Fictional Organisation Twin',
-    memory_policy: { working: false, semantic: true, procedural: true, episodic: false },
-    grants: [{ name: 'Acme Studio', operations: ['read_note'] }],
+    memory_policy: { ...grant.memory_policy }, profiles: [profile], grants: [grant],
   };
   const mcp = createMcp(ctx);
   const list = () => mcp.handle({ jsonrpc: '2.0', id: 1, method: 'tools/list' });
@@ -1238,13 +1243,63 @@ test('named agent activation tools keep the same Twin procedural and vault gates
   const allowed = await mcp.handle({ jsonrpc: '2.0', id: 2, method: 'tools/call', params: { name: directName, arguments: {} } });
   assert.equal(allowed.result.isError, false, JSON.stringify(allowed));
   assert.equal(allowed.result.structuredContent.agent.name, 'Chief of Staff');
+  assert.match(JSON.stringify(allowed), /PROCEDURAL_ROLE_CANARY/);
 
   ctx.twinScope.memory_policy.procedural = false;
-  listed = await list();
-  assert.ok(!listed.result.tools.some((tool) => tool.name === directName));
-  const denied = await mcp.handle({ jsonrpc: '2.0', id: 3, method: 'tools/call', params: { name: directName, arguments: {} } });
+  ctx.twinScope.profiles[0].memory_policy.procedural = false;
+  ctx.twinScope.profiles[0].grants[0].memory_policy.procedural = false;
+  ctx.twinScope.grants[0].memory_policy.procedural = false;
+  const noProceduralMcp = createMcp(ctx);
+  const noProceduralList = () => noProceduralMcp.handle({ jsonrpc: '2.0', id: 1, method: 'tools/list' });
+  listed = await noProceduralList();
+  assert.ok(listed.result.tools.some((tool) => tool.name === directName), 'role activation remains available without procedural-note access');
+  const restricted = await noProceduralMcp.handle({ jsonrpc: '2.0', id: 3, method: 'tools/call', params: { name: directName, arguments: {} } });
+  assert.equal(restricted.result.isError, false);
+  assert.doesNotMatch(JSON.stringify(restricted), /PROCEDURAL_ROLE_CANARY/, 'disabling procedural memory removes role-note bodies');
+});
+
+test('a role-less single-profile connection stays inside its explicit vault grants', async () => {
+  const { cfg, company } = await fixture();
+  const canary = 'SINGLE_PROFILE_GRANTED_VAULT_CANARY';
+  await writeFile(path.join(company, 'Granted Scope.md'), `# Granted scope\n\n${canary}\n`);
+  const ctx = ctxOf(cfg);
+  ctx.agents = [];
+  const memoryPolicy = { working: true, semantic: true, procedural: true, episodic: true };
+  const grant = { name: 'Acme Studio', operations: ['search', 'read_note'], memory_policy: memoryPolicy };
+  const profile = { profile_id: 'fictional-single-profile', profile_name: 'Fictional single profile', profile_mode: 'organisation',
+    source_policy: { private_default: true, provenance_required: false, session_capture: 'metadata-only' }, memory_policy: memoryPolicy, grants: [grant] };
+  ctx.twinScope = { mode: 'scoped', profile_id: profile.profile_id, profile_name: profile.profile_name, profiles: [profile],
+    grants: [grant, { name: 'Journal', operations: ['search', 'read_note'], memory_policy: memoryPolicy }], memory_policy: memoryPolicy };
+  const mcp = createMcp(ctx);
+  const granted = await mcp.handle({ jsonrpc: '2.0', id: 1, method: 'tools/call', params: { name: 'vault_search', arguments: { vault: 'Acme Studio', query: canary } } });
+  assert.equal(granted.result.isError, false, JSON.stringify(granted));
+  assert.match(JSON.stringify(granted.result.structuredContent), new RegExp(canary));
+  const privateDenied = await mcp.handle({ jsonrpc: '2.0', id: 2, method: 'tools/call', params: { name: 'vault_search', arguments: { vault: 'Journal', query: 'private diary' } } });
+  assert.equal(privateDenied.result.isError, true, 'the single-profile shortcut does not extend to an ungranted private vault');
+  assert.doesNotMatch(JSON.stringify(privateDenied), /private diary|diary about pricing/);
+});
+
+test('a multi-profile connection without an active role remains denied', async () => {
+  const { cfg } = await fixture();
+  const ctx = ctxOf(cfg);
+  ctx.agents = [];
+  const memoryPolicy = { working: true, semantic: true, procedural: true, episodic: true };
+  const profile = (id, name, mode) => {
+    const grant = { name, access: 'read', operations: ['search', 'read_note'], profile_id: id, memory_policy: { ...memoryPolicy },
+      source_policy: { private_default: true, provenance_required: false, session_capture: 'metadata-only' } };
+    return { profile_id: id, profile_name: id, profile_mode: mode, owner: 'fictional owner',
+      source_policy: grant.source_policy, memory_policy: { ...memoryPolicy }, grants: [grant] };
+  };
+  const company = profile('fictional-company', 'Acme Studio', 'organisation');
+  const personal = profile('fictional-personal', 'Journal', 'personal');
+  ctx.enabled = ['Acme Studio', 'Journal'];
+  ctx.twinScope = { mode: 'scoped', profile_id: null, profile_ids: [company.profile_id, personal.profile_id], profiles: [company, personal],
+    grants: [...company.grants, ...personal.grants], memory_policy: memoryPolicy };
+  const mcp = createMcp(ctx);
+  const denied = await mcp.handle({ jsonrpc: '2.0', id: 1, method: 'tools/call', params: { name: 'vault_search', arguments: { vault: 'Acme Studio', query: 'Agent Memory' } } });
   assert.equal(denied.result.isError, true);
-  assert.match(denied.result.content[0].text, /procedural memory access/);
+  assert.match(denied.result.content[0].text, /Activate a configured BrainLink role first/);
+  assert.doesNotMatch(JSON.stringify(denied), /Hybrid retrieval|private diary/);
 });
 
 test('connector search/fetch exclude private vaults', async () => {
@@ -1553,7 +1608,8 @@ test('one-click setup: new brain, every found AI app connected; multi-vault fold
     assert.equal(r.phrase, 'Connect to Brain');
     assert.deepEqual(r.connected.sort(), ['Claude Desktop', 'Cursor', 'Gemini CLI']);
     assert.match(await readFile(path.join(r.path, 'BrainLink', 'Brain Role.md'), 'utf8'), /Brain/);
-    assert.match(await readFile(path.join(r.path, 'BrainLink', 'Home.md'), 'utf8'), /generated_by: brainlink[\s\S]*\[\[Brain Role\]\]/, 'Home map created at setup');
+    const homeMap = await readFile(path.join(r.path, 'BrainLink', 'Home.md'), 'utf8');
+    assert.match(homeMap, /generated_by: brainlink[\s\S]*\[\[Brain Role\]\]/, 'Home map links the created role note');
     const st = await api('/api/state');
     assert.equal(st.agents[0].name, 'Brain');
     // The brain works straight away in a connected AI: no licence, no trial, nothing to unlock.

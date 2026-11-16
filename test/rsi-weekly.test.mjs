@@ -109,7 +109,7 @@ test('Setup weekly benchmark is authenticated, uses only the built-in fictional 
     assert.equal(saved.run.case_count, 20);
     assert.equal(saved.run.first_try_correct.total, 20);
     assert.equal(saved.run.privacy_violations, 0);
-    assert.equal(saved.run.software_version, '1.2.8');
+    assert.equal(saved.run.software_version, JSON.parse(await readFile(path.join(ROOT, 'package.json'), 'utf8')).version);
     assert.match(saved.run.source_commit_sha, /^[a-f0-9]{40}$/);
     assert.equal(saved.run.source_commit_sha_after, 'a'.repeat(40));
     assert.equal(saved.run.source_tree_clean, true);

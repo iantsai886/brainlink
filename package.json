@@ -21,7 +21,7 @@
     "yaml": "^2.9.1"
   },
   "scripts": {
-    "test": "node --import ./test/_preload.mjs --test --test-concurrency=1 \"test/*.test.mjs\"",
+    "test": "node --import ./test/_preload.mjs --test --test-concurrency=1 --test-reporter=tap \"test/*.test.mjs\"",
     "test:ui": "node --import ./test/_preload.mjs --test \"ui/app/test/*.test.mjs\"",
     "test:all": "npm test && npm run test:ui",
     "smoke:codex-cli": "node scripts/smoke-codex-cli.mjs",

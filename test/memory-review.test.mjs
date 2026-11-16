@@ -17,7 +17,13 @@ test('local memory review saves user edits, detects conflicts, and respects vaul
   let cfg = normalize({ vaults: [{ name: 'Private', path: vault, private: true, writes: 'on' }] });
   await saveConfig(cfg, file);
   const app = await startSetup({ env, home: root, os: process.platform, port: 0, useCli: false });
-  t.after(async () => { await new Promise((resolve) => app.server.close(resolve)); await rm(root, { recursive: true, force: true }); });
+  t.after(async () => {
+    await new Promise((resolve) => {
+      app.server.close(resolve);
+      app.server.closeAllConnections?.();
+    });
+    await rm(root, { recursive: true, force: true });
+  });
   const post = (route, body, token = app.token) => fetch(`http://127.0.0.1:${app.port}${route}`, { method: 'POST', headers: { 'Content-Type': 'application/json', 'X-BrainLink-Token': token }, body: JSON.stringify(body) });
   assert.equal((await post('/api/memory/review', { vault: 'Private' }, 'bad')).status, 401);
   const opened = await (await post('/api/memory/review', { vault: 'Private' })).json();

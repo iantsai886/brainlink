@@ -17,6 +17,10 @@ export function profileScopeEditable(profile) {
 }
 
 const MEMORY_TYPES = ['working', 'semantic', 'procedural', 'episodic'];
+const memoryPolicyFromGrants = (grants) => Object.fromEntries(MEMORY_TYPES.map((type) => [
+  type,
+  (Array.isArray(grants) ? grants : []).some((grant) => grant?.memory_policy?.[type] === true),
+]));
 const NOTE_TYPE_MEMORY = Object.freeze({
   'operating-manual': 'procedural', 'operations-manual': 'procedural', 'role-manual': 'procedural',
   'agent-manual': 'procedural', procedure: 'procedural', 'standard-operating-procedure': 'procedural',
@@ -95,20 +99,21 @@ export function resolveTwinAgentScope(cfg, agent, tokenProvided = false) {
     mode: 'scoped', profile_id: soleProfile?.profile_id || null, profile_name: soleProfile?.profile_name || null,
     profile_ids: scopes.map((scope) => scope.profile_id), profiles: scopes, grants,
     source_policy: soleProfile?.source_policy || null,
-    memory_policy: soleProfile?.memory_policy || Object.fromEntries(MEMORY_TYPES.map((type) => [type, scopes.some((scope) => scope.memory_policy[type])])),
+    // Compatibility summary only. Runtime authorization always checks grant.memory_policy.
+    memory_policy: memoryPolicyFromGrants(grants),
   };
 }
 
 export function twinProfileForVault(ctx, vaultName) {
   const scope = ctx.twinScope || { mode: 'legacy' };
   if (scope.mode !== 'scoped') return null;
-  const grant = scope.grants.find((item) => item.name === vaultName);
+  const grant = (Array.isArray(scope.grants) ? scope.grants : []).find((item) => item?.name === vaultName);
   return grant ? { profile_id: grant.profile_id, profile_name: grant.profile_name, mode: grant.profile_mode, owner: grant.owner, source_policy: grant.source_policy, memory_policy: grant.memory_policy } : null;
 }
 
 export function twinSessionProfileIds(ctx) {
   return (ctx.twinScope?.profiles || []).filter((profile) => profile.memory_policy?.episodic === true
-    && profile.grants.some((grant) => grant.operations.includes('read_session'))).map((profile) => profile.profile_id);
+    && (Array.isArray(profile.grants) ? profile.grants : []).some((grant) => grant.operations?.includes('read_session'))).map((profile) => profile.profile_id);
 }
 
 // Memory policy is enforced on the same boundary as vault and operation grants. This map
@@ -128,9 +133,9 @@ export function twinMemoryAllowed(ctx, memoryType, vaultName) {
   const scope = ctx.twinScope || { mode: 'legacy' };
   if (scope.mode === 'legacy') return true;
   if (scope.mode !== 'scoped') return false;
-  if (vaultName) return scope.grants.some((grant) => grant.name === vaultName && grant.memory_policy?.[memoryType] === true);
+  if (vaultName) return (Array.isArray(scope.grants) ? scope.grants : []).some((grant) => grant?.name === vaultName && grant.memory_policy?.[memoryType] === true);
   return ['working', 'semantic', 'procedural', 'episodic'].includes(memoryType)
-    && scope.profiles.some((profile) => profile.memory_policy?.[memoryType] === true);
+    && (Array.isArray(scope.grants) ? scope.grants : []).some((grant) => grant?.memory_policy?.[memoryType] === true);
 }
 
 // Whole-vault tools share one Markdown index, so tool-level checks alone are not enough:
@@ -171,7 +176,7 @@ export function twinNoteMemoryAllowed(ctx, vaultName, rel, meta = {}) {
   // Untyped, otherwise unclassified notes are ordinary semantic knowledge. Do not let an
   // empty classification set bypass every memory switch; malformed declarations fail closed.
   if (!required.size) required.add('semantic');
-  const vaultGrant = scope.grants.find((grant) => grant.name === vaultName);
+  const vaultGrant = (Array.isArray(scope.grants) ? scope.grants : []).find((grant) => grant?.name === vaultName);
   return Boolean(vaultGrant) && [...required].every((memoryType) => vaultGrant.memory_policy?.[memoryType] === true);
 }
 
@@ -200,13 +205,14 @@ export function twinCanWriteNotes(ctx, vaultName) {
 
 function handoffGrant(ctx, action) {
   const name = ctx.cfg?.handoff?.vault;
-  if (!name || !ctx.enabled.includes(name)) return false;
+  if (!name || !ctx.enabled.includes(name) || !twinMemoryAllowed(ctx, 'working', name)) return false;
   return (ctx.twinScope?.grants || []).some((grant) => grant.name === name && grant.operations.includes(action));
 }
 
 export function twinToolAuthorization(ctx, name, args = {}) {
   const permissionName = name.startsWith('agent_connect_') ? 'agent_connect' : name;
   const scope = ctx.twinScope || { mode: 'legacy', grants: [] };
+  const grants = Array.isArray(scope.grants) ? scope.grants : [];
   if (scope.mode === 'legacy') return { allowed: true };
   if (scope.mode !== 'scoped') return { allowed: false, reason: 'This AI agent token is not assigned to an active Twin profile.' };
   const action = READ_TOOL_ACTION[permissionName];
@@ -216,17 +222,21 @@ export function twinToolAuthorization(ctx, name, args = {}) {
   // dedicated handoff-only vault still needs the guide to learn the approved mailbox workflow.
   if (permissionName === 'brainlink_guide') return ctx.enabled.length > 0 && twinMemoryAllowed(ctx, memoryType)
     ? { allowed: true }
-    : { allowed: false, reason: 'This Twin profile has no enabled vault grants.' };
+    : { allowed: false, reason: `Twin profile scope does not allow ${memoryType} memory.` };
   // Listing/activating a named role returns metadata plus only the notes allowed by
   // its memory policy. Do not hide the role itself just because procedural memory
   // is disabled; each returned note is still filtered in connectAgent.
-  if (permissionName === 'agent_connect') return scope.grants.some((grant) => ctx.enabled.includes(grant.name)
-    && grantAllows(grant, action))
+  if (permissionName === 'agent_connect') return grants.some((grant) => ctx.enabled.includes(grant.name)
+    && grant.operations?.length > 0)
     ? { allowed: true }
     : { allowed: false, reason: 'No assigned agent role is available under this Twin profile scope.' };
-  if (HANDOFF_TOOLS.has(permissionName)) return handoffGrant(ctx, action)
-    ? { allowed: true }
-    : { allowed: false, reason: `Twin profile scope does not allow ${action} in its handoff vault.` };
+  if (HANDOFF_TOOLS.has(permissionName)) {
+    if (!twinMemoryAllowed(ctx, 'working', ctx.cfg?.handoff?.vault)) {
+      return { allowed: false, reason: 'Twin profile scope does not allow working memory in its handoff vault.' };
+    }
+    return handoffGrant(ctx, action) ? { allowed: true }
+      : { allowed: false, reason: `Twin profile scope does not allow ${action} in its handoff vault.` };
+  }
   let agentVault = null;
   if (permissionName === 'agent_connect') {
     const role = ctx.agents.find((item) => item.name === args.agent || item.activation?.includes(args.agent));
@@ -245,26 +255,39 @@ export function twinToolAuthorization(ctx, name, args = {}) {
     ? agentVault
     : args.vault || agentVault || savedSessionVault || (permissionName === 'fetch' ? String(args.id || '').split('::')[0] : null);
   if (targetVault) {
-    const grant = scope.grants.find((item) => item.name === targetVault);
+    const grant = grants.find((item) => item.name === targetVault);
     const captureAllowed = !['session_log', 'session_close'].includes(permissionName) || grant?.source_policy?.session_capture !== 'metadata-only';
     const fullTextAllowed = permissionName !== 'session_read' || args.full !== true || grant?.source_policy?.session_capture === 'full-text-opt-in';
     const permitted = ctx.enabled.includes(targetVault) && grantAllows(grant, action)
       && twinMemoryAllowed(ctx, memoryType, targetVault) && captureAllowed && fullTextAllowed;
     if (permitted) return { allowed: true };
+    if (ctx.enabled.includes(targetVault) && grantAllows(grant, action) && !twinMemoryAllowed(ctx, memoryType, targetVault)) {
+      return { allowed: false, reason: `Twin profile scope does not allow ${memoryType} memory in vault "${targetVault}".` };
+    }
     if (permissionName === 'session_close' && !args.vault && savedSessionVault) return { allowed: false, reason: 'Twin profile scope does not allow the saved destination for this session.' };
     return { allowed: false, reason: `Twin profile scope does not allow ${action} in vault "${targetVault}".` };
   }
   if (['session_list', 'session_read'].includes(permissionName)) {
-    const candidates = scope.profiles.filter((profile) => profile.memory_policy?.episodic === true
-      && profile.grants.some((grant) => grant.operations.includes('read_session')));
+    const candidates = (Array.isArray(scope.profiles) ? scope.profiles : []).filter((profile) => profile.memory_policy?.episodic === true
+      && (Array.isArray(profile.grants) ? profile.grants : []).some((grant) => grant.operations?.includes('read_session')));
     if (permissionName === 'session_read' && args.full === true && !candidates.some((profile) => profile.source_policy.session_capture === 'full-text-opt-in')) {
       return { allowed: false, reason: 'Full session text requires a Twin profile to opt in to full-text access.' };
     }
-    return candidates.length ? { allowed: true } : { allowed: false, reason: 'No Twin profile grants session history access.' };
+    if (candidates.length) return { allowed: true };
+    if ((scope.profiles || []).some((profile) => (profile.grants || []).some((grant) => grant.operations?.includes('read_session')))) {
+      return { allowed: false, reason: 'Twin profile scope does not allow episodic memory for session history.' };
+    }
+    return { allowed: false, reason: 'No Twin profile grants session history access.' };
+  }
+  if (['session_log', 'session_close'].includes(permissionName) && !targetVault) {
+    const eligible = grants.some((grant) => grantAllows(grant, action)
+      && grant.source_policy?.session_capture !== 'metadata-only'
+      && twinMemoryAllowed(ctx, memoryType, grant.name));
+    return eligible ? { allowed: true } : { allowed: false, reason: `Twin profile scope does not allow ${action} under its session capture policy.` };
   }
   // Cross-vault tools are available only when every enabled vault has the same operation grant.
   // This keeps a tool that searches the whole connection from quietly widening a narrower grant.
-  const permitted = ctx.enabled.length > 0 && ctx.enabled.every((vaultName) => scope.grants.some((item) => item.name === vaultName
+  const permitted = ctx.enabled.length > 0 && ctx.enabled.every((vaultName) => grants.some((item) => item.name === vaultName
     && grantAllows(item, action) && twinMemoryAllowed(ctx, memoryType, vaultName)));
   return permitted ? { allowed: true } : { allowed: false, reason: `Twin profile scope does not allow ${action} across every enabled vault.` };
 }
@@ -272,31 +295,33 @@ export function twinToolAuthorization(ctx, name, args = {}) {
 export function twinToolListed(ctx, name) {
   const permissionName = name.startsWith('agent_connect_') ? 'agent_connect' : name;
   const scope = ctx.twinScope || { mode: 'legacy', grants: [] };
+  const grants = Array.isArray(scope.grants) ? scope.grants : [];
   if (scope.mode === 'legacy') return true;
   if (scope.mode !== 'scoped') return false;
   const action = READ_TOOL_ACTION[permissionName];
   if (!action) return false;
   if (permissionName === 'brainlink_guide') return ctx.enabled.length > 0 && twinMemoryAllowed(ctx, READ_TOOL_MEMORY[permissionName]);
-  if (permissionName === 'agent_connect') return scope.grants.some((grant) => ctx.enabled.includes(grant.name)
-    && grantAllows(grant, action));
-  if (['session_list', 'session_read'].includes(permissionName)) return scope.profiles.some((profile) => profile.memory_policy?.episodic === true
-    && profile.grants.some((grant) => grant.operations.includes('read_session')));
-  if (permissionName === 'session_log') return scope.grants.some((grant) => grant.operations.includes(action)
+  if (permissionName === 'agent_connect') return grants.some((grant) => ctx.enabled.includes(grant.name)
+    && grant.operations?.length > 0);
+  if (['session_list', 'session_read'].includes(permissionName)) return (Array.isArray(scope.profiles) ? scope.profiles : []).some((profile) => profile.memory_policy?.episodic === true
+    && (Array.isArray(profile.grants) ? profile.grants : []).some((grant) => grant.operations?.includes('read_session')));
+  if (permissionName === 'session_log') return grants.some((grant) => grant.operations?.includes(action)
     && grant.source_policy?.session_capture !== 'metadata-only' && twinMemoryAllowed(ctx, READ_TOOL_MEMORY[permissionName], grant.name));
-  if (permissionName === 'session_close') return scope.grants.some((grant) => grantAllows(grant, action)
+  if (permissionName === 'session_close') return grants.some((grant) => grantAllows(grant, action)
     && grant.source_policy?.session_capture !== 'metadata-only' && twinMemoryAllowed(ctx, READ_TOOL_MEMORY[permissionName], grant.name));
   if (HANDOFF_TOOLS.has(permissionName)) return handoffGrant(ctx, action);
-  if (VAULT_ARGUMENT_TOOLS.has(permissionName)) return scope.grants.some((grant) => ctx.enabled.includes(grant.name)
+  if (VAULT_ARGUMENT_TOOLS.has(permissionName)) return grants.some((grant) => ctx.enabled.includes(grant.name)
     && grantAllows(grant, action) && twinMemoryAllowed(ctx, READ_TOOL_MEMORY[permissionName], grant.name));
-  return ctx.enabled.length > 0 && ctx.enabled.every((vaultName) => scope.grants.some((grant) => grant.name === vaultName
+  return ctx.enabled.length > 0 && ctx.enabled.every((vaultName) => grants.some((grant) => grant.name === vaultName
     && grantAllows(grant, action) && twinMemoryAllowed(ctx, READ_TOOL_MEMORY[permissionName], vaultName)));
 }
 
 export function twinToolVaultChoices(ctx, name) {
   const permissionName = name.startsWith('agent_connect_') ? 'agent_connect' : name;
   const scope = ctx.twinScope || { mode: 'legacy', grants: [] };
+  const grants = Array.isArray(scope.grants) ? scope.grants : [];
   if (scope.mode === 'legacy') return ctx.enabled;
   const action = READ_TOOL_ACTION[permissionName];
   if (HANDOFF_TOOLS.has(permissionName)) return handoffGrant(ctx, action) ? [ctx.cfg.handoff.vault] : [];
-  return action ? scope.grants.filter((grant) => ctx.enabled.includes(grant.name) && grantAllows(grant, action)).map((grant) => grant.name) : [];
+  return action ? grants.filter((grant) => ctx.enabled.includes(grant.name) && grantAllows(grant, action)).map((grant) => grant.name) : [];
 }

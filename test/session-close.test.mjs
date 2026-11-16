@@ -183,6 +183,7 @@ test('MCP close does not inspect semantic notes when this Twin cannot search the
   const env = { BRAINLINK_HOME: path.join(root, 'app'), HOME: root, BRAINLINK_AGENT_TOKEN: 'fictional-close-agent-token', BRAINLINK_AI_PLATFORM: 'Fictional AI' };
   const cfg = normalize({ version: CONFIG_SCHEMA_VERSION,
     vaults: [{ name: 'Company', path: company }],
+    agents: [{ name: 'Fictional Close Role', vault: 'Company', role: 'Synthetic session close role.', activation: ['Connect to Fictional Close Role'], close: [], connect_notes: [], tail_notes: [], close_target: { mode: 'proposal-only', path: 'BrainLink/Review.md' } }],
     ai_agents: [{ id: 'close-agent', name: 'Fictional close agent', kind: 'local', tokenHash: hashToken(env.BRAINLINK_AGENT_TOKEN) }],
     twin_profiles: [{
       id: 'fictional-org', name: 'Fictional Organisation Twin', mode: 'organisation', owner: 'fictional-owner',
@@ -194,6 +195,8 @@ test('MCP close does not inspect semantic notes when this Twin cannot search the
     }],
   });
   const mcp = createMcp(createContext(cfg, { env }));
+  const activation = await mcp.handle({ jsonrpc: '2.0', id: 1, method: 'tools/call', params: { name: 'agent_connect_fictional_close_role', arguments: {} } });
+  assert.equal(activation.result?.isError, false, JSON.stringify(activation));
   const result = await call(mcp, 'session_close', { vault: 'Company', title: 'Fictional session', project: 'new-topic', goal: 'Review a document', outcome: 'Discussed Secret Topic but made no filing decision.', session_or_task_id: 'no-semantic-routing' });
   assert.equal(result.error, false, JSON.stringify(result.value));
   assert.equal(result.value.folder_suggestion, undefined, 'the closed profile must not route using semantic note content');

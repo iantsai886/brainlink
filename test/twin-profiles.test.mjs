@@ -4,7 +4,7 @@ import { mkdtemp, mkdir, readFile, readdir, writeFile, stat, rm } from 'node:fs/
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { normalize, validate, saveConfig } from '../src/config.mjs';
-import { twinProfileStatus, profileScopeEditable, resolveTwinAgentScope } from '../src/twin-profiles.mjs';
+import { twinProfileStatus, profileScopeEditable, resolveTwinAgentScope, twinMemoryAllowed } from '../src/twin-profiles.mjs';
 import { startSetup } from '../src/setup.mjs';
 import { createContext, loadVault, readNote, search } from '../src/core.mjs';
 import { createMcp } from '../src/server.mjs';
@@ -26,6 +26,33 @@ const fixture = (vaultPath) => normalize({
   }],
 });
 
+// Runtime policy is enforced per vault grant; keep synthetic contexts internally consistent
+// when a test changes a permission after token resolution.
+function setRuntimeMemoryPolicy(ctx, type, allowed) {
+  for (const profile of ctx.twinScope.profiles || []) {
+    for (const grant of profile.grants || []) grant.memory_policy[type] = allowed;
+  }
+  for (const grant of ctx.twinScope.grants || []) grant.memory_policy[type] = allowed;
+}
+
+function addTestRole(cfg, name = 'Fictional Operations', vault = 'Fictional Org') {
+  cfg.agents ||= [];
+  cfg.agents.push({ name, vault, role: 'Synthetic role for authorization tests.', activation: [`Connect to ${name}`], close: [`${name} close loop`], connect_notes: [], tail_notes: [], close_target: { mode: 'proposal-only', path: 'BrainLink/Review.md' } });
+  return cfg;
+}
+
+async function activateTestRole(mcp, name = 'Fictional Operations') {
+  const tools = (await mcp.handle({ jsonrpc: '2.0', id: 'activation-list', method: 'tools/list' })).result.tools;
+  const slug = name.toLowerCase().replace(/[^a-z0-9]+/g, '_').replace(/^_|_$/g, '');
+  const tool = tools.find((item) => item.name === 'agent_connect')
+    || tools.find((item) => item.name === `agent_connect_${slug}` || String(item.title || '').includes(name));
+  assert.ok(tool, `an activation tool for ${name} is available`);
+  const args = tool.name === 'agent_connect' ? { agent: name } : {};
+  const result = await mcp.handle({ jsonrpc: '2.0', id: 'activation', method: 'tools/call', params: { name: tool.name, arguments: args } });
+  assert.equal(result.result?.isError, false, JSON.stringify(result));
+  return result;
+}
+
 test('Twin profile declarations validate references and prevent permission escalation in their contract', async () => {
   const root = await mkdtemp(path.join(tmpdir(), 'brainlink-twin-contract-'));
   const vaultPath = path.join(root, 'vault');
@@ -44,7 +71,7 @@ test('Twin profile declarations validate references and prevent permission escal
   assert.match(validate(overVaultGrant).join('; '), /agent vault access exceeds/);
   const duplicateAgent = structuredClone(cfg);
   duplicateAgent.twin_profiles.push({ ...structuredClone(cfg.twin_profiles[0]), id: 'second_profile', mode: 'personal' });
-  assert.match(validate(duplicateAgent).join('; '), /only one Twin profile/);
+  assert.match(validate(duplicateAgent).join('; '), /cannot grant note access to multiple Twin profiles/);
   const sharedNotes = structuredClone(cfg);
   sharedNotes.ai_agents.push({ id: 'agent_personal', name: 'Fictional Personal agent', kind: 'local', tokenHash: hashToken('fictional-personal-token'), connected: true });
   sharedNotes.twin_profiles.push({
@@ -64,13 +91,33 @@ test('Twin profile declarations validate references and prevent permission escal
   assert.match(validate(escalatedMemory).join('; '), /cannot exceed the Twin profile policy/);
 });
 
+test('a scoped connection with no grant arrays fails closed instead of crashing tool listing', async () => {
+  const root = await mkdtemp(path.join(tmpdir(), 'brainlink-twin-malformed-scope-'));
+  const vaultPath = path.join(root, 'vault');
+  await mkdir(vaultPath);
+  const ctx = createContext(fixture(vaultPath), { env: { HOME: root, BRAINLINK_HOME: path.join(root, 'app') } });
+  ctx.twinScope = { mode: 'scoped', profile_id: 'malformed-scope', grants: [{ name: 'Fictional Org', operations: ['search', 'read_note'] }] };
+  const mcp = createMcp(ctx);
+  const listed = await mcp.handle({ jsonrpc: '2.0', id: 1, method: 'tools/list' });
+  assert.equal(listed.error, undefined);
+  assert.equal(listed.result.tools.some((tool) => ['vault_search', 'vault_read_note', 'propose_note'].includes(tool.name)), false);
+  assert.deepEqual(ctx.enabled, [], 'a top-level grant without a nested profile grant is removed from the scoped connection');
+  ctx.twinScope = { mode: 'scoped', profiles: [{ profile_id: 'malformed-grant-profile', grants: [{ name: 'Fictional Org' }] }] };
+  const malformedGrantMcp = createMcp(ctx);
+  const malformedGrantList = await malformedGrantMcp.handle({ jsonrpc: '2.0', id: 2, method: 'tools/list' });
+  assert.equal(malformedGrantList.error, undefined, 'a nested grant without operations also fails closed without crashing');
+  assert.equal(malformedGrantList.result.tools.some((tool) => ['vault_search', 'vault_read_note', 'propose_note'].includes(tool.name)), false);
+});
+
 test('scoped retrieval automatically records only a content-free, profile-owned RSI observation', async () => {
   const root = await mkdtemp(path.join(tmpdir(), 'brainlink-twin-rsi-observation-'));
   const vaultPath = path.join(root, 'vault');
   await mkdir(vaultPath);
   const appHome = path.join(root, 'app');
+  const cfg = addTestRole(fixture(vaultPath));
   const env = { BRAINLINK_HOME: appHome, HOME: root, BRAINLINK_AGENT_TOKEN: 'fictional-agent-token', BRAINLINK_AI_PLATFORM: 'Fictional Codex', BRAINLINK_SEMANTIC: '0' };
-  const mcp = createMcp(createContext(fixture(vaultPath), { env }));
+  const mcp = createMcp(createContext(cfg, { env }));
+  await activateTestRole(mcp);
   const response = await mcp.handle({ jsonrpc: '2.0', id: 1, method: 'tools/call', params: { name: 'vault_search', arguments: { vault: 'Fictional Org', query: 'QUESTION_CANARY fictional missing roadmap' } } });
   assert.equal(response.result.structuredContent.status, 'not_in_brain');
   const { createRsiLedger } = await import('../src/rsi-ledger.mjs');
@@ -81,21 +128,23 @@ test('scoped retrieval automatically records only a content-free, profile-owned 
   assert.doesNotMatch(ledger, /QUESTION_CANARY|fictional missing roadmap|Fictional Org|path|excerpt|answer/i);
 });
 
-test('Twin source policy keeps proposed notes private and requires source confidence and a stable task id', async () => {
+test('Twin source policy follows vault visibility and requires source confidence and a stable task id', async () => {
   const root = await mkdtemp(path.join(tmpdir(), 'brainlink-twin-source-policy-'));
   const vaultPath = path.join(root, 'vault');
   await mkdir(path.join(vaultPath, 'Inbox'), { recursive: true });
   const cfg = fixture(vaultPath);
   cfg.twin_profiles[0].allowed_actions.push('propose_note');
   cfg.twin_profiles[0].agent_access[0].vaults[0].operations.push('propose_note');
+  addTestRole(cfg);
   const env = { BRAINLINK_HOME: path.join(root, 'app'), HOME: root, BRAINLINK_AGENT_TOKEN: 'fictional-agent-token', BRAINLINK_AI_PLATFORM: 'Fictional Codex' };
   const mcp = createMcp(createContext(cfg, { env }));
+  await activateTestRole(mcp);
   const tool = (await mcp.handle({ jsonrpc: '2.0', id: 1, method: 'tools/list' })).result.tools.find((item) => item.name === 'propose_note');
   assert.ok(tool.inputSchema.required.includes('confidence'));
   assert.ok(tool.inputSchema.required.includes('session_or_task_id'));
-  assert.match(tool.description, /private by default/);
+  assert.match(tool.description, /Visibility follows the selected vault/);
   const guide = await mcp.handle({ jsonrpc: '2.0', id: 1, method: 'tools/call', params: { name: 'brainlink_guide', arguments: {} } });
-  assert.equal(guide.result.structuredContent.twin_profile_scope.source_policy.private_default, true);
+  assert.equal(guide.result.structuredContent.twin_profile_scope.profiles[0].source_policy.private_default, true);
   assert.match(guide.result.structuredContent.write_rules.join(' '), /stable session_or_task_id/);
   const missing = await mcp.handle({ jsonrpc: '2.0', id: 2, method: 'tools/call', params: { name: 'propose_note', arguments: {
     vault: 'Fictional Org', folder: 'Inbox', title: 'Policy check', body: 'A fictional finding.', source: 'fictional test',
@@ -103,21 +152,23 @@ test('Twin source policy keeps proposed notes private and requires source confid
   assert.match(missing.result.structuredContent.errors.join(' '), /stable session_or_task_id/);
   assert.match(missing.result.structuredContent.errors.join(' '), /confidence/);
   const preview = await mcp.handle({ jsonrpc: '2.0', id: 3, method: 'tools/call', params: { name: 'propose_note', arguments: {
-    vault: 'Fictional Org', folder: 'Inbox', title: 'Private by default', body: 'A fictional finding.', source: 'fictional test',
+    vault: 'Fictional Org', folder: 'Inbox', title: 'Shared by default', body: 'A fictional finding.', source: 'fictional test',
     confidence: 'reported', session_or_task_id: 'fixture-task-01',
   } } });
   assert.equal(preview.result.structuredContent.written, false);
-  assert.match(preview.result.structuredContent.preview, /private: true/);
+  assert.doesNotMatch(preview.result.structuredContent.preview, /private:\s*true/i, 'a shared vault proposal must not become private from profile defaults');
   assert.match(preview.result.structuredContent.preview, /session_or_task_id: "fixture-task-01"/);
   const saved = await mcp.handle({ jsonrpc: '2.0', id: 4, method: 'tools/call', params: { name: 'propose_note', arguments: {
-    vault: 'Fictional Org', folder: 'Inbox', title: 'Private by default', body: 'A fictional finding.', source: 'fictional test',
+    vault: 'Fictional Org', folder: 'Inbox', title: 'Shared by default', body: 'A fictional finding.', source: 'fictional test',
     confidence: 'reported', session_or_task_id: 'fixture-task-01', confirm: true,
   } } });
   assert.equal(saved.result.structuredContent.written, true);
   const savedNames = await readdir(path.join(vaultPath, 'Inbox'));
   assert.equal(savedNames.length, 1);
-  assert.match(savedNames[0], / — Private by default\.md$/);
-  assert.match(await readFile(path.join(vaultPath, 'Inbox', savedNames[0]), 'utf8'), /private: true/);
+  assert.match(savedNames[0], / — Shared by default\.md$/);
+  const savedText = await readFile(path.join(vaultPath, 'Inbox', savedNames[0]), 'utf8');
+  assert.doesNotMatch(savedText, /private:\s*true/i);
+  assert.match(savedText, /twin_profile_id: "org_twin_1"/);
 });
 
 test('Twin session capture policy blocks content capture and full text until opted in', async () => {
@@ -127,11 +178,13 @@ test('Twin session capture policy blocks content capture and full text until opt
   const cfg = fixture(vaultPath);
   cfg.twin_profiles[0].allowed_actions.push('read_session', 'log_session', 'propose_note');
   cfg.twin_profiles[0].agent_access[0].vaults[0].operations.push('read_session', 'log_session', 'propose_note');
+  addTestRole(cfg);
   const env = { BRAINLINK_HOME: path.join(root, 'app'), HOME: root, BRAINLINK_AGENT_TOKEN: 'fictional-agent-token', BRAINLINK_AI_PLATFORM: 'Fictional Codex' };
   const call = (mcp, name, args, id = 1) => mcp.handle({ jsonrpc: '2.0', id, method: 'tools/call', params: { name, arguments: args } });
 
   cfg.twin_profiles[0].source_policy.session_capture = 'metadata-only';
   let mcp = createMcp(createContext(cfg, { env }));
+  await activateTestRole(mcp);
   let names = (await mcp.handle({ jsonrpc: '2.0', id: 1, method: 'tools/list' })).result.tools.map((item) => item.name);
   assert.ok(!names.includes('session_log'));
   assert.ok(!names.includes('session_close'));
@@ -143,6 +196,7 @@ test('Twin session capture policy blocks content capture and full text until opt
 
   cfg.twin_profiles[0].source_policy.session_capture = 'summary-proposal';
   mcp = createMcp(createContext(cfg, { env }));
+  await activateTestRole(mcp);
   names = (await mcp.handle({ jsonrpc: '2.0', id: 1, method: 'tools/list' })).result.tools.map((item) => item.name);
   assert.ok(names.includes('session_log'));
   const store = await openSessionStore(env);
@@ -153,8 +207,9 @@ test('Twin session capture policy blocks content capture and full text until opt
 
   cfg.twin_profiles[0].source_policy.session_capture = 'full-text-opt-in';
   mcp = createMcp(createContext(cfg, { env }));
+  await activateTestRole(mcp);
   const full = await call(mcp, 'session_read', { id: own.id, full: true }, 3);
-  assert.match(JSON.stringify(full), /FICTIONAL_FULL_TEXT_CANARY/);
+  assert.match(JSON.stringify(full), /FICTIONAL_FULL_TEXT_CANARY/, 'the owning Twin can read full text only after full-text opt-in');
   const imported = await store.putSession({ client: 'codex', source_id: 'imported-full', profile_id: 'org_twin_1', vault: 'Sessions', project: 'Fictional', title: 'Assigned imported session', summary: 'Imported summary.', started_at: new Date().toISOString(), private: true, messages: [{ role: 'assistant', at: new Date().toISOString(), text: 'FICTIONAL_IMPORTED_FULL_CANARY' }] });
   const importedFull = await call(mcp, 'session_read', { id: imported.id, full: true }, 4);
   assert.doesNotMatch(JSON.stringify(importedFull), /FICTIONAL_IMPORTED_FULL_CANARY/);
@@ -164,12 +219,10 @@ test('Twin session capture policy blocks content capture and full text until opt
 test('Twin status shows limited runtime scope and never exposes agent credentials', async () => {
   const status = twinProfileStatus(fixture('C:\\fictional-vault'));
   const cfg = fixture('C:\\fictional-vault');
-  assert.equal(status.enforcement, 'scoped_agent_read_only');
+  assert.equal(status.enforcement, 'scoped_agent_profile_grants');
   assert.equal(status.profiles[0].declaration_status, 'agent_profile_scope_active');
   assert.equal(status.profiles[0].memory_policy_enforcement, 'tools_prompts_resources');
-  assert.match(status.next_gate, /append-only replies support ACKNOWLEDGED, IN_PROGRESS, BLOCKED, COMPLETED and CANCELLED/);
-  assert.doesNotMatch(status.next_gate, /richer reply\/update semantics are not implemented/);
-  assert.match(status.next_gate, /Same-time updates are flagged for human review, not auto-resolved/);
+  assert.match(status.next_gate, /Named AI-agent tokens may be assigned to multiple Twin profiles/);
   assert.equal(status.profiles[0].editable_scope, true);
   const scoped = fixture('C:\\fictional-vault');
   scoped.vaults.push({ name: 'Fictional Other', path: 'C:\\fictional-other' });
@@ -184,6 +237,9 @@ test('Twin status shows limited runtime scope and never exposes agent credential
   scopedCfg.twin_profiles[0].agent_access[0].memory_policy = { working: false, semantic: true, procedural: true, episodic: false };
   const resolvedScope = resolveTwinAgentScope(scopedCfg, scopedCfg.ai_agents[0], true);
   assert.deepEqual(resolvedScope.memory_policy, scopedCfg.twin_profiles[0].agent_access[0].memory_policy);
+  resolvedScope.grants[0].memory_policy.semantic = false;
+  resolvedScope.memory_policy.semantic = true;
+  assert.equal(twinMemoryAllowed({ twinScope: resolvedScope }, 'semantic'), false, 'a compatibility summary cannot widen a denied grant');
   scopedCfg.twin_profiles[0].agent_access[0].memory_policy.procedural = false;
   const noProcedural = createMcp(createContext(scopedCfg, { env: { BRAINLINK_AGENT_TOKEN: 'fictional-agent-token' } }));
   const noProceduralTools = await noProcedural.handle({ jsonrpc: '2.0', id: 1, method: 'tools/list', params: {} });
@@ -200,7 +256,9 @@ test('Twin setup creates profiles from local UI choices and escapes every profil
   assert.match(html, /twinProfiles\.confirmUpdate/);
   assert.match(html, /id="preset-connect-modal"/);
   assert.match(html, /id="preset-connect-review" class="card" role="status" aria-live="polite"/);
-  assert.match(html, /connect\.reviewSelected/);
+  assert.match(html, /function updatePresetPermissionControls\(\)/);
+  assert.match(html, /data-preset-profile-check/);
+  assert.match(html, /input\.disabled = !required \|\| profile\?\.memory_policy/);
   assert.match(html, /grant\.actions\.push\(t\(actionKeys\[input\.value\]\)\)/);
   assert.match(html, /data-connect-scope=/);
   assert.match(html, /POST', '\/api\/connect'/);
@@ -210,7 +268,7 @@ test('Twin setup creates profiles from local UI choices and escapes every profil
   assert.match(html, /data-twin-agent-vault/);
   assert.match(html, /data-twin-memory/);
   assert.match(html, /function updateTwinPermissionControls\(\)/);
-  assert.match(html, /input\.disabled = !allowed;\s+if \(!allowed\) input\.checked = false;/);
+  assert.match(html, /input\.disabled = !allowed;\s+if \(!memoryAllowed\) input\.checked = false;/);
   assert.match(html, /twin-new-memory'\)\.addEventListener\('change', updateTwinPermissionControls\)/);
   assert.match(html, /POST', '\/api\/twins\/create'/);
   assert.match(html, /t\('twinProfiles\.confirmCreate'/);
@@ -223,45 +281,52 @@ test('Twin setup creates profiles from local UI choices and escapes every profil
   assert.match(html, /sessions\.twinPrivate/);
 });
 
-test('AI connection review summary tracks exact checked memory types and per-vault actions', async () => {
+test('AI connection review summary tracks selected profiles, memory ceilings and per-vault actions', async () => {
   const html = await readFile(new URL('../ui/index.html', import.meta.url), 'utf8');
-  const start = html.indexOf('function updatePresetPermissionControls(profile) {');
+  const start = html.indexOf('function updatePresetPermissionControls() {');
   const end = html.indexOf('function openPresetConnect(clientId)', start);
   assert.ok(start >= 0 && end > start, 'connection summary helper exists');
   const memories = ['working', 'semantic', 'procedural', 'episodic'].map((key) => ({ dataset: { presetMemory: key }, checked: ['semantic', 'episodic'].includes(key) }));
   const actions = [
-    { vault: 'Company Vault', value: 'search', checked: true },
-    { vault: 'Company Vault', value: 'read_note', checked: true },
-    { vault: 'Company Vault', value: 'propose_note', checked: false },
-    { vault: 'Personal Vault', value: 'read_session', checked: true },
-    { vault: 'Personal Vault', value: 'handoff_read', checked: true },
-  ].map((item) => ({ dataset: { presetVault: item.vault }, value: item.value, checked: item.checked, disabled: false }));
-  const review = { textContent: '' };
+    { vault: 'Company Vault', profile: 'org', memory: 'semantic', access: 'write', value: 'search', checked: true },
+    { vault: 'Company Vault', profile: 'org', memory: 'semantic', access: 'write', value: 'read_note', checked: true },
+    { vault: 'Company Vault', profile: 'org', memory: 'semantic', access: 'write', value: 'propose_note', checked: false },
+    { vault: 'Personal Vault', profile: 'org', memory: 'episodic', access: 'write', value: 'read_session', checked: true },
+    { vault: 'Personal Vault', profile: 'org', memory: 'working', access: 'write', value: 'handoff_read', checked: true },
+  ].map((item) => ({ dataset: { presetVault: item.vault, presetProfile: item.profile, memory: item.memory }, value: item.value, checked: item.checked, disabled: false, closest: () => section }));
+  const profileCheck = { value: 'org', checked: true, closest: () => section };
+  const permissions = { hidden: false };
+  const section = {
+    dataset: { presetProfile: 'org' },
+    querySelector: (selector) => selector === '.preset-profile-permissions' ? permissions : profileCheck,
+    querySelectorAll: (selector) => selector === '[data-preset-memory]' ? memories : selector === '[data-preset-vault]' ? actions : selector === '[data-preset-vault]:checked' ? actions.filter((item) => item.checked) : [],
+  };
+  const review = { textContent: '' }, submit = { disabled: false };
+  const profiles = [{ id: 'org', name: 'Organisation', memory_policy: { working: true, semantic: true, procedural: true, episodic: true }, vaults: [{ name: 'Company Vault', access: 'write' }, { name: 'Personal Vault', access: 'write' }] }];
   const document = {
     querySelectorAll(selector) {
-      if (selector === '[data-preset-memory]') return memories;
-      if (selector === '[data-preset-memory]:checked') return memories.filter((item) => item.checked);
+      if (selector === '[data-preset-profile]') return [section];
       if (selector === '[data-preset-vault]') return actions;
+      if (selector === '[data-preset-profile-check]:checked') return [profileCheck];
       if (selector === '[data-preset-vault]:checked') return actions.filter((item) => item.checked);
       throw new Error(`Unexpected selector: ${selector}`);
     },
   };
-  const $ = (id) => id === 'preset-connect-review' ? review : null;
-  const t = (key, values = {}) => key === 'connect.reviewSelected'
-    ? `Review access: Memory — ${values.memories}. Vaults and actions — ${values.grants}.`
-    : key;
-  const update = new Function('$', 't', 'document', `${html.slice(start, end)}; return updatePresetPermissionControls;`)($, t, document);
-  const profile = { memory_policy: { working: true, semantic: true, procedural: true, episodic: true } };
-  update(profile);
-  assert.equal(review.textContent, 'Review access: Memory — twinProfiles.memory.semantic, twinProfiles.memory.episodic. Vaults and actions — Company Vault: connect.search, connect.readNote · Personal Vault: connect.readSession.');
-  assert.equal(actions.find((item) => item.value === 'handoff_read').disabled, true, 'handoff access remains off when working memory is off');
+  document.querySelector = (selector) => selector.startsWith('[data-preset-profile-check') ? profileCheck : null;
+  const $ = (id) => ({ 'preset-connect-review': review, 'preset-connect-submit': submit, 'preset-connect-summary': { textContent: '' } })[id] || null;
+  const t = (key) => key;
+  const S = { twin_profiles: { profiles } };
+  const update = new Function('$', 't', 'document', 'S', `${html.slice(start, end)}; return updatePresetPermissionControls;`)($, t, document, S);
+  update();
+  assert.match(review.textContent, /Organisation: Company Vault \(connect\.search, connect\.readNote\); Personal Vault \(connect\.readSession\)/);
+  assert.equal(actions.find((item) => item.value === 'handoff_read').disabled, true, 'working memory remains off unless explicitly selected');
 
   memories.find((item) => item.dataset.presetMemory === 'semantic').checked = false;
-  update(profile);
+  update();
   assert.deepEqual(actions.filter((item) => ['search', 'read_note', 'propose_note'].includes(item.value)).map((item) => ({ checked: item.checked, disabled: item.disabled })), [
     { checked: false, disabled: true }, { checked: false, disabled: true }, { checked: false, disabled: true },
   ]);
-  assert.equal(review.textContent, 'Review access: Memory — twinProfiles.memory.episodic. Vaults and actions — Personal Vault: connect.readSession.');
+  assert.match(review.textContent, /Personal Vault \(connect\.readSession\)/);
 });
 
 test('Twin permission controls disable and clear actions when their memory type is off', async () => {
@@ -272,9 +337,14 @@ test('Twin permission controls disable and clear actions when their memory type 
   const memories = ['semantic', 'episodic', 'working', 'procedural'].map((key) => ({ dataset: { twinMemory: key }, checked: key === 'episodic' || key === 'procedural' }));
   const agentMemories = ['working', 'semantic', 'procedural', 'episodic'].map((key) => ({ dataset: { twinAgentMemory: 'agent', memoryType: key }, checked: key === 'episodic' || key === 'procedural', disabled: false }));
   const operations = ['search', 'read_note', 'read_session', 'log_session', 'propose_note', 'handoff_read', 'write_handoff'].map((value) => ({ value, checked: true, disabled: false }));
-  const agentOperations = operations.map((input) => ({ ...input, dataset: { twinOperation: 'agent' } }));
-  const document = { querySelectorAll: (selector) => selector === '[data-twin-memory]' ? memories : selector === '[data-twin-agent-memory]' ? agentMemories : selector === '[data-twin-operation]' ? agentOperations : operations };
-  const helpers = new Function('document', `${html.slice(start, end)}; return { updateTwinPermissionControls, twinActionMemoryAllowed };`)(document);
+  const agentOperations = operations.map((input) => ({ ...input, dataset: { twinOperation: 'agent', vaultName: 'Vault' } }));
+  const document = {
+    querySelectorAll: (selector) => selector === '[data-twin-memory]' ? memories : selector === '[data-twin-agent-memory]' ? agentMemories : selector === '[data-twin-operation]' ? agentOperations : operations,
+    querySelector: (selector) => selector.includes('data-twin-agent-vault') || selector.includes('data-twin-vault="')
+      ? { checked: true } : selector.includes('data-twin-vault-access') ? { value: 'write' } : null,
+  };
+  const CSS = { escape: (value) => String(value) };
+  const helpers = new Function('document', 'CSS', `${html.slice(start, end)}; return { updateTwinPermissionControls, twinActionMemoryAllowed };`)(document, CSS);
   const update = helpers.updateTwinPermissionControls;
   update();
   assert.deepEqual(agentOperations.map(({ disabled, checked }) => ({ disabled, checked })), [
@@ -366,11 +436,13 @@ test('profile-scoped agents see only granted vaults and only supported read tool
   await writeFile(path.join(orgPath, 'Public Brief.md'), 'Fictional public organisation note.');
   await writeFile(path.join(personalPath, 'Private.md'), 'Private canary TWIN_PERSONAL_CANARY_77.');
   const cfg = fixture(orgPath);
+  addTestRole(cfg, 'Fictional Operations', 'Fictional Org');
   cfg.vaults.push({ name: 'Fictional Personal', path: personalPath, private: true });
   const ctx = createContext(cfg, { env: { BRAINLINK_AGENT_TOKEN: 'fictional-agent-token' } });
   assert.deepEqual(ctx.enabled, ['Fictional Org']);
   assert.equal(ctx.twinScope.mode, 'scoped');
   const mcp = createMcp(ctx);
+  await activateTestRole(mcp);
   assert.match(mcp.instructions, /if brainlink_guide is listed and permitted/i);
   assert.match(mcp.instructions, /do not retry or ask to widen access/);
   const listed = await mcp.handle({ jsonrpc: '2.0', id: 1, method: 'tools/list' });
@@ -392,7 +464,7 @@ test('profile-scoped agents see only granted vaults and only supported read tool
   const noReadTools = (await noReadMcp.handle({ jsonrpc: '2.0', id: 13, method: 'tools/list' })).result.tools.map((tool) => tool.name);
   assert.ok(!noReadTools.includes('ingestion_read_source'), 'source reading is hidden when read_note is not granted');
   const promptList = await mcp.handle({ jsonrpc: '2.0', id: 5, method: 'prompts/list' });
-  assert.deepEqual(promptList.result.prompts.map((prompt) => prompt.name), ['brief']);
+  assert.deepEqual(promptList.result.prompts.map((prompt) => prompt.name), ['connect-fictional-operations', 'brief']);
   const resources = await mcp.handle({ jsonrpc: '2.0', id: 7, method: 'resources/list' });
   assert.ok(resources.result.resources.some((resource) => resource.uri === 'brainlink://guide'));
   assert.ok(resources.result.resources.every((resource) => !resource.uri.includes('Fictional%20Personal')));
@@ -402,12 +474,12 @@ test('profile-scoped agents see only granted vaults and only supported read tool
   assert.equal(scopedGuide.twin_profile_scope.writes_available, false);
   assert.equal(scopedGuide.twin_profile_scope.note_proposals_available, false);
   assert.deepEqual(scopedGuide.twin_profile_scope.proposal_vaults, []);
-  assert.match(scopedGuide.write_rules.join(' '), /General memory writes/);
+  assert.match(scopedGuide.write_rules.join(' '), /Note saves are proposal-only/);
   assert.doesNotMatch(guideResource.result.contents[0].text, /Fictional Personal|TWIN_PERSONAL_CANARY_77/);
   const guide = await mcp.handle({ jsonrpc: '2.0', id: 6, method: 'tools/call', params: { name: 'brainlink_guide', arguments: {} } });
-  assert.equal(guide.result.structuredContent.twin_profile_scope.profile_id, 'org_twin_1');
+  assert.equal(guide.result.structuredContent.twin_profile_scope.profiles[0].id, 'org_twin_1');
   assert.equal(guide.result.structuredContent.twin_profile_scope.writes_available, false);
-  assert.deepEqual(guide.result.structuredContent.twin_profile_scope.memory_policy, cfg.twin_profiles[0].memory_policy);
+  assert.deepEqual(guide.result.structuredContent.twin_profile_scope.profiles[0].memory_policy, cfg.twin_profiles[0].memory_policy);
   const deniedSessionPrompt = await mcp.handle({ jsonrpc: '2.0', id: 9, method: 'prompts/get', params: { name: 'close-session' } });
   assert.ok(deniedSessionPrompt.error);
   const deniedRawPrompt = await mcp.handle({ jsonrpc: '2.0', id: 10, method: 'prompts/get', params: { name: 'organize-sources', arguments: { vault: 'Fictional Org', folder: 'Raw' } } });
@@ -420,7 +492,7 @@ test('profile-scoped agents see only granted vaults and only supported read tool
   assert.match(deniedWrite.result.content[0].text, /does not allow propose_note/);
   const deniedSession = await mcp.handle({ jsonrpc: '2.0', id: 4, method: 'tools/call', params: { name: 'session_list', arguments: {} } });
   assert.equal(deniedSession.result.isError, true);
-  assert.match(deniedSession.result.content[0].text, /does not allow read_session/);
+  assert.match(deniedSession.result.content[0].text, /No Twin profile grants session history access/);
   const deniedLog = await mcp.handle({ jsonrpc: '2.0', id: 12, method: 'tools/call', params: { name: 'session_log', arguments: { text: 'must stay blocked' } } });
   assert.equal(deniedLog.result.isError, true);
   assert.match(deniedLog.result.content[0].text, /does not allow log_session/);
@@ -437,7 +509,7 @@ test('profile-scoped agents see only granted vaults and only supported read tool
   assert.equal(filingGuide.result.structuredContent.twin_profile_scope.writes_available, false);
   assert.equal(filingGuide.result.structuredContent.twin_profile_scope.note_proposals_available, true);
   assert.deepEqual(filingGuide.result.structuredContent.twin_profile_scope.proposal_vaults, ['Fictional Org']);
-  assert.match(filingGuide.result.structuredContent.write_rules.join(' '), /preview and separate user approval/);
+  assert.match(filingGuide.result.structuredContent.write_rules.join(' '), /each note requires separate user approval/);
   const unassigned = createContext(cfg, { env: { BRAINLINK_AGENT_TOKEN: 'unknown-token' } });
   assert.deepEqual(unassigned.enabled, []);
   assert.equal(unassigned.twinScope.mode, 'unassigned');
@@ -504,8 +576,10 @@ test('profile-scoped agents can save only private session notes owned by their T
   const cfg = fixture(vaultPath);
   cfg.twin_profiles[0].allowed_actions.push('log_session');
   cfg.twin_profiles[0].agent_access[0].vaults[0].operations.push('log_session');
+  addTestRole(cfg);
   const env = { BRAINLINK_HOME: brainHome, HOME: root, BRAINLINK_AGENT_TOKEN: 'fictional-agent-token', BRAINLINK_AI_PLATFORM: 'Codex' };
   const mcp = createMcp(createContext(cfg, { env }));
+  await activateTestRole(mcp);
   const listed = await mcp.handle({ jsonrpc: '2.0', id: 1, method: 'tools/list' });
   assert.ok(listed.result.tools.some((tool) => tool.name === 'session_log'));
   const scope = await mcp.handle({ jsonrpc: '2.0', id: 2, method: 'tools/call', params: { name: 'brainlink_guide', arguments: {} } });
@@ -603,6 +677,7 @@ test('Twin memory policy blocks disabled types at tool, prompt and resource boun
     const cfg = fixture(vaultPath);
     cfg.vaults[0].read_first = ['Policy.md'];
     cfg.twin_profiles[0].memory_policy[item.type] = false;
+    addTestRole(cfg, 'Chief of Staff', 'Fictional Org');
     if (item.type === 'working') {
       cfg.handoff = { vault: 'Fictional Org', folder: 'Handoffs' };
       cfg.twin_profiles[0].allowed_actions.push('write_handoff');
@@ -616,6 +691,7 @@ test('Twin memory policy blocks disabled types at tool, prompt and resource boun
     assert.deepEqual(validate(cfg), [], `${item.type} policy fixture remains valid`);
     const ctx = createContext(cfg, { env: { BRAINLINK_HOME: path.join(root, `app-${item.type}`), BRAINLINK_AGENT_TOKEN: 'fictional-agent-token', BRAINLINK_SEMANTIC: '0' } });
     const mcp = createMcp(ctx);
+    await activateTestRole(mcp, 'Chief of Staff');
     const init = await mcp.handle({ jsonrpc: '2.0', id: 5, method: 'initialize', params: { protocolVersion: '2025-03-26' } });
     const enabledTypes = ['working', 'semantic', 'procedural', 'episodic'].filter((type) => type !== item.type).join(', ');
     assert.ok(init.result.instructions.includes(`MEMORY TYPES ENABLED FOR THIS CONNECTION: ${enabledTypes}.`), `${item.type} stays out of this connection's memory guidance`);
@@ -623,7 +699,9 @@ test('Twin memory policy blocks disabled types at tool, prompt and resource boun
     assert.ok(!listed.result.tools.some((tool) => tool.name === item.tool), `${item.type} tool is not advertised`);
     const denied = await mcp.handle({ jsonrpc: '2.0', id: 2, method: 'tools/call', params: { name: item.tool, arguments: item.args || {} } });
     assert.equal(denied.result.isError, true, `${item.type} call is denied even if sent directly`);
-    assert.match(denied.result.content[0].text, new RegExp(`does not allow ${item.type} memory`));
+    assert.match(denied.result.content[0].text, item.type === 'working'
+      ? /does not allow working memory/
+      : new RegExp(`does not allow ${item.type} memory`));
     assert.doesNotMatch(JSON.stringify(denied), /Fictional semantic content|PROCEDURAL_POLICY_CANARY_61/);
 
     if (item.prompt) {
@@ -639,7 +717,7 @@ test('Twin memory policy blocks disabled types at tool, prompt and resource boun
       assert.match(read.error.message, /does not allow procedural memory/);
       assert.doesNotMatch(JSON.stringify(read), /PROCEDURAL_POLICY_CANARY_61/);
       const prompts = await mcp.handle({ jsonrpc: '2.0', id: 6, method: 'prompts/list' });
-      assert.ok(!prompts.result.prompts.some((prompt) => prompt.name.startsWith('connect-')));
+      assert.ok(prompts.result.prompts.some((prompt) => prompt.name.startsWith('connect-')), 'role activation instructions remain available without procedural note access');
     }
   }
 });
@@ -693,15 +771,12 @@ test('semantic vault tools exclude documents assigned to disabled memory types',
     working: ['WORKING_CANARY', 'HANDOFF_CANARY'],
     episodic: ['EPISODIC_CAPTURE_CANARY', 'EPISODE_CANARY'],
   };
+  cfg.agents = [{ name: 'Fictional Operations', vault: 'Fictional Org', role: 'Synthetic role', activation: ['Connect to Operations'], close: ['Operations close loop'], connect_notes: ['Policy.md'], tail_notes: ['Working.md'], close_target: { mode: 'append-section', path: 'Office/Captures.md' }, stale_days: 30 }];
   for (const disabled of Object.keys(canaries)) {
     const ctx = createContext(cfg, { env: { BRAINLINK_AGENT_TOKEN: 'fictional-agent-token', BRAINLINK_SEMANTIC: '0' } });
-    ctx.twinScope.memory_policy[disabled] = false;
-    ctx.agents = [{
-      name: 'Fictional Operations', vault: 'Fictional Org', role: 'Synthetic role', activation: ['Connect to Operations'],
-      close: ['Operations close loop'], connect_notes: ['Policy.md'], tail_notes: ['Working.md'],
-      close_target: { mode: 'append-section', path: 'Office/Captures.md' }, stale_days: 30,
-    }];
+    setRuntimeMemoryPolicy(ctx, disabled, false);
     const mcp = createMcp(ctx);
+    await activateTestRole(mcp);
     const call = (name, args) => mcp.handle({ jsonrpc: '2.0', id: 1, method: 'tools/call', params: { name, arguments: args } });
     const search = await call('vault_search', { vault: 'Fictional Org', query: canaries[disabled].join(' ') });
     assert.equal(search.result.isError, false, JSON.stringify(search));
@@ -750,10 +825,12 @@ test('semantic-only agents cannot search or directly read typed operating manual
   await writeFile(path.join(vaultPath, 'Session Summary Type.md'), '---\ntype: session_summary\n---\n# Session Summary\n\nEPISODIC_TYPE_CANARY is private to agents with episodic permission.');
   await writeFile(path.join(vaultPath, 'Session Summary Tag.md'), '---\ntags: [session_summary]\n---\n# Session Summary Tag\n\nEPISODIC_TAG_CANARY is private to agents with episodic permission.');
   const cfg = fixture(vaultPath);
+  addTestRole(cfg);
   const ctx = createContext(cfg, { env: { BRAINLINK_AGENT_TOKEN: 'fictional-agent-token' } });
-  ctx.twinScope.memory_policy.procedural = false;
-  ctx.twinScope.memory_policy.episodic = false;
-  const mcp = createMcp(ctx);
+  setRuntimeMemoryPolicy(ctx, 'procedural', false);
+  setRuntimeMemoryPolicy(ctx, 'episodic', false);
+  let mcp = createMcp(ctx);
+  await activateTestRole(mcp);
   const call = (name, args) => mcp.handle({ jsonrpc: '2.0', id: 1, method: 'tools/call', params: { name, arguments: args } });
   const query = 'SEMANTIC_TYPE_CANARY PROCEDURAL_MANUAL_CANARY PROCEDURAL_SKILL_CANARY EPISODIC_TYPE_CANARY EPISODIC_TAG_CANARY MALFORMED_MEMORY_CANARY UNTYPED_MEMORY_CANARY';
   const search = await call('vault_search', { vault: 'Fictional Org', query });
@@ -769,16 +846,22 @@ test('semantic-only agents cannot search or directly read typed operating manual
     assert.equal(read.result.isError, true, `${note} must be blocked by its required memory grant`);
     assert.doesNotMatch(JSON.stringify(read), /PROCEDURAL_MANUAL_CANARY|PROCEDURAL_SKILL_CANARY|EPISODIC_TYPE_CANARY|EPISODIC_TAG_CANARY|MALFORMED_MEMORY_CANARY/);
   }
-  ctx.twinScope.memory_policy.semantic = false;
+  setRuntimeMemoryPolicy(ctx, 'semantic', false);
+  mcp = createMcp(ctx);
+  await activateTestRole(mcp);
   const genericDenied = await call('vault_read_note', { vault: 'Fictional Org', path: 'Untyped memory.md' });
   assert.equal(genericDenied.result.isError, true, 'unclassified notes require semantic memory');
   assert.doesNotMatch(JSON.stringify(genericDenied), /UNTYPED_MEMORY_CANARY/);
-  ctx.twinScope.memory_policy.semantic = true;
+  setRuntimeMemoryPolicy(ctx, 'semantic', true);
+  mcp = createMcp(ctx);
+  await activateTestRole(mcp);
   const genericAllowed = await call('vault_read_note', { vault: 'Fictional Org', path: 'Untyped memory.md' });
   assert.equal(genericAllowed.result.isError, false);
   assert.match(JSON.stringify(genericAllowed.result.structuredContent), /UNTYPED_MEMORY_CANARY/);
-  ctx.twinScope.memory_policy.procedural = true;
-  ctx.twinScope.memory_policy.episodic = true;
+  setRuntimeMemoryPolicy(ctx, 'procedural', true);
+  setRuntimeMemoryPolicy(ctx, 'episodic', true);
+  mcp = createMcp(ctx);
+  await activateTestRole(mcp);
   const allowed = await call('vault_read_note', { vault: 'Fictional Org', path: 'Anna Manual.md' });
   assert.equal(allowed.result.isError, false, 'the existing Harness grant can still read the operating manual');
   assert.match(JSON.stringify(allowed.result.structuredContent), /PROCEDURAL_MANUAL_CANARY/);
@@ -797,8 +880,8 @@ test('search and direct reads check current memory type before reusing a stale-i
   const cfg = fixture(vaultPath);
   const ctx = createContext(cfg, { env: { BRAINLINK_AGENT_TOKEN: 'fictional-agent-token' } });
   const searchCtx = createContext(cfg, { env: { BRAINLINK_AGENT_TOKEN: 'fictional-agent-token' } });
-  ctx.twinScope.memory_policy.episodic = false;
-  searchCtx.twinScope.memory_policy.episodic = false;
+  setRuntimeMemoryPolicy(ctx, 'episodic', false);
+  setRuntimeMemoryPolicy(searchCtx, 'episodic', false);
   await loadVault(ctx, 'Fictional Org');
   await loadVault(searchCtx, 'Fictional Org');
   const cachedFiles = [ctx, searchCtx].map((item) => item.cache.get('Fictional Org').files.get('Mutable.md'));
@@ -850,9 +933,13 @@ test('profile-scoped session reads stay inside the profile and closeouts remain 
   };
   addScopedProfile({ id: 'personal_twin_2', name: 'Fictional Personal Twin', mode: 'personal', owner: 'fictional-person', vault: 'Fictional Personal', agentId: 'agent_personal', token: 'fictional-personal-token' });
   addScopedProfile({ id: 'client_twin_3', name: 'Fictional Client Twin', mode: 'client', owner: 'fictional-client-owner', vault: 'Fictional Client', agentId: 'agent_client', token: 'fictional-client-token' });
+  addTestRole(cfg, 'Fictional Org Role', 'Fictional Org');
+  addTestRole(cfg, 'Fictional Personal Role', 'Fictional Personal');
+  addTestRole(cfg, 'Fictional Client Role', 'Fictional Client');
   const env = { BRAINLINK_HOME: path.join(root, 'app'), HOME: root, BRAINLINK_AGENT_TOKEN: 'fictional-agent-token' };
   assert.deepEqual(validate(cfg), []);
   const mcp = createMcp(createContext(cfg, { env }));
+  await activateTestRole(mcp, 'Fictional Org Role');
   const store = await openSessionStore(env);
   const own = await store.putSession({ client: 'fictional-org-ai', source_id: 'own-1', profile_id: 'org_twin_1', vault: 'Sessions', project: 'Example', title: 'Own session', summary: 'ORG_SESSION_CANARY_77', started_at: new Date().toISOString(), private: true, messages: [{ role: 'assistant', at: new Date().toISOString(), text: 'ORG_MESSAGE_CANARY_77' }] });
   const foreign = await store.putSession({ client: 'fictional-person-ai', source_id: 'private-1', profile_id: 'personal_twin_2', vault: 'Sessions', project: 'Private', title: 'Private session', summary: 'PERSONAL_SESSION_CANARY_88', started_at: new Date().toISOString(), private: true, messages: [{ role: 'assistant', at: new Date().toISOString(), text: 'PERSONAL_MESSAGE_CANARY_88' }] });
@@ -872,14 +959,16 @@ test('profile-scoped session reads stay inside the profile and closeouts remain 
   const fullOptInCfg = structuredClone(cfg);
   fullOptInCfg.twin_profiles[0].source_policy.session_capture = 'full-text-opt-in';
   const fullOptInMcp = createMcp(createContext(fullOptInCfg, { env }));
+  await activateTestRole(fullOptInMcp, 'Fictional Org Role');
   const allowedFull = await fullOptInMcp.handle({ jsonrpc: '2.0', id: 22, method: 'tools/call', params: { name: 'session_read', arguments: { id: own.id, full: true } } });
   assert.match(JSON.stringify(allowedFull), /ORG_MESSAGE_CANARY_77/);
   const scopedClients = [
-    { id: 'organisation', mcp, own, foreign: [foreign, clientSession, unassigned], token: 'fictional-agent-token' },
-    { id: 'personal', mcp: createMcp(createContext(cfg, { env: { ...env, BRAINLINK_AGENT_TOKEN: 'fictional-personal-token' } })), own: foreign, foreign: [own, clientSession, unassigned], token: 'fictional-personal-token' },
-    { id: 'client', mcp: createMcp(createContext(cfg, { env: { ...env, BRAINLINK_AGENT_TOKEN: 'fictional-client-token' } })), own: clientSession, foreign: [own, foreign, unassigned], token: 'fictional-client-token' },
+    { id: 'organisation', role: 'Fictional Org Role', mcp, own, foreign: [foreign, clientSession, unassigned], token: 'fictional-agent-token' },
+    { id: 'personal', role: 'Fictional Personal Role', mcp: createMcp(createContext(cfg, { env: { ...env, BRAINLINK_AGENT_TOKEN: 'fictional-personal-token' } })), own: foreign, foreign: [own, clientSession, unassigned], token: 'fictional-personal-token' },
+    { id: 'client', role: 'Fictional Client Role', mcp: createMcp(createContext(cfg, { env: { ...env, BRAINLINK_AGENT_TOKEN: 'fictional-client-token' } })), own: clientSession, foreign: [own, foreign, unassigned], token: 'fictional-client-token' },
   ];
   for (const scoped of scopedClients) {
+    await activateTestRole(scoped.mcp, scoped.role);
     const scopedList = await scoped.mcp.handle({ jsonrpc: '2.0', id: 23, method: 'tools/call', params: { name: 'session_list', arguments: { q: 'SESSION_CANARY' } } });
     assert.deepEqual(scopedList.result.structuredContent.sessions.map((session) => session.id), [scoped.own.id], `${scoped.id} Twin sees its assigned session only`);
     const listJson = JSON.stringify(scopedList);
@@ -931,6 +1020,8 @@ test('profile-scoped handoffs require explicit grants and filter mailbox bodies 
       { name: 'Fictional Org', access: 'propose', operations: ['handoff_read', 'write_handoff'] },
     ] }],
   });
+  addTestRole(cfg, 'Fictional Org Role', 'Fictional Org');
+  addTestRole(cfg, 'Fictional Client Role', 'Fictional Client');
   const env = { BRAINLINK_HOME: path.join(root, 'app'), BRAINLINK_AGENT_TOKEN: 'fictional-agent-token' };
   assert.deepEqual(validate(cfg), []);
   const ungranted = structuredClone(cfg);
@@ -943,6 +1034,8 @@ test('profile-scoped handoffs require explicit grants and filter mailbox bodies 
   assert.equal(deniedList.result.isError, true);
   const mcp = createMcp(createContext(cfg, { env }));
   const clientMcp = createMcp(createContext(cfg, { env: { ...env, BRAINLINK_AGENT_TOKEN: 'fictional-client-handoff-token' } }));
+  await activateTestRole(mcp, 'Fictional Org Role');
+  await activateTestRole(clientMcp, 'Fictional Client Role');
   const names = (await mcp.handle({ jsonrpc: '2.0', id: 30, method: 'tools/list' })).result.tools.map((tool) => tool.name);
   assert.ok(names.includes('list_handoffs'));
   assert.ok(names.includes('send_handoff'));
@@ -1000,7 +1093,7 @@ test('authenticated local status exposes Twin scopes without returning agent cre
     assert.equal(denied.status, 401);
     const response = await fetch(`${base}/api/state`, { headers: { 'X-BrainLink-Token': setup.token } });
     const state = await response.json();
-    assert.equal(state.twin_profiles.enforcement, 'scoped_agent_read_only');
+    assert.equal(state.twin_profiles.enforcement, 'scoped_agent_profile_grants');
     assert.equal(state.twin_profiles.profiles[0].mode, 'organisation');
     assert.equal(state.twin_profiles.profiles[0].vaults[0].access, 'propose');
     assert.equal(state.twin_profiles.profiles[0].agents[0].vaults[0].access, 'read');
@@ -1063,7 +1156,7 @@ test('preset AI apps receive only the selected Twin permissions and disconnect r
 
     const invalid = await api('/api/connect', { client: 'cursor', profile_id: 'org_scope', vaults: [{ name: 'Ian Private', operations: ['search'] }] });
     assert.equal(invalid.status, 400);
-    assert.match(invalid.body.error, /vaults already included/);
+    assert.match(invalid.body.error, /available vaults only once/);
 
     const disconnected = await api('/api/disconnect', { client: 'cursor' });
     assert.equal(disconnected.status, 200);
@@ -1096,6 +1189,7 @@ test('DeepSeek Harness named profile connects through Setup with its own Twin-sc
   await writeFile(path.join(dshProfile, 'cordis.patch.yml'), '[]\n');
   const env = { BRAINLINK_HOME: path.join(home, 'app'), HOME: home, USERPROFILE: home, DSH_HOME: dshHome };
   const cfg = fixture(vaultPath);
+  addTestRole(cfg, 'DeepSeek Role', 'Fictional Org');
   cfg.twin_profiles[0].agent_access = [];
   await saveConfig(cfg, path.join(env.BRAINLINK_HOME, 'config.json'));
   const setup = await startSetup({ env, home, os: 'linux', port: 0, useCli: false });
@@ -1123,6 +1217,7 @@ test('DeepSeek Harness named profile connects through Setup with its own Twin-sc
     assert.ok(saved.twin_profiles[0].agent_access[0].vaults[0].operations.includes('log_session'));
     assert.deepEqual(saved.twin_profiles[0].agent_access[0].memory_policy, { working: false, semantic: true, procedural: false, episodic: true });
     const dshMcp = createMcp(createContext(saved, { env: { ...env, BRAINLINK_AGENT_TOKEN: token, BRAINLINK_AI_PLATFORM: 'DeepSeek Harness' } }));
+    await activateTestRole(dshMcp, 'DeepSeek Role');
     const logResult = await dshMcp.handle({ jsonrpc: '2.0', id: 8, method: 'tools/call', params: { name: 'session_log', arguments: { title: 'Fictional Harness session', text: 'Saved by synthetic test.', private: false } } });
     assert.equal(logResult.result.isError, false);
     const loggedSession = JSON.parse(logResult.result.content[0].text);
@@ -1154,6 +1249,7 @@ test('preset AI apps can receive scoped session and handoff tools without semant
   cfg.twin_profiles[0].allowed_actions = [];
   cfg.twin_profiles[0].agent_access = [];
   cfg.handoff = { vault: 'Fictional Org', folder: 'Handoffs' };
+  addTestRole(cfg, 'Fictional Operations', 'Fictional Org');
   await saveConfig(cfg, path.join(env.BRAINLINK_HOME, 'config.json'));
   const setup = await startSetup({ env, home, os: 'linux', port: 0, useCli: false });
   const base = `http://127.0.0.1:${setup.port}`;
@@ -1178,6 +1274,7 @@ test('preset AI apps can receive scoped session and handoff tools without semant
     assert.deepEqual(grant.operations.sort(), ['handoff_read', 'read_session', 'write_handoff']);
     const ctx = createContext(saved, { env: { ...env, BRAINLINK_AGENT_TOKEN: token } });
     const mcp = createMcp(ctx);
+    await activateTestRole(mcp, 'Fictional Operations');
     const listed = await mcp.handle({ jsonrpc: '2.0', id: 1, method: 'tools/list', params: {} });
     const names = listed.result.tools.map((tool) => tool.name);
     assert.ok(names.includes('session_list'));
@@ -1287,7 +1384,7 @@ test('Setup creates a validated Twin from explicit vault, agent, action and memo
     assert.match(privateVaultResponse.body.error, /available vaults/);
     const unsupported = await api({ ...request, name: 'Should Refuse Too', agent_access: [{ agent_id: 'agent_personal', operations: ['write_note'] }] });
     assert.equal(unsupported.status, 400);
-    assert.match(unsupported.body.error, /supported action/);
+    assert.match(unsupported.body.error, /full read and write access/);
     const disabledMemory = await api({ ...request, name: 'Should Refuse Disabled Memory', memory_policy: { ...request.memory_policy, semantic: false }, agent_access: [{ agent_id: 'agent_personal', vaults: [{ name: 'Fictional Personal', operations: ['search'] }] }] });
     assert.equal(disabledMemory.status, 400);
     assert.match(disabledMemory.body.error, /Enable semantic memory/);
@@ -1421,7 +1518,7 @@ test('Setup edits each Twin agent vault grant independently without widening acc
       memory_policy: { working: true, semantic: true, procedural: true, episodic: true },
     });
     assert.equal(refused.status, 400);
-    assert.match(refused.body.error, /propose access for a vault/);
+    assert.match(refused.body.error, /Choose propose or write access/);
     assert.equal(await readFile(path.join(env.BRAINLINK_HOME, 'config.json'), 'utf8'), afterValidUpdate);
     const mixedSessionScope = await call('/api/twins/update', {
       profile_id: 'org_twin_1', name: 'Invalid session scope', mode: 'organisation', owner: 'fictional-owner',

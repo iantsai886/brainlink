@@ -32,6 +32,20 @@ const WR = { readOnlyHint: false, destructiveHint: false, idempotentHint: false,
 const obsidianUrl = (v, p) => `obsidian://open?vault=${encodeURIComponent(v)}&file=${encodeURIComponent(p.replace(/\.md$/, ''))}`;
 export function createMcp(ctx, { onCall = () => {}, onProposal = null } = {}) {
   const baseCtx = ctx;
+  // A partially migrated scope must deny access cleanly rather than crash or retain
+  // enabled vaults that have no explicit grant.
+  if (baseCtx.twinScope?.mode === 'scoped') {
+    const profiles = (Array.isArray(baseCtx.twinScope.profiles) ? baseCtx.twinScope.profiles : [])
+      .map((profile) => ({ ...profile, grants: Array.isArray(profile?.grants)
+        ? profile.grants.filter((grant) => grant && typeof grant.name === 'string').map((grant) => ({
+          ...grant, operations: Array.isArray(grant.operations) ? grant.operations.filter((operation) => typeof operation === 'string') : [],
+        }))
+        : [] }));
+    // Profile grants are canonical. A stale top-level grant list must not widen them.
+    const grants = profiles.flatMap((profile) => profile.grants);
+    baseCtx.twinScope = { ...baseCtx.twinScope, profiles, grants };
+    baseCtx.enabled = (baseCtx.enabled || []).filter((name) => grants.some((grant) => grant?.name === name));
+  }
   const roleScopeStorage = new AsyncLocalStorage();
   const roleScopes = new Map();
   const roleScopeTtlMs = 8 * 60 * 60 * 1000;
@@ -61,7 +75,7 @@ export function createMcp(ctx, { onCall = () => {}, onProposal = null } = {}) {
   // connectAgent handler separately filters each note by memory policy.
   const agents = ctx.twinScope?.mode === 'scoped'
     ? ctx.agents.filter((agent) => ctx.twinScope.grants.some((grant) => grant.name === agent.vault
-      && grant.operations.includes('read_note')))
+      && grant.operations.length > 0))
     : ctx.agents;
   const agentSlug = (agent) => agent.name.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '') || 'agent';
   const activationTools = new Map();
@@ -84,22 +98,32 @@ export function createMcp(ctx, { onCall = () => {}, onProposal = null } = {}) {
   const scopedContextForRole = (role) => {
     if (!baseCtx.enabled.includes(role.vault)) return null;
     const matches = (baseCtx.twinScope?.profiles || []).flatMap((profile) => {
-      const grant = profile.grants.find((item) => item.name === role.vault && item.operations.includes('read_note'));
+      const grant = profile.grants.find((item) => item.name === role.vault && item.operations.length > 0);
       return grant ? [{ profile, grant }] : [];
     });
     if (matches.length !== 1) return null;
     const { profile, grant } = matches[0];
     const selectedGrant = { ...grant, memory_policy: { ...grant.memory_policy } };
-    const selectedProfile = { ...profile, grants: [selectedGrant], memory_policy: { ...profile.memory_policy } };
+    const selectedGrants = [selectedGrant];
+    const mailbox = (profile.grants || []).find((item) => item.name === cfg.handoff?.vault
+      && item.name !== grant.name && item.operations.some((operation) => ['handoff_read', 'write_handoff'].includes(operation)));
+    if (mailbox) selectedGrants.push({ ...mailbox,
+      operations: mailbox.operations.filter((operation) => ['handoff_read', 'write_handoff'].includes(operation)),
+      memory_policy: { ...mailbox.memory_policy },
+    });
+    const selectedMemoryPolicy = Object.fromEntries(['working', 'semantic', 'procedural', 'episodic'].map((type) => [
+      type, selectedGrants.some((item) => item.memory_policy?.[type] === true),
+    ]));
+    const selectedProfile = { ...profile, grants: selectedGrants, memory_policy: selectedMemoryPolicy };
     return {
       ...baseCtx,
-      enabled: [role.vault],
+      enabled: selectedGrants.map((item) => item.name),
       agents: [role],
       agentRole: role.name,
       twinScope: {
         mode: 'scoped', profile_id: profile.profile_id, profile_name: profile.profile_name,
-        profile_ids: [profile.profile_id], profiles: [selectedProfile], grants: [selectedGrant],
-        source_policy: { ...profile.source_policy }, memory_policy: { ...profile.memory_policy },
+        profile_ids: [profile.profile_id], profiles: [selectedProfile], grants: selectedGrants,
+        source_policy: { ...profile.source_policy }, memory_policy: selectedMemoryPolicy,
       },
     };
   };
@@ -117,7 +141,9 @@ export function createMcp(ctx, { onCall = () => {}, onProposal = null } = {}) {
     procedural: 'Reusable methods and workflows; call a Skill tested only when its tests or repeated evidence support that claim.',
     episodic: 'Source-linked events and session outcomes; do not create a second episode for a session already captured.',
   };
-  const memoryPolicy = ctx.twinScope?.memory_policy || Object.fromEntries(Object.keys(memoryTypes).map((type) => [type, true]));
+  const memoryPolicy = ctx.twinScope?.mode === 'scoped'
+    ? Object.fromEntries(Object.keys(memoryTypes).map((type) => [type, (ctx.twinScope.grants || []).some((grant) => grant.memory_policy?.[type] === true)]))
+    : ctx.twinScope?.memory_policy || Object.fromEntries(Object.keys(memoryTypes).map((type) => [type, true]));
   let sessionStorePromise = null;
   const sessionStore = () => sessionStorePromise ||= openSessionStore(ctx.env);
   // Refresh incrementally after the first session_list. The cooldown avoids walking a large local
@@ -290,14 +316,14 @@ export function createMcp(ctx, { onCall = () => {}, onProposal = null } = {}) {
       // Same fail-closed pattern as session_list: include_private is always false here, and the
       // allow_imported_private / allow_imported_full_private flags (from the user's own BrainLink
       // Settings choice) are always overwritten after the caller's arguments, never honoured from them.
-      run: async (a) => sessionRead(await sessionStore(), { ...a, include_private: false, allow_imported_private: cfg.sessions.shareSummaries, allow_imported_full_private: cfg.sessions.shareFullText, allow_profile_full_text: Object.fromEntries((ctx.twinScope?.profiles || []).map((profile) => [profile.profile_id, profile.source_policy?.session_capture === 'full-text-opt-in'])), profile_ids: ctx.twinScope?.mode === 'scoped' ? twinSessionProfileIds(ctx) : undefined, allow_profile_private: ctx.twinScope?.mode === 'scoped' }) },
+      run: async (a) => sessionRead(await sessionStore(), { ...a, include_private: false, allow_imported_private: cfg.sessions.shareSummaries, allow_imported_full_private: cfg.sessions.shareFullText, profile_full_text: Object.fromEntries((ctx.twinScope?.profiles || []).map((profile) => [profile.profile_id, profile.source_policy?.session_capture === 'full-text-opt-in'])), profile_ids: ctx.twinScope?.mode === 'scoped' ? twinSessionProfileIds(ctx) : undefined, allow_profile_private: ctx.twinScope?.mode === 'scoped' }) },
     { name: 'session_log', title: 'Log a note to an AI session', annotations: WR,
       description: 'For clients with no readable local history: append a short note/turn to a session, creating one for today if session_id is omitted. Secret-filtered before storage. Profile-scoped agents need the separate log_session permission and a session policy that permits content capture; their entries are always private and owned by that profile, and they can append only to their own sessions.',
       inputSchema: { type: 'object', properties: {
         vault: vaultProp, title: { type: 'string' }, text: { type: 'string' }, role: { type: 'string', enum: ['note', 'user', 'assistant'], default: 'note' },
-        session_id: { type: 'string' }, project: { type: 'string' }, private: { type: 'boolean', default: true } }, required: ctx.twinScope?.mode === 'scoped' ? ['text', 'vault'] : ['text'] },
+        session_id: { type: 'string' }, project: { type: 'string' }, private: { type: 'boolean', default: true } }, required: ['text'] },
       run: async (a) => sessionLog(await sessionStore(), ctx.twinScope?.mode === 'scoped' ? { ...a, private: true } : a, ctx.platform,
-        ctx.twinScope?.mode === 'scoped' ? { profile_id: twinProfileForVault(ctx, a.vault)?.profile_id } : {}) },
+        ctx.twinScope?.mode === 'scoped' ? { profile_id: twinProfileForVault(ctx, a.vault)?.profile_id || ctx.twinScope.profile_id } : {}) },
     { name: 'session_filing_folders', title: 'List safe session filing folders', annotations: RO,
       description: 'List existing non-hidden, non-protected, non-excluded folders in one explicitly chosen enabled vault. Use these choices to suggest a destination at session close; this tool only lists folder names and never writes.',
       inputSchema: { type: 'object', properties: { vault: vaultProp }, required: ['vault'] },

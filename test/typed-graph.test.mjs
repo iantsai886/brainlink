@@ -313,7 +313,7 @@ test('typed relationship proposals reject invalid IDs, predicates, evidence and 
   await mkdir(path.join(dir, 'Inbox'), { recursive: true });
   await writeFile(path.join(dir, 'Questions Dataset.md'), entity({ type: 'dataset', id: 'dataset.questions' }));
   const ctx = await context([{ name: 'Company', path: dir }]);
-  const base = { vault: 'Company', folder: 'Inbox', title: 'Workflow', type: 'workflow', entity_id: 'workflow.test', entity_scope: 'organisation', body: 'Do work.', source: 'test', confirm: true };
+  const base = { vault: 'Company', folder: 'Inbox', title: 'Workflow', type: 'workflow', entity_id: 'workflow.test', entity_scope: 'organisation', body: 'Do work.', source: 'test', ai_platform: 'ChatGPT', agent_or_role: 'test', session_or_task_id: 'relationship-validation', confirm: true };
   const invalid = await proposeNote(ctx, { ...base, relations: [{ predicate: 'invented', target: 'x', source: '', confidence: 2 }] });
   assert.equal(invalid.ok, false);
   assert.ok(invalid.errors.length >= 4);

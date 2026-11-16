@@ -92,6 +92,7 @@ export async function proposeNote(ctx, a, now = new Date()) {
     errors.push(`this Twin profile does not allow proposing ${a.memory_type} memory`);
   }
   const twinProfile = twinProfileForVault(ctx, vaultName);
+  if (ctx.twinScope?.mode === 'scoped' && !twinProfile) errors.push('the selected vault must match the active Twin profile grant');
   const twinSourcePolicy = twinProfile?.source_policy || null;
   let twinConfidence = a.confidence;
   if (twinSourcePolicy?.provenance_required) {

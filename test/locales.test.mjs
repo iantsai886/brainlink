@@ -48,14 +48,18 @@ test('Twin read-and-propose preset affects only chosen agents and vaults and doe
 
 test('connection dialog offers read-and-propose only when the Twin grants it', async () => {
   const html = await readFile(path.join(ROOT, 'ui', 'index.html'), 'utf8');
-  assert.match(html, /const canPropose = grant\.access === 'propose' && profile\.memory_policy\?\.semantic === true/);
-  assert.match(html, /data-preset-read-propose="\$\{esc\(grant\.name\)\}"/);
-  const start = html.indexOf("$('preset-vault-list').addEventListener('click'");
-  const end = html.indexOf("$('preset-vault-list').onchange", start);
-  assert.ok(start >= 0 && end > start, 'per-vault connection preset handler is present');
-  const handler = html.slice(start, end);
-  assert.match(handler, /\['search', 'read_note', 'propose_note'\]/);
-  assert.doesNotMatch(handler, /api\(|pendingPresetClient/);
+  const start = html.indexOf('function renderPresetConnectOptions()');
+  const end = html.indexOf('function updatePresetPermissionControls()', start);
+  assert.ok(start >= 0 && end > start, 'per-profile connection permission renderer is present');
+  const renderer = html.slice(start, end);
+  assert.match(renderer, /const vaults = \(profile\.vaults \|\| \[\]\)\.filter\(\(grant\) => S\.vaults\.some\(\(vault\) => vault\.name === grant\.name && vault\.exists\)\)/,
+    'only existing Twin-granted vaults are offered');
+  assert.match(renderer, /data-preset-vault="\$\{esc\(grant\.name\)\}"/,
+    'operations are selected explicitly per granted vault');
+  assert.match(renderer, /grant\.access === 'propose' && \['search','read_note'\]\.includes\(action\)/,
+    'proposal-level Twin access defaults to search and read only');
+  assert.match(renderer, /grant\.access === 'write' && \['search','read_note','write_note'\]\.includes\(action\)/,
+    'write access is offered only when the Twin grant allows it');
 });
 
 test('connection wording distinguishes configured settings from an AI app that loaded them', async () => {

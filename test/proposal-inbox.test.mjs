@@ -43,7 +43,7 @@ test('MCP queues proposal-only new-note previews without changing the vault', as
   assert.equal(result.result.structuredContent.written, false);
   assert.equal(result.result.structuredContent.owner_review_id, 'queued');
   assert.equal(queued.length, 1);
-  assert.equal(queued[0].path, 'Inbox/2026-11-11 — A safe idea.md');
+  assert.match(queued[0].path, /^Inbox\/\d{4}-\d{2}-\d{2} — A safe idea\.md$/);
   assert.deepEqual(await readdir(path.join(vaultPath, 'Inbox')), []);
 });
 
@@ -103,7 +103,9 @@ test('authenticated owner approval saves one new file, respects read-only mode, 
   assert.equal(daily.result.structuredContent.owner_review_id != null, true);
   const dailyApproval = await api('POST', '/api/proposals/approve', { id: daily.result.structuredContent.owner_review_id, confirm: true });
   assert.equal(dailyApproval.json.ok, true);
-  assert.match(await readFile(path.join(vaultPath, 'Daily', '2026-11-11.md'), 'utf8'), /A fictional daily capture/);
+  const dailyFiles = (await readdir(path.join(vaultPath, 'Daily'))).filter((name) => /^\d{4}-\d{2}-\d{2}\.md$/.test(name));
+  assert.equal(dailyFiles.length, 1, 'approval creates one date-stamped daily note');
+  assert.match(await readFile(path.join(vaultPath, 'Daily', dailyFiles[0]), 'utf8'), /A fictional daily capture/);
   const appendPath = 'Inbox/Append.md';
   const appendFile = path.join(vaultPath, 'Inbox', 'Append.md');
   const original = '# Existing note\n\nOriginal approved content.\n';
