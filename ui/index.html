@@ -289,6 +289,13 @@ main #ready, main #ask-panel, main #brain-panel, main #sessions-panel, main #s-c
     <div id="proposal-review-list" class="cards"></div>
   </details>
 
+  <details class="card" id="decision-reviews-panel" hidden>
+    <summary data-i18n="decisionReviews.title"></summary>
+    <p class="hint" data-i18n="decisionReviews.hint"></p>
+    <label><span data-i18n="decisionReviews.vault"></span><select id="decision-reviews-vault"></select></label>
+    <div id="decision-reviews-list" class="cards"></div>
+  </details>
+
   <details class="card" id="twin-profiles-panel" style="margin-top:12px" hidden>
     <summary data-i18n="twinProfiles.title"></summary>
     <p class="hint" data-i18n="twinProfiles.hint"></p>
@@ -1053,6 +1060,71 @@ document.addEventListener('click', (event) => {
   if (target.tagName === 'DETAILS') target.open = true;
   const settings = target.closest('details.settings');
   if (settings) settings.open = true;
+});
+
+async function loadDecisionReviews() {
+  const panel = $('decision-reviews-panel');
+  panel.hidden = !S.vaults?.length;
+  if (panel.hidden) return;
+  const select = $('decision-reviews-vault');
+  const selected = select.value;
+  select.innerHTML = (S.vaults || []).map((vault) => `<option value="${esc(vault.name)}">${esc(vault.name)}</option>`).join('');
+  if ((S.vaults || []).some((vault) => vault.name === selected)) select.value = selected;
+  await renderDecisionReviews();
+}
+
+async function renderDecisionReviews() {
+  const target = $('decision-reviews-list');
+  try {
+    const { reviews = [] } = await api('POST', '/api/decision-reviews/list', { vault: $('decision-reviews-vault').value });
+    if (!reviews.length) { target.innerHTML = `<p class="muted">${esc(t('decisionReviews.empty'))}</p>`; return; }
+    target.innerHTML = reviews.map((review) => `<article class="card" data-decision-review="${esc(review.path)}" data-decision-vault="${esc(review.vault)}">
+      <b>${esc(review.title)}</b><div class="muted">${esc(review.path)} · ${esc(t('decisionReviews.due', { date: review.review_date }))}</div>
+      ${review.happened_since?.length ? `<p>${esc(t('decisionReviews.since'))}: ${review.happened_since.map((item) => esc(`${item.title} (${item.path})`)).join(' · ')}</p>` : ''}
+      <label><span>${esc(t('decisionReviews.nextDate'))}</span><input type="date" data-decision-next-date></label>
+      <div class="row"><button type="button" data-decision-action="still_stands">${esc(t('decisionReviews.stands'))}</button><button type="button" data-decision-action="retire">${esc(t('decisionReviews.retire'))}</button></div>
+      <label><span>${esc(t('decisionReviews.newTitle'))}</span><input maxlength="120" data-decision-new-title></label>
+      <label><span>${esc(t('decisionReviews.newBody'))}</span><textarea rows="4" data-decision-new-body></textarea></label>
+      <button type="button" data-decision-action="changed">${esc(t('decisionReviews.changed'))}</button>
+      <pre class="mono" data-decision-preview hidden style="white-space:pre-wrap;max-height:360px;overflow:auto"></pre>
+      <button class="primary" type="button" data-decision-confirm hidden>${esc(t('decisionReviews.confirm'))}</button>
+      <span role="status" data-decision-status></span>
+    </article>`).join('');
+  } catch (error) { target.innerHTML = `<p class="error-box">${esc(error.message)}</p>`; }
+}
+
+$('decision-reviews-vault')?.addEventListener('change', () => renderDecisionReviews());
+document.addEventListener('click', (event) => {
+  const actionButton = event.target.closest('[data-decision-action]');
+  const confirmButton = event.target.closest('[data-decision-confirm]');
+  if (!actionButton && !confirmButton) return;
+  const card = event.target.closest('[data-decision-review]');
+  act(async () => {
+    const status = card.querySelector('[data-decision-status]');
+    status.textContent = '';
+    if (actionButton) {
+      actionButton.disabled = true;
+      try {
+        const action = actionButton.dataset.decisionAction;
+        const preview = await api('POST', '/api/decision-reviews/preview', { vault: card.dataset.decisionVault, path: card.dataset.decisionReview, action,
+          review_date: card.querySelector('[data-decision-next-date]').value,
+          new_title: card.querySelector('[data-decision-new-title]').value, body: card.querySelector('[data-decision-new-body]').value });
+        card.dataset.decisionPreviewId = preview.id;
+        const box = card.querySelector('[data-decision-preview]');
+        box.textContent = preview.append_preview + (preview.new_note_preview ? `\n--- New decision note preview: ${preview.new_note_path} ---\n${preview.new_note_preview}` : '');
+        box.hidden = false;
+        card.querySelector('[data-decision-confirm]').hidden = false;
+        status.textContent = t('decisionReviews.reviewFirst');
+      } catch (error) { status.textContent = error.message; actionButton.disabled = false; }
+    } else {
+      confirmButton.disabled = true;
+      try {
+        const result = await api('POST', '/api/decision-reviews/confirm', { id: card.dataset.decisionPreviewId, confirm: true });
+        status.textContent = t('decisionReviews.saved', { path: result.new_note_path || result.path });
+        await renderDecisionReviews();
+      } catch (error) { status.textContent = error.message; confirmButton.disabled = false; }
+    }
+  });
 });
 $('lang').onchange = () => act(() => setLocale($('lang').value));
 
@@ -2078,13 +2150,14 @@ async function load() {
   $('handoffs-panel').hidden = !hasVault || onboardingSync;
   if (hasVault && !onboardingSync) loadHandoffs().catch(() => {});
   if (hasVault && !onboardingSync) loadProposals().catch(() => {});
+  if (hasVault && !onboardingSync) loadDecisionReviews().catch(() => {});
   $('rsi-panel').hidden = !hasVault || onboardingSync;
   if (hasVault && !onboardingSync) loadRsi().catch(e => { $('rsi-ideas').innerHTML = '<p class="error-box">' + esc(e.message) + '</p>'; });
   if (hasVault && !onboardingSync) loadWeeklyBenchmark().catch(e => { $('rsi-weekly-status').textContent = e.message; });
   if (hasVault && !onboardingSync) loadDiscovery().catch(e => { $('rsi-discovery-status').textContent = e.message; });
   if (hasVault && !onboardingSync) loadObservations().catch(e => { $('rsi-observe-status').textContent = e.message; });
   if (guidedFirstRun) {
-    for (const id of ['ready','brain-panel','memory-review-panel','proposal-review-panel','twin-profiles-panel','ask-panel','sessions-panel','handoffs-panel','rsi-panel','sync-onboarding']) $(id).hidden = true;
+    for (const id of ['ready','brain-panel','memory-review-panel','proposal-review-panel','decision-reviews-panel','twin-profiles-panel','ask-panel','sessions-panel','handoffs-panel','rsi-panel','sync-onboarding']) $(id).hidden = true;
   }
   $('cfgpath').textContent = S.config_path;
   $('n1').className = 'step' + (S.vaults.length ? ' done' : '');

@@ -53,6 +53,7 @@ import { sessionHookStatus, setSessionHook, hermesSessionHookStatus, setHermesSe
 import { twinProfileStatus, profileScopeEditable } from './twin-profiles.mjs';
 import { createRsiLedger } from './rsi-ledger.mjs';
 import { createRsiExperiments } from './rsi-experiments.mjs';
+import { listDecisionReviews, readDecisionReview, validReviewDate } from './decision-reviews.mjs';
 import { createRsiDiscovery } from './rsi-discovery.mjs';
 import { createRsiObservationSchedule } from './rsi-observation-schedule.mjs';
 import { createRsiWeekly, taipeiWeek } from './rsi-weekly.mjs';
@@ -1551,6 +1552,7 @@ export async function startSetup(opts = {}) {
   }
 
   const teachPreviews = new Map();
+  const decisionReviewPreviews = new Map();
   const routes = {
     'GET /api/state': () => state(),
     'GET /api/updates/check': async () => checkForUpdate({
@@ -2136,6 +2138,66 @@ export async function startSetup(opts = {}) {
       return saveMemoryForReview(localContext(cfg, { ...env, BRAINLINK_SEMANTIC: '0' }), String(b.vault || ''), b.text, b.etag);
     },
     'GET /api/proposals': async () => ({ proposals: (await proposalInbox.listPending()).map(({ id, vault, path: rel, content, tool, agent, agent_verified, created_at }) => ({ id, vault, path: rel, content, tool, agent, agent_verified, created_at })) }),
+    'POST /api/decision-reviews/list': async (b) => {
+      const cfg = await loadConfig(file);
+      const ctx = localContext(cfg, { ...env, BRAINLINK_SEMANTIC: '0' });
+      const vault = String(b.vault || '');
+      if (!ctx.enabled.includes(vault)) throw new Error('Choose an enabled vault.');
+      const reviews = await listDecisionReviews(ctx, vault, { limit: 50 });
+      return { reviews };
+    },
+    'POST /api/decision-reviews/preview': async (b) => {
+      const cfg = await loadConfig(file);
+      const ctx = localContext(cfg, { ...env, BRAINLINK_SEMANTIC: '0', BRAINLINK_AI_PLATFORM: 'BrainLink Setup' });
+      const vault = String(b.vault || ''), rel = String(b.path || ''), action = String(b.action || '');
+      if (!ctx.enabled.includes(vault)) throw new Error('Choose an enabled vault.');
+      if (!['still_stands', 'changed', 'retire'].includes(action)) throw new Error('Choose a supported decision review action.');
+      const note = await readDecisionReview(ctx, vault, rel);
+      const oldTitle = String(note.body?.match(/^# (.+)$/m)?.[1] || path.posix.basename(rel, '.md'));
+      let reviewDate;
+      if (action === 'still_stands') {
+        reviewDate = String(b.review_date || '');
+        if (!validReviewDate(reviewDate) || reviewDate <= new Date().toISOString().slice(0, 10)) throw new Error('Choose a valid future review date.');
+      }
+      let newNote = null, newNoteArgs = null;
+      if (action === 'changed') {
+        const title = String(b.new_title || '').trim(), body = String(b.body || '').trim();
+        if (!title || !body) throw new Error('Enter the updated decision title and body.');
+        newNoteArgs = { vault, folder: path.posix.dirname(rel) === '.' ? '.' : path.posix.dirname(rel), title,
+          type: 'decision', template: null, body: `${body}\n\nReplaces the earlier decision [[${oldTitle}]] (${rel}).`, review_date: validReviewDate(String(b.review_date || '')) ? String(b.review_date) : undefined,
+          status: 'active', confidence: 'reported', source: `Owner-reviewed change to ${rel}`, ai_platform: 'BrainLink Setup', agent_or_role: 'owner', session_or_task_id: 'decision-review-owner', auto_link: false };
+        newNote = await proposeNote(ctx, newNoteArgs);
+        if (!newNote.ok || !newNote.preview) throw new Error((newNote.errors || ['Could not prepare the updated decision note.']).join(' '));
+      }
+      const stamp = new Date().toISOString().slice(0, 10);
+      const append = action === 'still_stands' ? `\nDecision reviewed: ${stamp} — still stands.\nReview rescheduled: ${reviewDate}\n`
+        : action === 'retire' ? `\nDecision retired: ${stamp}\n`
+          : `\nDecision changed: ${stamp}.\nsuperseded_by: [[${String(b.new_title).trim()}]]\n`;
+      const original = await readFile(safeJoin(vaultRoot(ctx, vault), rel));
+      const id = randomBytes(24).toString('base64url');
+      decisionReviewPreviews.set(id, { vault, rel, action, append, expected_hash: createHash('sha256').update(original).digest('hex'), newNote, newNoteArgs, expires_at: Date.now() + 15 * 60_000 });
+      return { id, vault, path: rel, action, append_preview: append, ...(newNote ? { new_note_preview: newNote.preview, new_note_path: newNote.path } : {}), expires_in_minutes: 15 };
+    },
+    'POST /api/decision-reviews/confirm': async (b) => {
+      if (b.confirm !== true) throw new Error('Review the complete append and any new decision note before confirming.');
+      const preview = decisionReviewPreviews.get(String(b.id || ''));
+      if (!preview || preview.expires_at < Date.now()) throw new Error('This decision review preview expired. Prepare it again.');
+      decisionReviewPreviews.delete(String(b.id));
+      const cfg = await loadConfig(file);
+      const ctx = localContext(cfg, { ...env, BRAINLINK_SEMANTIC: '0', BRAINLINK_AI_PLATFORM: 'BrainLink Setup' });
+      const full = safeJoin(vaultRoot(ctx, preview.vault), preview.rel);
+      const current = await readFile(full);
+      if (createHash('sha256').update(current).digest('hex') !== preview.expected_hash) throw new Error('The decision changed after preview. Refresh and review it again.');
+      let newPath = null;
+      if (preview.newNote) {
+        const saved = await proposeNote(ctx, { ...preview.newNoteArgs, confirm: true });
+        if (!saved.ok || saved.written !== true) throw new Error((saved.errors || ['Updated decision could not be saved.']).join(' '));
+        newPath = saved.path;
+      }
+      await appendTo(vaultRoot(ctx, preview.vault), preview.rel, preview.append);
+      await logActivity(env, { tool: 'decision_review', ok: true });
+      return { ok: true, path: `${preview.vault}/${preview.rel}`, new_note_path: newPath, action: preview.action };
+    },
     'POST /api/proposals/approve': async (b) => {
       if (b.confirm !== true) throw new Error('Review the full draft, then explicitly approve it.');
       const proposal = await proposalInbox.getPending(String(b.id || ''));
