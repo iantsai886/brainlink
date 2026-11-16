@@ -1550,6 +1550,7 @@ export async function startSetup(opts = {}) {
     return { ok: true, vault: vault.name, path: vault.path, phrase: agent?.activation[0], close: agent?.close[0], ...(connect ? await connectAll(saved) : { connected: [], skipped: [] }) };
   }
 
+  const teachPreviews = new Map();
   const routes = {
     'GET /api/state': () => state(),
     'GET /api/updates/check': async () => checkForUpdate({
@@ -2961,8 +2962,10 @@ export async function startSetup(opts = {}) {
     // Replayable misses (opt-in, local only, question text kept on this computer).
     'GET /api/replay-misses': async () => {
       const cfg = normalize(await loadConfig(file));
-      const items = await createReplayMisses({ home: localContext(cfg).dataDir }).list();
-      return { enabled: cfg.replay_misses.enabled, count: items.length, items: items.slice(-50).reverse() };
+      const ctx = localContext(cfg);
+      const items = await createReplayMisses({ home: ctx.dataDir }).list();
+      const visible = items.filter((item) => ctx.enabled.includes(item.vault) && !ctx.byName.get(item.vault)?.private);
+      return { enabled: cfg.replay_misses.enabled, count: visible.length, items: visible.slice(-50).reverse() };
     },
     'POST /api/replay-misses/settings': async (b) => withConfigMutation(async () => {
       const cfg = await loadConfig(file);
@@ -2974,6 +2977,51 @@ export async function startSetup(opts = {}) {
       const cfg = normalize(await loadConfig(file));
       const ctx = localContext(cfg, { ...env, BRAINLINK_AI_PLATFORM: '' });
       return createReplayMisses({ home: ctx.dataDir }).replay(ctx);
+    },
+    'POST /api/replay-misses/teach': async (b) => {
+      const cfg = normalize(await loadConfig(file));
+      const ctx = localContext(cfg, { ...env, BRAINLINK_AI_PLATFORM: '' });
+      const misses = createReplayMisses({ home: ctx.dataDir });
+      const miss = await misses.get(b.miss_id);
+      if (!miss || !ctx.enabled.includes(miss.vault) || ctx.byName.get(miss.vault)?.private) throw new Error('This question is no longer available for teaching.');
+      if (miss.fixed_by) throw new Error('This question already has a saved answer.');
+      const answer = String(b.answer || '').trim();
+      if (!answer || answer.length > 24_000) throw new Error('Enter an answer of at most 24,000 characters.');
+      const title = String(b.title || miss.query).trim();
+      const folder = String(b.folder || '').trim();
+      const identity = `teach-${miss.id.slice(0, 32)}`;
+      const noteDraft = await proposeNote(ctx, {
+        vault: miss.vault, title, folder, body: answer, source: 'owner answer to a recorded miss',
+        status: 'active', confidence: 'verified', memory_type: 'semantic', decision: 'ADOPT',
+        ai_platform: 'BrainLink', agent_or_role: 'owner', session_or_task_id: identity,
+        confirm: false,
+      });
+      if (!noteDraft.ok || typeof noteDraft.preview !== 'string') {
+        if (!noteDraft.ok) throw new Error((noteDraft.errors || []).join(' '));
+        throw new Error(noteDraft.next || 'This vault cannot save a confirmed answer.');
+      }
+      const key = randomBytes(24).toString('hex');
+      const rel = noteDraft.path.slice(`${miss.vault}/`.length);
+      if (b.confirm !== true) {
+        const now = Date.now();
+        for (const [id, item] of teachPreviews) if (item.expires < now) teachPreviews.delete(id);
+        if (teachPreviews.size >= 100) teachPreviews.delete(teachPreviews.keys().next().value);
+        teachPreviews.set(key, { miss_id: miss.id, vault: miss.vault, args: { title, folder, answer }, path: noteDraft.path, rel, preview: noteDraft.preview, expires: now + 15 * 60_000 });
+        return { ...noteDraft, miss_id: miss.id, preview_id: key, question: miss.query, destination: noteDraft.path };
+      }
+      const preview = teachPreviews.get(String(b.preview_id || ''));
+      if (!preview || preview.expires < Date.now() || preview.miss_id !== miss.id || preview.vault !== miss.vault
+        || preview.args.title !== title || preview.args.folder !== folder || preview.args.answer !== answer) {
+        throw new Error('Preview expired or changed. Review a fresh preview before saving.');
+      }
+      const result = await commitNew(ctx, miss.vault, preview.rel, preview.preview, true, { ownerApproved: true });
+      if (!result.ok || !result.written) throw new Error((result.errors || []).join(' ') || result.next || 'The answer was not saved.');
+      teachPreviews.delete(String(b.preview_id));
+      const replay = await searchWithVerdict(ctx, miss.vault, miss.query, { limit: 3 });
+      const top = replay.results[0] || null;
+      const fixed = replay.status === 'hits' && top?.path === preview.rel;
+      if (fixed) await misses.markFixed(miss.id, result.path);
+      return { ...result, question: miss.query, replay: { status: replay.status, top: top ? { path: top.path, title: top.title } : null }, fixed_by: fixed ? result.path : null };
     },
     'POST /api/replay-misses/clear': async () => {
       const cfg = normalize(await loadConfig(file));

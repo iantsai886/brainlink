@@ -62,6 +62,17 @@ test('connection dialog offers read-and-propose only when the Twin grants it', a
     'write access is offered only when the Twin grant allows it');
 });
 
+test('replay-miss teaching offers a preview-before-save flow in every locale', async () => {
+  const catalogs = Object.fromEntries(await Promise.all(LOCALES.map(async (id) => [id, await loadLocale(id)])));
+  const keys = ['replay.teach', 'replay.teachHeading', 'replay.teachAnswer', 'replay.teachFolderHint', 'replay.teachPreview', 'replay.teachConfirm', 'replay.teachFound'];
+  for (const id of LOCALES) for (const key of keys) assert.ok(catalogs[id][key], `${id} defines ${key}`);
+  const html = await readFile(path.join(ROOT, 'ui', 'index.html'), 'utf8');
+  assert.match(html, /data-teach-miss=/, 'each unanswered miss can open Teach it');
+  assert.match(html, /POST', '\/api\/replay-misses\/teach'/, 'saving uses the reviewed local Setup endpoint');
+  assert.match(html, /replay-teach-preview-button/);
+  assert.match(html, /replay-teach-confirm/);
+});
+
 test('connection wording distinguishes configured settings from an AI app that loaded them', async () => {
   const catalogs = Object.fromEntries(await Promise.all(LOCALES.map(async (id) => [id, await loadLocale(id)])));
   const en = catalogs.en;
