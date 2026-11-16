@@ -54,6 +54,7 @@ import { twinProfileStatus, profileScopeEditable } from './twin-profiles.mjs';
 import { createRsiLedger } from './rsi-ledger.mjs';
 import { createRsiExperiments } from './rsi-experiments.mjs';
 import { listDecisionReviews, readDecisionReview, validReviewDate } from './decision-reviews.mjs';
+import { createConflictReviewStore, listConflictCandidates } from './conflict-review.mjs';
 import { createRsiDiscovery } from './rsi-discovery.mjs';
 import { createRsiObservationSchedule } from './rsi-observation-schedule.mjs';
 import { createRsiWeekly, taipeiWeek } from './rsi-weekly.mjs';
@@ -285,6 +286,7 @@ export async function startSetup(opts = {}) {
   // health checks intentionally use createContext() without this bypass.
   const localContext = (cfg, contextEnv = env) => createContext(cfg, { env: contextEnv, trustedLocal: true });
   const proposalInbox = createProposalInbox({ home: appHome(env) });
+  const conflictReviewStore = createConflictReviewStore(appHome(env));
   const sessions = sessionsService(env, home); // src/host.mjs: imports only from this Setup user's home
   const rsiLedger = createRsiLedger({ home: appHome(env), verifyCommit: opts.rsiVerifyCommit || ((sha) => hasGitCommit(ROOT, sha)) });
   const rsiWeekly = createRsiWeekly({ home: appHome(env) });
@@ -1553,6 +1555,7 @@ export async function startSetup(opts = {}) {
 
   const teachPreviews = new Map();
   const decisionReviewPreviews = new Map();
+  const conflictReviewPreviews = new Map();
   const routes = {
     'GET /api/state': () => state(),
     'GET /api/updates/check': async () => checkForUpdate({
@@ -2197,6 +2200,51 @@ export async function startSetup(opts = {}) {
       await appendTo(vaultRoot(ctx, preview.vault), preview.rel, preview.append);
       await logActivity(env, { tool: 'decision_review', ok: true });
       return { ok: true, path: `${preview.vault}/${preview.rel}`, new_note_path: newPath, action: preview.action };
+    },
+    'POST /api/conflicts/list': async (b) => {
+      const cfg = await loadConfig(file), ctx = localContext(cfg, { ...env, BRAINLINK_SEMANTIC: '0' });
+      const vault = String(b.vault || '');
+      if (!ctx.enabled.includes(vault)) throw new Error('Choose an enabled vault.');
+      const offset = b.offset === undefined ? 0 : b.offset;
+      if (!Number.isSafeInteger(offset) || offset < 0 || offset > 100_000) throw new Error('Conflict review offset is invalid.');
+      const result = await listConflictCandidates(ctx, vault, { dismissed: await conflictReviewStore.dismissed(), limit: 50, offset });
+      return result;
+    },
+    'POST /api/conflicts/preview': async (b) => {
+      const cfg = await loadConfig(file), ctx = localContext(cfg, { ...env, BRAINLINK_SEMANTIC: '0' });
+      const vault = String(b.vault || ''), candidateId = String(b.candidate_id || ''), choice = String(b.choice || '');
+      if (!ctx.enabled.includes(vault)) throw new Error('Choose an enabled vault.');
+      if (!['a_stands', 'b_stands', 'both_valid', 'not_conflict'].includes(choice)) throw new Error('Choose a supported conflict resolution.');
+      const result = await listConflictCandidates(ctx, vault, { dismissed: await conflictReviewStore.dismissed(), limit: 50 });
+      const candidate = result.candidates.find((item) => item.id === candidateId);
+      if (!candidate) throw new Error('This candidate is no longer visible. Refresh the list.');
+      const winner = choice === 'a_stands' ? candidate.a : choice === 'b_stands' ? candidate.b : null;
+      const loser = winner ? (winner.path === candidate.a.path ? candidate.b : candidate.a) : null;
+      const append = winner ? `\n\n## BrainLink proposed supersession\n\n- superseded_by: [[${winner.title}]]\n- Review status: proposed\n- Reason: owner selected this note as the current record for a possible conflict with [[${loser.title}]].\n` : null;
+      const id = randomBytes(24).toString('base64url');
+      conflictReviewPreviews.set(id, { vault, candidate, choice, winner, loser, append, expires_at: Date.now() + 15 * 60_000 });
+      return { id, candidate, choice, proposal_preview: append, expires_in_minutes: 15 };
+    },
+    'POST /api/conflicts/confirm': async (b) => {
+      if (b.confirm !== true) throw new Error('Review the proposed action before confirming.');
+      const id = String(b.id || ''), preview = conflictReviewPreviews.get(id);
+      if (!preview || preview.expires_at < Date.now()) throw new Error('This conflict review preview expired. Refresh the list.');
+      conflictReviewPreviews.delete(id);
+      const cfg = await loadConfig(file), ctx = localContext(cfg, { ...env, BRAINLINK_SEMANTIC: '0' });
+      const latest = await listConflictCandidates(ctx, preview.vault, { dismissed: await conflictReviewStore.dismissed(), limit: 50 });
+      if (!latest.candidates.some((item) => item.id === preview.candidate.id)) throw new Error('This candidate changed or is no longer visible. Refresh the list.');
+      let proposal_id = null;
+      if (preview.winner && preview.loser) {
+        const full = safeJoin(vaultRoot(ctx, preview.vault), preview.loser.path);
+        const current = await readFile(full);
+        const proposal = await proposalInbox.add({ vault: preview.vault, vaultPath: ctx.byName.get(preview.vault).path, path: preview.loser.path,
+          content: preview.append, tool: 'conflict_review', agent: 'owner', action: 'append', expectedHash: createHash('sha256').update(current).digest('hex') });
+        if (!proposal) throw new Error('The supersession proposal was not queued. No vault note was changed.');
+        proposal_id = proposal.id;
+      }
+      await conflictReviewStore.dismiss(preview.candidate.id);
+      await logActivity(env, { tool: 'conflict_review', ok: true });
+      return { ok: true, proposal_id, dismissed: true, choice: preview.choice };
     },
     'POST /api/proposals/approve': async (b) => {
       if (b.confirm !== true) throw new Error('Review the full draft, then explicitly approve it.');
