@@ -616,7 +616,9 @@ export function searchIndex(index, query, opts = {}) {
     if (note.generated) x.s *= 0.2;
     if (note.minor) x.s *= 0.35;
   }
-  top.sort((a, b) => b.s - a.s);
+  top.sort((a, b) => b.s - a.s
+    || compareReviewTrust(index.notes[a.c.noteIdx], index.notes[b.c.noteIdx])
+    || index.notes[a.c.noteIdx].rel.localeCompare(index.notes[b.c.noteIdx].rel));
   // One result per note (its best section), so five results are five different notes.
   const seenNote = new Set();
   const maxScore = top[0]?.s || 1;
@@ -628,6 +630,17 @@ export function searchIndex(index, query, opts = {}) {
     if (results.length >= limit) break;
   }
   return results;
+}
+
+export function compareReviewTrust(a, b) {
+  const tier = (note) => {
+    const status = String(note.meta?.status || '').toLowerCase();
+    const confidence = String(note.meta?.confidence || '').toLowerCase();
+    if (confidence === 'verified' || ['verified', 'active', 'final'].includes(status)) return 2;
+    if (['proposed', 'draft'].includes(status)) return 0;
+    return 1;
+  };
+  return tier(b) - tier(a);
 }
 
 // How much of the query's term weight (idf) note i contains, 0..1.
