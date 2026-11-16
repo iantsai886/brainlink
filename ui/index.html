@@ -296,6 +296,13 @@ main #ready, main #ask-panel, main #brain-panel, main #sessions-panel, main #s-c
     <div id="decision-reviews-list" class="cards"></div>
   </details>
 
+  <details class="card" id="conflicts-panel" hidden>
+    <summary data-i18n="conflicts.title"></summary>
+    <p class="hint" data-i18n="conflicts.hint"></p>
+    <label><span data-i18n="conflicts.vault"></span><select id="conflicts-vault"></select></label>
+    <div id="conflicts-list" class="cards"></div>
+  </details>
+
   <details class="card" id="twin-profiles-panel" style="margin-top:12px" hidden>
     <summary data-i18n="twinProfiles.title"></summary>
     <p class="hint" data-i18n="twinProfiles.hint"></p>
@@ -1072,6 +1079,70 @@ async function loadDecisionReviews() {
   if ((S.vaults || []).some((vault) => vault.name === selected)) select.value = selected;
   await renderDecisionReviews();
 }
+
+let conflictsOffset = 0;
+async function loadConflicts() {
+  const panel = $('conflicts-panel');
+  panel.hidden = !S.vaults?.length;
+  if (panel.hidden) return;
+  const select = $('conflicts-vault'), selected = select.value;
+  select.innerHTML = (S.vaults || []).map((vault) => `<option value="${esc(vault.name)}">${esc(vault.name)}</option>`).join('');
+  if ((S.vaults || []).some((vault) => vault.name === selected)) select.value = selected;
+  conflictsOffset = 0;
+  await renderConflicts();
+}
+
+async function renderConflicts(append = false) {
+  const target = $('conflicts-list');
+  try {
+    const result = await api('POST', '/api/conflicts/list', { vault: $('conflicts-vault').value, offset: conflictsOffset });
+    const candidates = result.candidates || [];
+    if (!candidates.length && !append) { target.innerHTML = `<p class="muted">${esc(t('conflicts.empty'))}</p>`; return; }
+    const markup = candidates.map((candidate) => `<article class="card" data-conflict-id="${esc(candidate.id)}">
+      <div class="grid2"><div><b>A · ${esc(candidate.a.title)}</b><p class="mono">${esc(candidate.a.path)}</p></div><div><b>B · ${esc(candidate.b.title)}</b><p class="mono">${esc(candidate.b.path)}</p></div></div>
+      <p class="muted">${esc(candidate.reasons.join(' · '))}</p>
+      <div class="row"><button type="button" data-conflict-choice="a_stands">${esc(t('conflicts.aStands'))}</button><button type="button" data-conflict-choice="b_stands">${esc(t('conflicts.bStands'))}</button><button type="button" data-conflict-choice="both_valid">${esc(t('conflicts.both'))}</button><button type="button" data-conflict-choice="not_conflict">${esc(t('conflicts.dismiss'))}</button></div>
+      <pre data-conflict-preview hidden class="mono" style="white-space:pre-wrap"></pre><button hidden class="primary" type="button" data-conflict-confirm>${esc(t('conflicts.confirm'))}</button><span role="status" data-conflict-status></span>
+    </article>`).join('');
+    if (append) { target.querySelector('[data-conflicts-more]')?.parentElement.remove(); target.insertAdjacentHTML('beforeend', markup); }
+    else target.innerHTML = markup;
+    if (result.more) target.insertAdjacentHTML('beforeend', `<div class="row"><span class="muted">${esc(t('conflicts.more', { count: result.more }))}</span><button type="button" data-conflicts-more>${esc(t('conflicts.loadMore'))}</button></div>`);
+  } catch (error) { target.innerHTML = `<p class="error-box">${esc(error.message)}</p>`; }
+}
+
+$('conflicts-vault')?.addEventListener('change', () => { conflictsOffset = 0; renderConflicts(); });
+document.addEventListener('click', (event) => {
+  const more = event.target.closest('[data-conflicts-more]');
+  if (!more) return;
+  conflictsOffset += 50;
+  act(() => renderConflicts(true));
+});
+document.addEventListener('click', (event) => {
+  const choose = event.target.closest('[data-conflict-choice]'), confirmButton = event.target.closest('[data-conflict-confirm]');
+  if (!choose && !confirmButton) return;
+  const card = event.target.closest('[data-conflict-id]');
+  act(async () => {
+    const status = card.querySelector('[data-conflict-status]'); status.textContent = '';
+    if (choose) {
+      choose.disabled = true;
+      try {
+        const preview = await api('POST', '/api/conflicts/preview', { vault: $('conflicts-vault').value, candidate_id: card.dataset.conflictId, choice: choose.dataset.conflictChoice });
+        card.dataset.conflictPreviewId = preview.id;
+        const box = card.querySelector('[data-conflict-preview]');
+        box.textContent = preview.proposal_preview || t('conflicts.dismissPreview'); box.hidden = false;
+        card.querySelector('[data-conflict-confirm]').hidden = false;
+        status.textContent = t('conflicts.reviewFirst');
+      } catch (error) { status.textContent = error.message; choose.disabled = false; }
+    } else {
+      confirmButton.disabled = true;
+      try {
+        const result = await api('POST', '/api/conflicts/confirm', { id: card.dataset.conflictPreviewId, confirm: true });
+        status.textContent = result.proposal_id ? t('conflicts.proposed', { id: result.proposal_id }) : t('conflicts.dismissed');
+        conflictsOffset = 0; await renderConflicts();
+      } catch (error) { status.textContent = error.message; confirmButton.disabled = false; }
+    }
+  });
+});
 
 async function renderDecisionReviews() {
   const target = $('decision-reviews-list');
@@ -2151,13 +2222,14 @@ async function load() {
   if (hasVault && !onboardingSync) loadHandoffs().catch(() => {});
   if (hasVault && !onboardingSync) loadProposals().catch(() => {});
   if (hasVault && !onboardingSync) loadDecisionReviews().catch(() => {});
+  if (hasVault && !onboardingSync) loadConflicts().catch(() => {});
   $('rsi-panel').hidden = !hasVault || onboardingSync;
   if (hasVault && !onboardingSync) loadRsi().catch(e => { $('rsi-ideas').innerHTML = '<p class="error-box">' + esc(e.message) + '</p>'; });
   if (hasVault && !onboardingSync) loadWeeklyBenchmark().catch(e => { $('rsi-weekly-status').textContent = e.message; });
   if (hasVault && !onboardingSync) loadDiscovery().catch(e => { $('rsi-discovery-status').textContent = e.message; });
   if (hasVault && !onboardingSync) loadObservations().catch(e => { $('rsi-observe-status').textContent = e.message; });
   if (guidedFirstRun) {
-    for (const id of ['ready','brain-panel','memory-review-panel','proposal-review-panel','decision-reviews-panel','twin-profiles-panel','ask-panel','sessions-panel','handoffs-panel','rsi-panel','sync-onboarding']) $(id).hidden = true;
+    for (const id of ['ready','brain-panel','memory-review-panel','proposal-review-panel','decision-reviews-panel','conflicts-panel','twin-profiles-panel','ask-panel','sessions-panel','handoffs-panel','rsi-panel','sync-onboarding']) $(id).hidden = true;
   }
   $('cfgpath').textContent = S.config_path;
   $('n1').className = 'step' + (S.vaults.length ? ' done' : '');

@@ -84,6 +84,17 @@ test('decision review actions are localized and show append/new-note previews be
   assert.match(html, /data-decision-preview/);
 });
 
+test('conflict review is localized and queues supersession for owner approval', async () => {
+  const catalogs = Object.fromEntries(await Promise.all(LOCALES.map(async (id) => [id, await loadLocale(id)])));
+  const keys = ['conflicts.title', 'conflicts.hint', 'conflicts.aStands', 'conflicts.bStands', 'conflicts.both', 'conflicts.dismiss', 'conflicts.confirm', 'conflicts.loadMore'];
+  for (const id of LOCALES) for (const key of keys) assert.ok(catalogs[id][key], `${id} defines ${key}`);
+  const html = await readFile(path.join(ROOT, 'ui', 'index.html'), 'utf8');
+  assert.match(html, /id="conflicts-panel"/);
+  assert.match(html, /conflicts\/preview/);
+  assert.match(html, /conflicts\/confirm/);
+  assert.match(html, /data-conflicts-more/);
+});
+
 test('connection wording distinguishes configured settings from an AI app that loaded them', async () => {
   const catalogs = Object.fromEntries(await Promise.all(LOCALES.map(async (id) => [id, await loadLocale(id)])));
   const en = catalogs.en;
