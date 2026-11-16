@@ -105,9 +105,23 @@ export async function scaffold(vaultPath, items) {
 }
 
 // Merge a built pack into a config (replacing a vault/agents of the same name).
-export function mergePack(cfg, built) {
+// BrainLink has one inter-AI mailbox. A pack that ships its own mailbox must not silently
+// re-route it: once a mailbox exists in another vault that is still configured, it stays
+// there unless the caller explicitly asks to move it (moveHandoff). Otherwise adding a
+// second vault from a mailbox-bearing pack would redirect every later send_handoff into
+// the new vault without the user ever choosing that.
+export function mergePack(cfg, built, { moveHandoff = false } = {}) {
   const vaults = cfg.vaults.filter((v) => v.name !== built.vault.name).concat(built.vault);
   const names = new Set(built.agents.map((a) => a.name.toLowerCase()));
   const agents = cfg.agents.filter((a) => a.vault !== built.vault.name && !names.has(a.name.toLowerCase())).concat(built.agents);
-  return { ...cfg, vaults, agents, handoff: built.handoff || (cfg.handoff?.vault === built.vault.name ? null : cfg.handoff) };
+  const current = cfg.handoff && cfg.handoff.vault !== built.vault.name && cfg.vaults.some((v) => v.name === cfg.handoff.vault) ? cfg.handoff : null;
+  const keepCurrent = Boolean(current && built.handoff && !moveHandoff);
+  if (keepCurrent && built.vault.folders && built.handoff.folder in built.vault.folders) {
+    // The new vault's own Handoffs folder is not the mailbox, so do not describe it as one.
+    const folders = { ...built.vault.folders };
+    delete folders[built.handoff.folder];
+    vaults[vaults.length - 1] = { ...built.vault, folders };
+  }
+  const handoff = keepCurrent ? current : built.handoff || (cfg.handoff?.vault === built.vault.name ? null : cfg.handoff);
+  return { ...cfg, vaults, agents, handoff };
 }

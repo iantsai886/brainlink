@@ -151,6 +151,13 @@
   "ask.answered": "Answered",
   "ask.noSnippet": "(no snippet found)",
   "ask.searching": "Searching your notes…",
+  "ask.vaultLabel": "Search in",
+  "ask.allVaults": "All shared vaults",
+  "ask.privateVault": "{vault} (private)",
+  "ask.historical": "Older or superseded",
+  "ask.modeKeyword": "Keyword search: matches the words you typed, so try other wording or a translation if nothing fits.",
+  "ask.modeMeaning": "Keyword and meaning-based search.",
+  "ask.privateSkipped": "Private vaults are searched only when you choose one: {vaults}.",
   "ready.set": "You're set",
   "ready.almost": "Almost there",
   "ready.sayConnectIntro": "In that AI, say",
@@ -1294,5 +1301,6 @@
   "rsi.experiment.useForReview": "Use this test for review",
   "rsi.experiment.evidencePrefilled": "Test run, commit and fixture are copied into the review fields.",
   "rsi.experiment.reranker": "Local reranker test set (fictional notes)",
-  "rsi.experiment.rerankerIndependent": "Local reranker independent test set (fictional notes)"
+  "rsi.experiment.rerankerIndependent": "Local reranker independent test set (fictional notes)",
+  "vault.handoffKept": "The AI mailbox stays in {vault}/{folder}; it was not moved to the new vault."
 }

@@ -100,6 +100,8 @@ ol.todo li { padding-left: 4px; }
 .day-label:first-child { margin-top: 0; }
 .answer-card { display: grid; gap: 10px; }
 .answer-text { font-size: 15px; line-height: 1.6; margin: 0; }
+.ask-sources { list-style: none; margin: 0; padding: 0; display: grid; gap: 6px; font-size: 13px; }
+.pill.ask-old { background: var(--warn-soft); color: var(--warn); border-color: transparent; }
 .error-box { background: var(--bad); color: #fff; border-radius: 8px; padding: 10px 12px; font-size: 14px; }
 .skeleton { color: var(--muted); font-size: 14px; }
 .modal-overlay { position: fixed; inset: 0; background: rgba(0,0,0,.45); display: grid; place-items: center; z-index: 80; padding: 24px; }
@@ -187,10 +189,11 @@ main #ready, main #ask-panel, main #brain-panel, main #sessions-panel, main #s-c
   </section>
 
   <section id="ask-panel" hidden>
-    <h2 data-i18n="ask.title"></h2>
+    <h2 id="ask-title" data-i18n="ask.title"></h2>
     <p class="hint" data-i18n="ask.hint"></p>
-    <div class="row"><input id="ask-q" data-i18n-placeholder="ask.placeholder" style="flex:1;min-width:240px"><button class="primary" id="ask-go" data-i18n="ask.go"></button></div>
-    <div id="ask-out" style="margin-top:14px"></div>
+    <div class="row" id="ask-vault-row" hidden><label><span data-i18n="ask.vaultLabel"></span><select id="ask-vault"></select></label></div>
+    <div class="row"><input id="ask-q" aria-labelledby="ask-title" data-i18n-placeholder="ask.placeholder" style="flex:1;min-width:240px"><button class="primary" id="ask-go" data-i18n="ask.go"></button></div>
+    <div id="ask-out" role="status" aria-live="polite" style="margin-top:14px"></div>
   </section>
 
   <section class="big" id="ready" hidden>
@@ -1605,24 +1608,41 @@ async function drawGraph() {
 // ---- Ask your brain: cited instant answer ----
 function renderAskEmpty() { $('ask-out').innerHTML = `<p class="muted">${esc(t('ask.empty'))}</p>`; }
 function renderAskError(msg) { $('ask-out').innerHTML = `<p class="error-box">${esc(msg)}</p>`; }
-function renderAsk(r) {
-  if (r.status === 'not_in_brain') {
-    $('ask-out').innerHTML = `<div class="card"><span class="pill">${esc(t('ask.notInBrain'))}</span><p class="muted" style="margin:8px 0 0">${esc(t('ask.notInBrainBody', { vault: r.vault }))}</p></div>`;
-    return;
+// One card per searched vault: vaults are searched separately and never merged, so each keeps
+// its own verdict. Each source shows the note's own date, status and confidence, and flags
+// older or superseded notes, so the owner can judge trust before opening it.
+function askSourceMeta(x) { return [x.date, x.status, x.confidence].filter(Boolean).join(' · '); }
+function renderAskGroup(g, showVault) {
+  const vaultLabel = showVault ? `<b>${esc(g.private ? t('ask.privateVault', { vault: g.vault }) : g.vault)}</b>` : '';
+  if (g.status === 'not_in_brain') {
+    return `<div class="card">${vaultLabel}<span class="pill">${esc(t('ask.notInBrain'))}</span><p class="muted" style="margin:8px 0 0">${esc(t('ask.notInBrainBody', { vault: g.vault }))}</p></div>`;
   }
-  const badge = r.status === 'weak' ? `<span class="pill">${esc(t('ask.partial'))}</span>` : `<span class="pill on">${esc(t('ask.answered'))}</span>`;
-  const chip = (x) => `<button class="chip" data-open-note="${esc(x.vault)}::${esc(x.path)}" title="${esc(x.path)}"><b>${esc(x.title)}</b>${x.heading ? `<small>› ${esc(x.heading)}</small>` : ''}</button>`;
-  $('ask-out').innerHTML = `<div class="answer-card card">${badge}
-    <p class="answer-text">${esc(r.answer || t('ask.noSnippet'))}</p>
-    ${r.note ? `<p class="muted" style="font-size:13px;margin:0">${esc(r.note)}</p>` : ''}
-    <div class="row">${r.sources.map(chip).join('')}</div>
+  const badge = g.status === 'weak' ? `<span class="pill">${esc(t('ask.partial'))}</span>` : `<span class="pill on">${esc(t('ask.answered'))}</span>`;
+  const source = (x) => {
+    const meta = askSourceMeta(x);
+    return `<li><button class="chip" data-open-note="${esc(x.vault)}::${esc(x.path)}" title="${esc(x.path)}"><b>${esc(x.title)}</b>${x.heading ? `<small>› ${esc(x.heading)}</small>` : ''}</button>${meta ? ` <span class="muted">${esc(meta)}</span>` : ''}${x.historical ? ` <span class="pill ask-old">${esc(t('ask.historical'))}</span>` : ''}</li>`;
+  };
+  return `<div class="answer-card card">${vaultLabel}${badge}
+    <p class="answer-text">${esc(g.answer || t('ask.noSnippet'))}</p>
+    ${g.note ? `<p class="muted" style="font-size:13px;margin:0">${esc(g.note)}</p>` : ''}
+    <ul class="ask-sources">${(g.sources || []).map(source).join('')}</ul>
   </div>`;
+}
+function renderAsk(r) {
+  const groups = Array.isArray(r.groups) && r.groups.length ? r.groups : [r];
+  const skipped = Array.isArray(r.vaults_skipped_private) ? r.vaults_skipped_private : [];
+  const footer = [
+    r.search_mode ? t(r.search_mode === 'meaning' ? 'ask.modeMeaning' : 'ask.modeKeyword') : '',
+    skipped.length ? t('ask.privateSkipped', { vaults: skipped.join(', ') }) : '',
+  ].filter(Boolean).join(' ');
+  $('ask-out').innerHTML = groups.map((g) => renderAskGroup(g, groups.length > 1 || skipped.length > 0)).join('')
+    + (footer ? `<p class="muted" style="font-size:13px;margin:8px 0 0">${esc(footer)}</p>` : '');
 }
 async function ask() {
   const query = $('ask-q').value.trim();
   if (!query) return;
   $('ask-out').innerHTML = `<p class="skeleton">${esc(t('ask.searching'))}</p>`;
-  try { renderAsk(await api('POST', '/api/ask', { query })); }
+  try { renderAsk(await api('POST', '/api/ask', { query, vault: $('ask-vault').value || '*' })); }
   catch (e) { renderAskError(e.message); }
 }
 $('ask-go').onclick = ask;
@@ -1788,6 +1808,11 @@ async function load() {
   $('brain-panel').hidden = !hasVault || onboardingSync;
   $('memory-review-panel').hidden = !hasVault || onboardingSync;
   $('proposal-review-panel').hidden = !hasVault || onboardingSync;
+  const askVaults = S.vaults.filter((v) => v.exists);
+  const askChoice = $('ask-vault').value || '*';
+  $('ask-vault').innerHTML = `<option value="*">${esc(t('ask.allVaults'))}</option>` + askVaults.map((v) => `<option value="${esc(v.name)}">${esc(v.private ? t('ask.privateVault', { vault: v.name }) : v.name)}</option>`).join('');
+  $('ask-vault').value = [...$('ask-vault').options].some((option) => option.value === askChoice) ? askChoice : '*';
+  $('ask-vault-row').hidden = askVaults.length < 2;
   const memoryChoice = $('memory-review-vault').value;
   $('memory-review-vault').innerHTML = S.vaults.filter((v) => v.exists).map((v) => `<option value="${esc(v.name)}">${esc(v.name)}</option>`).join('');
   if ([...$('memory-review-vault').options].some((option) => option.value === memoryChoice)) $('memory-review-vault').value = memoryChoice;
@@ -2051,7 +2076,7 @@ $('save-vault').onclick = () => act(async () => {
   const drive = $('v-drive-id').value.trim() || $('v-drive-parent-id').value.trim() ? { remote: 'brainlink-gdrive', root_folder_id: $('v-drive-id').value.trim(), parent_folder_id: $('v-drive-parent-id').value.trim(), folder_name: $('v-name').value.trim() } : null;
   const r = await api('POST', '/api/vault', { path: $('v-path').value, name: $('v-name').value, pack, agentName: $('v-agent').value, scaffold: $('v-scaffold').checked, private: $('v-private').checked, excludedFolders, drive });
   $('vault-form').hidden = true;
-  toast(t('vault.addedToast', { vault: r.vault, extra: r.created.length ? t('vault.createdExtra', { n: r.created.length }) : '' }));
+  toast(t('vault.addedToast', { vault: r.vault, extra: r.created.length ? t('vault.createdExtra', { n: r.created.length }) : '' }) + (r.handoff_kept && r.handoff_mailbox ? ' ' + t('vault.handoffKept', { vault: r.handoff_mailbox.vault, folder: r.handoff_mailbox.folder }) : ''));
 });
 document.addEventListener('click', (e) => {
   const d = e.target.dataset;

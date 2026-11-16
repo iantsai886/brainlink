@@ -782,6 +782,24 @@ test('read-only connection refuses writes', async () => {
   assert.match((await proposeNote(ctx, { title: 'T', body: 'b', source: 's', decision: 'ADOPT' })).errors.join(), /read-only/);
 });
 
+test('mergePack keeps the existing inter-AI mailbox when a second mailbox-bearing vault is added', () => {
+  const company = buildPack('founder-os', { vaultName: 'Company', vaultPath: '/fictional/company', agentName: 'Chief of Staff' });
+  const second = buildPack('founder-os', { vaultName: 'Second', vaultPath: '/fictional/second', agentName: 'Advisor' });
+  const first = mergePack(normalize({}), company);
+  assert.deepEqual(first.handoff, { vault: 'Company', folder: 'Chief of Staff Office/Handoffs' });
+
+  const both = mergePack(first, second);
+  assert.deepEqual(both.handoff, first.handoff, 'adding a vault must not silently re-route the mailbox');
+  assert.ok(!('Advisor Office/Handoffs' in both.vaults.find((v) => v.name === 'Second').folders), 'the new vault must not describe a folder as the mailbox when it is not');
+  assert.ok('Advisor Office/Handoffs' in second.vault.folders, 'the built pack itself is not mutated');
+  assert.deepEqual(validate(normalize(both)), []);
+
+  assert.deepEqual(mergePack(first, second, { moveHandoff: true }).handoff, { vault: 'Second', folder: 'Advisor Office/Handoffs' }, 'an explicit move is still possible');
+  assert.deepEqual(mergePack(first, company).handoff, first.handoff, 're-applying a pack to the mailbox vault keeps it');
+  const orphaned = { ...first, vaults: [], handoff: { vault: 'Gone', folder: 'X' } };
+  assert.deepEqual(mergePack(orphaned, second).handoff, second.handoff, 'a mailbox whose vault no longer exists does not block a new one');
+});
+
 test('handoffs: send to a mailbox and filter by recipient', async () => {
   const { cfg } = await fixture();
   const ctx = ctxOf(cfg);

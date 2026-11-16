@@ -86,6 +86,25 @@ test('/api/ask: a question with nothing in the vault says so instead of guessing
   } finally { s.server.close(); }
 });
 
+test('/api/ask: sources carry trust metadata, an unknown vault is refused, and "*" searches each shared vault separately', async () => {
+  const { s, api } = await withSampleVault('ask-trust');
+  try {
+    const r = await (await api('/api/ask', { query: 'What is the price of the Brand Sprint?', vault: '*' })).json();
+    assert.equal(r.status, 'hits');
+    assert.ok(Array.isArray(r.groups) && r.groups.length === r.vaults_searched.length, 'one result group per searched vault');
+    assert.equal(r.groups[0].vault, r.vault, 'top-level fields mirror the best group for older callers');
+    assert.ok(['keyword', 'meaning'].includes(r.search_mode));
+    for (const source of r.groups.flatMap((group) => group.sources)) {
+      for (const key of ['date', 'status', 'confidence', 'match', 'snippet']) assert.equal(typeof source[key], 'string', `source.${key}`);
+      assert.equal(typeof source.historical, 'boolean');
+      assert.ok(r.vaults_searched.includes(source.vault), 'a source never comes from a vault that was not searched');
+    }
+    const unknown = await api('/api/ask', { query: 'anything', vault: 'No Such Vault' });
+    assert.equal(unknown.status, 400, 'an unknown vault must not silently fall back to another vault');
+    assert.match((await unknown.json()).error, /Unknown vault/);
+  } finally { s.server.close(); }
+});
+
 test('/api/ask and /api/note: no vault configured yet returns a clear error, not a crash', async () => {
   const home = await tmp('ask-empty-home');
   const env = { BRAINLINK_HOME: path.join(home, 'app'), BRAINLINK_SEMANTIC: '0' };

@@ -151,6 +151,13 @@
   "ask.answered": "已回答",
   "ask.noSnippet": "（找不到相關段落）",
   "ask.searching": "正在搜尋你的筆記…",
+  "ask.vaultLabel": "搜尋範圍",
+  "ask.allVaults": "所有共用筆記庫",
+  "ask.privateVault": "{vault}（私人）",
+  "ask.historical": "較舊或已被取代",
+  "ask.modeKeyword": "關鍵字搜尋：只比對你輸入的字詞；找不到時請換個說法或加上翻譯。",
+  "ask.modeMeaning": "關鍵字加語意搜尋。",
+  "ask.privateSkipped": "私人筆記庫只有在你指定時才會搜尋：{vaults}。",
   "ready.set": "設定完成",
   "ready.almost": "快完成了",
   "ready.sayConnectIntro": "在那個 AI 裡說",
@@ -1294,5 +1301,6 @@
   "rsi.experiment.useForReview": "用這次測試作為審查依據",
   "rsi.experiment.evidencePrefilled": "已將測試執行、commit 和 fixture 填入審查欄位。",
   "rsi.experiment.reranker": "本機重排序測試集（虛構筆記）",
-  "rsi.experiment.rerankerIndependent": "本機重排序獨立測試集（虛構筆記）"
+  "rsi.experiment.rerankerIndependent": "本機重排序獨立測試集（虛構筆記）",
+  "vault.handoffKept": "AI 信箱仍在 {vault}/{folder}，沒有移到新的筆記庫。"
 }

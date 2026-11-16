@@ -4,6 +4,10 @@ This log covers the development branch. Entries marked **unreleased** are not pu
 
 ## 1.3.8 — Development, unreleased
 
+- Ask (local Setup) can now search every shared vault or one chosen vault instead of silently using only the first configured vault. Vaults are searched separately and shown as separate result groups; private vaults are searched only when chosen. Each source shows the note's own date, status and confidence and flags older or superseded notes; the panel states whether search is keyword-only. `/api/ask` now refuses an unknown vault instead of answering from another one.
+- Adding a second vault from a pack that ships an inter-AI mailbox no longer re-routes the single BrainLink mailbox into the new vault. The existing mailbox is kept (Setup says so); `moveHandoff: true` on `POST /api/vault` moves it explicitly.
+- The "activate a role first" error for role-scoped connections lists the roles configured for that connection instead of two fixed example names.
+- Verification (2026-11-16, Linux container, Node 22): two new tests pass; `npm run test:ui` 48/48; `npm test` has the same 39 failures before and after this change (pre-existing on `8664b74`, mostly Twin-profile tests). The Ask panel change was exercised through the local HTTP API with three fictional vaults; it was not checked visually in a browser.
 - Fixed role-scoped retrieval failures: RSI observations now use the active tool arguments, and role-scoped runtime state is written to the selected role context.
 - BrainLink now keeps the activated role for the connector session, so Claude clients do not need to resend a fragile `role_scope_id` on each read. Switching roles revokes the previous capability; search and fetch remain restricted to the active role's granted vault, including an explicitly authorized private vault.
 - Verification: regression test covers Anna search/fetch in the shared Brain vault, John search in the explicitly granted Ian Personal vault, and rejection of Anna's stale scope after switching. Full test suites and real Claude app reconnection remain outstanding.

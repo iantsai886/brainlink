@@ -545,7 +545,7 @@ This prompt does not change permissions, write sources, or run unattended AI pro
               if (!roleScope || roleScope.expires_at <= Date.now()) {
                 if (selectedScopeId) roleScopes.delete(selectedScopeId);
                 if (activeRoleScopeId === selectedScopeId) activeRoleScopeId = null;
-                throw new Error('Activate Anna, John, or another configured BrainLink role first. The active role applies automatically to later calls in this connection.');
+                throw new Error(`Activate a configured BrainLink role first${agents.length ? ` (available here: ${agents.slice(0, 5).map((a) => a.name).join(', ')})` : ''}. The active role applies automatically to later calls in this connection.`);
               }
               callCtx = roleScope.ctx;
               callArgs = { ...suppliedArgs };

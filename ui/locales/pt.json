@@ -151,6 +151,13 @@
   "ask.answered": "Respondido",
   "ask.noSnippet": "(nenhum trecho encontrado)",
   "ask.searching": "A pesquisar nas suas notas…",
+  "ask.vaultLabel": "Pesquisar em",
+  "ask.allVaults": "Todos os cofres compartilhados",
+  "ask.privateVault": "{vault} (privado)",
+  "ask.historical": "Antiga ou substituída",
+  "ask.modeKeyword": "Pesquisa por palavras-chave: procura as palavras escritas; tente outra formulação ou uma tradução se nada corresponder.",
+  "ask.modeMeaning": "Pesquisa por palavras-chave e por significado.",
+  "ask.privateSkipped": "Os cofres privados só são pesquisados quando você escolhe um: {vaults}.",
   "ready.set": "Está tudo pronto",
   "ready.almost": "Quase lá",
   "ready.sayConnectIntro": "Nessa IA, diga",
@@ -1294,5 +1301,6 @@
   "rsi.experiment.useForReview": "Usar este teste na revisão",
   "rsi.experiment.evidencePrefilled": "A execução, o commit e a fixture foram copiados para os campos de revisão.",
   "rsi.experiment.reranker": "Teste do reranker local (notas fictícias)",
-  "rsi.experiment.rerankerIndependent": "Teste independente do reranker local (notas fictícias)"
+  "rsi.experiment.rerankerIndependent": "Teste independente do reranker local (notas fictícias)",
+  "vault.handoffKept": "A caixa de correio das IA continua em {vault}/{folder}; não foi movida para o novo cofre."
 }
