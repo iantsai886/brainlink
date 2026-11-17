@@ -13,6 +13,7 @@ Checked 2026-11-17 (Asia/Taipei). Repository: `iantsai886/brainlink`. Working br
 ## Verification receipts
 
 - Windows, Node.js 24.22.1: full `npm test` passed 704/714 (0 failures, 10 platform/privilege skips) and exited normally. `npm run test:ui` passed 48/48. The core run took about 1,361.8 seconds.
+- A diagnostic rerun before that clean full run encountered a transient Windows `EPERM` while replacing a temporary config and a file-worker native access violation. The affected brief-schedule test passed 3/3 alone, and `brainlink.test.mjs` passed 94 tests with 2 expected platform skips alone. The complete subsequent run passed.
 - After the full run, the packaging builder and installed-smoke assertion received small packaging-only edits. `test/packaging-runtime.test.mjs` then passed 3/3.
 - Windows package stage matched all bundled source files. The isolated install smoke passed Setup navigation, English/Portuguese/Traditional Chinese OCR, scanned-PDF OCR, safe HTML extraction, the sign-in launcher, and uninstall with test data and PATH preserved.
 - Installed locally from the current 1.3.8 app payload. Inno Setup returned exit code 0; the installed `package.json` and bundled CLI both report `1.3.8`; `%APPDATA%\BrainLink\config.json` remains present.
