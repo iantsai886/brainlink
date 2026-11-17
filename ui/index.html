@@ -199,13 +199,7 @@ main #ready, main #ask-panel, main #brain-panel, main #sessions-panel, main #s-c
     </div>
   </section>
 
-  <section id="ask-panel" hidden>
-    <h2 id="ask-title" data-i18n="ask.title"></h2>
-    <p class="hint" data-i18n="ask.hint"></p>
-    <div class="row" id="ask-vault-row" hidden><label><span data-i18n="ask.vaultLabel"></span><select id="ask-vault"></select></label></div>
-    <div class="row"><input id="ask-q" aria-labelledby="ask-title" data-i18n-placeholder="ask.placeholder" style="flex:1;min-width:240px"><button class="primary" id="ask-go" data-i18n="ask.go"></button></div>
-    <div id="ask-out" role="status" aria-live="polite" style="margin-top:14px"></div>
-  </section>
+  <!-- brainlink-include:find/ask.html -->
 
   <section class="big" id="ready" hidden>
     <h2 id="ready-title"></h2>
@@ -258,68 +252,17 @@ main #ready, main #ask-panel, main #brain-panel, main #sessions-panel, main #s-c
     </div>
   </section>
 
-  <details class="card" id="brain-panel" hidden>
-    <summary data-i18n="brain.title"></summary>
-    <p class="hint" data-i18n="brain.hint"></p>
-    <div class="brain">
-      <div><div id="notes3d-root" aria-label="Map of notes and links"></div></div>
-      <div>
-        <div class="stats"><div class="stat"><b id="st-notes">–</b><span data-i18n="brain.notes"></span></div><div class="stat"><b id="st-links">–</b><span data-i18n="brain.links"></span></div><div class="stat"><b id="st-orphans">–</b><span data-i18n="brain.orphans"></span></div></div>
-        <div class="phrases"><b style="font-size:13px;color:var(--muted)" data-i18n="brain.phrasesTitle"></b>
-          <span data-i18n="brain.phrase1"></span>
-          <span data-i18n="brain.phrase2"></span>
-          <span data-i18n="brain.phrase3"></span>
-          <span data-i18n="brain.phrase4"></span>
-          <span data-i18n="brain.phrase5"></span>
-        </div>
-        <p class="smart muted" id="smart"></p>
-      </div>
-    </div>
-  </details>
+  <!-- brainlink-include:find/brain.html -->
 
-  <details class="card" id="memory-review-panel" hidden>
-    <summary data-i18n="memoryReview.title"></summary>
-    <p class="hint" data-i18n="memoryReview.hint"></p>
-    <label><span data-i18n="memoryReview.vault"></span><select id="memory-review-vault"></select></label>
-    <div class="row"><button id="memory-review-open" type="button" data-i18n="memoryReview.open"></button></div>
-    <div id="memory-review-editor" hidden>
-      <p class="muted" data-i18n="memoryReview.format"></p>
-      <label><span data-i18n="memoryReview.note"></span><textarea id="memory-review-text" rows="12" style="width:100%;font-family:var(--mono)"></textarea></label>
-      <div class="row"><button id="memory-review-save" type="button" data-i18n="memoryReview.save"></button><span id="memory-review-status" role="status"></span></div>
-    </div>
-  </details>
+  <!-- brainlink-include:review/memory.html -->
 
-  <details class="card" id="proposal-review-panel" hidden>
-    <summary data-i18n="proposals.title"></summary>
-    <p class="hint" data-i18n="proposals.hint"></p>
-    <div id="proposal-review-list" class="cards"></div>
-  </details>
+  <!-- brainlink-include:review/proposals.html -->
 
-  <details class="card" id="decision-reviews-panel" hidden>
-    <summary data-i18n="decisionReviews.title"></summary>
-    <p class="hint" data-i18n="decisionReviews.hint"></p>
-    <label><span data-i18n="decisionReviews.vault"></span><select id="decision-reviews-vault"></select></label>
-    <div id="decision-reviews-list" class="cards"></div>
-  </details>
+  <!-- brainlink-include:review/decisions.html -->
 
-  <details class="card" id="conflicts-panel" hidden>
-    <summary data-i18n="conflicts.title"></summary>
-    <p class="hint" data-i18n="conflicts.hint"></p>
-    <label><span data-i18n="conflicts.vault"></span><select id="conflicts-vault"></select></label>
-    <div id="conflicts-list" class="cards"></div>
-  </details>
+  <!-- brainlink-include:review/conflicts.html -->
 
-  <details class="card" id="tidy-panel" hidden>
-    <summary data-i18n="tidy.title"></summary>
-    <p class="hint" data-i18n="tidy.hint"></p>
-    <label><span data-i18n="tidy.vault"></span><select id="tidy-vault"></select></label>
-    <div class="row"><button id="tidy-generate" type="button" class="primary" data-i18n="tidy.generate"></button><span role="status" id="tidy-status"></span></div>
-    <div id="tidy-list" class="cards"></div>
-    <button id="tidy-more" type="button" hidden data-i18n="tidy.loadMore"></button>
-    <div class="row"><button id="tidy-preview-apply" type="button" data-i18n="tidy.previewApply"></button><button id="tidy-preview-dismiss" type="button" data-i18n="tidy.previewDismiss"></button></div>
-    <pre id="tidy-preview" class="mono" hidden style="white-space:pre-wrap;max-height:420px;overflow:auto"></pre>
-    <button id="tidy-confirm" class="primary" type="button" hidden data-i18n="tidy.confirm"></button>
-  </details>
+  <!-- brainlink-include:review/tidy.html -->
 
   <details class="card" id="twin-profiles-panel" style="margin-top:12px" hidden>
     <summary data-i18n="twinProfiles.title"></summary>
@@ -355,65 +298,9 @@ main #ready, main #ask-panel, main #brain-panel, main #sessions-panel, main #s-c
     <div id="agents-root"></div>
   </details>
 
-  <details class="card" id="sessions-panel" hidden>
-    <summary data-i18n="sessions.title"></summary>
-    <p class="hint" id="sessions-hint"></p>
-    <div class="notice" id="sessions-private-notice" hidden style="margin-bottom:10px">
-      <span data-i18n="sessions.privateNotice"></span>
-      <button class="link" id="sessions-private-notice-btn" data-i18n="sessions.privateNoticeBtn"></button>
-    </div>
-    <div class="card" style="margin-bottom:10px">
-      <b data-i18n="sessions.shareTitle"></b>
-      <label class="muted" style="display:flex;flex-direction:row;gap:6px;align-items:center;margin-top:6px"><input type="checkbox" id="sess-import-history" style="width:auto"><span data-i18n="sessions.importHistoryLabel"></span></label>
-      <label class="muted" style="display:flex;flex-direction:row;gap:6px;align-items:center;margin-top:6px"><input type="checkbox" id="sess-share-summaries" style="width:auto"><span data-i18n="sessions.shareSummariesLabel"></span></label>
-      <label class="muted" style="display:flex;flex-direction:row;gap:6px;align-items:center;margin-top:6px"><input type="checkbox" id="sess-share-full" style="width:auto"><span data-i18n="sessions.shareFullTextLabel"></span></label>
-    </div>
-    <div class="card" style="margin-bottom:10px">
-      <b data-i18n="sessions.hermesProfileTitle"></b>
-      <p class="muted" data-i18n="sessions.hermesProfileHint"></p>
-      <p class="mono muted" id="sessions-hermes-profile-path"></p>
-      <div class="row"><button class="secondary" id="sessions-hermes-profile-choose" data-i18n="sessions.hermesProfileChoose"></button><button class="link" id="sessions-hermes-profile-default" data-i18n="sessions.hermesProfileDefault"></button></div>
-      <p class="muted" data-i18n="sessions.hermesProfileHistoryNote"></p>
-    </div>
-    <div class="card" style="margin-bottom:10px">
-      <b data-i18n="sessions.localSummaryTitle"></b>
-      <p class="muted" data-i18n="sessions.localSummaryHint"></p>
-      <label class="muted" style="display:flex;flex-direction:row;gap:6px;align-items:center;margin-top:6px"><input type="checkbox" id="sess-local-summary-enabled" style="width:auto"><span data-i18n="sessions.localSummaryEnable"></span></label>
-      <label class="muted" style="display:flex;flex-direction:row;gap:6px;align-items:center;margin-top:6px"><input type="checkbox" id="sess-local-summary-auto" style="width:auto"><span data-i18n="sessions.localSummaryAuto"></span></label>
-      <label class="muted" style="display:flex;flex-direction:row;gap:6px;align-items:center;margin-top:6px"><input type="checkbox" id="sess-local-summary-auto-file" style="width:auto"><span data-i18n="sessions.localSummaryAutoFile"></span></label>
-      <p class="muted" data-i18n="sessions.localSummaryAutoFileHint"></p>
-      <p class="muted" data-i18n="sessions.localSummarySetupGuide"></p>
-      <div class="row" style="margin-top:6px"><label><span data-i18n="sessions.localSummaryModel"></span><input id="sess-local-summary-model" list="sess-local-summary-model-options" maxlength="160" placeholder="qwen2.5:3b"><datalist id="sess-local-summary-model-options"></datalist></label><button class="secondary" id="sess-local-summary-find" data-i18n="sessions.localSummaryFind"></button><button class="secondary" id="sess-local-summary-check-vision" data-i18n="sessions.localSummaryCheckVision"></button><button class="secondary" id="sess-local-summary-save" data-i18n="sessions.localSummarySave"></button></div>
-      <p id="sess-local-summary-connection-status" class="muted" role="status" aria-live="polite"></p>
-      <p><a href="https://ollama.com/download" target="_blank" rel="noopener noreferrer" data-i18n="sessions.localSummaryDownload"></a></p>
-      <p id="sess-local-summary-vision-status" class="muted" role="status" aria-live="polite"></p>
-    </div>
-    <div class="row" style="margin-bottom:10px"><label class="muted" style="display:flex;flex-direction:row;gap:6px;align-items:center"><input type="checkbox" id="sess-private" style="width:auto"><span data-i18n="sessions.showPrivate"></span></label></div>
-    <div id="session-hook-settings" class="cards"></div>
-    <div id="session-end-cues" class="cards" aria-live="polite"></div>
-    <details class="card" style="margin-bottom:10px"><summary data-i18n="sessions.findFiled"></summary>
-      <p class="muted" data-i18n="sessions.findFiledHint"></p>
-      <div class="row"><label><span data-i18n="sessions.destination"></span><select id="filed-summary-vault"></select></label><button class="secondary" data-filed-list="1" data-i18n="sessions.searchFiled"></button></div>
-      <div id="filed-summaries-list" class="cards" aria-live="polite"></div>
-    </details>
-    <div id="filed-summary-editor" class="cards" style="margin-bottom:10px"></div>
-    <div id="sessions-list" class="cards"></div>
-    <div id="session-detail" style="margin-top:12px"></div>
-  </details>
+  <!-- brainlink-include:review/sessions.html -->
 
-  <details class="card" id="handoffs-panel" hidden>
-    <summary data-i18n="handoffs.title"></summary>
-    <p class="hint" data-i18n="handoffs.hint"></p>
-    <div class="card" id="handoff-mailbox-settings">
-      <b data-i18n="handoffs.mailboxSettings"></b>
-      <p class="muted" data-i18n="handoffs.mailboxFilesStay"></p>
-      <div class="grid2"><label><span data-i18n="handoffs.mailboxVault"></span><select id="handoff-mailbox-vault"></select></label><label><span data-i18n="handoffs.mailboxFolder"></span><select id="handoff-mailbox-folder"></select></label></div>
-      <div class="row"><button type="button" id="handoff-mailbox-preview-button" data-i18n="handoffs.mailboxPreview"></button><span id="handoff-mailbox-status" class="muted" role="status"></span></div>
-      <pre id="handoff-mailbox-preview" class="mono" hidden style="white-space:pre-wrap"></pre>
-      <button type="button" class="primary" id="handoff-mailbox-confirm" hidden data-i18n="handoffs.mailboxConfirm"></button>
-    </div>
-    <div id="handoffs-list" class="cards"></div>
-  </details>
+  <!-- brainlink-include:home/handoffs.html -->
 
   <section class="card" id="help-panel" aria-labelledby="help-title">
     <h2 id="help-title" data-i18n="help.title"></h2>
@@ -671,34 +558,7 @@ main #ready, main #ask-panel, main #brain-panel, main #sessions-panel, main #s-c
     </details>
   </section>
 
-  <section id="s-ingestion">
-    <h2 data-i18n="ingestion.title"></h2>
-    <p class="hint" data-i18n="ingestion.hint"></p>
-    <p id="ingestion-startup-warning" class="notice" role="status" hidden><span data-i18n="ingestion.startupWarning"></span> <button type="button" id="ingestion-enable-startup" data-i18n="ingestion.startupEnable"></button> <a href="#s-background" data-main-nav="s-background" data-i18n="ingestion.startupLink"></a></p>
-    <label class="muted" style="display:flex;flex-direction:row;gap:6px;align-items:center"><input type="checkbox" id="ingestion-enabled" style="width:auto"><span data-i18n="ingestion.enabled"></span></label>
-    <label class="muted" style="display:flex;flex-direction:row;gap:6px;align-items:center;margin-top:6px"><input type="checkbox" id="ingestion-auto-drafts" style="width:auto"><span data-i18n="ingestion.autoDrafts"></span></label>
-    <p class="muted" data-i18n="ingestion.autoDraftsHint"></p>
-    <p id="ingestion-model-setup" class="muted" role="status" hidden><span data-i18n="ingestion.modelSetup"></span> <a href="#sessions-panel" data-main-nav="sessions-panel" data-i18n="ingestion.modelSetupLink"></a></p>
-    <label class="muted" style="display:flex;flex-direction:row;gap:6px;align-items:center;margin-top:6px"><input type="checkbox" id="ingestion-auto-file" style="width:auto"><span data-i18n="ingestion.autoFile"></span></label>
-    <p class="muted" data-i18n="ingestion.autoFileHint"></p>
-    <div class="grid2" style="margin-top:10px">
-      <label><span data-i18n="ingestion.vault"></span><select id="ingestion-vault"></select></label>
-      <label><span data-i18n="ingestion.folder"></span><select id="ingestion-folder"></select></label>
-      <label><span data-i18n="ingestion.mode"></span><select id="ingestion-mode"><option value="daily" data-i18n="ingestion.modeDaily"></option><option value="watch" data-i18n="ingestion.modeWatch"></option></select></label>
-      <label id="ingestion-time-wrap"><span data-i18n="ingestion.time"></span><input id="ingestion-time" type="time" value="02:00"></label>
-      <label id="ingestion-interval-wrap" hidden><span data-i18n="ingestion.interval"></span><select id="ingestion-interval"><option value="1">1</option><option value="5">5</option><option value="15">15</option><option value="30">30</option><option value="60">60</option></select></label>
-    </div>
-    <div class="row" style="margin-top:8px"><button type="button" id="ingestion-add" data-i18n="ingestion.addTarget"></button></div>
-    <h3 data-i18n="ingestion.targets"></h3>
-    <div id="ingestion-target-list" class="cards"></div>
-    <div class="row" style="margin-top:12px"><button class="primary" id="ingestion-save" data-i18n="ingestion.save"></button><button id="ingestion-run" data-i18n="ingestion.run"></button></div>
-    <p id="ingestion-status" class="muted" role="status"></p>
-    <p id="ingestion-schedule-status" class="muted" role="status"></p>
-    <p id="ingestion-draft-status" class="muted" role="status"></p>
-    <div id="ingestion-queue" class="cards" aria-live="polite"></div>
-    <h3 data-i18n="ingestion.pendingDrafts"></h3>
-    <div id="ingestion-draft-list" class="cards" aria-live="polite"></div>
-  </section>
+  <!-- brainlink-include:review/ingestion.html -->
 
   <section id="s-brief">
     <h2 data-i18n="brief.title"></h2>
@@ -1078,7 +938,7 @@ async function ensureLocale(saved) {
 // Five top-level destinations. Every section belongs to exactly one group; choosing a group
 // shows only its sections, so the page is no longer one long scroll. Groups apply only while
 // the main navigation is visible, so onboarding screens are never filtered.
-const NAV_GROUPS = {"home":["ready","handoffs-panel"],"find":["ask-panel","brain-panel"],"review":["proposal-review-panel","memory-review-panel","sessions-panel","s-ingestion"],"access":["s-connect","s-vault","s-agents","agents-panel","twin-profiles-panel","s-test"],"system":["s-backup","s-sync","s-background","s-brief","s-updates","s-reranker","s-share","rsi-panel","help-panel"]};
+const NAV_GROUPS = {"home":["ready","handoffs-panel"],"find":["ask-panel","brain-panel"],"review":["proposal-review-panel","memory-review-panel","decision-reviews-panel","conflicts-panel","tidy-panel","sessions-panel","s-ingestion"],"access":["s-connect","s-vault","s-agents","agents-panel","twin-profiles-panel","s-test"],"system":["s-backup","s-sync","s-background","s-brief","s-updates","s-reranker","s-share","rsi-panel","help-panel"]};
 const navGroupOf = (id) => Object.keys(NAV_GROUPS).find((group) => NAV_GROUPS[group].includes(id)) || null;
 for (const [group, ids] of Object.entries(NAV_GROUPS)) for (const id of ids) $(id)?.setAttribute('data-nav-group', group);
 let navGroup = 'home';

@@ -125,6 +125,11 @@ test('every native installer bundles all production dependencies and portable Br
   assert.match(nsisInstaller, /Delete "\$DESKTOP\\BrainLink\.lnk"/, 'NSIS uninstall must remove the shortcut it created');
 
   const macZipTest = await read('packaging/macos/test-zip.sh');
+  for (const fragment of [
+    'ui/destinations/find/ask.html', 'ui/destinations/review/proposals.html',
+    'ui/destinations/home/handoffs.html', 'src/setup-page.mjs',
+    'src/setup/routes/find.mjs', 'src/setup/routes/review.mjs', 'src/setup/routes/handoffs.mjs',
+  ]) assert.ok(macZipTest.includes(fragment), `macOS package smoke test must check the destination module ${fragment}`);
   assert.match(await read('packaging/macos/resources/welcome.html'), /<h2[^>]*>BrainLink<\/h2>/, 'macOS installer should use the customer-facing product name');
   assert.match(await read('packaging/macos/resources/license.txt'), /^BrainLink — Pre-release Use Notice/, 'macOS license page should match the customer-facing product name');
   assert.match(macZipTest, /app\/src\/update-manifest\.mjs/, 'the macOS zip package must include the update verifier');

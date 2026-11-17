@@ -7,6 +7,7 @@
 // The fix is the pattern already used elsewhere in this file: data-i18n on its own <span>, sibling
 // to the control, never wrapping it.
 import test from 'node:test';
+import { readSetupHtml } from './helpers/setup-html.mjs';
 import assert from 'node:assert/strict';
 import { readFile } from 'node:fs/promises';
 import path from 'node:path';
@@ -18,7 +19,7 @@ const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const LOCALES_DIR = path.join(ROOT, 'ui', 'locales');
 
 test('ui/index.html: no data-i18n element directly wraps a live form control', async () => {
-  const html = await readFile(path.join(ROOT, 'ui', 'index.html'), 'utf8');
+  const html = await readSetupHtml();
   const offenders = [...html.matchAll(/<(\w+)[^>]*\bdata-i18n="[^"]+"[^>]*>\s*<(select|input|textarea)\b/g)];
   assert.deepEqual(offenders.map((m) => `<${m[1]} data-i18n> wraps <${m[2]}>`), []);
 });
@@ -27,7 +28,7 @@ test('ui/index.html: no data-i18n element directly wraps a live form control', a
 // a real, labelled form -- never window.prompt(), a jargon-y browser dialog with no room for
 // plain-language instructions.
 test('ui/index.html and ui/share.js: the folder-picker fallback never uses window.prompt', async () => {
-  const html = await readFile(path.join(ROOT, 'ui', 'index.html'), 'utf8');
+  const html = await readSetupHtml();
   const shareJs = await readFile(path.join(ROOT, 'ui', 'share.js'), 'utf8');
   assert.doesNotMatch(html, /\bwindow\.prompt\(/);
   assert.doesNotMatch(shareJs, /\bwindow\.prompt\?\.\(/);
@@ -39,7 +40,7 @@ test('ui/index.html and ui/share.js: the folder-picker fallback never uses windo
 // (agents.js, share.js) right away, so they stop saying "Add a vault first" without needing a
 // manual reload.
 test('ui/index.html dispatches brainlink:state-updated; agents.js and share.js listen for it', async () => {
-  const html = await readFile(path.join(ROOT, 'ui', 'index.html'), 'utf8');
+  const html = await readSetupHtml();
   const agentsJs = await readFile(path.join(ROOT, 'ui', 'agents.js'), 'utf8');
   const shareJs = await readFile(path.join(ROOT, 'ui', 'share.js'), 'utf8');
   assert.match(html, /dispatchEvent\(new CustomEvent\(['"]brainlink:state-updated['"]/);
@@ -55,7 +56,7 @@ test('ui/index.html dispatches brainlink:state-updated; agents.js and share.js l
 // missing from a catalog would silently fall back to raw English (or the key itself) for that
 // language instead of erroring, so it would never be caught just by using the app once in English.
 test('every en key used by Agents, Share, GitHub preview, and sync provider labels exists in every locale', async () => {
-  const html = await readFile(path.join(ROOT, 'ui', 'index.html'), 'utf8');
+  const html = await readSetupHtml();
   const agentsJs = await readFile(path.join(ROOT, 'ui', 'agents.js'), 'utf8');
   const shareJs = await readFile(path.join(ROOT, 'ui', 'share.js'), 'utf8');
 
@@ -123,7 +124,7 @@ test('P1d: folderFallback.hint gives generic, actionable steps with no Mac Finde
 // shipped renderer (extracted from ui/index.html, no browser available) rather than just
 // grepping for patterns, since this is exactly the kind of string-munging logic regexes miss.
 async function loadNoteRenderer() {
-  const html = await readFile(path.join(ROOT, 'ui', 'index.html'), 'utf8');
+  const html = await readSetupHtml();
   const esc = html.match(/const esc = \([^)]*\) => [^\n]+;/)[0];
   const inline = html.match(/function renderNoteInline\(text, linkMap\) \{[\s\S]*?\n\}/)[0];
   const body = html.match(/function renderNoteBody\(md, wikilinks, vault\) \{[\s\S]*?\n\}/)[0];

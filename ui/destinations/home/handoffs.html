@@ -1,0 +1,13 @@
+<details class="card" id="handoffs-panel" hidden>
+    <summary data-i18n="handoffs.title"></summary>
+    <p class="hint" data-i18n="handoffs.hint"></p>
+    <div class="card" id="handoff-mailbox-settings">
+      <b data-i18n="handoffs.mailboxSettings"></b>
+      <p class="muted" data-i18n="handoffs.mailboxFilesStay"></p>
+      <div class="grid2"><label><span data-i18n="handoffs.mailboxVault"></span><select id="handoff-mailbox-vault"></select></label><label><span data-i18n="handoffs.mailboxFolder"></span><select id="handoff-mailbox-folder"></select></label></div>
+      <div class="row"><button type="button" id="handoff-mailbox-preview-button" data-i18n="handoffs.mailboxPreview"></button><span id="handoff-mailbox-status" class="muted" role="status"></span></div>
+      <pre id="handoff-mailbox-preview" class="mono" hidden style="white-space:pre-wrap"></pre>
+      <button type="button" class="primary" id="handoff-mailbox-confirm" hidden data-i18n="handoffs.mailboxConfirm"></button>
+    </div>
+    <div id="handoffs-list" class="cards"></div>
+  </details>

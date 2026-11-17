@@ -1,4 +1,5 @@
 import test from 'node:test';
+import { readSetupHtml } from './helpers/setup-html.mjs';
 import assert from 'node:assert/strict';
 import { mkdtemp, writeFile, readFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
@@ -138,7 +139,7 @@ test('Setup weekly benchmark is authenticated, uses only the built-in fictional 
 });
 
 test('Setup exposes localized weekly benchmark controls and labels their evidence limits', async () => {
-  const html = await readFile(path.join(ROOT, 'ui', 'index.html'), 'utf8');
+  const html = await readSetupHtml();
   assert.match(html, /id="rsi-weekly-run"/);
   assert.match(html, /id="rsi-weekly-schedule-form"/);
   assert.match(html, /POST', '\/api\/rsi\/weekly-benchmark\/settings/);

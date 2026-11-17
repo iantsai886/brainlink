@@ -1,4 +1,5 @@
 import test from 'node:test';
+import { readSetupHtml } from './helpers/setup-html.mjs';
 import assert from 'node:assert/strict';
 import { mkdtemp, mkdir, writeFile, readFile, readdir, rename, symlink } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
@@ -413,7 +414,7 @@ test('authenticated Setup enables scheduled backup only after a verified first c
 });
 
 test('restore UI provides verified history, localized pickers and explicit restore confirmation', async () => {
-  const html = await readFile(new URL('../ui/index.html', import.meta.url), 'utf8');
+  const html = await readSetupHtml();
   assert.match(html, /const backupWhen = Number\.isFinite\(backupAt\)/, 'backup receipt handles old records without a valid timestamp');
   assert.match(html, /backup\.trigger\.' \+ backupTrigger/, 'backup receipt explains whether it was manual or scheduled');
   for (const id of ['backup-schedule-mode', 'backup-interval-wrap', 'backup-hours', 'backup-time-wrap', 'backup-time', 'backup-history-refresh', 'backup-history', 'backup-history-status', 'backup-restore-source', 'backup-restore-destination', 'backup-restore-pick-source', 'backup-restore-pick-destination', 'backup-restore']) {

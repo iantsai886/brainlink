@@ -1,6 +1,7 @@
 // RB2 demo features: cited instant answer (/api/ask, /api/note), connect + live health check
 // (/api/connect's health field, /api/client-health), and the `brainlink sync` session-count fix.
 import test from 'node:test';
+import { readSetupHtml } from './helpers/setup-html.mjs';
 import assert from 'node:assert/strict';
 import { mkdtemp, mkdir, cp, readFile, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
@@ -206,7 +207,7 @@ test('/api/connect: one-click connect returns a local BrainLink check, not an ex
 // `.modal-overlay[hidden] { display: none }` is required so the always-present #note-modal
 // (ui/index.html) does not cover the whole page and swallow clicks from first load.
 test('ui/index.html: #note-modal starts hidden (author CSS cannot override the hidden attribute) and Close/Esc wire up', async () => {
-  const html = await readFile(path.join(ROOT, 'ui', 'index.html'), 'utf8');
+  const html = await readSetupHtml();
   assert.match(html, /<div id="note-modal" class="modal-overlay" hidden>/, 'the modal must start with the hidden attribute in markup');
   assert.match(html, /\.modal-overlay\[hidden\]\s*\{\s*display:\s*none;?\s*\}/, 'an explicit [hidden] override is required because .modal-overlay also sets `display`');
   assert.match(html, /\$\('note-close'\)\.onclick\s*=\s*closeNote/, 'Close must hide the modal');
@@ -214,7 +215,7 @@ test('ui/index.html: #note-modal starts hidden (author CSS cannot override the h
 });
 
 test('ui/index.html: shared desktop content width grows while the graph still stacks on narrow screens', async () => {
-  const html = await readFile(path.join(ROOT, 'ui', 'index.html'), 'utf8');
+  const html = await readSetupHtml();
   const css = html.match(/<style>([\s\S]*?)<\/style>/)?.[1] || '';
   assert.match(css, /--content-width:\s*1180px/, 'desktop content should use the wider shared layout size');
   for (const selector of ['header', 'main', '#boot-loading, #boot-error', '#main-nav']) {

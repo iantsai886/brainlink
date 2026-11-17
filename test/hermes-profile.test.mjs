@@ -1,4 +1,5 @@
 import test from 'node:test';
+import { readSetupHtml } from './helpers/setup-html.mjs';
 import assert from 'node:assert/strict';
 import { mkdtemp, mkdir, readFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
@@ -51,7 +52,7 @@ test('Sessions lets a user select one Hermes profile and switch back to the defa
 });
 
 test('Hermes profile Settings exposes a native folder chooser and explains profile switching', async () => {
-  const html = await readFile(new URL('../ui/index.html', import.meta.url), 'utf8');
+  const html = await readSetupHtml();
   assert.match(html, /id="sessions-hermes-profile-choose"/);
   assert.match(html, /POST', '\/api\/sessions\/hermes-profile\/pick'/);
   assert.match(html, /POST', '\/api\/sessions\/hermes-profile'/);

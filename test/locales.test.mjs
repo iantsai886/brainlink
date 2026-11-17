@@ -1,6 +1,7 @@
 // Locale files (ui/locales/*.json): plain JSON, no i18n dependency. Every key BrainLink ships
 // must exist in every supported locale, or a user who picks zh-TW or pt ends up with blank UI text.
 import test from 'node:test';
+import { readSetupHtml } from './helpers/setup-html.mjs';
 import assert from 'node:assert/strict';
 import { readFile } from 'node:fs/promises';
 import path from 'node:path';
@@ -33,7 +34,7 @@ test('every supported locale ships a JSON file with the exact same keys as Engli
 });
 
 test('Twin read-and-propose preset affects only chosen agents and vaults and does not save', async () => {
-  const html = await readFile(path.join(ROOT, 'ui', 'index.html'), 'utf8');
+  const html = await readSetupHtml();
   assert.match(html, /id="twin-read-propose-preset"/);
   const start = html.indexOf("$('twin-read-propose-preset').addEventListener");
   const end = html.indexOf("$('twin-create').onclick", start);
@@ -62,7 +63,7 @@ test('replay-miss teaching offers a preview-before-save flow in every locale', a
   const catalogs = Object.fromEntries(await Promise.all(LOCALES.map(async (id) => [id, await loadLocale(id)])));
   const keys = ['replay.teach', 'replay.teachHeading', 'replay.teachAnswer', 'replay.teachFolderHint', 'replay.teachPreview', 'replay.teachConfirm', 'replay.teachFound'];
   for (const id of LOCALES) for (const key of keys) assert.ok(catalogs[id][key], `${id} defines ${key}`);
-  const html = await readFile(path.join(ROOT, 'ui', 'index.html'), 'utf8');
+  const html = await readSetupHtml();
   assert.match(html, /data-teach-miss=/, 'each unanswered miss can open Teach it');
   assert.match(html, /POST', '\/api\/replay-misses\/teach'/, 'saving uses the reviewed local Setup endpoint');
   assert.match(html, /replay-teach-preview-button/);
@@ -73,7 +74,7 @@ test('decision review actions are localized and show append/new-note previews be
   const catalogs = Object.fromEntries(await Promise.all(LOCALES.map(async (id) => [id, await loadLocale(id)])));
   const keys = ['decisionReviews.title', 'decisionReviews.hint', 'decisionReviews.empty', 'decisionReviews.stands', 'decisionReviews.changed', 'decisionReviews.retire', 'decisionReviews.confirm'];
   for (const id of LOCALES) for (const key of keys) assert.ok(catalogs[id][key], `${id} defines ${key}`);
-  const html = await readFile(path.join(ROOT, 'ui', 'index.html'), 'utf8');
+  const html = await readSetupHtml();
   assert.match(html, /id="decision-reviews-panel"/);
   assert.match(html, /decision-reviews\/preview/);
   assert.match(html, /decision-reviews\/confirm/);
@@ -84,7 +85,7 @@ test('conflict review is localized and queues supersession for owner approval', 
   const catalogs = Object.fromEntries(await Promise.all(LOCALES.map(async (id) => [id, await loadLocale(id)])));
   const keys = ['conflicts.title', 'conflicts.hint', 'conflicts.aStands', 'conflicts.bStands', 'conflicts.both', 'conflicts.dismiss', 'conflicts.confirm', 'conflicts.loadMore'];
   for (const id of LOCALES) for (const key of keys) assert.ok(catalogs[id][key], `${id} defines ${key}`);
-  const html = await readFile(path.join(ROOT, 'ui', 'index.html'), 'utf8');
+  const html = await readSetupHtml();
   assert.match(html, /id="conflicts-panel"/);
   assert.match(html, /conflicts\/preview/);
   assert.match(html, /conflicts\/confirm/);
@@ -95,7 +96,7 @@ test('on-demand tidy review is localized and previews append-only changes before
   const catalogs = Object.fromEntries(await Promise.all(LOCALES.map(async (id) => [id, await loadLocale(id)])));
   const keys = ['tidy.title', 'tidy.hint', 'tidy.generate', 'tidy.previewApply', 'tidy.previewDismiss', 'tidy.confirm', 'tidy.loadMore'];
   for (const id of LOCALES) for (const key of keys) assert.ok(catalogs[id][key], `${id} defines ${key}`);
-  const html = await readFile(path.join(ROOT, 'ui', 'index.html'), 'utf8');
+  const html = await readSetupHtml();
   assert.match(html, /id="tidy-panel"/);
   assert.match(html, /tidy\/apply-preview/);
   assert.match(html, /tidy\/apply-confirm/);

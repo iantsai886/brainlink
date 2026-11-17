@@ -1,4 +1,5 @@
 import test from 'node:test';
+import { readSetupHtml } from './helpers/setup-html.mjs';
 import assert from 'node:assert/strict';
 import path from 'node:path';
 import { mkdtemp, mkdir, readdir, readFile, writeFile } from 'node:fs/promises';
@@ -21,7 +22,7 @@ test('Harness automatic drafts wait 30 idle minutes and reject sessions with lat
 });
 
 test('pending session cue offers a safe copy request for an authorized AI', async () => {
-  const html = await readFile(new URL('../ui/index.html', import.meta.url), 'utf8');
+  const html = await readSetupHtml();
   assert.match(html, /data-cue-review-request="\$\{esc\(cue\.session_ref\)\}"/);
   assert.match(html, /data-sess-file="\$\{esc\(cue\.session_ref\)\}"/);
   assert.match(html, /if \(choices\) await previewSessionFile\(id\)/, 'opening a closeout from the reminder prepares a private preview immediately');

@@ -1,4 +1,5 @@
 import test from 'node:test';
+import { readSetupHtml } from './helpers/setup-html.mjs';
 import assert from 'node:assert/strict';
 import { mkdir, mkdtemp, readFile, writeFile } from 'node:fs/promises';
 import { createHash } from 'node:crypto';
@@ -250,7 +251,7 @@ test('scheduled aggregate observation can create one review proposal without per
 });
 
 test('RSI Setup panel has unique ids and one render/submit path', async () => {
-  const html = await readFile(new URL('../ui/index.html', import.meta.url), 'utf8');
+  const html = await readSetupHtml();
   assert.equal((html.match(/id="rsi-panel"/g) || []).length, 1);
   assert.equal((html.match(/id="rsi-idea-form"/g) || []).length, 1);
   assert.match(html, /data-rsi-field="promotion_commit_sha"/);

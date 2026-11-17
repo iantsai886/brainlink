@@ -1,4 +1,5 @@
 import test from 'node:test';
+import { readSetupHtml } from './helpers/setup-html.mjs';
 import assert from 'node:assert/strict';
 import path from 'node:path';
 import { mkdtemp, mkdir, writeFile, readFile } from 'node:fs/promises';
@@ -196,7 +197,7 @@ test('Setup offers authenticated manual scans and runs an enabled daily scan in 
 });
 
 test('ingestion scan UI has manual, scheduled and startup guidance controls in every locale', async () => {
-  const html = await readFile(new URL('../ui/index.html', import.meta.url), 'utf8');
+  const html = await readSetupHtml();
   assert.equal((html.match(/id="ingestion-startup-warning"/g) || []).length, 1, 'scheduled scans explain that the app must resume at sign-in');
   assert.match(html, /id="ingestion-startup-warning"[\s\S]*?data-main-nav="s-background"/, 'the warning links directly to the background startup setting');
   assert.match(html, /id="ingestion-enable-startup" data-i18n="ingestion\.startupEnable"/, 'the warning offers a one-click way to keep scans running after sign-in');

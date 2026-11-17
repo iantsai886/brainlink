@@ -1,5 +1,6 @@
 // RB7 item 2: the 3D notes graph API. Excluded folders and private notes/vaults must never
 // appear in the graph, the side panel, or backlinks/outlinks — same promise as search/answers.
+import { readSetupHtml } from './helpers/setup-html.mjs';
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { mkdtemp, mkdir, writeFile } from 'node:fs/promises';
@@ -616,7 +617,7 @@ test('ui/notes3d.js: clicking a node opens its note via the same path as a wikil
 
 test('active Setup UI reloads the graph on vault events and keeps an open editor intact', async () => {
   const { readFile } = await import('node:fs/promises');
-  const page = await readFile(new URL('../ui/index.html', import.meta.url), 'utf8');
+  const page = await readSetupHtml();
   const graph = await readFile(new URL('../ui/notes3d.js', import.meta.url), 'utf8');
   assert.match(page, /new EventSource\('\/api\/events\?t=' \+ encodeURIComponent\(T\)\)/);
   assert.match(page, /dispatchEvent\(new Event\('brainlink:vault-changed'\)\)/);
@@ -626,7 +627,7 @@ test('active Setup UI reloads the graph on vault events and keeps an open editor
 
 test('installed Setup graph panel exposes structured record fields and saves only its selected note', async () => {
   const { readFile } = await import('node:fs/promises');
-  const page = await readFile(new URL('../ui/index.html', import.meta.url), 'utf8');
+  const page = await readSetupHtml();
   const graph = await readFile(new URL('../ui/notes3d.js', import.meta.url), 'utf8');
   assert.match(page, /notes3d\.js/, 'the installed Setup page loads this graph panel');
   for (const field of ['type','scope','status']) assert.ok(graph.includes(`graphChoices('${field}',`), `form includes ${field}`);

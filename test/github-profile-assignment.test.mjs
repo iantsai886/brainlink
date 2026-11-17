@@ -1,6 +1,7 @@
 // Profile-scoped GitHub repository assignment. Fictional vaults, profiles, repositories and
 // secrets only; every Git remote is a temporary local path. No real GitHub contact.
 import test from 'node:test';
+import { readSetupHtml } from './helpers/setup-html.mjs';
 import assert from 'node:assert/strict';
 import { execFileSync } from 'node:child_process';
 import { mkdtemp, mkdir, readFile, writeFile, rm } from 'node:fs/promises';
@@ -416,7 +417,7 @@ test('Setup API: assignments need review plus an exact confirmation, are exclusi
 // Structural checks only: they prove the Setup page is wired to reset and bind state per profile,
 // not that a browser run behaved correctly (no desktop-UI validation has been done).
 test('Setup UI parses and clears selections, receipts and pending confirmations when the profile changes', async () => {
-  const html = await readFile(path.join(path.dirname(fileURLToPath(import.meta.url)), '..', 'ui', 'index.html'), 'utf8');
+  const html = await readSetupHtml();
   const scripts = [...html.matchAll(/<script(?![^>]*\bsrc=)[^>]*>([\s\S]*?)<\/script>/g)].map((m) => m[1]);
   assert.ok(scripts.length > 0);
   for (const code of scripts) assert.doesNotThrow(() => new vm.Script(code));

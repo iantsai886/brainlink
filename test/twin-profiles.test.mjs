@@ -1,4 +1,5 @@
 import test from 'node:test';
+import { readSetupHtml } from './helpers/setup-html.mjs';
 import assert from 'node:assert/strict';
 import { mkdtemp, mkdir, readFile, readdir, writeFile, stat, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
@@ -274,7 +275,7 @@ test('Twin permission controls apply both profile-vault and agent-memory ceiling
   assert.equal(twinActionAllowed({ action: 'search', access: 'write', memoryPolicy: { semantic: true }, selected: true, profileVaultSelected: false }), false);
 });
 test('Twin memory shortcut copies its ceiling only to selected agents and waits for normal review/save', async () => {
-  const html = await readFile(new URL('../ui/index.html', import.meta.url), 'utf8');
+  const html = await readSetupHtml();
   const start = html.indexOf('function twinActionMemoryAllowed(action, policy) {');
   const end = html.indexOf("$('twin-apply-memory-to-agents').addEventListener", start);
   assert.ok(start >= 0 && end > start, 'memory copy helper is in the setup permission flow');
@@ -315,7 +316,7 @@ test('Twin memory shortcut copies its ceiling only to selected agents and waits 
 });
 
 test('Twin setup explains all four memory switches in every supported language', async () => {
-  const html = await readFile(new URL('../ui/index.html', import.meta.url), 'utf8');
+  const html = await readSetupHtml();
   assert.match(html, /twinProfiles\.memoryDescription\.' \+ key/, 'each checkbox renders its matching short explanation');
   const catalogs = {};
   for (const locale of ['en', 'pt', 'zh-TW']) {

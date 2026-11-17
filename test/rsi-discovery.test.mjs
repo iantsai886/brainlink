@@ -1,4 +1,5 @@
 import test from 'node:test';
+import { readSetupHtml } from './helpers/setup-html.mjs';
 import assert from 'node:assert/strict';
 import { createHash } from 'node:crypto';
 import { mkdtemp, mkdir, readFile, writeFile } from 'node:fs/promises';
@@ -839,7 +840,7 @@ test('Setup activity cancels shutdown during the idle-exit grace period', async 
 });
 
 test('RSI discovery UI has one form, selectable fixed sources, unique controls, and translated labels', async () => {
-  const html = await readFile(new URL('../ui/index.html', import.meta.url), 'utf8');
+  const html = await readSetupHtml();
   assert.equal((html.match(/id="rsi-export"/g) || []).length, 1, 'review export has one visible control');
   assert.match(html, /api\('GET', '\/api\/rsi\/export'\)/, 'download uses the authenticated local API helper');
   assert.match(html, /URL\.createObjectURL\(blob\)/, 'export is downloaded as a file');

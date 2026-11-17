@@ -1,4 +1,5 @@
 import test from 'node:test';
+import { readSetupHtml } from './helpers/setup-html.mjs';
 import assert from 'node:assert/strict';
 import { mkdtemp, mkdir, readFile, writeFile, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
@@ -109,7 +110,7 @@ test('Setup event stream sends completed vault counts to a late browser connecti
 });
 
 test('Setup UI keeps count events that arrive before vault state and applies them after load', async () => {
-  const html = await readFile(new URL('../ui/index.html', import.meta.url), 'utf8');
+  const html = await readSetupHtml();
   const countListener = html.slice(html.indexOf("vaultEvents.addEventListener('vault-counts-updated'"), html.indexOf("const $ = (id) =>"));
   const loadFunction = html.slice(html.indexOf('async function load()'), html.indexOf('\nfunction renderStart()'));
   assert.match(countListener, /latestVaultNoteCounts\.set\(result\.vault, result\)/);

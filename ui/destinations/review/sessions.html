@@ -1,0 +1,45 @@
+<details class="card" id="sessions-panel" hidden>
+    <summary data-i18n="sessions.title"></summary>
+    <p class="hint" id="sessions-hint"></p>
+    <div class="notice" id="sessions-private-notice" hidden style="margin-bottom:10px">
+      <span data-i18n="sessions.privateNotice"></span>
+      <button class="link" id="sessions-private-notice-btn" data-i18n="sessions.privateNoticeBtn"></button>
+    </div>
+    <div class="card" style="margin-bottom:10px">
+      <b data-i18n="sessions.shareTitle"></b>
+      <label class="muted" style="display:flex;flex-direction:row;gap:6px;align-items:center;margin-top:6px"><input type="checkbox" id="sess-import-history" style="width:auto"><span data-i18n="sessions.importHistoryLabel"></span></label>
+      <label class="muted" style="display:flex;flex-direction:row;gap:6px;align-items:center;margin-top:6px"><input type="checkbox" id="sess-share-summaries" style="width:auto"><span data-i18n="sessions.shareSummariesLabel"></span></label>
+      <label class="muted" style="display:flex;flex-direction:row;gap:6px;align-items:center;margin-top:6px"><input type="checkbox" id="sess-share-full" style="width:auto"><span data-i18n="sessions.shareFullTextLabel"></span></label>
+    </div>
+    <div class="card" style="margin-bottom:10px">
+      <b data-i18n="sessions.hermesProfileTitle"></b>
+      <p class="muted" data-i18n="sessions.hermesProfileHint"></p>
+      <p class="mono muted" id="sessions-hermes-profile-path"></p>
+      <div class="row"><button class="secondary" id="sessions-hermes-profile-choose" data-i18n="sessions.hermesProfileChoose"></button><button class="link" id="sessions-hermes-profile-default" data-i18n="sessions.hermesProfileDefault"></button></div>
+      <p class="muted" data-i18n="sessions.hermesProfileHistoryNote"></p>
+    </div>
+    <div class="card" style="margin-bottom:10px">
+      <b data-i18n="sessions.localSummaryTitle"></b>
+      <p class="muted" data-i18n="sessions.localSummaryHint"></p>
+      <label class="muted" style="display:flex;flex-direction:row;gap:6px;align-items:center;margin-top:6px"><input type="checkbox" id="sess-local-summary-enabled" style="width:auto"><span data-i18n="sessions.localSummaryEnable"></span></label>
+      <label class="muted" style="display:flex;flex-direction:row;gap:6px;align-items:center;margin-top:6px"><input type="checkbox" id="sess-local-summary-auto" style="width:auto"><span data-i18n="sessions.localSummaryAuto"></span></label>
+      <label class="muted" style="display:flex;flex-direction:row;gap:6px;align-items:center;margin-top:6px"><input type="checkbox" id="sess-local-summary-auto-file" style="width:auto"><span data-i18n="sessions.localSummaryAutoFile"></span></label>
+      <p class="muted" data-i18n="sessions.localSummaryAutoFileHint"></p>
+      <p class="muted" data-i18n="sessions.localSummarySetupGuide"></p>
+      <div class="row" style="margin-top:6px"><label><span data-i18n="sessions.localSummaryModel"></span><input id="sess-local-summary-model" list="sess-local-summary-model-options" maxlength="160" placeholder="qwen2.5:3b"><datalist id="sess-local-summary-model-options"></datalist></label><button class="secondary" id="sess-local-summary-find" data-i18n="sessions.localSummaryFind"></button><button class="secondary" id="sess-local-summary-check-vision" data-i18n="sessions.localSummaryCheckVision"></button><button class="secondary" id="sess-local-summary-save" data-i18n="sessions.localSummarySave"></button></div>
+      <p id="sess-local-summary-connection-status" class="muted" role="status" aria-live="polite"></p>
+      <p><a href="https://ollama.com/download" target="_blank" rel="noopener noreferrer" data-i18n="sessions.localSummaryDownload"></a></p>
+      <p id="sess-local-summary-vision-status" class="muted" role="status" aria-live="polite"></p>
+    </div>
+    <div class="row" style="margin-bottom:10px"><label class="muted" style="display:flex;flex-direction:row;gap:6px;align-items:center"><input type="checkbox" id="sess-private" style="width:auto"><span data-i18n="sessions.showPrivate"></span></label></div>
+    <div id="session-hook-settings" class="cards"></div>
+    <div id="session-end-cues" class="cards" aria-live="polite"></div>
+    <details class="card" style="margin-bottom:10px"><summary data-i18n="sessions.findFiled"></summary>
+      <p class="muted" data-i18n="sessions.findFiledHint"></p>
+      <div class="row"><label><span data-i18n="sessions.destination"></span><select id="filed-summary-vault"></select></label><button class="secondary" data-filed-list="1" data-i18n="sessions.searchFiled"></button></div>
+      <div id="filed-summaries-list" class="cards" aria-live="polite"></div>
+    </details>
+    <div id="filed-summary-editor" class="cards" style="margin-bottom:10px"></div>
+    <div id="sessions-list" class="cards"></div>
+    <div id="session-detail" style="margin-top:12px"></div>
+  </details>

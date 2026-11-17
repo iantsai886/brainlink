@@ -1,4 +1,5 @@
 import test from 'node:test';
+import { readSetupHtml } from './helpers/setup-html.mjs';
 import assert from 'node:assert/strict';
 import { readFile } from 'node:fs/promises';
 import path from 'node:path';
@@ -9,7 +10,7 @@ import { LOCALES } from '../src/config.mjs';
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 
 test('main navigation has five destinations, every section belongs to one, and labels exist in every locale', async () => {
-  const page = await readFile(path.join(ROOT, 'ui', 'index.html'), 'utf8');
+  const page = await readSetupHtml();
   const ids = new Set([...page.matchAll(/\bid="([^"]+)"/g)].map((match) => match[1]));
   const nav = page.match(/<nav id="main-nav"[\s\S]*?<\/nav>/)?.[0] || '';
   const links = [...nav.matchAll(/<a\b[^>]*href="#([^"]+)"[^>]*data-nav-group-link="([^"]+)"[^>]*data-i18n="([^"]+)"[^>]*>/g)];
