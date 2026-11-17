@@ -1,6 +1,6 @@
 # BrainLink implementation status
 
-Checked 2026-11-17 (Asia/Taipei). Repository: `iantsai886/brainlink`. Working branch: `codex/complete-review-work-order`. Current pushed commit: `f4d3a4a5c6ad175f74c7c34cf38db7c42838ec9d`. Product version in `package.json`: `1.3.8` (development, unreleased).
+Checked 2026-11-17 (Asia/Taipei). Repository: `iantsai886/brainlink`. Working branch: `codex/complete-review-work-order`. Current pushed commit: `bfdad8a073aca875750bc7a213eaffb910f70812`. Product version in `package.json`: `1.3.8` (development, unreleased).
 
 ## Completed work and evidence
 
@@ -18,7 +18,7 @@ Checked 2026-11-17 (Asia/Taipei). Repository: `iantsai886/brainlink`. Working br
 - Windows package stage matched all bundled source files. The isolated install smoke passed Setup navigation, English/Portuguese/Traditional Chinese OCR, scanned-PDF OCR, safe HTML extraction, the sign-in launcher, and uninstall with test data and PATH preserved.
 - Installed locally from the current 1.3.8 app payload. Inno Setup returned exit code 0; the installed `package.json` and bundled CLI both report `1.3.8`; `%APPDATA%\BrainLink\config.json` remains present.
 - Unsigned installer: `dist/BrainLink-Setup-1.3.8-fc61ec7.exe`, 63,686,635 bytes; SHA-256 `F676A98F554B737CC885B32B37AF9E604D3C86F0078AAB2EC42E11400FEF1459`. Its app payload is the same 1.3.8 source as current HEAD; the suffix identifies the source commit used to build it.
-- Hosted GitHub Actions for commit `f4d3a4a` did not start. The check annotation reports an account payment/spending-limit gate; all package jobs were skipped. This is not a hosted test result.
+- Hosted GitHub Actions for commit `bfdad8a` did not start (all six test jobs have zero steps); the check annotation reports an account payment/spending-limit gate, and all package jobs were skipped. This is not a hosted test result.
 
 ## Remaining decisions and external validation
 
