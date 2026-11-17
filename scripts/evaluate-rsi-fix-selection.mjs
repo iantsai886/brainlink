@@ -1,6 +1,7 @@
 import { readFile, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { formatCoveragePercent } from './rsi-fix-selection-report.mjs';
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const fixturePath = path.join(root, 'samples', 'evaluation', 'rsi-fix-selection-v1.json');
@@ -26,7 +27,7 @@ const result = {
   decision: 'no_recursive_gain_claim',
   limitations: ['All cases are synthetic and authored for this fixture.', 'The fixed-list policy was specified before scoring the fresh cases, but the sample is small and not an independent benchmark.', 'This result does not establish better production retrieval, autonomous learning, or real user benefit.'],
 };
-const report = `# RSI-001 fix-selection experiment\n\n- Date: ${result.date}\n- Fixture: \`${result.fixture}\` (SHA-256: \`${result.fixture_sha256}\`)\n- Training baseline: ${result.training_cases} fictional cases; fixed-list top ${result.selection_limit}: ${fixed.selected.join(', ')}; fresh-case coverage ${fixed.hits}/${fixed.total} (${Math.round(fixed.coverage * 100)}%).\n- Candidate: frequency-selected top ${result.selection_limit}: ${dynamic.selected.join(', ')}; fresh-case coverage ${dynamic.hits}/${dynamic.total} (${Math.round(dynamic.coverage * 100)}%).\n- Outcome: ${result.outcome}.\n- Decision: no recursive gain claim; no behavior or ranking changed.\n\n## Limits\n\n${result.limitations.map(item => `- ${item}`).join('\n')}\n\nRSI-001's experiment is complete for this synthetic comparison. Any decision to promote an adaptive fix-selection policy remains open and requires a fresh, independently labeled evaluation.\n`;
+const report = `# RSI-001 fix-selection experiment\n\n- Date: ${result.date}\n- Fixture: \`${result.fixture}\` (SHA-256: \`${result.fixture_sha256}\`)\n- Training baseline: ${result.training_cases} fictional cases; fixed-list top ${result.selection_limit}: ${fixed.selected.join(', ')}; fresh-case coverage ${fixed.hits}/${fixed.total} (${formatCoveragePercent(fixed.hits, fixed.total)}).\n- Candidate: frequency-selected top ${result.selection_limit}: ${dynamic.selected.join(', ')}; fresh-case coverage ${dynamic.hits}/${dynamic.total} (${formatCoveragePercent(dynamic.hits, dynamic.total)}).\n- Outcome: ${result.outcome}.\n- Decision: no recursive gain claim; no behavior or ranking changed.\n\n## Limits\n\n${result.limitations.map(item => `- ${item}`).join('\n')}\n\nRSI-001's experiment is complete for this synthetic comparison. Any decision to promote an adaptive fix-selection policy remains open and requires a fresh, independently labeled evaluation.\n`;
 const output = path.join(root, 'docs', 'RSI-001-fix-selection-experiment.md');
 await writeFile(output, report, 'utf8');
 process.stdout.write(JSON.stringify(result, null, 2) + '\n');

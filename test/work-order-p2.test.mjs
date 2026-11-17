@@ -8,6 +8,13 @@ import { normalize } from '../src/config.mjs';
 import { createReplayMisses } from '../src/replay-misses.mjs';
 import { retrievalUseReport } from '../src/retrieval-use.mjs';
 import { startSetup } from '../src/setup.mjs';
+import { formatCoveragePercent } from '../scripts/rsi-fix-selection-report.mjs';
+
+test('RSI fix-selection report calculates one-decimal coverage from hit counts', () => {
+  assert.equal(formatCoveragePercent(7, 14), '50.0%');
+  assert.equal(formatCoveragePercent(5, 14), '35.7%');
+  assert.throws(() => formatCoveragePercent(1, 0), /positive total/);
+});
 
 test('pinned replay cases report changed top note and hidden private misses stay absent', async () => {
   const root = await mkdtemp(path.join(tmpdir(), 'bl-p2-pin-'));
