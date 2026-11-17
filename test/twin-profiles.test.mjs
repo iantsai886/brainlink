@@ -599,6 +599,8 @@ test('Twin memory policy blocks disabled types at tool, prompt and resource boun
     }
     assert.deepEqual(validate(cfg), [], `${item.type} policy fixture remains valid`);
     const ctx = createContext(cfg, { env: { BRAINLINK_HOME: path.join(root, `app-${item.type}`), BRAINLINK_AGENT_TOKEN: 'fictional-agent-token', BRAINLINK_SEMANTIC: '0' } });
+    // The compatibility summary is display-only; it must not widen prompt guidance.
+    if (item.type === 'semantic') ctx.twinScope.memory_policy.semantic = true;
     const mcp = createMcp(ctx);
     await activateTestRole(mcp, 'Chief of Staff');
     const init = await mcp.handle({ jsonrpc: '2.0', id: 5, method: 'initialize', params: { protocolVersion: '2025-03-26' } });

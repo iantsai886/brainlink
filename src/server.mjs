@@ -178,7 +178,7 @@ export function createMcp(ctx, { onCall = () => {}, onProposal = null } = {}) {
   };
   const memoryPolicy = ctx.twinScope?.mode === 'scoped'
     ? Object.fromEntries(Object.keys(memoryTypes).map((type) => [type, (ctx.twinScope.grants || []).some((grant) => grant.memory_policy?.[type] === true)]))
-    : ctx.twinScope?.memory_policy || Object.fromEntries(Object.keys(memoryTypes).map((type) => [type, true]));
+    : Object.fromEntries(Object.keys(memoryTypes).map((type) => [type, true]));
   let sessionStorePromise = null;
   const sessionStore = () => sessionStorePromise ||= openSessionStore(ctx.env);
   // Refresh incrementally after the first session_list. The cooldown avoids walking a large local
