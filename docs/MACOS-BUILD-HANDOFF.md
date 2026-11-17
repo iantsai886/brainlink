@@ -1,6 +1,6 @@
 # Build the macOS installer
 
-The latest source is pushed to `origin/codex/complete-review-work-order` at commit `bfdad8a`. On the MacBook, from a terminal in the BrainLink repository:
+The latest source is pushed to `origin/codex/complete-review-work-order`. On the MacBook, from a terminal in the BrainLink repository:
 
 ```sh
 git fetch origin
