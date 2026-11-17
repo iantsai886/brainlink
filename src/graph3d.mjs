@@ -29,8 +29,10 @@ export async function listGraphVaults(ctx, { includePrivateVaults = false } = {}
     const isPrivateVault = Boolean(ctx.byName.get(name)?.private);
     // Listing the picker must not read/index a private vault before the user selects it.
     if (isPrivateVault) { vaults.push({ name, private: true, notes: null }); continue; }
-    const index = await loadVaultGraph(ctx, name);
-    vaults.push({ name, private: false, notes: index.notes.filter((note) => !note.generated && !isPrivateNote(note)).length });
+    // The picker needs vault names and privacy labels only. Counting notes here forced a full
+    // graph/index scan before the map request and made large or cloud-synced vaults time out.
+    // The loaded graph reports the visible note count after its privacy checks complete.
+    vaults.push({ name, private: false, notes: null });
   }
   return { vaults };
 }

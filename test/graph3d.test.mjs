@@ -207,7 +207,7 @@ test('/api/graph3d and /api/graph3d/note: same exclusion guarantee over HTTP', a
     assert.ok(titles.includes('External') && !titles.includes('External Private'), JSON.stringify(titles));
     const available = await api('/api/graph3d/vaults', {});
     assert.deepEqual(available.vaults.map((v) => v.name), ['Main']);
-    assert.ok(available.vaults[0].notes >= titles.length);
+    assert.equal(available.vaults[0].notes, null, 'the picker avoids scanning vault files before the graph is requested');
     const filtered = await api('/api/graph3d', { vault: 'Main' });
     assert.deepEqual(filtered.nodes.map((n) => n.title), titles);
     assert.equal(filtered.total, g.total);

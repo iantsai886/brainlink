@@ -9,7 +9,10 @@
   async function api(path, body) {
     const isGraphRead = path === '/api/graph3d' || path === '/api/graph3d/vaults';
     const controller = isGraphRead ? new AbortController() : null;
-    const timer = controller ? setTimeout(() => controller.abort(), 90000) : null;
+    // Large vaults on cloud-backed folders can take longer than a minute to build the
+    // privacy-checked graph on a cold start. Give that read more time; the picker itself stays
+    // fast because it no longer indexes vaults just to show their names.
+    const timer = controller ? setTimeout(() => controller.abort(), 300000) : null;
     try {
       const r = await fetch(path, { method: 'POST', headers: { 'Content-Type': 'application/json', 'X-BrainLink-Token': T }, body: JSON.stringify(body || {}), ...(controller ? { signal: controller.signal } : {}) });
       const j = await r.json().catch(() => ({}));
@@ -189,7 +192,7 @@
     function renderVaultOptions() {
       const select = document.getElementById('notes3d-vault-select');
       if (!select) return;
-      select.innerHTML = `<option value="*">${esc(tr('notes3d.allVaults'))}</option>${graphVaultOptions.map((vault) => `<option value="${esc(vault.name)}">${esc(vault.name)}${vault.private ? ` · ${esc(tr('notes3d.privateLocal'))}` : ` · ${esc(vault.notes)}`}</option>`).join('')}`;
+      select.innerHTML = `<option value="*">${esc(tr('notes3d.allVaults'))}</option>${graphVaultOptions.map((vault) => `<option value="${esc(vault.name)}">${esc(vault.name)}${vault.private ? ` · ${esc(tr('notes3d.privateLocal'))}` : (Number.isSafeInteger(vault.notes) ? ` · ${esc(vault.notes)}` : '')}</option>`).join('')}`;
       select.value = vaultFilter === null ? '*' : vaultFilter;
     }
 
