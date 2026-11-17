@@ -1958,7 +1958,7 @@ test('P0-2: a root .brainlinkignore exclusion applies at any depth, not only to 
   assert.ok(existsSync(path.join(dest, 'BrainLink Shared', 'Acme Studio', 'sub', 'Visible.md')));
 });
 
-test('default .brainlinkignore: entry folders are visible by default in new vaults and user exclusions stay private', async () => {
+test('default .brainlinkignore: 00 Home is excluded by default in new vaults and existing user exclusions stay unchanged', async () => {
   const home = await tmp('excluded');
   const vaultDir = path.join(home, 'Notes');
   await mkdir(vaultDir, { recursive: true });
@@ -1981,20 +1981,26 @@ test('default .brainlinkignore: entry folders are visible by default in new vaul
   await scaffold(company, built.scaffold);
   cfg = normalize(mergePack(cfg, built));
   const r = await search(ctxOf(cfg), 'Acme Studio', 'zebracorn');
-  assert.deepEqual(r.map((x) => x.path), ['00 Home/Diary.md', 'finance/Taxes.md']); // entry notes are visible; finance remains an opt-in exclusion suggestion
+  assert.deepEqual(r.map((x) => x.path), ['finance/Taxes.md']); // 00 Home is excluded by default; finance remains an opt-in exclusion suggestion
+  await assert.rejects(readNote(ctxOf(cfg), 'Acme Studio', '00 Home/Diary.md'), /private/i, 'direct note reads respect the default 00 Home exclusion');
   const read = await readExcludedFolders(company);
   assert.deepEqual(read.active, DEFAULT_EXCLUDED_FOLDERS);
   assert.deepEqual(read.suggested, SUGGESTED_EXCLUDED_FOLDERS);
   await writeExcludedFolders(company, [...DEFAULT_EXCLUDED_FOLDERS, 'finance/']);
   const r2 = await search(ctxOf(cfg), 'Acme Studio', 'zebracorn');
-  assert.deepEqual(r2.map((x) => x.path), ['00 Home/Diary.md']); // owner exclusion applies to finance without hiding the entry note
+  assert.deepEqual(r2.map((x) => x.path), []); // both the default private folder and owner-selected finance are excluded
+  await writeExcludedFolders(company, [...DEFAULT_EXCLUDED_FOLDERS.filter((folder) => folder !== '00 Home/'), 'finance/']);
+  const r3 = await search(ctxOf(cfg), 'Acme Studio', 'zebracorn');
+  assert.deepEqual(r3.map((x) => x.path), ['00 Home/Diary.md']); // the owner can explicitly opt 00 Home back in
 });
 
-test('setup UI: connecting a real vault ships default excluded folders; private flag and excluded folders are editable after connecting', async () => {
+test('setup UI: new vaults get privacy defaults, existing ignore files stay unchanged, and exclusions remain editable', async () => {
   const home = await tmp('setup-excluded');
   const env = { BRAINLINK_HOME: path.join(home, 'app'), BRAINLINK_SEMANTIC: '0' };
   const vaultDir = path.join(home, 'Notes');
   await cp(SAMPLE, vaultDir, { recursive: true });
+  const existingIgnore = 'OwnerPrivate/\n# finance/\n# personal/\n# home/\n';
+  await writeFile(path.join(vaultDir, '.brainlinkignore'), existingIgnore);
   const s = await startSetup({ env, home, os: 'darwin', port: 0, useCli: false });
   const base = `http://127.0.0.1:${s.port}`;
   const api = (method, p, body) => fetch(base + p, { method, headers: { 'X-BrainLink-Token': s.token, 'Content-Type': 'application/json' }, body: body && JSON.stringify(body) });
@@ -2005,10 +2011,10 @@ test('setup UI: connecting a real vault ships default excluded folders; private 
     const add = await (await api('POST', '/api/vault', { path: vaultDir, name: 'Acme', pack: 'founder-os', private: true })).json();
     assert.equal(add.ok, true);
     const shipped = await readFile(path.join(vaultDir, '.brainlinkignore'), 'utf8');
-    for (const f of DEFAULT_EXCLUDED_FOLDERS) assert.match(shipped, new RegExp(f.replace('/', '\\/')));
+    assert.equal(shipped, existingIgnore, 'connecting an existing vault does not rewrite its ignore file or expose 00 Home implicitly');
     const st = await (await api('GET', '/api/state')).json();
     assert.equal(st.vaults[0].private, true);
-    assert.deepEqual(st.vaults[0].excluded_folders, DEFAULT_EXCLUDED_FOLDERS);
+    assert.deepEqual(st.vaults[0].excluded_folders, ['OwnerPrivate/']);
     assert.deepEqual(st.vaults[0].excluded_suggestions, SUGGESTED_EXCLUDED_FOLDERS);
     // Editable afterwards, independent of the connect step.
     const priv = await (await api('POST', '/api/vault/private', { name: 'Acme', private: false })).json();
@@ -2018,5 +2024,14 @@ test('setup UI: connecting a real vault ships default excluded folders; private 
     const stAfter = await (await api('GET', '/api/state')).json();
     assert.equal(stAfter.vaults[0].private, false);
     assert.deepEqual(stAfter.vaults[0].excluded_folders, ['.obsidian/', 'finance/']);
+
+    const freshVault = path.join(home, 'Fresh Notes');
+    await cp(SAMPLE, freshVault, { recursive: true });
+    const freshAdd = await (await api('POST', '/api/vault', { path: freshVault, name: 'Fresh', pack: 'simple' })).json();
+    assert.equal(freshAdd.ok, true);
+    const freshIgnore = await readFile(path.join(freshVault, '.brainlinkignore'), 'utf8');
+    assert.match(freshIgnore, /^00 Home\/$/m, 'a newly generated ignore file excludes 00 Home');
+    const freshState = await (await api('GET', '/api/state')).json();
+    assert.deepEqual(freshState.vaults.find((vault) => vault.name === 'Fresh').excluded_folders, DEFAULT_EXCLUDED_FOLDERS);
   } finally { s.server.close(); }
 });

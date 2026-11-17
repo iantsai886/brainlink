@@ -5,7 +5,7 @@ Checked 2026-11-17 (Asia/Taipei). Repository: `iantsai886/brainlink`. Working br
 ## Completed work and evidence
 
 - P0: The 29 original failures have an individual verdict and rationale in [P0-1-failing-test-verdicts.md](P0-1-failing-test-verdicts.md). Permission checks and scoped connection instructions use per-grant memory policy; the compatibility summary cannot widen access. A multi-Twin connection with no active role is refused except for the guide; missing grants fail closed; package jobs depend on tests.
-- P1: Existing-vault adoption previews and avoids file creation; mailbox changes are previewed and warn for private destinations; pack re-application preserves unrelated roles; a private-by-default personal pack exists; retrieval ordering favors reviewed material; `vault_health` is bounded. **P1-5 changes the default for newly connected vaults to include `00 Home/`; the explicit owner approval requested in the work order is still outstanding. Existing vault ignore files are not rewritten.**
+- P1: Existing-vault adoption previews and avoids file creation; mailbox changes are previewed and warn for private destinations; pack re-application preserves unrelated roles; a private-by-default personal pack exists; retrieval ordering favors reviewed material; `vault_health` is bounded. P1-5 now excludes `00 Home/` by default for vaults receiving a newly generated `.brainlinkignore`; existing ignore files are never rewritten, and owners can remove the rule explicitly.
 - P2: Daily self-test while Setup is open creates deduplicated, content-free RSI proposals; replayed misses can be pinned; local retrieval-use reporting stores visible note paths without query text; the RSI-001 synthetic comparison is documented with corrected rates (50.0% fixed list versus 35.7% frequency-selected). No recursive gain is claimed.
 - P3: Proposal edits are previewed with destination/reason/similar notes; errors remain accessible in place, requests time out and can be cancelled, and destructive confirmations use in-page dialogs. Setup markup and API routes are split by destination; tests render the composed page. `ui/app/` remains a separate desktop client with its own host bridge and tests.
 - F1–F6 implementation is in the branch: teach from a miss; trust-aware answer receipts; `since_last_session`; decision review dates; deterministic conflict review (stage 1); and previewed, on-demand tidy batches. Tidy remains on demand, duplicate candidates route to conflict review, and archive candidates remain omitted until retrieval-use data supports them.
@@ -22,13 +22,13 @@ Checked 2026-11-17 (Asia/Taipei). Repository: `iantsai886/brainlink`. Working br
 
 ## Remaining decisions and external validation
 
-The feature brief explicitly reserves these choices for Ian. Current code has the noted behavior, but those choices are not confirmed:
+Ian confirmed these defaults on 2026-11-17:
 
-1. F1: should an owner-authored answer to a miss default to `verified` confidence?
-2. F3: should the short `since_last_session` brief be included in every `agent_connect` by default?
-3. F5: may stage 2 use an owner-enabled local model, or should conflict review stay deterministic?
-4. F6: should tidy stay on request, or gain an opt-in weekly schedule (off by default)?
-5. P1-5: approve exposing `00 Home/` to AI for newly connected vaults by default?
+1. F1 owner-taught answers use `verified` confidence.
+2. F3 includes the short `since_last_session` brief on agent connection by default.
+3. F5 conflict review stays deterministic; no local-model stage 2.
+4. F6 tidy remains on demand.
+5. P1-5 excludes `00 Home/` by default for newly generated ignore files.
 
 The work order also reserves real-vault configuration changes (mailbox location, Ian Personal privacy/rules, Anna Office location, source snapshot/backup exclusions, whether all clients use BrainLink only, and the master status document). No such real-vault migration was performed.
 

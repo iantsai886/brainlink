@@ -176,7 +176,7 @@ async function ignoreRules(dir) {
 // Shipped in every newly connected real vault's root .brainlinkignore (never overwrites one
 // already there). These folders are never read, chunked, searched, answered from, graphed,
 // surfaced in sessions or synced — same as the rest of .brainlinkignore (see walk(), below).
-export const DEFAULT_EXCLUDED_FOLDERS = ['.obsidian/', '.trash/', '.git/', 'node_modules/'];
+export const DEFAULT_EXCLUDED_FOLDERS = ['.obsidian/', '.trash/', '.git/', 'node_modules/', '00 Home/'];
 // Common personal folders people keep out of an AI-connected vault; shipped as commented-out
 // suggestions so the user opts in rather than losing folders silently.
 export const SUGGESTED_EXCLUDED_FOLDERS = ['finance/', 'personal/', 'home/'];
