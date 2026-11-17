@@ -64,6 +64,10 @@ test('every native installer bundles all production dependencies and portable Br
   const windowsBuilder = await read('packaging/windows/build-windows.ps1');
   assert.match(windowsBuilder, /LOCALAPPDATA.*Inno Setup 6\\ISCC\.exe/, 'Windows builder must find a per-user Inno Setup installation');
   assert.match(windowsBuilder, /Inno Setup compiler failed with exit code/, 'Windows builder must report compiler failures');
+  assert.match(windowsBuilder, /Preserve build\/windows\/qa/, 'Windows installer rebuild must preserve the upgrade-smoke baseline');
+  assert.doesNotMatch(windowsBuilder, /Remove-Item -Recurse -Force "\$Root\\build\\windows"/, 'Windows installer rebuild must not delete the QA fixtures');
+  assert.match(windowsBuilder, /BRAINLINK_OUTPUT_NAME/, 'Windows installer builder must permit a distinct output filename when the default is open');
+  assert.match(windowsBuilder, /Get-FileHash "\$Root\\dist\\\$OutputName\.exe"/, 'Windows installer checksum must match the selected output filename');
   const windowsInstaller = await read('packaging/windows/BrainLink.iss');
   const installedWindowsSmoke = await read('scripts/smoke-installed-windows.ps1');
   const upgradeWindowsSmoke = await read('scripts/smoke-upgrade-windows.ps1');
