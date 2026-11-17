@@ -12,14 +12,13 @@ Checked 2026-11-17 (Asia/Taipei). Repository: `iantsai886/brainlink`. Working br
 
 ## Verification receipts
 
-- Windows, Node.js 24.22.1: full `npm test` passed 704/714 (0 failures, 10 platform/privilege skips) and exited normally. `npm run test:ui` passed 48/48. The core run took about 1,361.8 seconds.
+- Windows, Node.js 22.23.5 (downloaded from nodejs.org and SHA-256 verified): full suite passed **705/715** (0 failures, 10 platform/privilege skips) and exited normally in 451.3 seconds. Windows Node.js 24.22.1: after P0-3, two full-suite attempts encountered a native access violation (`3221225477`) in the `test/brainlink.test.mjs` child process during ingestion/OCR. That file passes alone at 94/96 (2 expected Windows skips), and its scanned-PDF/OCR test passes alone at 1/1. `npm run test:ui` passed **48/48** after the final P0-3 change.
 - A diagnostic rerun before that clean full run encountered a transient Windows `EPERM` while replacing a temporary config and a file-worker native access violation. The affected brief-schedule test passed 3/3 alone, and `brainlink.test.mjs` passed 94 tests with 2 expected platform skips alone. The complete subsequent run passed.
 - After the full run, the packaging builder and installed-smoke assertion received small packaging-only edits. `test/packaging-runtime.test.mjs` then passed 3/3.
 - On 2026-11-17, `test/twin-profiles.test.mjs` passed 31/31 after removing the last server-instructions fallback to `ctx.twinScope.memory_policy`. A regression assertion deliberately widens that compatibility summary while the grant denies semantic memory; scoped initialization still reports only grant-authorized types.
 - Windows package stage matched all bundled source files. The isolated install smoke passed Setup navigation, English/Portuguese/Traditional Chinese OCR, scanned-PDF OCR, safe HTML extraction, the sign-in launcher, and uninstall with test data and PATH preserved.
-- Installed locally from the current 1.3.8 app payload. Inno Setup returned exit code 0; the installed `package.json` and bundled CLI both report `1.3.8`; `%APPDATA%\BrainLink\config.json` remains present.
-- Unsigned installer: `dist/BrainLink-Setup-1.3.8-fc61ec7.exe`, 63,686,635 bytes; SHA-256 `F676A98F554B737CC885B32B37AF9E604D3C86F0078AAB2EC42E11400FEF1459`. Its app payload is the same 1.3.8 source as current HEAD; the suffix identifies the source commit used to build it.
-- Hosted GitHub Actions on the current branch did not start (all six test jobs have zero steps); the check annotation reports an account payment/spending-limit gate, and all package jobs were skipped. This is not a hosted test result.
+- After commit `19f9956`, rebuilt `dist/BrainLink-Setup-1.3.8-19f9956.exe`, 63,686,670 bytes; SHA-256 `9C5BE91BA57FB67DEC9D9094F5F23A8BD15698BAE5026D525A862BDF7DACD4C6`. Installed it over the existing per-user installation; Inno Setup returned 0, installed package and CLI report `1.3.8`, and the existing `%APPDATA%\BrainLink\config.json` hash remained unchanged. The isolated QA install/uninstall smoke also passed with user data and PATH preserved.
+- Hosted GitHub Actions on the current branch did not start (all six test jobs have zero steps); prior check output reported an account payment/spending-limit gate, and all package jobs were skipped. This is not a hosted test result.
 
 ## Remaining decisions and external validation
 
