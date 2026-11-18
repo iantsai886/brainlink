@@ -435,6 +435,8 @@ async function loadVaultFresh(ctx, name) {
 // Setup creates a short-lived request context for each local API call. Keep the lightweight
 // graph index across those contexts, keyed by vault path and the exact Twin visibility policy.
 const graphVaultCache = new Map();
+const GRAPH_STAT_BATCH_SIZE = 96;
+const GRAPH_READ_BATCH_SIZE = 32;
 function graphVaultCacheKey(ctx, name) {
   const scope = ctx.twinScope || { mode: 'legacy' };
   const grants = (scope.grants || []).filter((grant) => grant.name === name)
@@ -457,7 +459,7 @@ export async function loadVaultGraph(ctx, name) {
     // Check the current eligible paths and metadata on each request. A time-only cache could
     // continue showing a note immediately after it was made private or its folder excluded.
     const states = [];
-    for (let start = 0; start < files.length; start += 32) states.push(...await Promise.all(files.slice(start, start + 32).map(async (full) => {
+    for (let start = 0; start < files.length; start += GRAPH_STAT_BATCH_SIZE) states.push(...await Promise.all(files.slice(start, start + GRAPH_STAT_BATCH_SIZE).map(async (full) => {
       const st = await stat(full, { bigint: true });
       return { full, rel: path.relative(root, full).split(path.sep).join('/'), mtime: Number(st.mtimeNs) / 1e6, bytes: Number(st.size),
         signature: `${st.size}:${st.mtimeNs}:${st.ctimeNs}` };
@@ -467,8 +469,8 @@ export async function loadVaultGraph(ctx, name) {
       graphVaultCache.set(key, { value: cached.value, signatures });
       return cached.value;
     }
-    for (let start = 0; start < files.length; start += 32) {
-      const batch = await Promise.all(states.slice(start, start + 32).map(async ({ full, rel, mtime, bytes }) => {
+    for (let start = 0; start < files.length; start += GRAPH_READ_BATCH_SIZE) {
+      const batch = await Promise.all(states.slice(start, start + GRAPH_READ_BATCH_SIZE).map(async ({ full, rel, mtime, bytes }) => {
         if (!twinNoteMemoryAllowed(ctx, name, rel)) return null;
         const header = await readIndexableHeader(full, bytes);
         if (!header.indexable || !twinNoteMemoryAllowed(ctx, name, rel, header.meta)) return null;

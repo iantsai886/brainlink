@@ -9,7 +9,7 @@ import path from 'node:path';
 
 import { normalize } from '../src/config.mjs';
 import { createContext } from '../src/core.mjs';
-import { buildGraph3D, noteDetail3D } from '../src/graph3d.mjs';
+import { buildGraph3D, listGraphVaults, noteDetail3D } from '../src/graph3d.mjs';
 import { startSetup } from '../src/setup.mjs';
 
 const tmp = (p) => mkdtemp(path.join(tmpdir(), `brainlink-${p}-`));
@@ -28,6 +28,24 @@ async function ctxFor(vaultPath, extraVaults = []) {
   const cfg = normalize({ vaults: [{ name: 'Main', path: vaultPath }, ...extraVaults] });
   return createContext(cfg, { env: { BRAINLINK_SEMANTIC: '0' } });
 }
+
+test('graph vault picker returns names without scanning vault files and fingerprints access configuration', async () => {
+  const firstPath = path.join(await tmp('graph3d-picker-first'), 'not-mounted');
+  const secondPath = path.join(await tmp('graph3d-picker-second'), 'not-mounted');
+  const makeContext = (root) => createContext(normalize({ vaults: [
+    { name: 'Main', path: root }, { name: 'Diary', path: path.join(root, 'private'), private: true },
+  ] }), { env: { BRAINLINK_SEMANTIC: '0' } });
+  const first = makeContext(firstPath);
+  const second = makeContext(secondPath);
+  const picker = await listGraphVaults(first, { includePrivateVaults: true });
+  const refreshed = await listGraphVaults(second, { includePrivateVaults: true });
+  assert.deepEqual(picker.vaults, [
+    { name: 'Main', private: false, notes: null },
+    { name: 'Diary', private: true, notes: null },
+  ]);
+  assert.match(picker.revision, /^[a-f0-9]{64}$/);
+  assert.notEqual(picker.revision, refreshed.revision, 'changing the configured vault path invalidates a cached graph');
+});
 
 test('buildGraph3D: excluded-folder notes never appear as nodes or edges', async () => {
   const dir = await buildVault(await tmp('graph3d-excl'));
@@ -622,6 +640,11 @@ test('active Setup UI reloads the graph on vault events and keeps an open editor
   assert.match(page, /new EventSource\('\/api\/events\?t=' \+ encodeURIComponent\(T\)\)/);
   assert.match(page, /dispatchEvent\(new Event\('brainlink:vault-changed'\)\)/);
   assert.match(graph, /addEventListener\('brainlink:vault-changed',[\s\S]*?refreshGraph\(\)/);
+  assert.match(graph, /addEventListener\('brainlink:vault-changed',[\s\S]*?clearGraphClientCache\(\)/, 'vault mutations invalidate cached public graphs before refresh');
+  assert.match(graph, /addEventListener\('brainlink:state-updated', clearGraphClientCache\)/, 'config changes invalidate cached graphs');
+  assert.match(graph, /selected\?\.private\) return null/, 'private vault graphs are never cached in the browser');
+  assert.match(graph, /GRAPH_CLIENT_CACHE_LIMIT = 2/, 'the in-memory cache stays bounded');
+  assert.match(graph, /revision = optionData\.revision/, 'cached graphs are keyed to current access configuration');
   assert.match(graph, /if \(editor && !editor\.hidden\) \{ pendingVaultRefresh = true; return; \}/);
 });
 

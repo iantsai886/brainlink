@@ -136,6 +136,20 @@
     const root = document.getElementById('notes3d-root');
     if (!brainPanel || !root) return;
     let graphInstance = null, nodesById = [], byTitle = new Map(), loaded = false, loadedOk = false, selectedId = null, currentDetail = null, currentDetailComplete = false, currentNode = null, pendingVaultRefresh = false, vaultFilter = null, graphVaultOptions = [], graphDataAll = { nodes: [], links: [] }, legendGroups = [], activeGroup = null;
+    const graphClientCache = new Map();
+    const GRAPH_CLIENT_CACHE_LIMIT = 2;
+    function clearGraphClientCache() { graphClientCache.clear(); }
+    function graphClientCacheKey(revision) {
+      const selected = vaultFilter && vaultFilter !== '*' ? graphVaultOptions.find((vault) => vault.name === vaultFilter) : null;
+      if (selected?.private) return null;
+      return `${revision}\0${vaultFilter || '*'}`;
+    }
+    function rememberPublicGraph(key, graph) {
+      if (!key) return;
+      graphClientCache.delete(key);
+      graphClientCache.set(key, JSON.stringify(graph));
+      while (graphClientCache.size > GRAPH_CLIENT_CACHE_LIMIT) graphClientCache.delete(graphClientCache.keys().next().value);
+    }
     const relationTargets = { owned_by: ['team','person'], runs: ['workflow'], consumes: ['dataset','artifact'], produces: ['dataset','artifact'], depends_on: ['workflow','dataset','project'], part_of: ['team','project'], assigned_to: ['person','team'], informed_by: ['artifact','dataset','concept'], communicates_with: ['person','team'] };
 
     function stat(id, v) { const el = document.getElementById(id); if (el) el.textContent = v; }
@@ -403,7 +417,7 @@
     });
 
     root.addEventListener('click', (e) => {
-      if (e.target.closest('[data-notes3d-retry]')) { loadGraph(); return; }
+      if (e.target.closest('[data-notes3d-retry]')) { loadGraph({ force: true }); return; }
       if (e.target.closest('[data-review-load-more]')) { loadReviewQueue({ append: true }); return; }
       const graphNote = e.target.closest('[data-graph-note-id]');
       if (graphNote) { openById(graphNote.dataset.graphNoteId); return; }
@@ -414,7 +428,7 @@
         if (fields.type === 'workflow') for (const field of document.getElementById('notes3d-links').querySelectorAll('[data-graph-workflow-field]')) fields[field.getAttribute('data-graph-workflow-field')] = field.value.split(/\r?\n/).map((item) => item.trim()).filter(Boolean);
         saveGraphRecord.disabled = true;
         api('/api/graph3d/entity/save', { vault: currentDetail.vault, path: currentDetail.path, etag: currentDetail.etag, graph_record: fields })
-          .then(async (result) => { toast(tr('notes3d.graphRecordSaved')); await loadGraph(); const updated = nodesById.find((node) => node.vault === currentDetail?.vault && node.path === currentDetail?.path); if (updated) openById(updated.id); })
+          .then(async (result) => { toast(tr('notes3d.graphRecordSaved')); await loadGraph({ force: true }); const updated = nodesById.find((node) => node.vault === currentDetail?.vault && node.path === currentDetail?.path); if (updated) openById(updated.id); })
           .catch((err) => { toast(err.message, true); saveGraphRecord.disabled = false; });
         return;
       }
@@ -447,7 +461,7 @@
           document.getElementById('notes3d-body').hidden = false;
           pendingVaultRefresh = false;
           toast('Note saved.');
-          return loadGraph();
+          return loadGraph({ force: true });
         }).catch((err) => { document.getElementById('notes3d-save-status').textContent = err.message; }).finally(() => { button.disabled = false; });
         return;
       }
@@ -592,8 +606,9 @@
     });
     document.getElementById('notes3d-reset-view')?.addEventListener('click', resetGraphView);
     let graphLoadSequence = 0;
-    async function loadGraph() {
+    async function loadGraph({ force = false } = {}) {
       const sequence = ++graphLoadSequence;
+      if (force) clearGraphClientCache();
       const canvas = document.getElementById('notes3d-canvas');
       const resetView = document.getElementById('notes3d-reset-view');
       if (resetView) resetView.disabled = true;
@@ -605,7 +620,17 @@
         if (vaultFilter === null && optionData.vaults.length) vaultFilter = optionData.vaults[0].name;
         if (vaultFilter && vaultFilter !== '*' && !optionData.vaults.some((vault) => vault.name === vaultFilter)) vaultFilter = optionData.vaults[0]?.name || '*';
         renderVaultOptions();
-        g = await api('/api/graph3d', { vault: vaultFilter && vaultFilter !== '*' ? vaultFilter : undefined });
+        const revision = optionData.revision || JSON.stringify(optionData.vaults.map(({ name, private: isPrivate }) => [name, Boolean(isPrivate)]));
+        const cacheKey = graphClientCacheKey(revision);
+        const cachedGraph = !force && cacheKey ? graphClientCache.get(cacheKey) : null;
+        if (cachedGraph) {
+          graphClientCache.delete(cacheKey);
+          graphClientCache.set(cacheKey, cachedGraph);
+          g = JSON.parse(cachedGraph);
+        } else {
+          g = await api('/api/graph3d', { vault: vaultFilter && vaultFilter !== '*' ? vaultFilter : undefined });
+          rememberPublicGraph(cacheKey, g);
+        }
       }
       catch (e) {
         if (sequence !== graphLoadSequence) return;
@@ -691,13 +716,14 @@
       if (editor && !editor.hidden) { pendingVaultRefresh = true; return; }
       const selected = currentNode && { vault: currentNode.vault, path: currentNode.path };
       selectedId = null;
-      await loadGraph();
+      await loadGraph({ force: true });
       if (!selected) return;
       const updated = nodesById.find((node) => node.vault === selected.vault && node.path === selected.path);
       if (updated) openById(updated.id);
       else document.getElementById('notes3d-panel-detail').close();
     }
-    window.addEventListener('brainlink:vault-changed', () => { pendingVaultRefresh = false; refreshGraph(); });
+    window.addEventListener('brainlink:state-updated', clearGraphClientCache);
+    window.addEventListener('brainlink:vault-changed', () => { clearGraphClientCache(); pendingVaultRefresh = false; refreshGraph(); });
 
     // canvas.clientWidth/clientHeight can read 0 (or a stale pre-layout value) the instant
     // #brain-panel stops being hidden, so this is called once right after the graph is created,
