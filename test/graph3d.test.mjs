@@ -637,6 +637,7 @@ test('active Setup UI reloads the graph on vault events and keeps an open editor
   const { readFile } = await import('node:fs/promises');
   const page = await readSetupHtml();
   const graph = await readFile(new URL('../ui/notes3d.js', import.meta.url), 'utf8');
+  const core = await readFile(new URL('../src/core.mjs', import.meta.url), 'utf8');
   assert.match(page, /new EventSource\('\/api\/events\?t=' \+ encodeURIComponent\(T\)\)/);
   assert.match(page, /dispatchEvent\(new Event\('brainlink:vault-changed'\)\)/);
   assert.match(graph, /addEventListener\('brainlink:vault-changed',[\s\S]*?refreshGraph\(\)/);
@@ -645,6 +646,10 @@ test('active Setup UI reloads the graph on vault events and keeps an open editor
   assert.match(graph, /selected\?\.private\) return null/, 'private vault graphs are never cached in the browser');
   assert.match(graph, /GRAPH_CLIENT_CACHE_LIMIT = 2/, 'the in-memory cache stays bounded');
   assert.match(graph, /revision = optionData\.revision/, 'cached graphs are keyed to current access configuration');
+  assert.match(core, /if \(isPrivateVault\) \{[\s\S]*?return buildVaultGraph\(ctx, name\);/, 'server graph cache does not retain private-vault note bodies');
+  assert.match(core, /GRAPH_CACHE_MAX_ENTRIES = 4/, 'server graph cache has a fixed entry limit');
+  assert.match(core, /GRAPH_CACHE_TTL_MS = 60_000/, 'server graph cache entries expire after one minute');
+  assert.match(core, /private: Boolean\(vault\?\.private\)/, 'changing vault privacy changes the server cache key');
   assert.match(graph, /if \(editor && !editor\.hidden\) \{ pendingVaultRefresh = true; return; \}/);
 });
 

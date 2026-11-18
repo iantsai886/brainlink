@@ -437,6 +437,8 @@ async function loadVaultFresh(ctx, name) {
 const graphVaultCache = new Map();
 const GRAPH_STAT_BATCH_SIZE = 96;
 const GRAPH_READ_BATCH_SIZE = 32;
+const GRAPH_CACHE_MAX_ENTRIES = 4;
+const GRAPH_CACHE_TTL_MS = 60_000;
 function graphVaultCacheKey(ctx, name) {
   const scope = ctx.twinScope || { mode: 'legacy' };
   const grants = (scope.grants || []).filter((grant) => grant.name === name)
@@ -448,48 +450,69 @@ function graphVaultCacheKey(ctx, name) {
   }));
   const vault = ctx.byName.get(name);
   const handoffFolder = ctx.cfg?.handoff?.vault === name ? ctx.cfg.handoff.folder : null;
-  return `${path.resolve(vaultRoot(ctx, name))}\0${JSON.stringify({ mode: scope.mode, grants, rolePaths, read_first: vault?.read_first || [], handoffFolder })}`;
+  return `${path.resolve(vaultRoot(ctx, name))}\0${JSON.stringify({ private: Boolean(vault?.private), mode: scope.mode, grants, rolePaths, read_first: vault?.read_first || [], handoffFolder })}`;
 }
 export async function loadVaultGraph(ctx, name) {
+  const root = path.resolve(vaultRoot(ctx, name));
+  const isPrivateVault = Boolean(ctx.byName.get(name)?.private);
+  // Do not retain note bodies from a private vault in the process-wide graph cache. Also purge
+  // any formerly-public entry for this path if its privacy setting has changed.
+  if (isPrivateVault) {
+    for (const [entryKey, entry] of graphVaultCache) if (entry.root === root || entryKey.startsWith(`${root}\0`)) graphVaultCache.delete(entryKey);
+    return buildVaultGraph(ctx, name);
+  }
+
+  const now = Date.now();
+  for (const [entryKey, entry] of graphVaultCache) {
+    if (!entry.pending && entry.expiresAt <= now) graphVaultCache.delete(entryKey);
+  }
   const key = graphVaultCacheKey(ctx, name);
   const cached = graphVaultCache.get(key);
   if (cached?.pending) return cached.pending;
+  if (cached) { graphVaultCache.delete(key); graphVaultCache.set(key, cached); }
   const pending = (async () => {
-    const root = vaultRoot(ctx, name), notes = [], files = await walk(root);
-    // Check the current eligible paths and metadata on each request. A time-only cache could
-    // continue showing a note immediately after it was made private or its folder excluded.
-    const states = [];
-    for (let start = 0; start < files.length; start += GRAPH_STAT_BATCH_SIZE) states.push(...await Promise.all(files.slice(start, start + GRAPH_STAT_BATCH_SIZE).map(async (full) => {
-      const st = await stat(full, { bigint: true });
-      return { full, rel: path.relative(root, full).split(path.sep).join('/'), mtime: Number(st.mtimeNs) / 1e6, bytes: Number(st.size),
-        signature: `${st.size}:${st.mtimeNs}:${st.ctimeNs}` };
-    })));
-    const signatures = new Map(states.map((item) => [item.rel, item.signature]));
-    if (cached?.value && cached.signatures?.size === signatures.size && [...signatures].every(([rel, value]) => cached.signatures.get(rel) === value)) {
-      graphVaultCache.set(key, { value: cached.value, signatures });
-      return cached.value;
-    }
-    for (let start = 0; start < files.length; start += GRAPH_READ_BATCH_SIZE) {
-      const batch = await Promise.all(states.slice(start, start + GRAPH_READ_BATCH_SIZE).map(async ({ full, rel, mtime, bytes }) => {
-        if (!twinNoteMemoryAllowed(ctx, name, rel)) return null;
-        const header = await readIndexableHeader(full, bytes);
-        if (!header.indexable || !twinNoteMemoryAllowed(ctx, name, rel, header.meta)) return null;
-        const raw = await readFile(full, 'utf8');
-        const { meta, body, frontmatter } = parseFrontmatter(raw);
-        if (isPrivateMeta(meta) || fmSaysPrivate(frontmatter) || !twinNoteMemoryAllowed(ctx, name, rel, meta)) return null;
-        return { rel, title: path.posix.basename(rel).replace(/\.md$/i, ''), aliases: listValue(meta.aliases), raw, meta, body, mtime,
-          tags: extractTags(raw, meta), generated: meta.generated_by === 'brainlink' || /^BrainLink\/Commands\//i.test(rel), private: false };
-      }));
-      notes.push(...batch.filter(Boolean));
-    }
-    notes.sort((a, b) => a.rel.localeCompare(b.rel));
-    const value = { notes, noteEdges: linkGraph(notes).edges, byRel: new Map(notes.map((note, index) => [note.rel, index])) };
-    graphVaultCache.set(key, { value, signatures });
-    return value;
+    const value = await buildVaultGraph(ctx, name, cached);
+    const signatures = value.signatures;
+    graphVaultCache.set(key, { value: value.graph, signatures, root, expiresAt: Date.now() + GRAPH_CACHE_TTL_MS });
+    while (graphVaultCache.size > GRAPH_CACHE_MAX_ENTRIES) graphVaultCache.delete(graphVaultCache.keys().next().value);
+    return value.graph;
   })();
-  graphVaultCache.set(key, { pending });
+  graphVaultCache.set(key, { pending, root, expiresAt: Number.POSITIVE_INFINITY });
+  while (graphVaultCache.size > GRAPH_CACHE_MAX_ENTRIES) graphVaultCache.delete(graphVaultCache.keys().next().value);
   try { return await pending; }
   catch (error) { if (graphVaultCache.get(key)?.pending === pending) graphVaultCache.delete(key); throw error; }
+}
+
+async function buildVaultGraph(ctx, name, cached = null) {
+  const root = vaultRoot(ctx, name), notes = [], files = await walk(root);
+  // Check the current eligible paths and metadata on each request. A time-only cache could
+  // continue showing a note immediately after it was made private or its folder excluded.
+  const states = [];
+  for (let start = 0; start < files.length; start += GRAPH_STAT_BATCH_SIZE) states.push(...await Promise.all(files.slice(start, start + GRAPH_STAT_BATCH_SIZE).map(async (full) => {
+    const st = await stat(full, { bigint: true });
+    return { full, rel: path.relative(root, full).split(path.sep).join('/'), mtime: Number(st.mtimeNs) / 1e6, bytes: Number(st.size),
+      signature: `${st.size}:${st.mtimeNs}:${st.ctimeNs}` };
+  })));
+  const signatures = new Map(states.map((item) => [item.rel, item.signature]));
+  if (cached?.value && cached.signatures?.size === signatures.size && [...signatures].every(([rel, value]) => cached.signatures.get(rel) === value)) {
+    return { graph: cached.value, signatures };
+  }
+  for (let start = 0; start < files.length; start += GRAPH_READ_BATCH_SIZE) {
+    const batch = await Promise.all(states.slice(start, start + GRAPH_READ_BATCH_SIZE).map(async ({ full, rel, mtime, bytes }) => {
+      if (!twinNoteMemoryAllowed(ctx, name, rel)) return null;
+      const header = await readIndexableHeader(full, bytes);
+      if (!header.indexable || !twinNoteMemoryAllowed(ctx, name, rel, header.meta)) return null;
+      const raw = await readFile(full, 'utf8');
+      const { meta, body, frontmatter } = parseFrontmatter(raw);
+      if (isPrivateMeta(meta) || fmSaysPrivate(frontmatter) || !twinNoteMemoryAllowed(ctx, name, rel, meta)) return null;
+      return { rel, title: path.posix.basename(rel).replace(/\.md$/i, ''), aliases: listValue(meta.aliases), raw, meta, body, mtime,
+        tags: extractTags(raw, meta), generated: meta.generated_by === 'brainlink' || /^BrainLink\/Commands\//i.test(rel), private: false };
+    }));
+    notes.push(...batch.filter(Boolean));
+  }
+  notes.sort((a, b) => a.rel.localeCompare(b.rel));
+  const value = { notes, noteEdges: linkGraph(notes).edges, byRel: new Map(notes.map((note, index) => [note.rel, index])) };
+  return { graph: value, signatures };
 }
 
 export function buildIndex(notes) {
