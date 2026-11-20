@@ -751,12 +751,14 @@ test('3D graph has a searchable, keyboard-accessible note list in every supporte
   assert.match(src, /if \(graphNote\) \{ openById\(graphNote\.dataset\.graphNoteId\); return; \}/, 'keyboard activation of a note button must open the same detail panel as a graph click');
   assert.match(src, /brainlink:locale-changed/);
   assert.match(src, /api\('\/api\/graph3d\/discover'/, 'vault-wide discovery must call its authenticated local API');
+  assert.match(src, /id="notes3d-discover-all"[^>]*data-i18n="notes3d\.discoverAll"/, 'vault-wide discovery offers a one-click full scan');
+  assert.match(src, /while \(all && !result\.done\)/, 'full scan walks every bounded page until all notes are checked');
   assert.match(src, /data-discover-save/, 'each discovered link must be saved through the review flow');
   assert.match(src, /id="notes3d-vault-select"/, 'graph must let the user focus on one vault');
   assert.match(src, /api\('\/api\/graph3d\/vaults'/, 'vault choices must come from the privacy-filtered API');
   assert.match(src, /brainlink:locale-changed[\s\S]*?renderVaultOptions\(\);/, 'vault filter choices must update when the app language changes');
   assert.match(css, /\.notes3d-node:focus-visible/);
-  const keys = ['notes3d.browseNotes', 'notes3d.browseSearch', 'notes3d.browsePlaceholder', 'notes3d.browseEmpty', 'notes3d.browseCount', 'notes3d.browseMore', 'notes3d.vaultFilter', 'notes3d.allVaults', 'notes3d.resetView', 'notes3d.discoverVault', 'notes3d.discoverHint', 'notes3d.discoverRun', 'notes3d.discoverMore', 'notes3d.discoverDone', 'notes3d.discoverProgress', 'notes3d.discoverFailed', 'notes3d.discoverChanged', 'notes3d.discoverReadOnly'];
+  const keys = ['notes3d.browseNotes', 'notes3d.browseSearch', 'notes3d.browsePlaceholder', 'notes3d.browseEmpty', 'notes3d.browseCount', 'notes3d.browseMore', 'notes3d.vaultFilter', 'notes3d.allVaults', 'notes3d.resetView', 'notes3d.discoverVault', 'notes3d.discoverHint', 'notes3d.discoverRun', 'notes3d.discoverAll', 'notes3d.discoverMore', 'notes3d.discoverDone', 'notes3d.discoverProgress', 'notes3d.discoverFailed', 'notes3d.discoverChanged', 'notes3d.discoverReadOnly'];
   for (const locale of ['en', 'zh-TW', 'pt']) {
     const localeText = await readFile(new URL(`../ui/locales/${locale}.json`, import.meta.url), 'utf8');
     const catalog = JSON.parse(localeText);

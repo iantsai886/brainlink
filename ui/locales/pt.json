@@ -812,6 +812,7 @@
   "notes3d.discoverVault": "Encontrar conexões nos vaults acessíveis",
   "notes3d.discoverHint": "O BrainLink verifica pequenos grupos de notas nos vaults acessíveis em busca de conexões claras no texto. Os resultados são sugestões até serem salvos e aprovados.",
   "notes3d.discoverRun": "Buscar conexões",
+  "notes3d.discoverAll": "Verificar todas as notas",
   "notes3d.discoverMore": "Verificar próximo grupo",
   "notes3d.discoverDone": "Encontradas {count} sugestões após verificar {scanned} de {total} notas.",
   "notes3d.discoverProgress": "Encontradas {count} sugestões; {scanned} de {total} notas verificadas.",

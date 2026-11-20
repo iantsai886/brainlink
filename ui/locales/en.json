@@ -812,6 +812,7 @@
   "notes3d.discoverVault": "Find connections across accessible vaults",
   "notes3d.discoverHint": "BrainLink checks small batches of notes in your accessible vaults for clear text links. Results stay suggestions until you save and approve them.",
   "notes3d.discoverRun": "Scan for connections",
+  "notes3d.discoverAll": "Scan all notes",
   "notes3d.discoverMore": "Scan next batch",
   "notes3d.discoverDone": "Found {count} suggestions after checking {scanned} of {total} notes.",
   "notes3d.discoverProgress": "Found {count} suggestions; checked {scanned} of {total} notes.",

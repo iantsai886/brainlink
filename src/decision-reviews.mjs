@@ -10,6 +10,17 @@ export function validReviewDate(value) {
 export async function listDecisionReviews(ctx, vaultName, { today = new Date().toISOString().slice(0, 10), limit = 50 } = {}) {
   const index = await loadVault(ctx, vaultName);
   const candidates = [];
+  // Build incoming links once. The old per-decision scan walked the complete note list
+  // for every decision, making review load proportional to decisions × notes.
+  const incomingByTarget = new Map();
+  for (let source = 0; source < index.outlinks.length; source++) {
+    for (const target of index.outlinks[source] || []) {
+      const note = index.notes[source];
+      const list = incomingByTarget.get(target) || [];
+      list.push(note);
+      incomingByTarget.set(target, list);
+    }
+  }
   for (let i = 0; i < index.notes.length; i++) {
     const note = index.notes[i];
     if (note.private || note.generated || String(note.meta.type || '').toLowerCase() !== 'decision') continue;
@@ -20,11 +31,11 @@ export async function listDecisionReviews(ctx, vaultName, { today = new Date().t
     const reschedules = [...note.body.matchAll(/^Review rescheduled: (\d{4}-\d{2}-\d{2})$/gmi)].map((m) => m[1]).filter(validReviewDate);
     const effective = reschedules.at(-1) || original;
     if (effective > today) continue;
-    const happened = [];
-    for (let j = 0; j < index.notes.length && happened.length < 3; j++) {
-      if (j === i || index.notes[j].date <= String(note.meta.created_date || note.date)) continue;
-      if (index.outlinks[j]?.has(i)) happened.push({ title: index.notes[j].title, path: index.notes[j].rel, date: index.notes[j].date });
-    }
+    const cutoff = String(note.meta.created_date || note.date);
+    const happened = (incomingByTarget.get(i) || [])
+      .filter((linked) => linked !== note && linked.date > cutoff)
+      .slice(0, 3)
+      .map((linked) => ({ title: linked.title, path: linked.rel, date: linked.date }));
     candidates.push({ vault: vaultName, title: note.title, path: note.rel, review_date: effective, decision_date: String(note.meta.created_date || note.date), happened_since: happened });
   }
   return candidates.sort((a, b) => a.review_date.localeCompare(b.review_date) || a.path.localeCompare(b.path)).slice(0, Math.max(1, Math.min(50, limit)));

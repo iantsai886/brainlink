@@ -2234,7 +2234,7 @@ export async function startSetup(opts = {}) {
       const cfg = await loadConfig(file);
       const ctx = localContext(cfg, { ...env, BRAINLINK_SEMANTIC: '0' });
       if (b.vault && !ctx.enabled.includes(b.vault)) throw new Error('Unknown vault.');
-      return discoverVaultRelationshipCandidates(ctx, { vault: b.vault, offset: b.offset ?? 0, limit: 20, scanId: b.scan_id });
+      return discoverVaultRelationshipCandidates(ctx, { vault: b.vault, offset: b.offset ?? 0, limit: b.limit ?? 20, scanId: b.scan_id });
     },
     'POST /api/graph3d/note': async (b) => {
       const cfg = await loadConfig(file);

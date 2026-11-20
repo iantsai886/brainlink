@@ -119,6 +119,7 @@
       <summary data-i18n="notes3d.discoverVault"></summary>
       <p class="muted" data-i18n="notes3d.discoverHint"></p>
       <button type="button" class="chip" id="notes3d-discover-run" data-i18n="notes3d.discoverRun"></button>
+      <button type="button" class="chip" id="notes3d-discover-all" data-i18n="notes3d.discoverAll"></button>
       <p id="notes3d-discover-status" class="muted" role="status" aria-live="polite"></p>
       <div id="notes3d-discover-list"></div>
     </details>`);
@@ -356,19 +357,31 @@
       }
     }
 
-    async function runDiscovery({ append = false } = {}) {
+    async function runDiscovery({ append = false, all = false } = {}) {
       const list = document.getElementById('notes3d-discover-list');
       const status = document.getElementById('notes3d-discover-status');
       const button = document.getElementById('notes3d-discover-run');
-      if (!list || !status || !button) return;
-      button.disabled = true;
+      const allButton = document.getElementById('notes3d-discover-all');
+      if (!list || !status || !button || !allButton) return;
+      button.disabled = true; allButton.disabled = true;
       try {
-        const offset = append ? (list._nextOffset || 0) : 0;
-        const result = await api('/api/graph3d/discover', { offset, vault: vaultFilter && vaultFilter !== '*' ? vaultFilter : undefined, scan_id: append ? list._scanId : undefined });
-        const items = append ? [...(list._candidates || []), ...result.candidates] : result.candidates;
+        let offset = append ? (list._nextOffset || 0) : 0;
+        let scanId = append ? list._scanId : undefined;
+        let items = append ? [...(list._candidates || [])] : [];
+        let result;
+        do {
+          result = await api('/api/graph3d/discover', { offset, limit: all ? 50 : 20, vault: vaultFilter && vaultFilter !== '*' ? vaultFilter : undefined, scan_id: scanId });
+          items = [...items, ...result.candidates];
+          scanId = result.scan_id;
+          offset = result.next_offset;
+          list._candidates = items; list._scanId = scanId; list._nextOffset = offset;
+          status.textContent = all && !result.done
+            ? tr('notes3d.discoverProgress', { count: items.length, scanned: offset, total: result.total_sources })
+            : (result.done ? tr('notes3d.discoverDone', { count: items.length, scanned: offset, total: result.total_sources })
+              : tr('notes3d.discoverProgress', { count: items.length, scanned: offset, total: result.total_sources }));
+          if (all && !result.done) await new Promise((resolve) => setTimeout(resolve, 0));
+        } while (all && !result.done);
         list._candidates = items;
-        list._scanId = result.scan_id;
-        list._nextOffset = result.next_offset;
         list._done = result.done;
         list.innerHTML = items.map((item, i) => `<article class="card notes3d-review-item">
           <b>${esc(item.title)}</b><span class="mono muted">${esc(item.vault)} · ${esc(item.path)}</span>
@@ -383,7 +396,7 @@
           status.textContent = tr('notes3d.discoverChanged');
           list._nextOffset = 0; list._done = true; list._candidates = []; list._scanId = null; list.innerHTML = ''; button.textContent = tr('notes3d.discoverRun');
         } else status.textContent = tr('notes3d.discoverFailed', { error: error.message });
-      } finally { button.disabled = false; }
+      } finally { button.disabled = false; allButton.disabled = false; }
     }
 
     function updateManualTargetOptions(form) {
@@ -466,6 +479,7 @@
         return;
       }
       if (e.target.id === 'notes3d-discover-run') { runDiscovery({ append: Boolean(document.getElementById('notes3d-discover-list')._nextOffset && !document.getElementById('notes3d-discover-list')._done) }); return; }
+      if (e.target.id === 'notes3d-discover-all') { runDiscovery({ all: true }); return; }
       const review = e.target.closest('[data-review-relation]');
       if (review) {
         if (!currentDetail || !window.confirm(tr('notes3d.approveConfirm'))) return;
