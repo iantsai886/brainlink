@@ -290,7 +290,21 @@ export async function startSetup(opts = {}) {
   const clientOpts = () => ({ home, os, env, launch: launchSpec(env), useCli: opts.useCli });
   // Setup and its scheduled local jobs operate with the user's local authority. AI client
   // health checks intentionally use createContext() without this bypass.
-  const localContext = (cfg, contextEnv = env) => createContext(cfg, { env: contextEnv, trustedLocal: true });
+  // Reuse the local Setup index across API requests so every Ask query does not rebuild the
+  // entire vault index. Config/environment changes replace the context, while loadVault still
+  // checks file signatures and privacy metadata before reusing cached notes.
+  let cachedLocalContext = null;
+  const localContext = (cfg, contextEnv = env) => {
+    const identity = createHash('sha256').update(JSON.stringify({
+      cfg,
+      env: Object.fromEntries(['BRAINLINK_VAULTS', 'BRAINLINK_READ_ONLY', 'BRAINLINK_SEMANTIC', 'BRAINLINK_AI_PLATFORM', 'BRAINLINK_HOME', 'APPDATA']
+        .map((key) => [key, contextEnv[key] || null])),
+    })).digest('hex');
+    if (cachedLocalContext?.identity === identity) return cachedLocalContext.ctx;
+    const ctx = createContext(cfg, { env: contextEnv, trustedLocal: true });
+    cachedLocalContext = { identity, ctx };
+    return ctx;
+  };
   const proposalInbox = createProposalInbox({ home: appHome(env) });
   const conflictReviewStore = createConflictReviewStore(appHome(env));
   const tidyState = createTidyState(appHome(env));

@@ -46,6 +46,22 @@ test('/api/ask: answers from the vault with clickable source chips; /api/note op
   } finally { s.server.close(); }
 });
 
+test('/api/ask reuses its local search index across requests and detects note edits', async () => {
+  const { s, api, vaultPath } = await withSampleVault('ask-index-reuse');
+  try {
+    const notePath = path.join(vaultPath, 'Iango Goal.md');
+    await writeFile(notePath, '# Iango Goal\n\nIango goal is to establish the first customer workflow.\n');
+    const first = await (await api('/api/ask', { query: 'what is iango goal' })).json();
+    assert.equal(first.status, 'hits');
+    assert.ok(first.sources.some((source) => source.path === 'Iango Goal.md'));
+
+    await writeFile(notePath, '# Iango Goal\n\nUpdated goal marker: lavender comet 78421.\n');
+    const refreshed = await (await api('/api/ask', { query: 'lavender comet 78421' })).json();
+    assert.equal(refreshed.status, 'hits');
+    assert.ok(refreshed.sources.some((source) => source.path === 'Iango Goal.md'), JSON.stringify(refreshed.sources));
+  } finally { await new Promise((resolve) => s.server.close(resolve)); }
+});
+
 test('S1: /api/ask never answers from or cites a private note', async () => {
   const { s, api, vaultPath } = await withSampleVault('ask-private');
   try {

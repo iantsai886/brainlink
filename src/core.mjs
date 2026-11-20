@@ -369,47 +369,51 @@ async function loadVaultFresh(ctx, name) {
   const state = ctx.cache.get(name) || { files: new Map(), index: null };
   const seen = new Set();
   let changed = !state.index;
-  for (const full of await walk(root)) {
-    const rel = path.relative(root, full).split(path.sep).join('/');
+  const files = await walk(root);
+  const statBatchSize = 96, readBatchSize = 32;
+  const fileStates = [];
+  // Drive-backed vaults pay substantial latency per metadata lookup. Check a bounded batch in
+  // parallel rather than awaiting stat() once per note; the batch cap avoids unbounded I/O.
+  for (let start = 0; start < files.length; start += statBatchSize) {
+    fileStates.push(...await Promise.all(files.slice(start, start + statBatchSize).map(async (full) => {
+      const rel = path.relative(root, full).split(path.sep).join('/');
+      const stNow = await stat(full, { bigint: true });
+      return { full, rel, mtime: Number(stNow.mtimeNs) / 1e6, bytes: Number(stNow.size), ctime: String(stNow.ctimeNs) };
+    })));
+  }
+  const processFile = async ({ full, rel, mtime, bytes, ctime }) => {
     seen.add(rel);
     const prev = state.files.get(rel);
-    // Use ctime at nanosecond precision as well as size/mtime. Sync tools can preserve
-    // mtime while replacing a note; without this check a cached public copy could survive
-    // a change to `private: true` and still appear in search until restart.
-    const stNow = await stat(full, { bigint: true });
-    const mtime = Number(stNow.mtimeNs) / 1e6;
-    const bytes = Number(stNow.size);
-    const ctime = String(stNow.ctimeNs);
     // Configured paths such as the handoff mailbox and capture log have known types;
     // exclude them before even opening their Markdown body.
     if (!twinNoteMemoryAllowed(ctx, name, rel)) {
       if (prev?.note) changed = true;
       state.files.set(rel, { hash: null, mtime, bytes, ctime, note: null });
-      continue;
+      return;
     }
     let header = null;
     if (prev?.note && prev.mtime === mtime && prev.bytes === bytes && prev.ctime === ctime) {
       // Scoped agents must not reuse a cached note based only on stat metadata: a sync tool or
       // filesystem can preserve those values while changing the memory-type frontmatter.
       // Check the bounded header before retaining the cached body for ranking or excerpts.
-      if (ctx.twinScope?.mode !== 'scoped') continue;
+      if (ctx.twinScope?.mode !== 'scoped') return;
       header = await readIndexableHeader(full, bytes);
       if (!header.indexable || !twinNoteMemoryAllowed(ctx, name, rel, header.meta)) {
         changed = true;
         state.files.set(rel, { hash: null, mtime, bytes, ctime, note: null });
-        continue;
+        return;
       }
-      if (JSON.stringify(header.meta) === JSON.stringify(prev.note.meta)) continue;
+      if (JSON.stringify(header.meta) === JSON.stringify(prev.note.meta)) return;
     }
     header ||= await readIndexableHeader(full, bytes);
     if (!header.indexable || !twinNoteMemoryAllowed(ctx, name, rel, header.meta)) {
       if (prev?.note) changed = true;
       state.files.set(rel, { hash: null, mtime, bytes, ctime, note: null });
-      continue;
+      return;
     }
     const raw = await readFile(full, 'utf8');
     const hash = createHash('sha1').update(raw).digest('hex');
-    if (prev?.hash === hash) { prev.mtime = mtime; prev.bytes = bytes; prev.ctime = ctime; continue; }
+    if (prev?.hash === hash) { prev.mtime = mtime; prev.bytes = bytes; prev.ctime = ctime; return; }
     changed = true;
     const { meta, body, frontmatter } = parseFrontmatter(raw);
     const title = path.posix.basename(rel).replace(/\.md$/i, '');
@@ -419,9 +423,12 @@ async function loadVaultFresh(ctx, name) {
     // Recheck after the full read in case the file changed between the header and body reads.
     if (isPrivateMeta(meta) || fmSaysPrivate(frontmatter) || !twinNoteMemoryAllowed(ctx, name, rel, meta)) {
       state.files.set(rel, { hash: null, mtime, bytes, ctime, note: null });
-      continue;
+      return;
     }
     state.files.set(rel, { hash, mtime, bytes, ctime, note: { rel, title, aliases, raw, meta, body, chunks, mtime, minor: isMinor(rel, title), date: noteDate(rel, meta, mtime), tags: extractTags(body, meta), generated: meta.generated_by === 'brainlink' || /^BrainLink\/Commands\//i.test(rel), historical: isHistorical(rel, meta), private: false } });
+  };
+  for (let start = 0; start < fileStates.length; start += readBatchSize) {
+    await Promise.all(fileStates.slice(start, start + readBatchSize).map(processFile));
   }
   for (const rel of [...state.files.keys()]) if (!seen.has(rel)) { state.files.delete(rel); changed = true; }
   if (changed) state.index = buildIndex([...state.files.values()].map((f) => f.note).filter(Boolean).sort((a, b) => a.rel.localeCompare(b.rel)));
