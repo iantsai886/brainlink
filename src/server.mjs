@@ -32,6 +32,41 @@ export const SERVER_NAME = 'brainlink';
 const SUPPORTED_PROTOCOLS = ['2025-06-18', '2025-03-26', '2024-11-05'];
 const RO = { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: false };
 const WR = { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: false };
+export const CORE_MCP_TOOLS = new Set([
+  'brainlink_guide',
+  'vault_search',
+  'vault_read_note',
+  'brain_brief',
+  'propose_note',
+  'remember',
+  'session_list',
+  'session_read',
+]);
+export const MCP_TOOL_GROUP_MAP = {
+  insights: ['context_packet', 'vault_recent', 'since_last_session', 'open_loops', 'decision_reviews', 'vault_health', 'vault_related'],
+  sessions: ['session_log', 'session_filing_folders', 'session_close'],
+  agents: ['agent_connect', 'agent_close_loop'],
+  handoffs: ['send_handoff', 'list_handoffs'],
+  ingestion: ['ingestion_queue', 'ingestion_read_source', 'ingestion_record'],
+  connectors: ['search', 'fetch'],
+};
+export function resolveMcpToolProfile(ctx, env = process.env) {
+  const override = String(env?.BRAINLINK_MCP_TOOLS || '').trim().toLowerCase();
+  if (override === 'core' || override === 'full') return override;
+  return ctx?.cfg?.mcp?.tool_profile === 'full' ? 'full' : 'core';
+}
+export function toolListedByProfile(ctx, toolName, activationToolNames = new Set(), { env = process.env, hasAgents = false } = {}) {
+  const profile = resolveMcpToolProfile(ctx, env);
+  if (profile === 'full') return true;
+  if (CORE_MCP_TOOLS.has(toolName)) return true;
+  if (ctx?.twinScope?.mode === 'scoped' && hasAgents && toolName === 'agent_connect') return true;
+  const groups = Array.isArray(ctx?.cfg?.mcp?.enabled_groups) ? ctx.cfg.mcp.enabled_groups : [];
+  for (const group of groups) {
+    if (group === 'agents' && activationToolNames.has(toolName)) return true;
+    if (MCP_TOOL_GROUP_MAP[group]?.includes(toolName)) return true;
+  }
+  return false;
+}
 const obsidianUrl = (v, p) => `obsidian://open?vault=${encodeURIComponent(v)}&file=${encodeURIComponent(p.replace(/\.md$/, ''))}`;
 export function createMcp(ctx, { onCall = () => {}, onProposal = null } = {}) {
   const baseCtx = ctx;
@@ -258,6 +293,11 @@ export function createMcp(ctx, { onCall = () => {}, onProposal = null } = {}) {
       value.vaults[name].read_first = await visibleRules(name);
       value.vaults[name].excluded_folders = (await readExcludedFolders(ctx.byName.get(name).path)).active;
     }
+    value.mcp = {
+      tool_profile: resolveMcpToolProfile(ctx),
+      enabled_groups: Array.isArray(ctx.cfg?.mcp?.enabled_groups) ? [...ctx.cfg.mcp.enabled_groups] : [],
+      available_groups: Object.keys(MCP_TOOL_GROUP_MAP),
+    };
     return value;
   };
   const idProps = {
@@ -588,7 +628,7 @@ This prompt does not change permissions, write sources, or run unattended AI pro
           return ok({ protocolVersion: SUPPORTED_PROTOCOLS.includes(asked) ? asked : SUPPORTED_PROTOCOLS[0], capabilities: { tools: { listChanged: false }, resources: { listChanged: false }, prompts: { listChanged: false } }, serverInfo: { name: SERVER_NAME, title: 'BrainLink MCP', version: VERSION }, instructions });
         }
         case 'ping': return ok({});
-        case 'tools/list': return ok({ tools: tools.filter((t) => twinToolListed(ctx, t.name)).map(({ run, ...t }) => {
+        case 'tools/list': return ok({ tools: tools.filter((t) => twinToolListed(ctx, t.name) && toolListedByProfile(ctx, t.name, activationToolNames, { hasAgents: agents.length > 0 })).map(({ run, ...t }) => {
           if (t.inputSchema?.properties?.vault) {
             const vault = { ...t.inputSchema.properties.vault, enum: twinToolVaultChoices(ctx, t.name) };
             return { ...t, inputSchema: { ...t.inputSchema, properties: { ...t.inputSchema.properties, vault } } };

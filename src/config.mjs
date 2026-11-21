@@ -20,6 +20,8 @@ export const SCHEMAS = ['standard', 'provenance'];
 export const WRITE_MODES = ['on', 'proposal-only', 'off'];
 export const TWIN_MODES = ['personal', 'organisation', 'client'];
 export const TWIN_ACTIONS = ['search', 'read_note', 'read_session', 'log_session', 'handoff_read', 'write_handoff', 'propose_note', 'write_note'];
+export const MCP_TOOL_PROFILES = ['core', 'full'];
+export const MCP_TOOL_GROUPS = ['insights', 'sessions', 'agents', 'handoffs', 'ingestion', 'connectors'];
 
 export function configPath(env = process.env) {
   return env.BRAINLINK_CONFIG || path.join(appHome(env), 'config.json');
@@ -40,7 +42,7 @@ export const AGENT_KINDS = ['local', 'remote'];
 export const CONFIG_SCHEMA_VERSION = 2;
 
 export function emptyConfig() {
-  return { version: CONFIG_SCHEMA_VERSION, timezone: null, locale: null, vaults: [], agents: [], ai_agents: [], twin_profiles: [], handoff: null, platforms: DEFAULT_PLATFORMS, http: { port: 8765, token: null }, connections: {}, reranker: { enabled: false, url: 'http://127.0.0.1:8080/v1/rerank' }, sessions: { shareSummaries: false, shareFullText: false, hermesHome: null, localSummary: { enabled: false, model: '', autoDraftOnEnd: false, autoFileOnEnd: false } }, session_filing: { projectVaults: {}, projectFolders: {} }, backup: { enabled: false, folder: null, intervalHours: 24, scheduleMode: 'interval', time: '02:00', last_scheduled_date: null, keepCount: 0, encrypted: false }, ingestion: { enabled: false, mode: 'daily', intervalMinutes: 5, last_scan_at: null, autoDrafts: false, autoFile: false, vault: null, folder: null, targets: [], time: '02:00', last_scheduled_date: null, retry_count: 0, retry_date: null, retry_after: null }, brief: { enabled: false, vault: null, time: '08:00', last_scheduled_date: null }, weekly_benchmark: { enabled: false, weekday: 1, time: '09:00', last_scheduled_week: null, last_run_at: null, last_run_ok: null } };
+  return { version: CONFIG_SCHEMA_VERSION, timezone: null, locale: null, vaults: [], agents: [], ai_agents: [], twin_profiles: [], handoff: null, platforms: DEFAULT_PLATFORMS, http: { port: 8765, token: null }, connections: {}, mcp: { tool_profile: 'core', enabled_groups: [] }, reranker: { enabled: false, url: 'http://127.0.0.1:8080/v1/rerank' }, sessions: { shareSummaries: false, shareFullText: false, hermesHome: null, localSummary: { enabled: false, model: '', autoDraftOnEnd: false, autoFileOnEnd: false } }, session_filing: { projectVaults: {}, projectFolders: {} }, backup: { enabled: false, folder: null, intervalHours: 24, scheduleMode: 'interval', time: '02:00', last_scheduled_date: null, keepCount: 0, encrypted: false }, ingestion: { enabled: false, mode: 'daily', intervalMinutes: 5, last_scan_at: null, autoDrafts: false, autoFile: false, vault: null, folder: null, targets: [], time: '02:00', last_scheduled_date: null, retry_count: 0, retry_date: null, retry_after: null }, brief: { enabled: false, vault: null, time: '08:00', last_scheduled_date: null }, weekly_benchmark: { enabled: false, weekday: 1, time: '09:00', last_scheduled_week: null, last_run_at: null, last_run_ok: null } };
 }
 
 // Fill defaults so the rest of the code never checks for missing keys.
@@ -55,6 +57,12 @@ export function normalize(raw = {}) {
   cfg.twin_profiles = raw.twin_profiles ?? [];
   cfg.http = { port: 8765, token: null, ...(raw.http || {}) };
   cfg.connections = raw.connections || {};
+  const rawProfile = raw.mcp?.tool_profile;
+  const rawGroups = Array.isArray(raw.mcp?.enabled_groups) ? raw.mcp.enabled_groups : [];
+  cfg.mcp = {
+    tool_profile: MCP_TOOL_PROFILES.includes(rawProfile) ? rawProfile : 'core',
+    enabled_groups: [...new Set(rawGroups.filter((group) => MCP_TOOL_GROUPS.includes(group)))],
+  };
   try { cfg.reranker = validateRerankerSettings({ ...emptyConfig().reranker, ...(raw.reranker || {}) }); }
   catch { cfg.reranker = emptyConfig().reranker; }
   cfg.backup = { enabled: false, folder: null, intervalHours: 24, scheduleMode: 'interval', time: '02:00', last_scheduled_date: null, keepCount: 0, encrypted: false, ...(raw.backup || {}) };

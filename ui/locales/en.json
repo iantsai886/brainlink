@@ -1455,5 +1455,15 @@
   "handoffs.mailboxPrivateWarning": "This mailbox is in a private vault. Only agents granted access to that vault can use it.",
   "handoffs.mailboxReviewFirst": "Review the source, destination and privacy warning before confirming.",
   "handoffs.mailboxPreviewRequired": "Preview the mailbox change before confirming.",
-  "handoffs.mailboxSaved": "The active mailbox location was updated."
+  "handoffs.mailboxSaved": "The active mailbox location was updated.",
+  "nav.advancedOff": "Advanced mode",
+  "nav.advancedOn": "Simple 3-step mode",
+  "mcpProfile.title": "MCP tool surface",
+  "mcpProfile.hint": "Keep AI clients focused with 8 core tools by default, or enable optional tool groups / Full mode.",
+  "mcpProfile.coreLabel": "Core (8 tools, recommended)",
+  "mcpProfile.fullLabel": "Full (all tools)",
+  "mcpProfile.groupsHint": "Optional tool groups (when in Core mode):",
+  "mcpProfile.save": "Save tool surface",
+  "mcpProfile.saving": "Saving…",
+  "mcpProfile.saved": "Saved. Restart connected AI apps to refresh their tool list."
 }

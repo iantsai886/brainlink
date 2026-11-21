@@ -1455,5 +1455,15 @@
   "handoffs.mailboxPrivateWarning": "此信箱位於私人知識庫。只有獲准使用該知識庫的 AI 可以使用。",
   "handoffs.mailboxReviewFirst": "確認前請檢查來源、目的地與隱私警告。",
   "handoffs.mailboxPreviewRequired": "請先預覽信箱變更，再確認。",
-  "handoffs.mailboxSaved": "目前使用的信箱位置已更新。"
+  "handoffs.mailboxSaved": "目前使用的信箱位置已更新。",
+  "nav.advancedOff": "進階模式",
+  "nav.advancedOn": "簡易三步驟模式",
+  "mcpProfile.title": "MCP 工具範圍",
+  "mcpProfile.hint": "預設提供 8 個核心工具讓 AI 更專注，或依需求開啟選用工具組／完整模式。",
+  "mcpProfile.coreLabel": "核心模式（8 個工具，建議）",
+  "mcpProfile.fullLabel": "完整模式（所有工具）",
+  "mcpProfile.groupsHint": "核心模式下的選用工具組：",
+  "mcpProfile.save": "儲存工具範圍",
+  "mcpProfile.saving": "儲存中…",
+  "mcpProfile.saved": "已儲存。請重新啟動已連線的 AI 應用以更新工具清單。"
 }

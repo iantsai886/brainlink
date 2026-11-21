@@ -8,17 +8,19 @@
     "brainlink": "bin/brainlink.mjs"
   },
   "dependencies": {
+    "brainlink-store": "file:./vendor/brainlink-store",
+    "fflate": "0.8.3",
+    "parse5": "8.0.1",
+    "yaml": "^2.9.1"
+  },
+  "optionalDependencies": {
     "@napi-rs/canvas": "1.1.0",
     "@tesseract.js-data/chi_tra": "1.0.0",
     "@tesseract.js-data/eng": "1.0.0",
     "@tesseract.js-data/por": "1.0.0",
-    "brainlink-store": "file:./vendor/brainlink-store",
-    "fflate": "0.8.3",
     "mammoth": "1.13.0",
-    "parse5": "8.0.1",
     "pdfjs-dist": "4.10.38",
-    "tesseract.js": "7.0.0",
-    "yaml": "^2.9.1"
+    "tesseract.js": "7.0.0"
   },
   "scripts": {
     "test": "node --import ./test/_preload.mjs --test --test-concurrency=1 --test-reporter=tap \"test/*.test.mjs\"",

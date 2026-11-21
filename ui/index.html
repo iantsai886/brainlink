@@ -123,6 +123,12 @@ body[data-nav-group="access"] [data-nav-group]:not([data-nav-group="access"]),
 body[data-nav-group="system"] [data-nav-group]:not([data-nav-group="system"]),
 body[data-nav-group="home"] #settings, body[data-nav-group="find"] #settings { display: none !important; }
 body[data-nav-group] #settings > summary { display: none; }
+/* Progressive 3-step Simple mode (default): hide advanced tabs and power panels until opted in. */
+body[data-ui-mode="simple"] [data-advanced-panel="true"],
+body[data-ui-mode="simple"] #main-nav a[data-nav-group-link="review"],
+body[data-ui-mode="simple"] #main-nav a[data-nav-group-link="system"] { display: none !important; }
+#advanced-mode-toggle { margin-left: auto; flex: none; font-size: 12px; padding: 4px 10px; border-radius: 999px; border: 1px solid var(--line); background: var(--panel); color: var(--muted); cursor: pointer; white-space: nowrap; }
+#advanced-mode-toggle[aria-pressed="true"] { color: var(--accent); border-color: var(--accent); font-weight: 600; }
 /* Inside a destination, settings sections fold to their title and one-line hint. */
 body[data-nav-group] section[data-collapsed] > h2 { cursor: pointer; }
 body[data-nav-group] section[data-collapsed] > h2::after { content: "▾"; margin-left: auto; color: var(--muted); font-size: 13px; }
@@ -157,6 +163,7 @@ main #ready, main #ask-panel, main #brain-panel, main #sessions-panel, main #s-c
   <a href="#proposal-review-panel" data-nav-group-link="review" data-i18n="nav.review"></a>
   <a href="#s-connect" data-nav-group-link="access" data-i18n="nav.access"></a>
   <a href="#s-backup" data-nav-group-link="system" data-i18n="nav.system"></a>
+  <button type="button" id="advanced-mode-toggle" aria-pressed="false" data-i18n="nav.advancedOff"></button>
 </nav>
 <div id="boot-loading" role="status" data-i18n="boot.loading"></div>
 <div id="boot-error" hidden role="alert"><b data-i18n="boot.errorTitle"></b> <span id="boot-error-msg"></span> <button id="boot-retry" data-i18n="boot.retry"></button></div>
@@ -473,6 +480,20 @@ main #ready, main #ask-panel, main #brain-panel, main #sessions-panel, main #s-c
       <div class="row"><button id="http-token" data-i18n="connect.createToken"></button></div>
       <div id="http-out" class="mono" style="margin-top:8px"></div>
     </details>
+  </section>
+
+  <section id="s-mcp-profile">
+    <h2 data-i18n="mcpProfile.title"></h2>
+    <p class="hint" data-i18n="mcpProfile.hint"></p>
+    <div class="row" style="gap:14px;flex-wrap:wrap;margin-top:8px">
+      <label class="muted" style="display:flex;flex-direction:row;gap:6px;align-items:center"><input type="radio" name="mcp-tool-profile" id="mcp-profile-core" value="core" style="width:auto"><span data-i18n="mcpProfile.coreLabel"></span></label>
+      <label class="muted" style="display:flex;flex-direction:row;gap:6px;align-items:center"><input type="radio" name="mcp-tool-profile" id="mcp-profile-full" value="full" style="width:auto"><span data-i18n="mcpProfile.fullLabel"></span></label>
+    </div>
+    <div id="mcp-groups-row" style="margin-top:10px">
+      <p class="muted" style="font-size:13px;margin:0 0 6px" data-i18n="mcpProfile.groupsHint"></p>
+      <div id="mcp-groups-list" class="row" style="gap:10px;flex-wrap:wrap"></div>
+    </div>
+    <div class="row" style="margin-top:10px"><button type="button" id="mcp-profile-save" data-i18n="mcpProfile.save"></button><span id="mcp-profile-status" class="muted" role="status"></span></div>
   </section>
 
   <section id="s-test">
@@ -938,9 +959,67 @@ async function ensureLocale(saved) {
 // Five top-level destinations. Every section belongs to exactly one group; choosing a group
 // shows only its sections, so the page is no longer one long scroll. Groups apply only while
 // the main navigation is visible, so onboarding screens are never filtered.
-const NAV_GROUPS = {"home":["ready","handoffs-panel"],"find":["ask-panel","brain-panel"],"review":["proposal-review-panel","memory-review-panel","decision-reviews-panel","conflicts-panel","tidy-panel","sessions-panel","s-ingestion"],"access":["s-connect","s-vault","s-agents","agents-panel","twin-profiles-panel","s-test"],"system":["s-backup","s-sync","s-background","s-brief","s-updates","s-reranker","s-share","rsi-panel","help-panel"]};
+const NAV_GROUPS = {"home":["ready","handoffs-panel"],"find":["ask-panel","brain-panel"],"review":["proposal-review-panel","memory-review-panel","decision-reviews-panel","conflicts-panel","tidy-panel","sessions-panel","s-ingestion"],"access":["s-connect","s-mcp-profile","s-vault","s-agents","agents-panel","twin-profiles-panel","s-test"],"system":["s-backup","s-sync","s-background","s-brief","s-updates","s-reranker","s-share","rsi-panel","help-panel"]};
+const ADVANCED_PANEL_IDS = ["handoffs-panel","brain-panel","s-agents","agents-panel","twin-profiles-panel","s-test",...NAV_GROUPS.review,...NAV_GROUPS.system];
 const navGroupOf = (id) => Object.keys(NAV_GROUPS).find((group) => NAV_GROUPS[group].includes(id)) || null;
 for (const [group, ids] of Object.entries(NAV_GROUPS)) for (const id of ids) $(id)?.setAttribute('data-nav-group', group);
+for (const id of ADVANCED_PANEL_IDS) $(id)?.setAttribute('data-advanced-panel', 'true');
+let uiMode = 'simple';
+try { if (localStorage.getItem('brainlink-ui-mode') === 'advanced') uiMode = 'advanced'; } catch { /* storage unavailable */ }
+function applyUiMode() {
+  document.body.dataset.uiMode = uiMode;
+  const toggle = $('advanced-mode-toggle');
+  if (toggle) {
+    const isAdv = uiMode === 'advanced';
+    toggle.setAttribute('aria-pressed', isAdv ? 'true' : 'false');
+    toggle.setAttribute('data-i18n', isAdv ? 'nav.advancedOn' : 'nav.advancedOff');
+    toggle.textContent = t(isAdv ? 'nav.advancedOn' : 'nav.advancedOff');
+  }
+  if (uiMode === 'simple' && (navGroup === 'review' || navGroup === 'system')) {
+    navGroup = 'home';
+  }
+  if (uiMode === 'simple') {
+    for (const id of ['s-connect', 's-mcp-profile', 's-vault']) {
+      const el = $(id);
+      if (el?.dataset.collapsed) setFolded(el, false);
+    }
+  }
+}
+$('advanced-mode-toggle')?.addEventListener('click', () => {
+  uiMode = uiMode === 'advanced' ? 'simple' : 'advanced';
+  try { localStorage.setItem('brainlink-ui-mode', uiMode); } catch { /* storage unavailable */ }
+  applyUiMode();
+  applyNavGroup();
+});
+const MCP_GROUP_IDS = ['insights', 'sessions', 'agents', 'handoffs', 'ingestion', 'connectors'];
+function renderMcpProfile(mcp = S?.mcp) {
+  const profile = mcp?.tool_profile === 'full' ? 'full' : 'core';
+  const groups = new Set(Array.isArray(mcp?.enabled_groups) ? mcp.enabled_groups : []);
+  if ($('mcp-profile-core')) $('mcp-profile-core').checked = profile === 'core';
+  if ($('mcp-profile-full')) $('mcp-profile-full').checked = profile === 'full';
+  const row = $('mcp-groups-row');
+  if (row) row.hidden = profile === 'full';
+  const list = $('mcp-groups-list');
+  if (list) {
+    list.innerHTML = MCP_GROUP_IDS.map((id) => `<label class="muted" style="display:flex;flex-direction:row;gap:5px;align-items:center"><input type="checkbox" data-mcp-group="${id}" ${groups.has(id) ? 'checked' : ''} style="width:auto"><span>${esc(id)}</span></label>`).join('');
+  }
+}
+$('mcp-profile-core')?.addEventListener('change', () => { if ($('mcp-groups-row')) $('mcp-groups-row').hidden = false; });
+$('mcp-profile-full')?.addEventListener('change', () => { if ($('mcp-groups-row')) $('mcp-groups-row').hidden = true; });
+$('mcp-profile-save')?.addEventListener('click', async () => {
+  const status = $('mcp-profile-status');
+  const tool_profile = $('mcp-profile-full')?.checked ? 'full' : 'core';
+  const enabled_groups = [...document.querySelectorAll('input[data-mcp-group]:checked')].map((el) => el.dataset.mcpGroup);
+  if (status) status.textContent = t('mcpProfile.saving');
+  try {
+    const res = await api('POST', '/api/mcp/profile', { tool_profile, enabled_groups });
+    S.mcp = { tool_profile: res.tool_profile, enabled_groups: res.enabled_groups };
+    renderMcpProfile(S.mcp);
+    if (status) status.textContent = t('mcpProfile.saved');
+  } catch (err) {
+    if (status) status.textContent = err.message || String(err);
+  }
+});
 let navGroup = 'home';
 function applyNavGroup() {
   const active = !$('main-nav').hidden;
@@ -2243,6 +2322,8 @@ async function load() {
   const guidedFirstRun = hasVault && ['2', '3'].includes(firstRunStage);
   const onboardingSync = hasVault && pendingSyncOnboarding;
   $('main-nav').hidden = !hasVault || onboardingSync || guidedFirstRun;
+  applyUiMode();
+  renderMcpProfile(S.mcp);
   $('start').hidden = hasVault;
   $('first-run-progress').hidden = !guidedFirstRun && hasVault;
   $('first-run').hidden = !guidedFirstRun;

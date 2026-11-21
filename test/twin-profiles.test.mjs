@@ -16,6 +16,7 @@ import { parse as parseYaml } from 'yaml';
 
 const fixture = (vaultPath) => normalize({
   version: 2,
+  mcp: { tool_profile: 'full', enabled_groups: [] },
   vaults: [{ name: 'Fictional Org', path: vaultPath }],
   ai_agents: [{ id: 'agent_codex', name: 'Fictional Codex', kind: 'local', tokenHash: hashToken('fictional-agent-token'), connected: true }],
   twin_profiles: [{

@@ -1173,6 +1173,7 @@ test('close loop: new-note and append-task modes', async () => {
 
 test('MCP: initialize, tools, prompts, resources, errors', async () => {
   const { cfg } = await fixture();
+  cfg.mcp = { tool_profile: 'full', enabled_groups: [] };
   const mcp = createMcp(ctxOf(cfg));
   const call = (method, params, id = 1) => mcp.handle({ jsonrpc: '2.0', id, method, params });
   const init = await call('initialize', { protocolVersion: '2025-03-26' });
@@ -1227,6 +1228,7 @@ test('MCP: initialize, tools, prompts, resources, errors', async () => {
 
 test('named agent activation tools keep the same Twin procedural and vault gates', async () => {
   const { cfg, company } = await fixture();
+  cfg.mcp = { tool_profile: 'full', enabled_groups: [] };
   await writeFile(path.join(company, 'Role Canary.md'), '# Role Canary\n\nPROCEDURAL_ROLE_CANARY must stay hidden when procedural memory is off.');
   cfg.agents[0].connect_notes = ['Role Canary.md'];
   const ctx = ctxOf(cfg, { BRAINLINK_VAULTS: 'Acme Studio' });
@@ -1840,6 +1842,7 @@ test('close-loop captures link the notes they are about', async () => {
 
 test('shared commands from BrainLink/Commands appear as prompts in every AI', async () => {
   const { cfg } = await fixture();
+  cfg.mcp = { tool_profile: 'full', enabled_groups: [] };
   const mcp = createMcp(ctxOf(cfg));
   const list = (await mcp.handle({ jsonrpc: '2.0', id: 1, method: 'prompts/list' })).result.prompts.map((p) => p.name);
   for (const n of ['cmd-weekly-review', 'cmd-meeting-notes', 'cmd-link-my-notes', 'brief', 'remember']) assert.ok(list.includes(n), n);

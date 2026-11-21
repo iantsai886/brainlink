@@ -1455,5 +1455,15 @@
   "handoffs.mailboxPrivateWarning": "Esta caixa fica em um cofre privado. Somente agentes autorizados para esse cofre podem usá-la.",
   "handoffs.mailboxReviewFirst": "Revise a origem, o destino e o aviso de privacidade antes de confirmar.",
   "handoffs.mailboxPreviewRequired": "Pré-visualize a alteração da caixa antes de confirmar.",
-  "handoffs.mailboxSaved": "O local ativo da caixa foi atualizado."
+  "handoffs.mailboxSaved": "O local ativo da caixa foi atualizado.",
+  "nav.advancedOff": "Modo avançado",
+  "nav.advancedOn": "Modo simples (3 passos)",
+  "mcpProfile.title": "Superfície de ferramentas MCP",
+  "mcpProfile.hint": "Mantenha os clientes de IA focados com 8 ferramentas essenciais por padrão, ou ative grupos opcionais / modo completo.",
+  "mcpProfile.coreLabel": "Essencial (8 ferramentas, recomendado)",
+  "mcpProfile.fullLabel": "Completo (todas as ferramentas)",
+  "mcpProfile.groupsHint": "Grupos opcionais (no modo Essencial):",
+  "mcpProfile.save": "Salvar superfície",
+  "mcpProfile.saving": "Salvando…",
+  "mcpProfile.saved": "Salvo. Reinicie os aplicativos de IA conectados para atualizar a lista."
 }

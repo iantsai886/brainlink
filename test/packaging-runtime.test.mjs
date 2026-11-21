@@ -35,13 +35,16 @@ test('every native installer bundles all production dependencies and portable Br
     assert.ok(windowsPreview.includes(doc), `Windows portable preview must include its documented public README reference: ${doc}`);
   }
   assert.ok(pkg.dependencies.yaml, 'YAML connector dependency must remain a production dependency');
-  assert.ok(pkg.dependencies['pdfjs-dist'], 'local PDF text extraction must remain a production dependency');
-  assert.ok(pkg.dependencies['@napi-rs/canvas'], 'scanned PDF rendering must use the pinned local canvas runtime');
-  assert.ok(pkg.dependencies.mammoth, 'local DOCX text extraction must remain a production dependency');
   assert.ok(pkg.dependencies.fflate, 'local XLSX and PPTX archive extraction must remain a production dependency');
-  assert.ok(pkg.dependencies['tesseract.js'], 'offline local OCR must remain a production dependency');
   assert.ok(pkg.dependencies.parse5, 'local HTML text extraction must remain a production dependency');
-  for (const lang of ['eng', 'por', 'chi_tra']) assert.ok(pkg.dependencies[`@tesseract.js-data/${lang}`], `${lang} OCR data must remain version locked`);
+  assert.ok(pkg.optionalDependencies['pdfjs-dist'], 'local PDF text extraction is decoupled as an optional dependency');
+  assert.ok(pkg.optionalDependencies['@napi-rs/canvas'], 'scanned PDF rendering is decoupled as an optional dependency');
+  assert.ok(pkg.optionalDependencies.mammoth, 'local DOCX text extraction is decoupled as an optional dependency');
+  assert.ok(pkg.optionalDependencies['tesseract.js'], 'offline local OCR is decoupled as an optional dependency');
+  for (const lang of ['eng', 'por', 'chi_tra']) assert.ok(pkg.optionalDependencies[`@tesseract.js-data/${lang}`], `${lang} OCR data is version locked in optionalDependencies`);
+  for (const heavy of ['@napi-rs/canvas', 'tesseract.js', 'pdfjs-dist', 'mammoth']) {
+    assert.equal(pkg.dependencies[heavy], undefined, `${heavy} must not be a mandatory core dependency`);
+  }
   assert.match(await read('packaging/windows/build-portable-zip.sh'), /npm install/, 'Windows source preview installs its declared production dependencies');
 
   const linuxBuilder = await read('packaging/linux/build-linux.sh');
