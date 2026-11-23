@@ -158,9 +158,9 @@ export interface BrainStore {
   /** session_log: append messages to a session (creates it if new). Secret-filtered. */
   appendSession(id_or_input: string | { client: string; source_id: string; vault: string; title?: string }, messages: Omit<SessionMessage, 'seq'>[], opts?: Access): Promise<Session>;
   /** Summary-first, newest first. `q` = keyword filter over title+summary. */
-  listSessions(opts?: Access & { client?: string; vault?: string; q?: string; since?: string; limit?: number }): Promise<Session[]>;
+  listSessions(opts?: Access & { client?: string; vault?: string; q?: string; since?: string; limit?: number; profile_ids?: string[]; include_unowned?: boolean }): Promise<Session[]>;
   /** Paged messages; default returns summary + last 0 messages unless limit>0. */
-  readSession(id: string, opts?: Access & { offset?: number; limit?: number }): Promise<SessionPage>;
+  readSession(id: string, opts?: Access & { offset?: number; limit?: number; profile_ids?: string[]; include_unowned?: boolean }): Promise<SessionPage>;
   /** Toggle per-session privacy (see Session.private). E_NOT_FOUND, E_PRIVACY, E_READ_ONLY. */
   setSessionPrivate(id: string, isPrivate: boolean, opts?: Access): Promise<Session>;
   /** Assign an unowned session to one Twin profile. Assignment is one-way and forces private=true. */

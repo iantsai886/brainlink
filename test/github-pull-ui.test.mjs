@@ -1,4 +1,5 @@
 import test from 'node:test';
+import { readSetupHtml } from './helpers/setup-html.mjs';
 import assert from 'node:assert/strict';
 import { readFile } from 'node:fs/promises';
 import path from 'node:path';
@@ -7,7 +8,7 @@ import { fileURLToPath } from 'node:url';
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 
 test('GitHub pull UI keeps updates opt-in and conflicts separate', async () => {
-  const html = await readFile(path.join(root, 'ui', 'index.html'), 'utf8');
+  const html = await readSetupHtml();
   assert.match(html, /n\.action === 'add' \? 'checked' : ''/);
   assert.match(html, /\['add', 'update', 'conflict'\]\.includes\(n\.action\)/);
   assert.match(html, /githubPullSelection\('add,update'\)/);

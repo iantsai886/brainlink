@@ -15,6 +15,7 @@ import { runSync } from '../src/sync-cli.mjs';
 import { startSetup } from '../src/setup.mjs';
 import { openSessionStore } from '../src/sessions/index.mjs';
 import { launchSpec, CLI_PATH } from '../src/runtime.mjs';
+import { hashToken } from '../src/mcp-agents.mjs';
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const FIXTURES = path.join(ROOT, 'test', 'fixtures');
@@ -167,6 +168,8 @@ test('importAll wiring: `brainlink sync` and `session_list` import Claude, Codex
 
   // 1) `brainlink sync` must call importAll so the local session index is no longer empty.
   const syncEnv = { ...env, BRAINLINK_HOME: path.join(home, 'app-sync') };
+  await mkdir(syncEnv.BRAINLINK_HOME, { recursive: true });
+  await writeFile(path.join(syncEnv.BRAINLINK_HOME, 'config.json'), JSON.stringify({ version: 2, vaults: [], sessions: { importHistory: true } }));
   await new Promise((resolve, reject) => {
     const child = spawn(process.execPath, [path.join(ROOT, 'bin', 'brainlink.mjs'), 'sync'], { env: syncEnv });
     let buf = '';
@@ -185,6 +188,8 @@ test('importAll wiring: `brainlink sync` and `session_list` import Claude, Codex
   // caller-supplied include_private is still never honoured: it changes nothing here either way.
   // The import itself still happens lazily regardless of the sharing setting (checked below).
   const serveEnv = { ...env, BRAINLINK_HOME: path.join(home, 'app-serve') };
+  await mkdir(serveEnv.BRAINLINK_HOME, { recursive: true });
+  await writeFile(path.join(serveEnv.BRAINLINK_HOME, 'config.json'), JSON.stringify({ version: 2, vaults: [], sessions: { importHistory: true } }));
   const child = spawn(process.execPath, [path.join(ROOT, 'bin', 'brainlink.mjs'), 'serve'], { env: serveEnv });
   const lines = [];
   let buf = '';
@@ -204,7 +209,7 @@ test('importAll wiring: `brainlink sync` and `session_list` import Claude, Codex
 
 // ---- connectors.mjs: {ok,message} wrappers + the ChatGPT honest note ----
 
-test('connectors: detect() lists ChatGPT as unsupported; connect/disconnect/test never touch it', async () => {
+test('connectors: ChatGPT stays manual-only and explains the Secure MCP Tunnel data flow', async () => {
   const home = await tmp('connectors-home');
   const opts = { home, os: 'linux', env: {}, launch: { command: 'node', args: ['cli.mjs', 'serve'] }, useCli: false };
   const found = await detect(opts);
@@ -214,7 +219,8 @@ test('connectors: detect() lists ChatGPT as unsupported; connect/disconnect/test
   for (const fn of [connect, disconnect, testClient]) {
     const r = await fn('chatgpt', opts);
     assert.equal(r.ok, false);
-    assert.match(r.message, /remote HTTPS/);
+    assert.match(r.message, /Secure MCP Tunnel/);
+    assert.match(r.message, /pass through OpenAI/);
   }
 });
 
@@ -418,7 +424,7 @@ test('connect: the generated DeepSeek Harness config launches BrainLink in an is
   await writeFile(clientConfig, '[]\n');
   await writeFile(path.join(vault, 'Public Project.md'), '# HARNESSPUBLIC\n\nA fictional public project note for runtime isolation testing.');
   await writeFile(path.join(vault, 'Private Project.md'), '---\nprivate: true\n---\n# HARNESSPRIVATE\n\nA fictional private note that must never be returned.');
-  await saveConfig(normalize({ vaults: [{ name: 'Fictional Harness Vault', path: vault }] }), configFile);
+  await saveConfig(normalize({ vaults: [{ name: 'Fictional Harness Vault', path: vault }], ai_agents: [{ id: 'fictional_harness', name: 'Fictional Harness', kind: 'local', tokenHash: hashToken('fictional-harness-runtime-token') }] }), configFile);
 
   const launch = { command: process.execPath, args: [path.join(ROOT, 'bin/brainlink.mjs'), 'serve'] };
   const opts = {

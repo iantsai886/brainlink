@@ -1,6 +1,7 @@
 import test from 'node:test';
+import { readSetupHtml } from './helpers/setup-html.mjs';
 import assert from 'node:assert/strict';
-import { mkdtemp, mkdir, writeFile, rm } from 'node:fs/promises';
+import { mkdtemp, mkdir, readFile, writeFile, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { emptyConfig, normalize, saveConfig } from '../src/config.mjs';
@@ -62,6 +63,59 @@ test('Setup returns before a slow vault count and updates the count when it fini
     if (app) await new Promise((resolve) => app.server.close(resolve));
     await rm(root, { recursive: true, force: true });
   }
+});
+
+test('Setup event stream sends completed vault counts to a late browser connection', async () => {
+  const root = await mkdtemp(path.join(tmpdir(), 'brainlink-late-count-event-'));
+  const home = path.join(root, 'home');
+  const vaultPath = path.join(root, 'vault');
+  await Promise.all([mkdir(home), mkdir(vaultPath)]);
+  const config = emptyConfig();
+  config.vaults.push({ name: 'Synthetic', path: vaultPath });
+  await saveConfig(config, path.join(home, 'config.json'));
+  let app;
+  let reader;
+  try {
+    app = await startSetup({
+      env: { BRAINLINK_HOME: home, HOME: home }, home, os: process.platform, port: 0, useCli: false,
+      countVisibleNotes: async () => 7,
+    });
+    const base = `http://127.0.0.1:${app.port}`;
+    const headers = { 'X-BrainLink-Token': app.token };
+    let state;
+    for (let attempt = 0; attempt < 50; attempt++) {
+      state = await (await fetch(`${base}/api/state`, { headers })).json();
+      if (state.vaults[0].notes_status === 'ready') break;
+      await new Promise((resolve) => setTimeout(resolve, 10));
+    }
+    assert.equal(state.vaults[0].notes, 7);
+    const events = await fetch(`${base}/api/events?t=${encodeURIComponent(app.token)}`);
+    reader = events.body.getReader();
+    const decoder = new TextDecoder();
+    let text = '';
+    while (!text.includes('event: vault-counts-updated')) {
+      const next = await new Promise((resolve, reject) => {
+        const timer = setTimeout(() => reject(new Error('initial count snapshot timed out')), 2000);
+        reader.read().then((value) => { clearTimeout(timer); resolve(value); }, (error) => { clearTimeout(timer); reject(error); });
+      });
+      if (next.done) break;
+      text += decoder.decode(next.value, { stream: true });
+    }
+    assert.match(text, /"vault":"Synthetic","status":"ready","notes":7/);
+  } finally {
+    await reader?.cancel().catch(() => {});
+    if (app) await new Promise((resolve) => app.server.close(resolve));
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+test('Setup UI keeps count events that arrive before vault state and applies them after load', async () => {
+  const html = await readSetupHtml();
+  const countListener = html.slice(html.indexOf("vaultEvents.addEventListener('vault-counts-updated'"), html.indexOf("const $ = (id) =>"));
+  const loadFunction = html.slice(html.indexOf('async function load()'), html.indexOf('\nfunction renderStart()'));
+  assert.match(countListener, /latestVaultNoteCounts\.set\(result\.vault, result\)/);
+  assert.match(loadFunction, /for \(const \[name, result\] of latestVaultNoteCounts\)/);
+  assert.ok(loadFunction.indexOf('latestVaultNoteCounts') < loadFunction.indexOf('renderReady(last)'), 'apply buffered counts before rendering the ready screen');
 });
 
 test('lightweight vault count excludes private, generated, and excluded-folder notes', async () => {

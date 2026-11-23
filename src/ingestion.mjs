@@ -3,18 +3,214 @@
 // opaque identifiers and outcomes in the local app-data journal.
 import { appendFile, lstat, mkdir, open, readFile, readdir, realpath } from 'node:fs/promises';
 import { createHash } from 'node:crypto';
+import { Worker } from 'node:worker_threads';
 import path from 'node:path';
 import { appHome } from './config.mjs';
 import { indexableHeader, isExcludedPath, isPrivateMeta, fmSaysPrivate, parseFrontmatter, safeJoin, vault, vaultRoot } from './core.mjs';
 import { extractLinks } from './graph.mjs';
 import { redactText } from './sessions/redact.mjs';
+import { extractImageText, imageDimensions } from './ingestion/image-ocr.mjs';
+import { twinProfileForVault } from './twin-profiles.mjs';
 
-const hash = (s) => createHash('sha256').update(String(s)).digest('hex');
+const hash = (s) => createHash('sha256').update(Buffer.isBuffer(s) ? s : String(s)).digest('hex');
 const MAX_NOTES = 5000;
 const MAX_DEPTH = 32;
 const MAX_NOTE_BYTES = 5 * 1024 * 1024;
 const MAX_HEADER_BYTES = 64 * 1024;
 const MAX_DRAFT_SOURCE_CHARS = 24_000;
+const TEXT_SOURCE_FORMATS = new Set(['.md', '.txt', '.csv', '.tsv', '.json', '.xml', '.yaml', '.yml', '.log', '.html', '.htm', '.pdf', '.docx', '.xlsx', '.pptx', '.png', '.jpg', '.jpeg', '.bmp']);
+const PDF_WORKER_TIMEOUT_MS = 90_000;
+const DOCX_WORKER_TIMEOUT_MS = 15_000;
+const OFFICE_WORKER_TIMEOUT_MS = 15_000;
+const HTML_WORKER_TIMEOUT_MS = 15_000;
+
+function sourceExtension(rel) { return path.posix.extname(String(rel || '')).toLowerCase(); }
+
+function isSupportedSource(rel) { return TEXT_SOURCE_FORMATS.has(sourceExtension(rel)); }
+
+function decodeSourceText(bytes) {
+  let text;
+  try { text = new TextDecoder('utf-8', { fatal: true }).decode(bytes).replace(/^\uFEFF/, ''); }
+  catch { throw new Error('This source is not valid UTF-8 text.'); }
+  if (text.includes('\0')) throw new Error('This source contains binary data and cannot be read as text.');
+  return text;
+}
+
+function extractPdfText(bytes) {
+  if (!Buffer.from(bytes).subarray(0, 5).equals(Buffer.from('%PDF-'))) return Promise.reject(new Error('This file is not a valid PDF.'));
+  const data = Uint8Array.from(bytes);
+  const worker = new Worker(new URL('./ingestion/pdf-worker.mjs', import.meta.url), {
+    workerData: data,
+    transferList: [data.buffer],
+    resourceLimits: { maxOldGenerationSizeMb: 96, maxYoungGenerationSizeMb: 24, stackSizeMb: 4 },
+  });
+  return new Promise((resolve, reject) => {
+    let settled = false;
+    const finish = (fn, value) => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timer);
+      fn(value);
+    };
+    const timer = setTimeout(() => {
+      void worker.terminate();
+      finish(reject, new Error('PDF extraction exceeded its time limit.'));
+    }, PDF_WORKER_TIMEOUT_MS);
+    timer.unref?.();
+    worker.once('message', (result) => {
+      if (result?.ok && typeof result.text === 'string') finish(resolve, result);
+      else {
+        const reason = result?.reason === 'no_text'
+          ? 'This PDF has no readable text. If it is scanned, its pages may be blank, too faint, or outside the OCR page limit.'
+          : result?.reason === 'page_limit'
+            ? 'This PDF is over the 100-page extraction limit.'
+            : result?.reason === 'missing_dependency'
+              ? `Optional PDF package "${result.package || 'pdfjs-dist'}" is not installed. Install BrainLink optional ingestion packages to extract PDFs.`
+              : 'This PDF could not be safely extracted.';
+        finish(reject, new Error(reason));
+      }
+    });
+    worker.once('error', () => finish(reject, new Error('This PDF could not be safely extracted.')));
+    worker.once('exit', (code) => {
+      if (!settled && code !== 0) finish(reject, new Error('This PDF could not be safely extracted.'));
+      else if (!settled) finish(reject, new Error('PDF extraction ended without a result.'));
+    });
+  });
+}
+
+function validateOfficeArchive(bytes, requiredPart) {
+  const buffer = Buffer.from(bytes);
+  if (buffer.length < 22 || buffer.readUInt32LE(0) !== 0x04034b50) throw new Error('This is not a valid Office document.');
+  const searchFrom = Math.max(0, buffer.length - 22 - 0xffff);
+  let end = -1;
+  for (let offset = buffer.length - 22; offset >= searchFrom; offset--) {
+    if (buffer.readUInt32LE(offset) === 0x06054b50) {
+      const commentLength = buffer.readUInt16LE(offset + 20);
+      if (offset + 22 + commentLength === buffer.length) { end = offset; break; }
+    }
+  }
+  if (end < 0) throw new Error('This Office archive is incomplete or unsupported.');
+  const disk = buffer.readUInt16LE(end + 4);
+  const centralDisk = buffer.readUInt16LE(end + 6);
+  const diskEntries = buffer.readUInt16LE(end + 8);
+  const entryCount = buffer.readUInt16LE(end + 10);
+  const centralSize = buffer.readUInt32LE(end + 12);
+  const centralOffset = buffer.readUInt32LE(end + 16);
+  if (disk || centralDisk || diskEntries !== entryCount || entryCount === 0xffff || centralSize === 0xffffffff || centralOffset === 0xffffffff || entryCount > 2048 || centralOffset + centralSize > end) throw new Error('This Office archive uses an unsupported or unsafe ZIP layout.');
+  let offset = centralOffset;
+  let expandedBytes = 0;
+  const names = new Set();
+  for (let index = 0; index < entryCount; index++) {
+    if (offset + 46 > centralOffset + centralSize || buffer.readUInt32LE(offset) !== 0x02014b50) throw new Error('This Office archive has a malformed directory.');
+    const flags = buffer.readUInt16LE(offset + 8);
+    const method = buffer.readUInt16LE(offset + 10);
+    const compressedBytes = buffer.readUInt32LE(offset + 20);
+    const uncompressedBytes = buffer.readUInt32LE(offset + 24);
+    const nameLength = buffer.readUInt16LE(offset + 28);
+    const extraLength = buffer.readUInt16LE(offset + 30);
+    const commentLength = buffer.readUInt16LE(offset + 32);
+    const entryEnd = offset + 46 + nameLength + extraLength + commentLength;
+    if (entryEnd > centralOffset + centralSize || !nameLength || nameLength > 4096 || (flags & 1) || (method !== 0 && method !== 8) || compressedBytes === 0xffffffff || uncompressedBytes === 0xffffffff || uncompressedBytes > 20 * 1024 * 1024) throw new Error('This Office archive contains an unsupported or unsafe entry.');
+    const name = buffer.subarray(offset + 46, offset + 46 + nameLength).toString('utf8');
+    if (name.startsWith('/') || name.includes('\\') || name.split('/').some((part) => part === '..' || part === '.')) throw new Error('This Office archive contains an unsafe entry path.');
+    if (names.has(name)) throw new Error('This Office archive contains duplicate entry names.');
+    names.add(name);
+    expandedBytes += uncompressedBytes;
+    if (expandedBytes > 32 * 1024 * 1024) throw new Error('This Office archive expands beyond the 32 MB safety limit.');
+    offset = entryEnd;
+  }
+  if (offset !== centralOffset + centralSize || !names.has(requiredPart)) throw new Error('This Office archive is missing its main document.');
+}
+
+function validateDocxArchive(bytes) { return validateOfficeArchive(bytes, 'word/document.xml'); }
+
+function extractDocxText(bytes) {
+  try { validateDocxArchive(bytes); }
+  catch (error) { return Promise.reject(error); }
+  const data = Uint8Array.from(bytes);
+  const worker = new Worker(new URL('./ingestion/docx-worker.mjs', import.meta.url), {
+    workerData: data,
+    transferList: [data.buffer],
+    resourceLimits: { maxOldGenerationSizeMb: 96, maxYoungGenerationSizeMb: 24, stackSizeMb: 4 },
+  });
+  return new Promise((resolve, reject) => {
+    let settled = false;
+    const finish = (fn, value) => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timer);
+      fn(value);
+    };
+    const timer = setTimeout(() => {
+      void worker.terminate();
+      finish(reject, new Error('DOCX extraction exceeded its time limit.'));
+    }, DOCX_WORKER_TIMEOUT_MS);
+    timer.unref?.();
+    worker.once('message', (result) => {
+      if (result?.ok && typeof result.text === 'string') finish(resolve, result);
+      else {
+        const reason = result?.reason === 'no_text'
+          ? 'This DOCX has no readable text.'
+          : result?.reason === 'missing_dependency'
+            ? `Optional DOCX package "${result.package || 'mammoth'}" is not installed. Install BrainLink optional ingestion packages to extract DOCX files.`
+            : 'This DOCX could not be safely extracted.';
+        finish(reject, new Error(reason));
+      }
+    });
+    worker.once('error', () => finish(reject, new Error('This DOCX could not be safely extracted.')));
+    worker.once('exit', (code) => {
+      if (!settled && code !== 0) finish(reject, new Error('This DOCX could not be safely extracted.'));
+      else if (!settled) finish(reject, new Error('DOCX extraction ended without a result.'));
+    });
+  });
+}
+
+function extractOfficeText(bytes, extension) {
+  const kind = extension === '.xlsx' ? 'xlsx' : 'pptx';
+  try { validateOfficeArchive(bytes, kind === 'xlsx' ? 'xl/workbook.xml' : 'ppt/presentation.xml'); }
+  catch (error) { return Promise.reject(error); }
+  const data = Uint8Array.from(bytes);
+  const worker = new Worker(new URL('./ingestion/office-worker.mjs', import.meta.url), {
+    workerData: { data, kind }, transferList: [data.buffer],
+    resourceLimits: { maxOldGenerationSizeMb: 96, maxYoungGenerationSizeMb: 24, stackSizeMb: 4 },
+  });
+  return new Promise((resolve, reject) => {
+    let settled = false;
+    const finish = (fn, value) => { if (settled) return; settled = true; clearTimeout(timer); fn(value); };
+    const timer = setTimeout(() => { void worker.terminate(); finish(reject, new Error('Office text extraction exceeded its time limit.')); }, OFFICE_WORKER_TIMEOUT_MS);
+    timer.unref?.();
+    worker.once('message', (result) => {
+      if (result?.ok && typeof result.text === 'string') finish(resolve, result);
+      else finish(reject, new Error(result?.reason === 'no_text' ? 'This Office file has no readable text.' : 'This Office file could not be safely extracted.'));
+    });
+    worker.once('error', () => finish(reject, new Error('This Office file could not be safely extracted.')));
+    worker.once('exit', (code) => {
+      if (!settled) finish(reject, new Error(code === 0 ? 'Office text extraction ended without a result.' : 'This Office file could not be safely extracted.'));
+    });
+  });
+}
+
+function extractHtmlText(bytes) {
+  const data = Uint8Array.from(bytes);
+  const worker = new Worker(new URL('./ingestion/html-worker.mjs', import.meta.url), {
+    workerData: data, transferList: [data.buffer],
+    resourceLimits: { maxOldGenerationSizeMb: 96, maxYoungGenerationSizeMb: 24, stackSizeMb: 4 },
+  });
+  return new Promise((resolve, reject) => {
+    let settled = false;
+    const finish = (fn, value) => { if (settled) return; settled = true; clearTimeout(timer); fn(value); };
+    const timer = setTimeout(() => { void worker.terminate(); finish(reject, new Error('HTML extraction exceeded its time limit.')); }, HTML_WORKER_TIMEOUT_MS);
+    timer.unref?.();
+    worker.once('message', (result) => {
+      if (result?.ok && typeof result.text === 'string') finish(resolve, result);
+      else finish(reject, new Error(result?.reason === 'no_text' ? 'This HTML file has no readable text.' : 'This HTML file could not be safely extracted.'));
+    });
+    worker.once('error', () => finish(reject, new Error('This HTML file could not be safely extracted.')));
+    worker.once('exit', (code) => {
+      if (!settled) finish(reject, new Error(code === 0 ? 'HTML extraction ended without a result.' : 'This HTML file could not be safely extracted.'));
+    });
+  });
+}
 
 function selectedFolder(value) {
   const folder = String(value || '').replace(/\\/g, '/').replace(/^\/+|\/+$/g, '');
@@ -48,16 +244,29 @@ async function checkedFolder(ctx, vaultName, requested) {
 }
 
 function scopeId(ctx, vaultName, root) {
-  return hash(`${path.resolve(root)}\0${vaultName}\0${ctx.twinScope?.profile_id || 'unscoped'}`);
+  return hash(`${path.resolve(root)}\0${vaultName}\0${twinProfileForVault(ctx, vaultName)?.profile_id || 'unscoped'}`);
 }
 
 function sourceId(scope, rel) { return hash(`${scope}\0${rel}`); }
 
+// Common OS/editor metadata and temporary files are never useful knowledge sources.
+// Keep this list explicit so we do not accidentally exclude user dotfiles wholesale.
+function isOsMetadataPath(rel) {
+  return rel.split(/[\\/]/).some((name) =>
+    name.startsWith('.') ||
+    name.startsWith('._') ||
+    name.startsWith('~$') ||
+    /^(?:\.DS_Store|Thumbs\.db|ehthumbs\.db|desktop\.ini|Icon\r)$/i.test(name)
+  );
+}
+
 async function readEligible(full, root, realRoot, rel, { includeBody = false } = {}) {
+  if (isOsMetadataPath(rel)) return null;
   if (await isExcludedPath(root, rel)) return null;
   const before = await lstat(full);
   if (before.isSymbolicLink() || !before.isFile() || before.size > MAX_NOTE_BYTES) return null;
-  if (!/\.md$/i.test(rel)) return null;
+  const extension = sourceExtension(rel);
+  if (!isSupportedSource(rel)) return null;
   const real = await realpath(full);
   const relReal = path.relative(realRoot, real);
   if (relReal === '..' || relReal.startsWith(`..${path.sep}`) || path.isAbsolute(relReal) || await isExcludedPath(root, relReal.split(path.sep).join('/'))) return null;
@@ -66,23 +275,52 @@ async function readEligible(full, root, realRoot, rel, { includeBody = false } =
   try {
     const opened = await fh.stat();
     if (!opened.isFile() || opened.size !== before.size || (opened.ino && before.ino && opened.ino !== before.ino) || (opened.dev && before.dev && opened.dev !== before.dev)) return null;
-    const header = Buffer.alloc(Math.min(opened.size, MAX_HEADER_BYTES));
-    const { bytesRead } = await fh.read(header, 0, header.length, 0);
-    if (!indexableHeader(header.subarray(0, bytesRead).toString('utf8'), opened.size, bytesRead)) return null;
-    // Privacy was checked from the bounded header. Only now read the body.
-    const raw = await fh.readFile('utf8');
+    if (extension === '.md') {
+      const header = Buffer.alloc(Math.min(opened.size, MAX_HEADER_BYTES));
+      const { bytesRead } = await fh.read(header, 0, header.length, 0);
+      if (!indexableHeader(header.subarray(0, bytesRead).toString('utf8'), opened.size, bytesRead)) return null;
+    }
+    // Scope and .brainlinkignore exclusions were checked before opening the source. Markdown
+    // additionally requires a bounded frontmatter privacy check before its body is read.
+    const bytes = await fh.readFile();
+    let raw;
+    if (extension === '.pdf') raw = includeBody ? await extractPdfText(bytes) : { text: '' };
+    else if (extension === '.docx') {
+      validateDocxArchive(bytes);
+      raw = includeBody ? await extractDocxText(bytes) : { text: '' };
+    } else if (extension === '.xlsx' || extension === '.pptx') raw = includeBody ? await extractOfficeText(bytes, extension) : { text: '' };
+    else if (extension === '.html' || extension === '.htm') raw = includeBody ? await extractHtmlText(bytes) : { text: '' };
+    else if (['.png', '.jpg', '.jpeg', '.bmp'].includes(extension)) {
+      imageDimensions(bytes, extension);
+      raw = includeBody ? await extractImageText(bytes) : { text: '' };
+    }
+    else raw = { text: decodeSourceText(bytes) };
     const after = await fh.stat();
     const pathAfter = await lstat(full);
     if (after.size !== opened.size || after.mtimeMs !== opened.mtimeMs || pathAfter.isSymbolicLink() || (pathAfter.ino && opened.ino && pathAfter.ino !== opened.ino)) return null;
-    const { meta, body, frontmatter } = parseFrontmatter(raw);
-    if (isPrivateMeta(meta) || fmSaysPrivate(frontmatter) || meta.generated_by === 'brainlink') return null;
-    return { rel, title: path.posix.basename(rel).replace(/\.md$/i, ''), revision: hash(raw), updated_at: new Date(after.mtimeMs).toISOString(), ...(includeBody ? { body } : {}) };
+    let body = raw.text;
+    if (extension === '.md') {
+      const { meta, body: markdownBody, frontmatter } = parseFrontmatter(raw.text);
+      if (isPrivateMeta(meta) || fmSaysPrivate(frontmatter) || meta.generated_by === 'brainlink') return null;
+      body = markdownBody;
+    }
+    const imageBase64 = includeBody && ['.png', '.jpg', '.jpeg'].includes(extension) ? bytes.toString('base64') : undefined;
+    return { rel, title: path.posix.basename(rel).slice(0, -extension.length), format: extension.slice(1), revision: hash(bytes), updated_at: new Date(after.mtimeMs).toISOString(), ...(includeBody ? { body, body_truncated: raw.truncated === true, ...(imageBase64 ? { image_base64: imageBase64 } : {}) } : {}) };
   } finally { await fh.close(); }
 }
 
 async function sourcesInFolder(ctx, vaultName, folderInfo) {
   const out = [];
+  const unsupportedCounts = new Map();
+  let unsupportedCount = 0;
   let visited = 0, skipped = 0, truncated = false;
+  function noteUnsupported(rel) {
+    unsupportedCount++;
+    const extension = sourceExtension(rel);
+    const key = extension && /^\.[a-z0-9]{1,12}$/i.test(extension) ? extension : extension ? 'other' : '';
+    const boundedKey = unsupportedCounts.has(key) || unsupportedCounts.size < 19 ? key : 'other';
+    unsupportedCounts.set(boundedKey, (unsupportedCounts.get(boundedKey) || 0) + 1);
+  }
   async function visit(dir, relDir, depth = 0) {
     if (truncated) return;
     if (depth > MAX_DEPTH) { skipped++; return; }
@@ -90,20 +328,24 @@ async function sourcesInFolder(ctx, vaultName, folderInfo) {
     for (const entry of entries) {
       if (truncated) return;
       if (++visited > MAX_NOTES) { truncated = true; return; }
-      if (entry.name.startsWith('.')) { skipped++; continue; }
       const rel = `${relDir}/${entry.name}`;
+      if (isOsMetadataPath(rel)) { skipped++; continue; }
       if (await isExcludedPath(folderInfo.root, rel)) { skipped++; continue; }
       const full = path.join(dir, entry.name);
       const st = await lstat(full).catch(() => null);
       if (!st || st.isSymbolicLink()) { skipped++; continue; }
       if (st.isDirectory()) { await visit(full, rel, depth + 1); continue; }
-      if (!st.isFile() || !/\.md$/i.test(entry.name)) continue;
+      if (!st.isFile()) continue;
+      if (!isSupportedSource(rel)) { skipped++; noteUnsupported(rel); continue; }
       const source = await readEligible(full, folderInfo.root, folderInfo.realRoot, rel).catch(() => null);
       if (source) out.push(source); else skipped++;
     }
   }
   await visit(folderInfo.full, folderInfo.folder);
-  return { sources: out, scanned: visited, skipped, truncated };
+  const unsupported_formats = [...unsupportedCounts.entries()]
+    .map(([extension, count]) => ({ extension, count }))
+    .sort((a, b) => a.extension.localeCompare(b.extension));
+  return { sources: out, scanned: visited, skipped, truncated, unsupported_count: unsupportedCount, unsupported_formats };
 }
 
 function journalPath(ctx, scope) { return path.join(appHome(ctx.env), 'ingestion', `${scope}.jsonl`); }
@@ -121,14 +363,14 @@ async function latestEvents(file) {
 export async function ingestionQueue(ctx, vaultName, folder, { limit = 50 } = {}) {
   const folderInfo = await checkedFolder(ctx, vaultName, folder);
   const scope = scopeId(ctx, vaultName, folderInfo.root);
-  const { sources, scanned, skipped, truncated } = await sourcesInFolder(ctx, vaultName, folderInfo);
+  const { sources, scanned, skipped, truncated, unsupported_count, unsupported_formats } = await sourcesInFolder(ctx, vaultName, folderInfo);
   const events = await latestEvents(journalPath(ctx, scope));
   const pending = sources.filter((s) => events.get(sourceId(scope, s.rel))?.revision !== s.revision)
     .sort((a, b) => b.updated_at.localeCompare(a.updated_at));
   const cap = Math.max(1, Math.min(100, Number(limit) || 50));
   const candidates = pending.slice(0, cap)
     .map((s) => ({ source_id: sourceId(scope, s.rel), revision: s.revision, path: s.rel, title: s.title, updated_at: s.updated_at }));
-  return { ok: true, vault: vaultName, folder: folderInfo.folder, candidates, queued_total: pending.length, scanned, skipped, truncated, limited: pending.length > cap, next: 'Read each selected source with vault_read_note. Draft linked knowledge with propose_note and show its preview. After a linked note is saved, record filed; otherwise record skipped. Source files are never changed.' };
+  return { ok: true, vault: vaultName, folder: folderInfo.folder, candidates, queued_total: pending.length, scanned, skipped, truncated, unsupported_count, unsupported_formats, limited: pending.length > cap, next: 'Read each selected source with ingestion_read_source. Draft linked knowledge with propose_note and show its preview. After a linked note is saved, record filed; otherwise record skipped. Unsupported regular files are reported by extension and count only; they are not read. Source files are never changed.' };
 }
 
 // Re-read one exact queue item only after the same folder, vault and privacy checks pass.
@@ -144,7 +386,7 @@ export async function readIngestionSource(ctx, vaultName, folder, { source_id, r
   if (!queued || queued.revision !== revision) throw new Error('This source changed or is no longer available. Refresh the queue and review it again.');
   const source = await readEligible(safeJoin(folderInfo.root, queued.rel), folderInfo.root, folderInfo.realRoot, queued.rel, { includeBody: true });
   if (!source || source.revision !== revision) throw new Error('This source changed during review. Refresh the queue and review it again.');
-  return { ...source, source_id, vault: vaultName, folder: folderInfo.folder, body: redactText(source.body).slice(0, MAX_DRAFT_SOURCE_CHARS) };
+  return { ...source, source_id, vault: vaultName, folder: folderInfo.folder, body: redactText(source.body).slice(0, MAX_DRAFT_SOURCE_CHARS), body_truncated: source.body_truncated === true || source.body.length > MAX_DRAFT_SOURCE_CHARS };
 }
 
 export async function recordIngestion(ctx, vaultName, folder, { source_id, revision, outcome, knowledge_path } = {}) {

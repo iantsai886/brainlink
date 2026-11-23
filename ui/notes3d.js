@@ -7,10 +7,21 @@
   const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 
   async function api(path, body) {
-    const r = await fetch(path, { method: 'POST', headers: { 'Content-Type': 'application/json', 'X-BrainLink-Token': T }, body: JSON.stringify(body || {}) });
-    const j = await r.json().catch(() => ({}));
-    if (!r.ok) throw new Error(j.error || r.statusText);
-    return j;
+    const isGraphRead = path === '/api/graph3d' || path === '/api/graph3d/vaults';
+    const controller = isGraphRead ? new AbortController() : null;
+    // Large vaults on cloud-backed folders can take longer than a minute to build the
+    // privacy-checked graph on a cold start. Give that read more time; the picker itself stays
+    // fast because it no longer indexes vaults just to show their names.
+    const timer = controller ? setTimeout(() => controller.abort(), 300000) : null;
+    try {
+      const r = await fetch(path, { method: 'POST', headers: { 'Content-Type': 'application/json', 'X-BrainLink-Token': T }, body: JSON.stringify(body || {}), ...(controller ? { signal: controller.signal } : {}) });
+      const j = await r.json().catch(() => ({}));
+      if (!r.ok) throw new Error(j.error || r.statusText);
+      return j;
+    } catch (error) {
+      if (controller?.signal.aborted) throw new Error('The map request timed out.');
+      throw error;
+    } finally { if (timer) clearTimeout(timer); }
   }
   function toast(msg, bad) {
     const t = document.getElementById('toast');
@@ -78,18 +89,19 @@
     root.innerHTML = `
       <div class="notes3d-wrap">
         <div class="notes3d-vault-picker"><label for="notes3d-vault-select" data-i18n="notes3d.vaultFilter"></label><select id="notes3d-vault-select" aria-label="Choose a vault"></select></div>
+        <div class="notes3d-legend" id="notes3d-legend" aria-label="Graph color legend"></div>
         <div class="notes3d-controls"><button type="button" class="chip" id="notes3d-reset-view" data-i18n="notes3d.resetView" disabled>Reset view</button></div>
         <div class="notes3d-canvas" id="notes3d-canvas"></div>
-        <aside class="notes3d-panel" id="notes3d-panel-detail" hidden>
-          <div class="notes3d-actions"><a class="chip" id="notes3d-edit" target="_blank" rel="noopener" hidden></a><button class="chip" id="notes3d-edit-toggle" hidden>Edit</button><button class="link notes3d-close" id="notes3d-close" data-i18n="notes3d.close">Close ✕</button></div>
+      </div>
+      <dialog class="notes3d-dialog" id="notes3d-panel-detail" aria-labelledby="notes3d-title">
+          <div class="notes3d-actions"><a class="chip" id="notes3d-edit" target="_blank" rel="noopener" hidden></a><button class="chip" id="notes3d-edit-toggle" hidden>Edit</button><button type="button" class="chip notes3d-close" id="notes3d-close" data-i18n="notes3d.close" aria-label="Close note">✕</button></div>
           <b id="notes3d-title"></b>
           <div class="notes3d-tags" id="notes3d-tags"></div>
           <div class="notes3d-body" id="notes3d-body"></div>
           <textarea id="notes3d-editor" class="notes3d-editor" hidden aria-label="Edit note"></textarea>
           <div class="notes3d-actions" id="notes3d-editor-actions" hidden><button class="chip" id="notes3d-save">Save</button><button class="chip" id="notes3d-cancel">Cancel</button><span class="muted" id="notes3d-save-status"></span></div>
           <div class="notes3d-links" id="notes3d-links"></div>
-        </aside>
-      </div>`;
+      </dialog>`;
     root.insertAdjacentHTML('beforeend', `
       <details class="notes3d-browse">
         <summary data-i18n="notes3d.browseNotes"></summary>
@@ -107,6 +119,7 @@
       <summary data-i18n="notes3d.discoverVault"></summary>
       <p class="muted" data-i18n="notes3d.discoverHint"></p>
       <button type="button" class="chip" id="notes3d-discover-run" data-i18n="notes3d.discoverRun"></button>
+      <button type="button" class="chip" id="notes3d-discover-all" data-i18n="notes3d.discoverAll"></button>
       <p id="notes3d-discover-status" class="muted" role="status" aria-live="polite"></p>
       <div id="notes3d-discover-list"></div>
     </details>`);
@@ -123,50 +136,139 @@
     const brainPanel = document.getElementById('brain-panel');
     const root = document.getElementById('notes3d-root');
     if (!brainPanel || !root) return;
-    let graphInstance = null, nodesById = [], byTitle = new Map(), loaded = false, loadedOk = false, selectedId = null, currentDetail = null, currentNode = null, pendingVaultRefresh = false, vaultFilter = null, graphVaultOptions = [];
+    let graphInstance = null, nodesById = [], byTitle = new Map(), loaded = false, loadedOk = false, selectedId = null, currentDetail = null, currentDetailComplete = false, currentNode = null, pendingVaultRefresh = false, vaultFilter = null, graphVaultOptions = [], graphDataAll = { nodes: [], links: [] }, legendGroups = [], activeGroup = null;
+    const graphClientCache = new Map();
+    const GRAPH_CLIENT_CACHE_LIMIT = 2;
+    function clearGraphClientCache() { graphClientCache.clear(); }
+    function graphClientCacheKey(revision) {
+      const selected = vaultFilter && vaultFilter !== '*' ? graphVaultOptions.find((vault) => vault.name === vaultFilter) : null;
+      if (selected?.private) return null;
+      return `${revision}\0${vaultFilter || '*'}`;
+    }
+    function rememberPublicGraph(key, graph) {
+      if (!key) return;
+      graphClientCache.delete(key);
+      graphClientCache.set(key, JSON.stringify(graph));
+      while (graphClientCache.size > GRAPH_CLIENT_CACHE_LIMIT) graphClientCache.delete(graphClientCache.keys().next().value);
+    }
     const relationTargets = { owned_by: ['team','person'], runs: ['workflow'], consumes: ['dataset','artifact'], produces: ['dataset','artifact'], depends_on: ['workflow','dataset','project'], part_of: ['team','project'], assigned_to: ['person','team'], informed_by: ['artifact','dataset','concept'], communicates_with: ['person','team'] };
 
     function stat(id, v) { const el = document.getElementById(id); if (el) el.textContent = v; }
 
+    function graphPayloadForActiveGroup() {
+      const nodes = graphDataAll.nodes.filter((node) => activeGroup === null || node.group === activeGroup);
+      const ids = new Set(nodes.map((node) => node.id));
+      const endpointId = (endpoint) => typeof endpoint === 'object' ? endpoint.id : endpoint;
+      const links = graphDataAll.links.filter((link) => ids.has(endpointId(link.source)) && ids.has(endpointId(link.target)))
+        .map((link) => ({ ...link, source: endpointId(link.source), target: endpointId(link.target) }));
+      return { nodes, links };
+    }
+
+    function applyGraphFilter() {
+      if (!graphInstance) return;
+      graphInstance.graphData(graphPayloadForActiveGroup());
+      requestAnimationFrame(() => graphInstance?.zoomToFit(650, 55));
+    }
+
+    function toggleGraphGroup(group) {
+      if (!legendGroups.includes(group)) return;
+      activeGroup = activeGroup === group ? null : group;
+      document.getElementById('notes3d-legend')?.querySelectorAll('[data-graph-group-index]').forEach((button) => {
+        button.setAttribute('aria-pressed', String(legendGroups[Number(button.dataset.graphGroupIndex)] === activeGroup));
+      });
+      applyGraphFilter();
+    }
+
+    function resetGraphView() {
+      if (activeGroup !== null) {
+        activeGroup = null;
+        document.getElementById('notes3d-legend')?.querySelectorAll('[data-graph-group-index]').forEach((button) => button.setAttribute('aria-pressed', 'false'));
+        graphInstance?.graphData(graphPayloadForActiveGroup());
+      }
+      requestAnimationFrame(() => graphInstance?.zoomToFit(700, 50));
+    }
+
+    function renderGraphLegend(ranked, colorOf) {
+      legendGroups = ranked.slice(0, 8);
+      const legend = document.getElementById('notes3d-legend');
+      if (!legend) return;
+      legend.innerHTML = legendGroups.map((group, index) => {
+        const label = group || (window.brainlinkT?.('notes3d.ungrouped') || 'No folder');
+        return `<button type="button" class="notes3d-legend-item" data-graph-group-index="${index}" aria-pressed="${activeGroup === group ? 'true' : 'false'}" aria-label="Filter graph by ${esc(label)}" title="Filter graph by ${esc(label)}"><i style="--legend-color:${esc(colorOf(group))}"></i><span>${esc(label)}</span></button>`;
+      }).join('') + (ranked.length > 8 ? `<span class="notes3d-legend-more">+${ranked.length - 8}</span>` : '');
+      legend.querySelectorAll('[data-graph-group-index]').forEach((button) => {
+        button.addEventListener('click', (event) => {
+          event.stopPropagation();
+          toggleGraphGroup(legendGroups[Number(button.dataset.graphGroupIndex)]);
+        });
+      });
+    }
+
     function renderVaultOptions() {
       const select = document.getElementById('notes3d-vault-select');
       if (!select) return;
-      select.innerHTML = `<option value="*">${esc(tr('notes3d.allVaults'))}</option>${graphVaultOptions.map((vault) => `<option value="${esc(vault.name)}">${esc(vault.name)} · ${esc(vault.notes)}</option>`).join('')}`;
+      select.innerHTML = `<option value="*">${esc(tr('notes3d.allVaults'))}</option>${graphVaultOptions.map((vault) => `<option value="${esc(vault.name)}">${esc(vault.name)}${vault.private ? ` · ${esc(tr('notes3d.privateLocal'))}` : (Number.isSafeInteger(vault.notes) ? ` · ${esc(vault.notes)}` : '')}</option>`).join('')}`;
       select.value = vaultFilter === null ? '*' : vaultFilter;
     }
 
     function openPanel(node) {
       const panel = document.getElementById('notes3d-panel-detail');
       if (!panel) return;
-      panel.hidden = false;
+      if (!panel.open) panel.showModal();
       document.getElementById('notes3d-title').textContent = node.title;
       document.getElementById('notes3d-tags').innerHTML = (node.tags || []).map((t) => `<span class="pill">#${esc(t)}</span>`).join('');
       document.getElementById('notes3d-body').innerHTML = '<p class="skeleton">Loading…</p>';
       document.getElementById('notes3d-links').innerHTML = '';
       const edit = document.getElementById('notes3d-edit');
       edit.hidden = true;
-      currentDetail = null; currentNode = node;
+      currentDetail = null; currentDetailComplete = false; currentNode = node;
       document.getElementById('notes3d-edit-toggle').hidden = true;
       document.getElementById('notes3d-editor').hidden = true;
       document.getElementById('notes3d-editor-actions').hidden = true;
       document.getElementById('notes3d-body').hidden = false;
+      api('/api/graph3d/note/preview', { vault: node.vault, path: node.path }).then((preview) => {
+        if (selectedId !== node.id || currentDetailComplete) return;
+        currentDetail = preview;
+        document.getElementById('notes3d-body').innerHTML = renderMarkdown(preview.body) || '<p class="muted">(This note is empty.)</p>';
+        document.getElementById('notes3d-links').innerHTML = `<p class="skeleton">${esc(tr('notes3d.loadingConnections'))}</p>`;
+      }).catch((error) => {
+        if (selectedId === node.id && !currentDetailComplete) document.getElementById('notes3d-body').innerHTML = `<p class="error-box">Could not open this note: ${esc(error.message)}</p>`;
+      });
       api('/api/graph3d/note', { vault: node.vault, path: node.path }).then((detail) => {
         if (selectedId !== node.id) return; // ignore a slower response after the user selected another node
-        const params = new URLSearchParams({ vault: detail.vault, file: detail.path });
-        edit.href = `obsidian://open?${params.toString()}`;
+        currentDetailComplete = true;
+        edit.href = detail.obsidian_url || '';
         edit.textContent = window.t?.('notes3d.editInObsidian') || 'Edit in Obsidian';
-        edit.hidden = false;
+        // A syntactically valid URI is not enough: Obsidian must know this exact folder as a vault.
+        // Demo/temp folders are intentionally not registered, so don't offer a link that errors.
+        edit.hidden = !detail.obsidian_registered || !detail.obsidian_url;
         currentDetail = detail;
         const editToggle = document.getElementById('notes3d-edit-toggle');
         editToggle.hidden = !detail.writable;
         document.getElementById('notes3d-body').innerHTML = renderMarkdown(detail.body) || '<p class="muted">(This note is empty.)</p>';
         const chip = (n, label) => `<button class="chip" data-focus-title="${esc(n.title)}" title="${esc(n.path)}">${esc(n.title)}<small>${esc(label)}</small></button>`;
         const parts = [];
+        const graphRecord = detail.graph_record || {};
+        const workflowKeys = ['triggers','inputs','steps','outputs','exception_handling'];
+        const graphChoices = (field, label, values) => {
+          const current = typeof graphRecord[field] === 'string' ? graphRecord[field] : '';
+          const custom = current && !values.includes(current) ? `<option value="${esc(current)}" selected>${esc(tr('notes3d.existingValue', { value: current }))}</option>` : '';
+          return `<label>${esc(label)}<select data-graph-record-field="${field}" ${detail.writable ? '' : 'disabled'}><option value="">${esc(tr('notes3d.notSet'))}</option>${custom}${values.map((value) => `<option value="${value}" ${current === value ? 'selected' : ''}>${value}</option>`).join('')}</select></label>`;
+        };
+        const relationEditor = (r) => {
+          const targets = nodesById.filter((item) => item.vault === detail.vault && item.scope === detail.graph_record?.scope && item.entity_id && item.entity_id !== detail.graph_record?.id);
+          const hasCurrent = targets.some((item) => item.entity_id === r.target_id);
+          const currentTarget = hasCurrent || !r.target_id ? '' : `<option value="${esc(r.target_id)}" selected>${esc(r.note.title)} · ${esc(r.target_id)}</option>`;
+          return detail.writable ? `<details class="card" style="margin-top:8px"><summary>${esc(tr('notes3d.editRelationship'))}</summary><label class="muted">${esc(tr('notes3d.relationshipType'))}<select data-edit-predicate>${['owned_by','runs','consumes','produces','depends_on','part_of','assigned_to','informed_by','communicates_with'].map((value) => `<option value="${value}" ${r.predicate === value ? 'selected' : ''}>${value}</option>`).join('')}</select></label><label class="muted">${esc(tr('notes3d.targetEntity'))}<select data-edit-target>${currentTarget}${targets.map((item) => `<option value="${esc(item.entity_id)}" ${item.entity_id === r.target_id ? 'selected' : ''}>${esc(item.title)} · ${esc(item.type)}</option>`).join('')}</select></label><label class="muted">${esc(tr('notes3d.evidenceExcerpt'))}<textarea data-edit-evidence maxlength="300" rows="3">${esc(r.evidence)}</textarea></label><label class="muted">${esc(tr('notes3d.confidenceLabel'))}<input data-edit-confidence type="number" min="0" max="1" step="0.01" value="${esc(r.confidence)}"></label><button type="button" class="chip" data-save-relation="${esc(r.relation_index)}">${esc(tr('notes3d.saveRelationship'))}</button></details>` : '';
+        };
+        const workflowFields = graphRecord.type === 'workflow' ? `<div class="card" style="margin-top:8px"><p><b>${esc(tr('notes3d.workflowFieldsTitle'))}</b></p><p class="muted">${esc(tr('notes3d.workflowFieldsHint'))}</p>${workflowKeys.map((key) => `<label>${esc(tr(`notes3d.workflow.${key}`))}<textarea data-graph-workflow-field="${key}" rows="${key === 'steps' ? 5 : 3}" maxlength="20040" ${detail.writable ? '' : 'disabled'}>${esc((graphRecord[key] || []).join('\n'))}</textarea></label>`).join('')}</div>` : '';
+        parts.push(`<details class="card" style="margin-top:10px"><summary>${esc(tr('notes3d.graphRecord'))}</summary><p class="muted">${esc(tr('notes3d.graphRecordHint'))}</p>${graphChoices('type', tr('notes3d.recordType'), ['person','team','workflow','dataset','artifact','project','policy','concept'])}<label>${esc(tr('notes3d.stableId'))}<input data-graph-record-field="id" value="${esc(graphRecord.id || '')}" placeholder="team.product" maxlength="128" ${detail.writable ? '' : 'disabled'}></label>${graphChoices('scope', tr('notes3d.recordScope'), ['personal','organisation','client'])}${graphChoices('status', tr('notes3d.recordStatus'), ['proposed','current','archived'])}${workflowFields}<small class="muted">${esc(tr('notes3d.graphRecordSaveHint'))}</small><div class="row" style="margin-top:8px"><button type="button" class="chip" data-save-graph-record ${detail.writable ? '' : 'disabled'}>${esc(tr('notes3d.saveGraphRecord'))}</button></div></details>`);
         if (detail.backlinks.length) parts.push(`<div class="muted" style="font-size:12px;margin-top:10px">Linked from</div><div class="row">${detail.backlinks.map((n) => chip(n, 'backlink')).join('')}</div>`);
         if (detail.outlinks.length) parts.push(`<div class="muted" style="font-size:12px;margin-top:10px">Links to</div><div class="row">${detail.outlinks.map((n) => chip(n, 'link')).join('')}</div>`);
-        if (detail.relationships?.length) parts.push(`<div class="muted" style="font-size:12px;margin-top:10px">Typed relationships</div>${detail.relationships.map((r) => `<div style="margin:5px 0"><div><b>${esc(r.predicate)}</b> · ${esc(r.direction)}</div><div class="row">${chip(r.note, 'related record')}</div><small class="muted">${esc(r.evidence)} · confidence ${esc(r.confidence)}</small>${detail.writable && r.direction === 'outgoing' ? `<div style="margin-top:8px"><button type="button" class="chip" data-reopen-relation="${esc(r.relation_index)}">${esc(tr('notes3d.undoApproval'))}</button></div>` : ''}</div>`).join('')}`);
-        if (detail.proposed_relationships?.length) parts.push(`<div class="muted" style="font-size:12px;margin-top:12px"><b>${esc(tr('notes3d.proposedRelationships'))}</b></div><p class="muted">${esc(tr('notes3d.proposedHint'))}</p>${detail.proposed_relationships.map((r) => `<div class="card" style="margin:6px 0"><div><b>${esc(r.predicate)}</b></div><div class="row">${chip(r.note, tr('notes3d.suggestedTarget'))}</div><small class="muted">${esc(r.evidence)} · ${esc(tr('notes3d.confidence', { confidence: r.confidence }))}</small>${detail.writable ? `<div class="row" style="margin-top:8px"><button type="button" class="chip" data-review-relation="${esc(r.relation_index)}">${esc(tr('notes3d.approveRelationship'))}</button><button type="button" class="chip" data-reject-relation="${esc(r.relation_index)}">${esc(tr('notes3d.rejectRelationship'))}</button></div>` : ''}</div>`).join('')}`);
-        if (detail.rejected_relationships?.length) parts.push(`<div class="muted" style="font-size:12px;margin-top:12px"><b>${esc(tr('notes3d.rejectedRelationships'))}</b></div>${detail.rejected_relationships.map((r) => `<div class="card" style="margin:6px 0"><div><b>${esc(r.predicate)}</b></div><div class="row">${chip(r.note, tr('notes3d.suggestedTarget'))}</div><small class="muted">${esc(r.evidence)} · ${esc(tr('notes3d.confidence', { confidence: r.confidence }))}</small>${detail.writable ? `<div style="margin-top:8px"><button type="button" class="chip" data-reopen-rejected="${esc(r.relation_index)}">${esc(tr('notes3d.reopenRejected'))}</button></div>` : ''}</div>`).join('')}`);
+        if (detail.relationships?.length) parts.push(`<div class="muted" style="font-size:12px;margin-top:10px">Typed relationships</div>${detail.relationships.map((r) => `<div style="margin:5px 0"><div><b>${esc(r.predicate)}</b> · ${esc(r.direction)}</div><div class="row">${chip(r.note, 'related record')}</div><small class="muted">${esc(r.evidence)} · confidence ${esc(r.confidence)}</small>${detail.writable && r.direction === 'outgoing' ? `<div class="row" style="margin-top:8px"><button type="button" class="chip" data-reopen-relation="${esc(r.relation_index)}">${esc(tr('notes3d.undoApproval'))}</button><button type="button" class="chip" data-archive-relation="${esc(r.relation_index)}">${esc(tr('notes3d.archiveRelationship'))}</button></div>${relationEditor(r)}` : ''}</div>`).join('')}`);
+        if (detail.proposed_relationships?.length) parts.push(`<div class="muted" style="font-size:12px;margin-top:12px"><b>${esc(tr('notes3d.proposedRelationships'))}</b></div><p class="muted">${esc(tr('notes3d.proposedHint'))}</p>${detail.proposed_relationships.map((r) => `<div class="card" style="margin:6px 0"><div><b>${esc(r.predicate)}</b></div><div class="row">${chip(r.note, tr('notes3d.suggestedTarget'))}</div><small class="muted">${esc(r.evidence)} · ${esc(tr('notes3d.confidence', { confidence: r.confidence }))}</small>${detail.writable ? `<div class="row" style="margin-top:8px"><button type="button" class="chip" data-review-relation="${esc(r.relation_index)}">${esc(tr('notes3d.approveRelationship'))}</button><button type="button" class="chip" data-reject-relation="${esc(r.relation_index)}">${esc(tr('notes3d.rejectRelationship'))}</button><button type="button" class="chip" data-archive-relation="${esc(r.relation_index)}">${esc(tr('notes3d.archiveRelationship'))}</button></div>${relationEditor(r)}` : ''}</div>`).join('')}`);
+        if (detail.rejected_relationships?.length) parts.push(`<div class="muted" style="font-size:12px;margin-top:12px"><b>${esc(tr('notes3d.rejectedRelationships'))}</b></div>${detail.rejected_relationships.map((r) => `<div class="card" style="margin:6px 0"><div><b>${esc(r.predicate)}</b></div><div class="row">${chip(r.note, tr('notes3d.suggestedTarget'))}</div><small class="muted">${esc(r.evidence)} · ${esc(tr('notes3d.confidence', { confidence: r.confidence }))}</small>${detail.writable ? `<div class="row" style="margin-top:8px"><button type="button" class="chip" data-reopen-rejected="${esc(r.relation_index)}">${esc(tr('notes3d.reopenRejected'))}</button><button type="button" class="chip" data-archive-relation="${esc(r.relation_index)}">${esc(tr('notes3d.archiveRelationship'))}</button></div>${relationEditor(r)}` : ''}</div>`).join('')}`);
+        if (detail.withdrawn_relationships?.length) parts.push(`<div class="muted" style="font-size:12px;margin-top:12px"><b>${esc(tr('notes3d.withdrawnRelationships'))}</b></div><p class="muted">${esc(tr('notes3d.withdrawnHint'))}</p>${detail.withdrawn_relationships.map((r) => `<div class="card" style="margin:6px 0"><div><b>${esc(r.predicate)}</b></div><div class="row">${chip(r.note, tr('notes3d.suggestedTarget'))}</div><small class="muted">${esc(r.evidence)} · ${esc(tr('notes3d.confidence', { confidence: r.confidence }))}</small>${detail.writable ? `<div style="margin-top:8px"><button type="button" class="chip" data-restore-withdrawn="${esc(r.relation_index)}">${esc(tr('notes3d.restoreWithdrawn'))}</button></div>` : ''}</div>`).join('')}`);
         if (detail.discovered_relationships?.length) parts.push(`<div class="muted" style="font-size:12px;margin-top:12px"><b>${esc(tr('notes3d.discoveredRelationships'))}</b></div><p class="muted">${esc(tr('notes3d.discoveredHint'))}</p>${detail.discovered_relationships.map((r) => `<div class="card" style="margin:6px 0"><div><b>${esc(r.predicate)}</b></div><div class="row">${chip(r.note, tr('notes3d.suggestedTarget'))}</div><small class="muted">${esc(r.evidence)} · ${esc(tr('notes3d.patternOnly'))}</small>${detail.writable ? `<div style="margin-top:8px"><button type="button" class="chip" data-save-suggestion="${esc(r.target_id)}" data-predicate="${esc(r.predicate)}" data-evidence="${esc(r.evidence)}">${esc(tr('notes3d.saveSuggestion'))}</button></div>` : ''}</div>`).join('')}`);
         if (detail.writable && currentNode?.entity_id && currentNode?.scope) {
           const targets = nodesById.filter((item) => item.entity_id && item.scope === currentNode.scope && item.entity_id !== currentNode.entity_id && item.vault === detail.vault);
@@ -174,7 +276,11 @@
         }
         document.getElementById('notes3d-links').innerHTML = parts.join('');
         document.getElementById('notes3d-links').querySelectorAll('details:has([data-manual-target])').forEach(updateManualTargetOptions);
-      }).catch((e) => { if (selectedId === node.id) document.getElementById('notes3d-body').innerHTML = `<p class="error-box">Could not open this note: ${esc(e.message)}</p>`; });
+      }).catch((e) => {
+        if (selectedId !== node.id) return;
+        if (currentDetail) document.getElementById('notes3d-links').innerHTML = `<p class="error-box">${esc(e.message)}</p>`;
+        else document.getElementById('notes3d-body').innerHTML = `<p class="error-box">Could not open this note: ${esc(e.message)}</p>`;
+      });
     }
     function openById(id) {
       const node = nodesById[id];
@@ -203,9 +309,25 @@
       if (!list || !status || !input) return;
       const query = input.value.trim().toLocaleLowerCase();
       const matches = nodesById.filter((node) => !query || `${node.title} ${node.type || ''} ${node.group || ''}`.toLocaleLowerCase().includes(query))
-        .sort((a, b) => a.title.localeCompare(b.title));
+        .sort((a, b) => (b.modified || 0) - (a.modified || 0) || a.title.localeCompare(b.title));
       const visible = matches.slice(0, 50);
-      list.innerHTML = visible.map((node) => `<div role="listitem"><button type="button" class="notes3d-node" data-graph-note-id="${esc(node.id)}" aria-pressed="${node.id === selectedId ? 'true' : 'false'}"><span>${esc(node.title)}</span><small>${esc(node.type || node.group || '')}</small></button></div>`).join('');
+      const groupColor = (group) => {
+        const counts = new Map();
+        for (const node of nodesById) counts.set(node.group, (counts.get(node.group) || 0) + 1);
+        const ranked = [...counts.entries()].sort((a, b) => b[1] - a[1]).map(([name]) => name);
+        const rank = ranked.indexOf(group);
+        const vars = ['c1', 'c2', 'c3', 'c4', 'c5', 'c6', 'c7', 'c8'];
+        const css = getComputedStyle(document.documentElement);
+        return rank >= 0 && rank < vars.length ? css.getPropertyValue(`--${vars[rank]}`).trim() : css.getPropertyValue('--muted').trim();
+      };
+      const folders = new Map();
+      for (const node of visible) {
+        const parts = String(node.path || '').split('/').filter(Boolean);
+        const folder = parts.length > 1 ? `${parts[0]}/${parts[1]}` : (parts[0] || 'Root notes');
+        if (!folders.has(folder)) folders.set(folder, []);
+        folders.get(folder).push(node);
+      }
+      list.innerHTML = [...folders.entries()].map(([folder, nodes]) => `<section class="notes3d-folder-group" role="group" aria-label="${esc(folder)}"><h4><i style="--legend-color:${esc(groupColor(nodes[0].group))}"></i><span title="${esc(folder)}">${esc(folder)}</span><small>${nodes.length}</small></h4><div>${nodes.map((node) => `<div role="listitem"><button type="button" class="notes3d-node" data-graph-note-id="${esc(node.id)}" aria-pressed="${node.id === selectedId ? 'true' : 'false'}"><span>${esc(node.title)}</span><small>${esc(node.type || node.group || '')}${node.modified ? ` · ${new Date(node.modified).toLocaleDateString()}` : ''}</small></button></div>`).join('')}</div></section>`).join('');
       status.textContent = matches.length > 50 ? tr('notes3d.browseMore', { count: matches.length, limit: 50 }) : tr('notes3d.browseCount', { count: matches.length });
       if (query && !matches.length) status.textContent = tr('notes3d.browseEmpty');
     }
@@ -235,19 +357,31 @@
       }
     }
 
-    async function runDiscovery({ append = false } = {}) {
+    async function runDiscovery({ append = false, all = false } = {}) {
       const list = document.getElementById('notes3d-discover-list');
       const status = document.getElementById('notes3d-discover-status');
       const button = document.getElementById('notes3d-discover-run');
-      if (!list || !status || !button) return;
-      button.disabled = true;
+      const allButton = document.getElementById('notes3d-discover-all');
+      if (!list || !status || !button || !allButton) return;
+      button.disabled = true; allButton.disabled = true;
       try {
-        const offset = append ? (list._nextOffset || 0) : 0;
-        const result = await api('/api/graph3d/discover', { offset, vault: vaultFilter && vaultFilter !== '*' ? vaultFilter : undefined, scan_id: append ? list._scanId : undefined });
-        const items = append ? [...(list._candidates || []), ...result.candidates] : result.candidates;
+        let offset = append ? (list._nextOffset || 0) : 0;
+        let scanId = append ? list._scanId : undefined;
+        let items = append ? [...(list._candidates || [])] : [];
+        let result;
+        do {
+          result = await api('/api/graph3d/discover', { offset, limit: all ? 50 : 20, vault: vaultFilter && vaultFilter !== '*' ? vaultFilter : undefined, scan_id: scanId });
+          items = [...items, ...result.candidates];
+          scanId = result.scan_id;
+          offset = result.next_offset;
+          list._candidates = items; list._scanId = scanId; list._nextOffset = offset;
+          status.textContent = all && !result.done
+            ? tr('notes3d.discoverProgress', { count: items.length, scanned: offset, total: result.total_sources })
+            : (result.done ? tr('notes3d.discoverDone', { count: items.length, scanned: offset, total: result.total_sources })
+              : tr('notes3d.discoverProgress', { count: items.length, scanned: offset, total: result.total_sources }));
+          if (all && !result.done) await new Promise((resolve) => setTimeout(resolve, 0));
+        } while (all && !result.done);
         list._candidates = items;
-        list._scanId = result.scan_id;
-        list._nextOffset = result.next_offset;
         list._done = result.done;
         list.innerHTML = items.map((item, i) => `<article class="card notes3d-review-item">
           <b>${esc(item.title)}</b><span class="mono muted">${esc(item.vault)} · ${esc(item.path)}</span>
@@ -262,7 +396,7 @@
           status.textContent = tr('notes3d.discoverChanged');
           list._nextOffset = 0; list._done = true; list._candidates = []; list._scanId = null; list.innerHTML = ''; button.textContent = tr('notes3d.discoverRun');
         } else status.textContent = tr('notes3d.discoverFailed', { error: error.message });
-      } finally { button.disabled = false; }
+      } finally { button.disabled = false; allButton.disabled = false; }
     }
 
     function updateManualTargetOptions(form) {
@@ -279,8 +413,9 @@
       if (e.target.matches('[data-manual-predicate]')) { updateManualTargetOptions(e.target.closest('details')); return; }
       if (e.target.id !== 'notes3d-vault-select') return;
       vaultFilter = e.target.value || '*';
+      activeGroup = null;
       selectedId = null; currentDetail = null; currentNode = null;
-      document.getElementById('notes3d-panel-detail').hidden = true;
+      document.getElementById('notes3d-panel-detail').close();
       const suggestions = document.getElementById('notes3d-discover-list');
       suggestions._nextOffset = 0; suggestions._done = true; suggestions._candidates = []; suggestions._scanId = null; suggestions.innerHTML = '';
       document.getElementById('notes3d-discover-status').textContent = '';
@@ -295,10 +430,21 @@
     });
 
     root.addEventListener('click', (e) => {
-      if (e.target.closest('#notes3d-reset-view')) { graphInstance?.zoomToFit(700, 50); return; }
+      if (e.target.closest('[data-notes3d-retry]')) { loadGraph({ force: true }); return; }
       if (e.target.closest('[data-review-load-more]')) { loadReviewQueue({ append: true }); return; }
       const graphNote = e.target.closest('[data-graph-note-id]');
       if (graphNote) { openById(graphNote.dataset.graphNoteId); return; }
+      const saveGraphRecord = e.target.closest('[data-save-graph-record]');
+      if (saveGraphRecord) {
+        if (!currentDetail) return;
+        const fields = Object.fromEntries([...document.getElementById('notes3d-links').querySelectorAll('[data-graph-record-field]')].map((field) => [field.dataset.graphRecordField, field.value]));
+        if (fields.type === 'workflow') for (const field of document.getElementById('notes3d-links').querySelectorAll('[data-graph-workflow-field]')) fields[field.getAttribute('data-graph-workflow-field')] = field.value.split(/\r?\n/).map((item) => item.trim()).filter(Boolean);
+        saveGraphRecord.disabled = true;
+        api('/api/graph3d/entity/save', { vault: currentDetail.vault, path: currentDetail.path, etag: currentDetail.etag, graph_record: fields })
+          .then(async (result) => { toast(tr('notes3d.graphRecordSaved')); await loadGraph({ force: true }); const updated = nodesById.find((node) => node.vault === currentDetail?.vault && node.path === currentDetail?.path); if (updated) openById(updated.id); })
+          .catch((err) => { toast(err.message, true); saveGraphRecord.disabled = false; });
+        return;
+      }
       if (e.target.id === 'notes3d-edit-toggle') {
         const editor = document.getElementById('notes3d-editor');
         editor.value = currentDetail?.body || '';
@@ -328,11 +474,12 @@
           document.getElementById('notes3d-body').hidden = false;
           pendingVaultRefresh = false;
           toast('Note saved.');
-          return loadGraph();
+          return loadGraph({ force: true });
         }).catch((err) => { document.getElementById('notes3d-save-status').textContent = err.message; }).finally(() => { button.disabled = false; });
         return;
       }
       if (e.target.id === 'notes3d-discover-run') { runDiscovery({ append: Boolean(document.getElementById('notes3d-discover-list')._nextOffset && !document.getElementById('notes3d-discover-list')._done) }); return; }
+      if (e.target.id === 'notes3d-discover-all') { runDiscovery({ all: true }); return; }
       const review = e.target.closest('[data-review-relation]');
       if (review) {
         if (!currentDetail || !window.confirm(tr('notes3d.approveConfirm'))) return;
@@ -367,6 +514,42 @@
         api('/api/graph3d/relationship/reopen', { vault: currentDetail.vault, path: currentDetail.path, etag: currentDetail.etag, relation_index: Number(reopenRejected.dataset.reopenRejected) })
           .then(() => { toast(tr('notes3d.reopenRejectedToast')); return refreshGraph(); })
           .catch((err) => { reopenRejected.disabled = false; toast(err.message, true); });
+        return;
+      }
+      const archiveRelation = e.target.closest('[data-archive-relation]');
+      if (archiveRelation) {
+        if (!currentDetail || !window.confirm(tr('notes3d.archiveRelationshipConfirm'))) return;
+        archiveRelation.disabled = true;
+        api('/api/graph3d/relationship/archive', { vault: currentDetail.vault, path: currentDetail.path, etag: currentDetail.etag, relation_index: Number(archiveRelation.dataset.archiveRelation) })
+          .then(() => { toast(tr('notes3d.archivedToast')); return refreshGraph(); })
+          .catch((err) => { archiveRelation.disabled = false; toast(err.message, true); });
+        return;
+      }
+      const saveRelation = e.target.closest('[data-save-relation]');
+      if (saveRelation) {
+        if (!currentDetail) return;
+        const editor = saveRelation.closest('details');
+        saveRelation.disabled = true;
+        api('/api/graph3d/relationship/edit', {
+          vault: currentDetail.vault, path: currentDetail.path, etag: currentDetail.etag,
+          relation_index: Number(saveRelation.dataset.saveRelation),
+          predicate: editor.querySelector('[data-edit-predicate]').value,
+          target_id: editor.querySelector('[data-edit-target]').value,
+          evidence: editor.querySelector('[data-edit-evidence]').value,
+          confidence: editor.querySelector('[data-edit-confidence]').value,
+        }).then((result) => {
+          toast(tr('notes3d.editedRelationshipToast'));
+          return refreshGraph();
+        }).catch((err) => { saveRelation.disabled = false; toast(err.message, true); });
+        return;
+      }
+      const restoreWithdrawn = e.target.closest('[data-restore-withdrawn]');
+      if (restoreWithdrawn) {
+        if (!currentDetail || !window.confirm(tr('notes3d.restoreWithdrawnConfirm'))) return;
+        restoreWithdrawn.disabled = true;
+        api('/api/graph3d/relationship/reopen', { vault: currentDetail.vault, path: currentDetail.path, etag: currentDetail.etag, relation_index: Number(restoreWithdrawn.dataset.restoreWithdrawn) })
+          .then(() => { toast(tr('notes3d.restoredWithdrawnToast')); return refreshGraph(); })
+          .catch((err) => { restoreWithdrawn.disabled = false; toast(err.message, true); });
         return;
       }
       const queuedReview = e.target.closest('[data-approve-queued]');
@@ -426,22 +609,24 @@
         return;
       }
       if (e.target.id === 'notes3d-close') {
-        document.getElementById('notes3d-panel-detail').hidden = true;
-        selectedId = null;
-        graphInstance?.refresh();
+        document.getElementById('notes3d-panel-detail').close();
         return;
       }
+      if (e.target.id === 'notes3d-panel-detail') { e.target.close(); return; }
       const wiki = e.target.closest('[data-wikilink]');
       if (wiki) { e.preventDefault(); openByTitle(wiki.dataset.wikilink); return; }
       const chip = e.target.closest('[data-focus-title]');
       if (chip) { openByTitle(chip.dataset.focusTitle); return; }
     });
-
-    async function loadGraph() {
+    document.getElementById('notes3d-reset-view')?.addEventListener('click', resetGraphView);
+    let graphLoadSequence = 0;
+    async function loadGraph({ force = false } = {}) {
+      const sequence = ++graphLoadSequence;
+      if (force) clearGraphClientCache();
       const canvas = document.getElementById('notes3d-canvas');
       const resetView = document.getElementById('notes3d-reset-view');
       if (resetView) resetView.disabled = true;
-      if (!graphInstance) canvas.innerHTML = '<p class="skeleton">Loading your 3D brain map…</p>';
+      if (!graphInstance) canvas.innerHTML = `<p class="skeleton">${esc(tr('notes3d.loading'))}</p>`;
       let g;
       try {
         const optionData = await api('/api/graph3d/vaults', {});
@@ -449,22 +634,38 @@
         if (vaultFilter === null && optionData.vaults.length) vaultFilter = optionData.vaults[0].name;
         if (vaultFilter && vaultFilter !== '*' && !optionData.vaults.some((vault) => vault.name === vaultFilter)) vaultFilter = optionData.vaults[0]?.name || '*';
         renderVaultOptions();
-        g = await api('/api/graph3d', { vault: vaultFilter && vaultFilter !== '*' ? vaultFilter : undefined });
+        const revision = optionData.revision || JSON.stringify(optionData.vaults.map(({ name, private: isPrivate }) => [name, Boolean(isPrivate)]));
+        const cacheKey = graphClientCacheKey(revision);
+        const cachedGraph = !force && cacheKey ? graphClientCache.get(cacheKey) : null;
+        if (cachedGraph) {
+          graphClientCache.delete(cacheKey);
+          graphClientCache.set(cacheKey, cachedGraph);
+          g = JSON.parse(cachedGraph);
+        } else {
+          g = await api('/api/graph3d', { vault: vaultFilter && vaultFilter !== '*' ? vaultFilter : undefined });
+          rememberPublicGraph(cacheKey, g);
+        }
       }
-      catch (e) { canvas.innerHTML = `<p class="error-box">Could not load the map: ${esc(e.message)}</p>`; return; }
-      try { const h = await api('/api/graph', {}); stat('st-notes', h.health?.notes ?? 0); stat('st-links', h.health?.links ?? 0); stat('st-orphans', h.health?.not_linked ?? 0); } catch {}
+      catch (e) {
+        if (sequence !== graphLoadSequence) return;
+        try { graphInstance?._destructor?.(); } catch {}
+        graphInstance = null; loadedOk = false;
+        canvas.innerHTML = `<p class="error-box">${esc(tr('notes3d.loadError', { error: e.message }))}</p><button type="button" data-notes3d-retry>${esc(tr('boot.retry'))}</button>`;
+        return;
+      }
+      if (sequence !== graphLoadSequence) return;
+      // The health endpoint builds the full search index, and review suggestions can be slow on
+      // large vaults. Neither should hold the 3D canvas behind a loading message.
+      const refreshAuxiliary = () => {
+        loadReviewQueue().catch(() => {});
+      };
+      stat('st-notes', g.total ?? g.nodes.length);
+      stat('st-links', g.linkCount ?? g.links.length);
+      stat('st-orphans', g.unlinked ?? g.nodes.filter((node) => node.degree === 0).length);
       nodesById = g.nodes;
+      graphDataAll = { nodes: g.nodes, links: g.links };
       byTitle = new Map(g.nodes.map((n) => [n.title.toLowerCase(), n]));
       renderNodeList();
-      await loadReviewQueue();
-      if (!g.nodes.length) {
-        if (graphInstance) graphInstance.graphData({ nodes: [], links: [] });
-        else canvas.innerHTML = '<p class="muted">No notes yet — once you add some, their links show up here.</p>';
-        loadedOk = false; return;
-      }
-      if (graphInstance) { graphInstance.graphData({ nodes: g.nodes, links: g.links }); loadedOk = true; if (resetView) resetView.disabled = false; resizeToContainer(); return; }
-      if (typeof ForceGraph3D !== 'function') { canvas.innerHTML = '<p class="error-box">Could not load the 3D map (missing viewer). Try reloading.</p>'; return; }
-      canvas.innerHTML = '';
       const css = getComputedStyle(document.documentElement);
       const colorVars = ['c1', 'c2', 'c3', 'c4', 'c5', 'c6', 'c7', 'c8'];
       const counts = new Map();
@@ -472,24 +673,55 @@
       const ranked = [...counts.entries()].sort((a, b) => b[1] - a[1]).map(([k]) => k);
       const colorOf = (grp) => { const r = ranked.indexOf(grp); return r >= 0 && r < 8 ? css.getPropertyValue(`--${colorVars[r]}`).trim() : css.getPropertyValue('--muted').trim(); };
       const selectedColor = css.getPropertyValue('--accent').trim() || css.getPropertyValue('--ink').trim() || '#fff';
+      renderGraphLegend(ranked, colorOf);
+      if (activeGroup !== null && !ranked.includes(activeGroup)) activeGroup = null;
+      if (activeGroup !== null) root.querySelectorAll('[data-graph-group-index]').forEach((button) => button.setAttribute('aria-pressed', String(ranked[Number(button.dataset.graphGroupIndex)] === activeGroup)));
+      if (!g.nodes.length) {
+        if (graphInstance) graphInstance.graphData({ nodes: [], links: [] });
+        else canvas.innerHTML = `<p class="muted" data-i18n="notes3d.empty">${esc(tr('notes3d.empty'))}</p>`;
+        loadedOk = false; refreshAuxiliary(); return;
+      }
+      if (graphInstance) {
+        try {
+          graphInstance.graphData(graphPayloadForActiveGroup());
+          loadedOk = true;
+          if (resetView) resetView.disabled = false;
+          fitGraphAfterLayout();
+        } catch (e) {
+          graphInstance = null;
+          loadedOk = false;
+          canvas.innerHTML = `<p class="error-box">Could not draw the 3D map: ${esc(e.message || e)}. Reload BrainLink and try again.</p>`;
+        }
+        refreshAuxiliary();
+        return;
+      }
+      if (typeof ForceGraph3D !== 'function') { canvas.innerHTML = '<p class="error-box">Could not load the 3D map (missing viewer). Try reloading.</p>'; return; }
+      canvas.innerHTML = '';
       // nodeLabel is rendered as the hover tooltip's innerHTML (3d-force-graph's documented
       // behavior), so a note title must be escaped the same way any other note-derived text going
       // into innerHTML is (see renderInline/renderMarkdown above) — otherwise a crafted title could
       // inject HTML into the tooltip.
-      graphInstance = ForceGraph3D()(canvas)
-        .graphData({ nodes: g.nodes, links: g.links })
-        .backgroundColor(css.getPropertyValue('--bg').trim() || '#000')
-        .nodeLabel((n) => `${esc(n.title)}${n.type ? `<br><small>${esc(n.type)}</small>` : ''}`)
-        .nodeColor((n) => (n.id === selectedId ? selectedColor : colorOf(n.group)))
-        .nodeVal((n) => (n.id === selectedId ? 1.6 : 1) + Math.sqrt(n.degree || 0))
-        .linkColor((l) => l.kind === 'typed' ? selectedColor : css.getPropertyValue('--muted').trim())
-        .linkCurvature((l) => l.parallel_count > 1 ? (l.parallel_index - (l.parallel_count - 1) / 2) * 0.12 : 0)
-        .linkLabel((l) => l.predicate ? `${esc(l.predicate)}${l.evidence ? `<br><small>${esc(l.evidence)}</small>` : ''}${Number.isFinite(l.confidence) ? `<br><small>Confidence ${esc(l.confidence)}</small>` : ''}` : '')
-        .linkOpacity(0.35)
-        .onNodeClick((n) => openById(n.id));
+      try {
+        graphInstance = ForceGraph3D()(canvas)
+          .graphData(graphPayloadForActiveGroup())
+          .backgroundColor(css.getPropertyValue('--bg').trim() || '#000')
+          .nodeLabel((n) => `${esc(n.title)}${n.type ? `<br><small>${esc(n.type)}</small>` : ''}`)
+          .nodeColor((n) => (n.id === selectedId ? selectedColor : colorOf(n.group)))
+          .nodeVal((n) => (n.id === selectedId ? 1.6 : 1) + Math.sqrt(n.degree || 0))
+          .linkColor((l) => l.kind === 'typed' ? selectedColor : css.getPropertyValue('--muted').trim())
+          .linkCurvature((l) => l.parallel_count > 1 ? (l.parallel_index - (l.parallel_count - 1) / 2) * 0.12 : 0)
+          .linkLabel((l) => l.predicate ? `${esc(l.predicate)}${l.evidence ? `<br><small>${esc(l.evidence)}</small>` : ''}${Number.isFinite(l.confidence) ? `<br><small>Confidence ${esc(l.confidence)}</small>` : ''}` : '')
+          .linkOpacity(0.35)
+          .onNodeClick((n) => openById(n.id));
+      } catch (e) {
+        graphInstance = null;
+        canvas.innerHTML = `<p class="error-box">Could not draw the 3D map: ${esc(e.message || e)}. Reload BrainLink and try again.</p>`;
+        return;
+      }
       if (resetView) resetView.disabled = false;
       loadedOk = true;
-      resizeToContainer();
+      fitGraphAfterLayout();
+      refreshAuxiliary();
     }
 
     async function refreshGraph() {
@@ -498,13 +730,14 @@
       if (editor && !editor.hidden) { pendingVaultRefresh = true; return; }
       const selected = currentNode && { vault: currentNode.vault, path: currentNode.path };
       selectedId = null;
-      await loadGraph();
+      await loadGraph({ force: true });
       if (!selected) return;
       const updated = nodesById.find((node) => node.vault === selected.vault && node.path === selected.path);
       if (updated) openById(updated.id);
-      else { document.getElementById('notes3d-panel-detail').hidden = true; currentNode = null; currentDetail = null; }
+      else document.getElementById('notes3d-panel-detail').close();
     }
-    window.addEventListener('brainlink:vault-changed', () => { pendingVaultRefresh = false; refreshGraph(); });
+    window.addEventListener('brainlink:state-updated', clearGraphClientCache);
+    window.addEventListener('brainlink:vault-changed', () => { clearGraphClientCache(); pendingVaultRefresh = false; refreshGraph(); });
 
     // canvas.clientWidth/clientHeight can read 0 (or a stale pre-layout value) the instant
     // #brain-panel stops being hidden, so this is called once right after the graph is created,
@@ -516,16 +749,34 @@
       graphInstance.width(c.clientWidth || 600).height(c.clientHeight || 450);
     }
 
+    function fitGraphAfterLayout() {
+      const instance = graphInstance;
+      if (!instance) return;
+      requestAnimationFrame(() => {
+        resizeToContainer();
+        requestAnimationFrame(() => {
+          if (graphInstance === instance) instance.zoomToFit(700, 60);
+        });
+      });
+    }
+
     buildLayout(root);
+    document.getElementById('notes3d-panel-detail').addEventListener('close', () => {
+      selectedId = null;
+      currentDetail = null;
+      currentNode = null;
+      graphInstance?.refresh();
+    });
     const ro = new ResizeObserver(resizeToContainer);
     ro.observe(root);
 
     function maybeLoad() {
-      if (brainPanel.hidden) return;
+      if (brainPanel.hidden || (brainPanel.tagName === 'DETAILS' && !brainPanel.open)) return;
       if (!loaded) { loaded = true; loadGraph().then(() => requestAnimationFrame(resizeToContainer)); }
       else if (pendingVaultRefresh) { pendingVaultRefresh = false; refreshGraph(); }
     }
     maybeLoad();
+    brainPanel.addEventListener('toggle', maybeLoad);
     new MutationObserver(maybeLoad).observe(brainPanel, { attributes: true, attributeFilter: ['hidden'] });
   }
 

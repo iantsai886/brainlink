@@ -12,7 +12,13 @@ NAME="BrainLink-Preview-$VERSION"
 STAGE="$WORK/$NAME"
 
 rm -rf "$WORK" && mkdir -p "$STAGE/brainlink-src/vendor" "$DIST"
-cp -R "$ROOT/bin" "$ROOT/src" "$ROOT/ui" "$ROOT/samples" "$ROOT/docs" "$ROOT/skills" "$ROOT/package.json" "$ROOT/LICENSE.txt" "$ROOT/README.md" "$STAGE/brainlink-src/"
+cp -R "$ROOT/bin" "$ROOT/src" "$ROOT/ui" "$ROOT/samples" "$ROOT/skills" "$ROOT/package.json" "$ROOT/LICENSE.txt" "$ROOT/README.md" "$STAGE/brainlink-src/"
+# Ship only the public product documentation referenced by README. The checkout's docs folder
+# also contains private reviews, Claude prompts, and project working notes; never copy it wholesale.
+mkdir -p "$STAGE/brainlink-src/docs"
+for doc in PRODUCT-SPEC.md GRAPH-KNOWLEDGE-MODEL.md SESSION-INDEX.md RELEASE-READINESS.md STORE-RECOVERY.md; do
+  cp "$ROOT/docs/$doc" "$STAGE/brainlink-src/docs/$doc"
+done
 rm -rf "$STAGE/brainlink-src/ui/app/test"
 cp -R "$ROOT/vendor/brainlink-store" "$STAGE/brainlink-src/vendor/"
 
@@ -26,13 +32,12 @@ You need Node 24 (or any Node 22+) already installed. Check with:  node -v
 2. Open a terminal (PowerShell or cmd) in the "brainlink-src" folder.
 3. Run:
      npm install
-     node bin\brainlink.mjs demo
-   This opens a browser to a throwaway sample vault (made-up notes) -- nothing on your
-   real computer is touched. Press Control-C in the terminal when you are done.
-4. To try it on your own notes instead:
-     node bin\brainlink.mjs init --vault "C:\path\to\your\notes"
-     node bin\brainlink.mjs ui
-   "ui" opens the same app on the vault(s) in your config instead of the sample one.
+     node bin\brainlink.mjs setup
+   This opens the guided first-run setup. Choose an existing notes folder or create a new,
+   empty brain. No sample company or demo notes are added. Connect AI apps one at a time,
+   and skip any connection you do not want.
+4. To see made-up sample notes instead, run `node bin\brainlink.mjs demo` explicitly.
+   To reopen BrainLink later, run `node bin\brainlink.mjs ui`.
 
 A signed .exe installer and a macOS .pkg follow later; this zip is just for today's look.
 TXT

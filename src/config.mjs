@@ -9,6 +9,7 @@ import path from 'node:path';
 import { validateSync } from './sync/settings.mjs';
 import { validateGitHubAssignments } from './sync/github-assignment.mjs';
 import { normalizeBackupSchedule } from './backup-schedule.mjs';
+import { validateRerankerSettings } from './rerank.mjs';
 import { appHome } from './app-home.mjs';
 
 export { appHome };
@@ -19,6 +20,8 @@ export const SCHEMAS = ['standard', 'provenance'];
 export const WRITE_MODES = ['on', 'proposal-only', 'off'];
 export const TWIN_MODES = ['personal', 'organisation', 'client'];
 export const TWIN_ACTIONS = ['search', 'read_note', 'read_session', 'log_session', 'handoff_read', 'write_handoff', 'propose_note', 'write_note'];
+export const MCP_TOOL_PROFILES = ['core', 'full'];
+export const MCP_TOOL_GROUPS = ['insights', 'sessions', 'agents', 'handoffs', 'ingestion', 'connectors'];
 
 export function configPath(env = process.env) {
   return env.BRAINLINK_CONFIG || path.join(appHome(env), 'config.json');
@@ -39,7 +42,7 @@ export const AGENT_KINDS = ['local', 'remote'];
 export const CONFIG_SCHEMA_VERSION = 2;
 
 export function emptyConfig() {
-  return { version: CONFIG_SCHEMA_VERSION, timezone: null, locale: null, vaults: [], agents: [], ai_agents: [], twin_profiles: [], handoff: null, platforms: DEFAULT_PLATFORMS, http: { port: 8765, token: null }, connections: {}, sessions: { shareSummaries: false, shareFullText: false, hermesHome: null, localSummary: { enabled: false, model: '', autoDraftOnEnd: false, autoFileOnEnd: false } }, session_filing: { projectVaults: {}, projectFolders: {} }, backup: { enabled: false, folder: null, intervalHours: 24, scheduleMode: 'interval', time: '02:00', last_scheduled_date: null, keepCount: 0, encrypted: false }, ingestion: { enabled: false, autoDrafts: false, vault: null, folder: null, targets: [], time: '02:00', last_scheduled_date: null, retry_count: 0, retry_date: null, retry_after: null }, brief: { enabled: false, vault: null, time: '08:00', last_scheduled_date: null }, weekly_benchmark: { enabled: false, weekday: 1, time: '09:00', last_scheduled_week: null, last_run_at: null, last_run_ok: null } };
+  return { version: CONFIG_SCHEMA_VERSION, timezone: null, locale: null, vaults: [], agents: [], ai_agents: [], twin_profiles: [], handoff: null, platforms: DEFAULT_PLATFORMS, http: { port: 8765, token: null }, connections: {}, mcp: { tool_profile: 'core', enabled_groups: [] }, reranker: { enabled: false, url: 'http://127.0.0.1:8080/v1/rerank' }, sessions: { shareSummaries: false, shareFullText: false, hermesHome: null, localSummary: { enabled: false, model: '', autoDraftOnEnd: false, autoFileOnEnd: false } }, session_filing: { projectVaults: {}, projectFolders: {} }, backup: { enabled: false, folder: null, intervalHours: 24, scheduleMode: 'interval', time: '02:00', last_scheduled_date: null, keepCount: 0, encrypted: false }, ingestion: { enabled: false, mode: 'daily', intervalMinutes: 5, last_scan_at: null, autoDrafts: false, autoFile: false, vault: null, folder: null, targets: [], time: '02:00', last_scheduled_date: null, retry_count: 0, retry_date: null, retry_after: null }, brief: { enabled: false, vault: null, time: '08:00', last_scheduled_date: null }, weekly_benchmark: { enabled: false, weekday: 1, time: '09:00', last_scheduled_week: null, last_run_at: null, last_run_ok: null } };
 }
 
 // Fill defaults so the rest of the code never checks for missing keys.
@@ -54,11 +57,22 @@ export function normalize(raw = {}) {
   cfg.twin_profiles = raw.twin_profiles ?? [];
   cfg.http = { port: 8765, token: null, ...(raw.http || {}) };
   cfg.connections = raw.connections || {};
+  const rawProfile = raw.mcp?.tool_profile;
+  const rawGroups = Array.isArray(raw.mcp?.enabled_groups) ? raw.mcp.enabled_groups : [];
+  cfg.mcp = {
+    tool_profile: MCP_TOOL_PROFILES.includes(rawProfile) ? rawProfile : 'core',
+    enabled_groups: [...new Set(rawGroups.filter((group) => MCP_TOOL_GROUPS.includes(group)))],
+  };
+  try { cfg.reranker = validateRerankerSettings({ ...emptyConfig().reranker, ...(raw.reranker || {}) }); }
+  catch { cfg.reranker = emptyConfig().reranker; }
   cfg.backup = { enabled: false, folder: null, intervalHours: 24, scheduleMode: 'interval', time: '02:00', last_scheduled_date: null, keepCount: 0, encrypted: false, ...(raw.backup || {}) };
-  cfg.ingestion = { enabled: false, autoDrafts: false, vault: null, folder: null, targets: [], time: '02:00', last_scheduled_date: null, retry_count: 0, retry_date: null, retry_after: null, ...(raw.ingestion || {}) };
+  cfg.ingestion = { enabled: false, mode: 'daily', intervalMinutes: 5, last_scan_at: null, autoDrafts: false, autoFile: false, vault: null, folder: null, targets: [], time: '02:00', last_scheduled_date: null, retry_count: 0, retry_date: null, retry_after: null, ...(raw.ingestion || {}) };
   if (typeof cfg.ingestion.autoDrafts !== 'boolean') cfg.ingestion.autoDrafts = false;
+  if (typeof cfg.ingestion.autoFile !== 'boolean') cfg.ingestion.autoFile = false;
   if (!Array.isArray(cfg.ingestion.targets)) cfg.ingestion.targets = [];
   if (!cfg.ingestion.targets.length && cfg.ingestion.vault && cfg.ingestion.folder) cfg.ingestion.targets = [{ vault: cfg.ingestion.vault, folder: cfg.ingestion.folder }];
+  // Opt-in, local-only list of questions a search could not answer (src/replay-misses.mjs).
+  cfg.replay_misses = { enabled: raw.replay_misses?.enabled === true };
   cfg.brief = { enabled: false, vault: null, time: '08:00', last_scheduled_date: null, ...(raw.brief || {}) };
   cfg.weekly_benchmark = { enabled: false, weekday: 1, time: '09:00', last_scheduled_week: null, last_run_at: null, last_run_ok: null, ...(raw.weekly_benchmark || {}) };
   cfg.session_filing = { projectVaults: {}, projectFolders: {}, ...(raw.session_filing || {}) };
@@ -77,12 +91,14 @@ export function normalize(raw = {}) {
   cfg.sessions = upgrading
     ? { shareSummaries: false, shareFullText: false, hermesHome: null, localSummary: { enabled: false, model: '', autoDraftOnEnd: false, autoFileOnEnd: false } }
     : { shareSummaries: false, shareFullText: false, hermesHome: null, localSummary: { enabled: false, model: '', autoDraftOnEnd: false, autoFileOnEnd: false }, ...(raw.sessions || {}), localSummary: { enabled: false, model: '', autoDraftOnEnd: false, autoFileOnEnd: false, ...(raw.sessions?.localSummary || {}) } };
+  cfg.sessions.importHistory = raw.sessions?.importHistory === true;
   cfg.version = CONFIG_SCHEMA_VERSION;
   return cfg;
 }
 
 export function validate(cfg) {
   const errors = [];
+  try { validateRerankerSettings(cfg.reranker || {}); } catch (error) { errors.push(error.message); }
   const names = new Set();
   for (const v of cfg.vaults) {
     if (!v.name || /[\/\\:]/.test(v.name)) errors.push(`vault name "${v.name}" must be set and contain no / \\ :`);
@@ -111,7 +127,6 @@ export function validate(cfg) {
     if (!AGENT_KINDS.includes(a.kind)) errors.push(`agent "${a.name}": kind must be ${AGENT_KINDS.join(' | ')}`);
   }
   const profileIds = new Set();
-  const assignedTwinAgents = new Set();
   if (!Array.isArray(cfg.twin_profiles)) errors.push('twin_profiles must be an array');
   for (const p of Array.isArray(cfg.twin_profiles) ? cfg.twin_profiles : []) {
     if (!p || typeof p !== 'object' || Array.isArray(p)) { errors.push('twin profile must be an object'); continue; }
@@ -141,9 +156,7 @@ export function validate(cfg) {
         else if (types.some((type) => access.memory_policy[type] && p.memory_policy?.[type] !== true)) errors.push(`twin profile "${p.id || ''}": an agent memory policy cannot exceed the Twin profile policy`);
       }
       if (profileAgents.has(access.agent_id)) errors.push(`twin profile "${p.id || ''}": duplicate agent access`);
-      if (assignedTwinAgents.has(access.agent_id)) errors.push('an AI agent may be assigned to only one Twin profile');
       profileAgents.add(access.agent_id);
-      assignedTwinAgents.add(access.agent_id);
       if (!Array.isArray(access.vaults) || !access.vaults.length) errors.push(`twin profile "${p.id || ''}": agent vault access must be a non-empty subset of profile vaults`);
       const agentVaults = new Set();
       for (const grant of Array.isArray(access.vaults) ? access.vaults : []) {
@@ -183,6 +196,7 @@ export function validate(cfg) {
   if (cfg.timezone) { try { new Intl.DateTimeFormat('en', { timeZone: cfg.timezone }); } catch { errors.push(`unknown timezone "${cfg.timezone}"`); } }
   if (cfg.locale && !LOCALES.includes(cfg.locale)) errors.push(`locale must be one of ${LOCALES.join(', ')}`);
   if (typeof cfg.sessions?.shareSummaries !== 'boolean') errors.push('sessions.shareSummaries must be a boolean');
+  if (cfg.sessions?.importHistory !== undefined && typeof cfg.sessions.importHistory !== 'boolean') errors.push('sessions.importHistory must be a boolean');
   if (typeof cfg.sessions?.shareFullText !== 'boolean') errors.push('sessions.shareFullText must be a boolean');
   if (cfg.sessions?.hermesHome !== null && (typeof cfg.sessions?.hermesHome !== 'string' || !path.isAbsolute(cfg.sessions.hermesHome) || cfg.sessions.hermesHome.length > 4096)) errors.push('sessions.hermesHome must be null or an absolute folder path');
   if (typeof cfg.sessions?.localSummary?.enabled !== 'boolean' || typeof cfg.sessions?.localSummary?.model !== 'string' || cfg.sessions.localSummary.model.length > 160 || typeof cfg.sessions.localSummary?.autoDraftOnEnd !== 'boolean' || typeof cfg.sessions.localSummary?.autoFileOnEnd !== 'boolean' || (cfg.sessions.localSummary.enabled && !/^[A-Za-z0-9][A-Za-z0-9._:/-]{0,159}$/.test(cfg.sessions.localSummary.model)) || (cfg.sessions.localSummary.autoDraftOnEnd && !cfg.sessions.localSummary.enabled) || (cfg.sessions.localSummary.autoFileOnEnd && (!cfg.sessions.localSummary.enabled || !cfg.sessions.localSummary.autoDraftOnEnd))) errors.push('sessions.localSummary must contain valid enabled, model, autoDraftOnEnd, and autoFileOnEnd settings');

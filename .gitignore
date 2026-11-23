@@ -4,3 +4,4 @@ build/
 vendor/node/SHASUMS256.txt
 vendor/node/node-v*.tar.*
 vendor/node/node-v*.zip
+vendor/node-macos/

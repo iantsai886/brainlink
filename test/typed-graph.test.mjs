@@ -6,12 +6,37 @@ import path from 'node:path';
 import { normalize } from '../src/config.mjs';
 import { createContext, loadVault } from '../src/core.mjs';
 import { buildGraph3D, noteDetail3D } from '../src/graph3d.mjs';
-import { deriveTypedRelations, deriveRejectedTypedRelations, discoverTypedRelationshipCandidates, discoverTypedRelationshipCandidatesForSources, appendTypedRelationProposal, approveTypedRelation, rejectTypedRelation, reopenTypedRelation, typedGraphHealth } from '../src/typed-graph.mjs';
+import { deriveTypedRelations, deriveProposedTypedRelations, deriveRejectedTypedRelations, deriveWithdrawnTypedRelations, discoverTypedRelationshipCandidates, discoverTypedRelationshipCandidatesForSources, appendTypedRelationProposal, approveTypedRelation, rejectTypedRelation, reopenTypedRelation, withdrawTypedRelation, updateTypedRelation, typedGraphHealth, typedEntityFields, updateTypedEntityFields } from '../src/typed-graph.mjs';
 import { proposeNote } from '../src/writes.mjs';
 import { createMcp } from '../src/server.mjs';
 
 const temp = (name) => mkdtemp(path.join(tmpdir(), `brainlink-typed-graph-${name}-`));
 const entity = ({ type, id, scope = 'organisation', body = '', relations = '', extra = '' }) => `---\ntype: ${type}\nid: ${id}\nscope: ${scope}\nstatus: current\n${extra}${relations ? `relations:\n${relations}` : ''}---\n# ${id}\n${body}`;
+
+test('typed entity field updates preserve Markdown and relations, validate all fields, and can clear identity', () => {
+  const raw = entity({ type: 'workflow', id: 'workflow.triage', relations: '  - predicate: runs\n    target: workflow.followup\n    review: proposed\n    source: "Exact source sentence"\n    confidence: 0.8\n', body: 'Keep this note.' });
+  const next = updateTypedEntityFields(raw, { type: 'team', id: 'team.support', scope: 'organisation', status: 'proposed' });
+  assert.deepEqual(typedEntityFields(next), { type: 'team', id: 'team.support', scope: 'organisation', status: 'proposed' });
+  assert.match(next, /review: proposed/); assert.match(next, /source: "Exact source sentence"/); assert.match(next, /Keep this note\./);
+  assert.equal(updateTypedEntityFields(next, { type: '', id: '', scope: '', status: '' }), next.replace(/^type: team\nid: team\.support\nscope: organisation\nstatus: proposed\n/m, ''));
+  assert.throws(() => updateTypedEntityFields(raw, { type: 'team', id: 'Bad ID', scope: 'organisation', status: 'current' }), /Graph IDs/);
+  assert.throws(() => updateTypedEntityFields(raw, { type: 'team', id: 'team.support', scope: 'company', status: 'current' }), /data scope/);
+  assert.throws(() => updateTypedEntityFields(raw, { type: 'team', id: 'team.support', scope: 'organisation', status: '' }), /together/);
+  assert.throws(() => updateTypedEntityFields('---\ntype: team\ntype: workflow\n---\nBody', { type: 'team', id: 'team.support', scope: 'organisation', status: 'current' }), /duplicate type/);
+});
+
+test('workflow graph fields round-trip as bounded structured lists without changing note content', () => {
+  const raw = entity({ type: 'workflow', id: 'workflow.triage', body: 'Keep this body and [[linked note]].\n' });
+  const fields = { type: 'workflow', id: 'workflow.triage', scope: 'organisation', status: 'current', triggers: ['New ticket arrives'], inputs: ['Ticket data'], steps: ['Review, classify', 'Assign "owner"'], outputs: ['Draft response'], exception_handling: ['Escalate to team'] };
+  const next = updateTypedEntityFields(raw, fields);
+  assert.deepEqual(typedEntityFields(next), fields);
+  assert.match(next, /Keep this body and \[\[linked note\]\]\./);
+  assert.match(next, /- "Review, classify"/);
+  assert.match(next, /- "Assign \\\"owner\\\""/);
+  assert.throws(() => updateTypedEntityFields(raw, { ...fields, steps: ['two\nlines'] }), /single-line items/);
+  assert.throws(() => updateTypedEntityFields(raw, { ...fields, steps: ['x'.repeat(501)] }), /500 characters/);
+  assert.throws(() => updateTypedEntityFields(raw, { ...fields, steps: Array(41).fill('step') }), /up to 40/);
+});
 
 test('typed graph health returns structural counts only and excludes private or generated notes', () => {
   const notes = [
@@ -100,6 +125,41 @@ test('reopening a rejected relation explicitly changes only its review marker', 
   assert.match(reopened, /^status: current$/m);
   assert.match(reopened, /^    review: proposed$/m);
   assert.match(reopened, /^    source: "Operations handbook section 2"$/m);
+});
+
+test('withdrawing a relation hides it from graph and review while retaining evidence for restoration', () => {
+  const raw = `---\ntype: team\nid: team.product\nscope: organisation\nstatus: current\nrelations:\n  - predicate: runs\n    target: workflow.collect\n    review: verified\n    source: "Operations handbook section 2"\n    confidence: 0.8\n---\n# Product team\n`;
+  const withdrawn = withdrawTypedRelation(raw, 0, 'verified');
+  assert.match(withdrawn, /^    review: withdrawn$/m);
+  assert.match(withdrawn, /^    source: "Operations handbook section 2"$/m);
+  const notes = [{ rel: 'Team.md', raw: withdrawn }, { rel: 'Workflow.md', raw: entity({ type: 'workflow', id: 'workflow.collect' }) }];
+  assert.deepEqual(deriveTypedRelations(notes), []);
+  assert.deepEqual(deriveWithdrawnTypedRelations(notes).map((edge) => edge.relation_index), [0]);
+  const restored = reopenTypedRelation(withdrawn, 0, 'withdrawn');
+  assert.match(restored, /^    review: proposed$/m);
+  assert.match(restored, /^    source: "Operations handbook section 2"$/m);
+  assert.deepEqual(deriveWithdrawnTypedRelations([{ rel: 'Team.md', raw: restored }, notes[1]]), []);
+  assert.equal(deriveProposedTypedRelations([{ rel: 'Team.md', raw: restored }, notes[1]]).length, 1);
+});
+
+test('editing a relationship preserves Markdown and returns material changes to review', () => {
+  const raw = `---\ntype: workflow\nid: workflow.collect\nscope: organisation\nstatus: current\nrelations:\n  - predicate: consumes\n    target: dataset.tickets\n    review: verified\n    source: "Reads ticket records each morning."\n    confidence: 0.8\n---\n# Collect questions\n\nReads ticket records each morning.\n`;
+  const unchanged = updateTypedRelation(raw, 0, { predicate: 'consumes', target_id: 'dataset.tickets', evidence: 'Reads ticket records each morning.', confidence: 0.8 }, 'verified');
+  assert.match(unchanged, /^    review: verified$/m, 'a no-op edit does not unapprove the edge');
+  const changed = updateTypedRelation(raw, 0, { predicate: 'consumes', target_id: 'dataset.answers', evidence: 'Reads ticket records each morning.', confidence: 0.9 }, 'verified');
+  assert.match(changed, /^    target: dataset\.answers$/m);
+  assert.match(changed, /^    review: proposed$/m, 'a material edit must be reviewed again');
+  assert.match(changed, /^    source: "Reads ticket records each morning\."$/m);
+  assert.match(changed, /# Collect questions[\s\S]*Reads ticket records each morning\./);
+  const quotedEvidence = 'Reads "ticket" records each morning.';
+  const rawWithQuotes = raw.replaceAll('Reads ticket records each morning.', quotedEvidence);
+  const withQuotedEvidence = updateTypedRelation(rawWithQuotes, 0, { predicate: 'consumes', target_id: 'dataset.tickets', evidence: quotedEvidence, confidence: 0.81 }, 'verified');
+  assert.equal(deriveProposedTypedRelations([{ rel: 'Workflow.md', raw: withQuotedEvidence }, { rel: 'Tickets.md', raw: entity({ type: 'dataset', id: 'dataset.tickets' }) }])[0].evidence, quotedEvidence, 'escaped quote characters round-trip through Markdown frontmatter');
+  assert.throws(() => updateTypedRelation(raw, 0, { predicate: 'unknown', target_id: 'dataset.answers', evidence: 'quote', confidence: 0.9 }, 'verified'), /valid relationship/i);
+  assert.throws(() => updateTypedRelation(raw, 0, { predicate: 'consumes', target_id: 'dataset.answers', evidence: 'quote', confidence: '' }, 'verified'), /valid relationship/i);
+  assert.throws(() => updateTypedRelation(raw, 0, { predicate: 'consumes', target_id: 'dataset.answers', evidence: 'quote', confidence: 0.9 }, 'rejected'), /no longer active/i);
+  const duplicate = raw.replace('---\n# Collect questions', '  - predicate: consumes\n    target: dataset.answers\n    review: proposed\n    source: "Reads ticket records each morning."\n    confidence: 0.5\n---\n# Collect questions');
+  assert.throws(() => updateTypedRelation(duplicate, 0, { predicate: 'consumes', target_id: 'dataset.answers', evidence: 'Reads ticket records each morning.', confidence: 0.9 }, 'verified'), /duplicate another saved connection/i);
 });
 
 test('typed graph relationship suggestions are saved as proposed and become edges only after explicit review', async () => {
@@ -253,7 +313,7 @@ test('typed relationship proposals reject invalid IDs, predicates, evidence and 
   await mkdir(path.join(dir, 'Inbox'), { recursive: true });
   await writeFile(path.join(dir, 'Questions Dataset.md'), entity({ type: 'dataset', id: 'dataset.questions' }));
   const ctx = await context([{ name: 'Company', path: dir }]);
-  const base = { vault: 'Company', folder: 'Inbox', title: 'Workflow', type: 'workflow', entity_id: 'workflow.test', entity_scope: 'organisation', body: 'Do work.', source: 'test', confirm: true };
+  const base = { vault: 'Company', folder: 'Inbox', title: 'Workflow', type: 'workflow', entity_id: 'workflow.test', entity_scope: 'organisation', body: 'Do work.', source: 'test', ai_platform: 'ChatGPT', agent_or_role: 'test', session_or_task_id: 'relationship-validation', confirm: true };
   const invalid = await proposeNote(ctx, { ...base, relations: [{ predicate: 'invented', target: 'x', source: '', confidence: 2 }] });
   assert.equal(invalid.ok, false);
   assert.ok(invalid.errors.length >= 4);

@@ -1,25 +1,44 @@
 {
   "name": "brainlink-mcp",
-  "version": "1.2.8",
+  "version": "1.3.9",
   "description": "BrainLink MCP: one Obsidian / Markdown second brain that every AI can search and write to safely.",
   "private": true,
   "type": "module",
-  "bin": { "brainlink": "bin/brainlink.mjs" },
-  "dependencies": { "brainlink-store": "file:./vendor/brainlink-store", "yaml": "^2.9.1" },
+  "bin": {
+    "brainlink": "bin/brainlink.mjs"
+  },
+  "dependencies": {
+    "brainlink-store": "file:./vendor/brainlink-store",
+    "fflate": "0.8.3",
+    "parse5": "8.0.1",
+    "yaml": "^2.9.1"
+  },
+  "optionalDependencies": {
+    "@napi-rs/canvas": "1.1.0",
+    "@tesseract.js-data/chi_tra": "1.0.0",
+    "@tesseract.js-data/eng": "1.0.0",
+    "@tesseract.js-data/por": "1.0.0",
+    "mammoth": "1.13.0",
+    "pdfjs-dist": "4.10.38",
+    "tesseract.js": "7.0.0"
+  },
   "scripts": {
-    "test": "node --import ./test/_preload.mjs --test --test-concurrency=1 \"test/*.test.mjs\"",
+    "test": "node --import ./test/_preload.mjs --test --test-concurrency=1 --test-reporter=tap \"test/*.test.mjs\"",
     "test:ui": "node --import ./test/_preload.mjs --test \"ui/app/test/*.test.mjs\"",
     "test:all": "npm test && npm run test:ui",
     "smoke:codex-cli": "node scripts/smoke-codex-cli.mjs",
     "smoke:claude-code": "node scripts/smoke-claude-code.mjs",
     "smoke:live-claude-handoff": "node scripts/smoke-live-claude-handoff.mjs --live",
     "smoke:live-cross-client-handoff": "node scripts/smoke-live-cross-client-handoff.mjs --live",
+    "smoke:live-ingestion": "node scripts/smoke-live-ingestion.mjs",
     "smoke:backup-recovery": "node scripts/smoke-backup-recovery.mjs",
     "updates:sign-manifest": "node scripts/sign-update-manifest.mjs",
     "updates:create-payload": "node scripts/create-update-payload.mjs",
     "smoke:installed:win": "pwsh -NoProfile -File scripts/smoke-installed-windows.ps1",
     "smoke:upgrade:win": "pwsh -NoProfile -File scripts/smoke-upgrade-windows.ps1",
+    "stage:canvas-platforms": "node scripts/stage-canvas-platforms.mjs",
     "evaluate:rsi-discovery": "node bin/rsi-discovery-eval.mjs",
+    "evaluate:rsi-fix-selection": "node scripts/evaluate-rsi-fix-selection.mjs",
     "setup": "node bin/brainlink.mjs setup",
     "build:mac": "bash packaging/macos/build-pkg.sh",
     "build:mac-zip": "bash packaging/macos/build-zip.sh",
@@ -28,6 +47,11 @@
     "build:win-preview": "bash packaging/windows/build-portable-zip.sh",
     "build:linux": "bash packaging/linux/build-linux.sh"
   },
-  "engines": { "node": ">=22" },
-  "license": "SEE LICENSE IN LICENSE.txt"
+  "engines": {
+    "node": ">=22"
+  },
+  "license": "SEE LICENSE IN LICENSE.txt",
+  "devDependencies": {
+    "jszip": "3.10.2"
+  }
 }

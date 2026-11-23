@@ -5,17 +5,21 @@ Obsidian / Markdown vaults that authorized AI agents can search and write to saf
 ## For customers
 
 1. Install `BrainLink-<version>.pkg` (macOS), `BrainLink-Setup-<version>.exe` (Windows), or on Linux the `.deb` or `brainlink-<version>-linux-<arch>.tar.gz` (run `./install.sh`).
-2. Setup opens in a dedicated Edge app window on Windows (or your default browser if Edge is unavailable); on macOS/Linux it opens in your default browser. Choose your vault folder and a rule pack, then name your agent.
-3. Press **Connect** for each AI app. Then fully quit and reopen each app so it loads the new BrainLink tools. Closing a window may leave the app running in the background.
-4. Start a new chat and say **"Connect to <agent>"**. Existing chats may still show an older tool list. Say **"<agent> close loop"** to save the session to your vault.
+2. Setup opens in a dedicated Edge app window on Windows (or your default browser if Edge is unavailable); on macOS/Linux it opens in your default browser. Choose a vault folder or create one, then review the confirmation before BrainLink adds setup files and attempts to configure detected AI apps.
+3. Review the connection for each AI app. Fully quit and reopen each app so it loads the new BrainLink tools. Closing a window may leave the app running in the background.
+4. Start a new chat and say **"Connect to <agent>"**. Existing chats may still show an older tool list. Say **"<agent> close loop"** to prepare a session capture. Depending on vault and agent settings, the AI may only return a proposal for you to review.
 
 If an agent name is missing, check **BrainLink → Connect** first. A successful local connection check confirms BrainLink has that agent configured; a full app quit, reopen, and new chat are still needed for the AI app to load the updated tool list.
+
+Running BrainLink MCP connections re-read saved access settings before subsequent requests. A request already underway is not cancelled, and an AI client may need a new chat or restart to refresh its displayed tools. If the saved HTTP bearer token is rotated, restart the HTTP listener to use the new token.
 
 ## Command line
 
 ```
-brainlink setup | init | connect <client|all> | disconnect <client> | clients | status | sync | ui | demo | serve [--http]
+brainlink setup | init | connect <client|all> | disconnect <client> | clients | status | selftest [--json] | sync | ui | demo | serve [--http]
 ```
+
+`selftest` checks, without changing anything, that connected AIs can reach the rule notes, role notes and mailbox the configuration points at, and lists excluded folders that hold notes; it exits non-zero when a check fails. `brainlink miss replay` re-runs the questions kept by the opt-in "Questions your notes could not answer" list (off by default; question text stays in the BrainLink data folder on this computer and private vaults are never recorded).
 
 `connect` also accepts `--all`. `sync` runs one sync pass (local-only by default; choose Drive, iCloud or Dropbox in Setup).
 
@@ -26,12 +30,16 @@ folder ID and local path can be recorded in Setup for auditability.
 
 ## Smart features
 
+Importing local AI session history is off by default. Enable it explicitly in the Sessions panel if needed; session sharing with connected AIs is a separate choice. Demo mode does not import local AI session history. Existing imported records are retained when import is turned off.
+
+Use **Review and correct memories** in Setup to open a vault's `BrainLink/Memories.md`, review AI suggestions and edit its list yourself. Saving requires the vault to permit direct edits; BrainLink checks whether the note changed since you opened it. Keep source details when correcting a memory. Changes made simultaneously by another application can still require manual conflict resolution.
+
 - **Auto-linking:** every note an AI writes links the notes it mentions or is about, and `BrainLink/Home.md` links everything, so notes connect even without Obsidian.
 - **Search:** keyword (stemmed, filters, `#tag`, `[[Note]]`, fused rephrasings) plus meaning-based search when Ollama is installed (`ollama pull nomic-embed-text`).
 - **Separate workspaces:** connect multiple vaults and Personal, Organisation, or Client Twins with their own allowed data and memory types.
 - **Four memory types:** BrainLink organizes current work, past sessions, lasting knowledge, and reusable skills in the background. Users do not need to sort every note by hand.
 - **Interactive 3D graph:** rotate and zoom the note-link map, click a note to open it, or use the keyboard-accessible note list; private notes stay filtered unless explicitly shown in local Setup.
-- **Tools:** `brain_brief`, `vault_recent`, `open_loops`, `vault_health`, `remember`, `append_daily`, `propose_note` templates (meeting, decision, person, project, idea), and the Raw-to-Wiki review flow (`ingestion_queue` / `ingestion_record`). Setup can scan one selected non-private folder manually or once daily; scans only prepare a review queue and never file knowledge automatically. `session_list` and `session_read` access approved local AI history; `session_log` saves short notes. For profile-scoped AIs, session logging is a separate opt-in permission; entries are forced private and tied to that Personal, Organisation, or Client profile. See `docs/SESSION-INDEX.md`.
+- **Tools:** `brain_brief`, `vault_recent`, `open_loops`, `vault_health`, `remember`, `append_daily`, `propose_note` templates (meeting, decision, person, project, idea), and the Raw-to-Wiki intake flow (`ingestion_queue`, `ingestion_read_source`, `ingestion_record`). Setup can scan up to 20 selected non-private folders manually, once daily, or repeatedly every 1, 5, 15, 30, or 60 minutes while BrainLink is open. Intake supports Markdown, TXT, CSV/TSV, JSON, XML, YAML, LOG, HTML/HTM visible text, PDF up to 100 pages, DOCX, XLSX, PPTX, and PNG/JPEG/BMP images. HTML scripts, styles, embedded documents and explicitly hidden markup are excluded; extraction runs locally in a bounded worker and never runs page code or fetches linked resources. External CSS is not evaluated, so text hidden only by an external stylesheet may still be extracted. Image OCR uses bundled local English, Portuguese, and Traditional Chinese data. When local Ollama drafts are enabled, PNG/JPEG images can also receive an unverified visual description with a vision-capable local model on this computer; image bytes are not saved with drafts. Legacy Word and other image formats remain unsupported. Office extraction and OCR run locally with bounded inputs and output; hidden spreadsheet sheets, rows and columns, and hidden presentation slides are excluded. Optional local Ollama analysis can draft up to five changed supported sources per scan. BrainLink suggests same-vault related notes from the redacted source text and draft summary for every supported format. Manual review can select links; the separate auto-file option adds up to three top shared-word suggestions, marked unverified, while saving a new source-linked `proposed` note. Existing notes are never overwritten; excluded and generated Markdown sources are skipped. Non-Markdown files rely on the selected non-private vault/folder and path exclusions; they have no Markdown `private: true` frontmatter check. `session_list` and `session_read` access approved local AI history; `session_log` saves short notes. For profile-scoped AIs, session logging is a separate opt-in permission; entries are forced private and tied to that Personal, Organisation, or Client profile. See `docs/SESSION-INDEX.md`.
 - **Shared commands:** notes in `BrainLink/Commands/` can appear as prompts in supported MCP clients that load configured BrainLink prompts.
 - **Portable Agent Skills:** `brainlink-session-closeout`, `brainlink-raw-to-wiki`, and `brainlink-cross-ai-handoff` are versioned in Git, with Claude/Codex-compatible copies. Desktop installers include these skills and all runtime packages.
 - **Scheduled backup:** choose a backup folder and schedule. BrainLink checks each backup; restore tools help recover a vault when needed. Encrypted backups use a recovery key.
@@ -60,8 +68,9 @@ npm install               # uses the checked-in store implementation (file:./ven
 npm test                  # core suite (Node 22+)
 npm run test:ui           # local UI-model suite
 npm run test:all          # core + UI suites
-node bin/brainlink.mjs demo   # try the milestone UI on a throwaway sample vault, nothing real touched
+node bin/brainlink.mjs setup  # guided first run; creates an empty vault unless you choose an existing one
 node bin/brainlink.mjs ui     # same UI on the vaults in config.json
+node bin/brainlink.mjs demo   # optional: try a throwaway sample vault; history import is disabled
 npm run build:mac        # dist/BrainLink-<version>.pkg (unsigned build: packaging/macos/INSTALL-UNSIGNED.md)
 npm run build:win        # dist/BrainLink-Setup-<version>.exe + portable zip (needs makensis)
 npm run build:win-preview # dist/BrainLink-Preview-<version>-windows.zip — no installer, no bundled Node, Node 22+ required

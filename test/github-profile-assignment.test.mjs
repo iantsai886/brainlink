@@ -1,6 +1,7 @@
 // Profile-scoped GitHub repository assignment. Fictional vaults, profiles, repositories and
 // secrets only; every Git remote is a temporary local path. No real GitHub contact.
 import test from 'node:test';
+import { readSetupHtml } from './helpers/setup-html.mjs';
 import assert from 'node:assert/strict';
 import { execFileSync } from 'node:child_process';
 import { mkdtemp, mkdir, readFile, writeFile, rm } from 'node:fs/promises';
@@ -13,7 +14,7 @@ import { createContext } from '../src/core.mjs';
 import {
   listGitHubShareCandidates, previewGitHubRepository, commitGitHubSelectedNotes, pushGitHubSelectedNotes,
   listGitHubPullCandidates, importGitHubSelectedNotes, githubAssignmentStatus,
-  saveGitHubConflictCopies,
+  saveGitHubConflictCopies, testGitHubRepositoryAccess, cloneGitHubRepository,
 } from '../src/sync/github-preview.mjs';
 import { githubAssignmentProjection } from '../src/sync/github-assignment.mjs';
 import { startSetup } from '../src/setup.mjs';
@@ -251,6 +252,92 @@ test('legacy configs load unchanged and fail closed until an owner confirms a Tw
   await assert.rejects(listGitHubShareCandidates(legacy, P.org.vault, 'org'), /Create a Personal, Organisation, or Client Twin profile/);
 });
 
+test('GitHub access test is read-only, uses saved non-interactive Git auth, and hides credential errors', async () => {
+  const f = await fixture({ assign: false });
+  const bare = path.join(f.root, 'github-access-check.git');
+  await mkdir(bare, { recursive: true });
+  git(bare, 'init', '--bare', '--quiet');
+  const repo = f.repos.org;
+  git(repo, 'config', 'user.name', 'BrainLink Test');
+  git(repo, 'config', 'user.email', 'brainlink-test@example.invalid');
+  await writeFile(path.join(repo, 'README.md'), 'fictional public test fixture\n');
+  git(repo, 'switch', '-c', 'main');
+  git(repo, 'add', '--', 'README.md');
+  git(repo, 'commit', '-m', 'fictional test repository');
+  git(repo, 'config', `url.${pathToFileURL(bare).href}.insteadOf`, `https://github.com/${P.org.remote}.git`);
+  git(repo, 'push', '--set-upstream', 'origin', 'main');
+  git(bare, 'symbolic-ref', 'HEAD', 'refs/heads/main');
+  const input = { profile_id: 'org', vault: P.org.vault, repository: repo, folders: ['Shared'], whole_vault: false };
+  const result = await testGitHubRepositoryAccess(f.cfg, input);
+  assert.deepEqual(result, { ok: true, remote: P.org.remote, head_found: true });
+  assert.equal(f.cfg.twin_profiles.find((p) => p.id === 'org').github_repository, undefined, 'checking access does not save the profile assignment');
+
+  let checkedOptions;
+  await assert.rejects(testGitHubRepositoryAccess(f.cfg, input, { runGit: async (_command, args, options) => {
+    assert.deepEqual(args.slice(-3), ['--symref', 'origin', 'HEAD']);
+    checkedOptions = options;
+    throw new Error('fatal: https://user:ghp_FAKE_SECRET@github.com/private/repo.git denied');
+  } }), (error) => {
+    assert.match(error.message, /check the internet connection and Git sign-in/i);
+    assert.doesNotMatch(error.message, /ghp_FAKE_SECRET|github\.com\/private/i);
+    return true;
+  });
+  assert.equal(checkedOptions.env.GIT_TERMINAL_PROMPT, '0');
+  assert.equal(checkedOptions.env.GCM_INTERACTIVE, 'never');
+  assert.equal(checkedOptions.timeout, 30_000);
+});
+
+test('managed GitHub clone checks out only BrainLink notes and never overwrites existing data', async () => {
+  const f = await fixture({ assign: false });
+  const bare = path.join(f.root, 'new-device-remote.git');
+  const seed = path.join(f.root, 'remote-seed');
+  const home = path.join(f.root, 'new-device-home');
+  await mkdir(bare, { recursive: true });
+  await mkdir(seed, { recursive: true });
+  await mkdir(home, { recursive: true });
+  git(bare, 'init', '--bare', '--quiet');
+  git(bare, 'config', 'uploadpack.allowFilter', 'true');
+  git(seed, 'init', '--quiet');
+  git(seed, 'config', 'user.name', 'BrainLink Test');
+  git(seed, 'config', 'user.email', 'brainlink-test@example.invalid');
+  await mkdir(path.join(seed, 'BrainLink', 'notes', 'Shared'), { recursive: true });
+  await writeFile(path.join(seed, 'README.md'), 'This file must not be checked out.\n');
+  await writeFile(path.join(seed, 'BrainLink', 'notes', 'Shared', 'Knowledge.md'), 'A fictional shared note.\n');
+  git(seed, 'add', '--', 'README.md', 'BrainLink/notes');
+  git(seed, 'commit', '-m', 'fictional shared notes');
+  git(seed, 'branch', '-M', 'main');
+  git(seed, 'remote', 'add', 'origin', bare);
+  git(seed, 'push', '--set-upstream', 'origin', 'main');
+  git(bare, 'symbolic-ref', 'HEAD', 'refs/heads/main');
+  const remote = `https://github.com/${P.org.remote}.git`;
+  const env = {
+    GIT_CONFIG_COUNT: '1',
+    GIT_CONFIG_KEY_0: `url.${pathToFileURL(bare).href}.insteadOf`,
+    GIT_CONFIG_VALUE_0: remote,
+  };
+  const result = await cloneGitHubRepository({ ownerRepo: P.org.remote, home, reservedPaths: [f.vaults.org] }, { env });
+  assert.equal(result.ok, true);
+  assert.equal(result.remote, P.org.remote);
+  assert.equal(result.sparse_folder, 'BrainLink/notes');
+  assert.match(await readFile(path.join(result.path, 'BrainLink', 'notes', 'Shared', 'Knowledge.md'), 'utf8'), /^A fictional shared note\.\r?\n$/);
+  await assert.rejects(readFile(path.join(result.path, 'README.md')), { code: 'ENOENT' }, 'files outside the notes subtree are not checked out');
+  assert.equal(git(result.path, 'status', '--porcelain'), '');
+  assert.equal(f.cfg.twin_profiles.find((profile) => profile.id === 'org').github_repository, undefined, 'cloning does not assign or publish the repository');
+  const before = await readFile(path.join(result.path, 'BrainLink', 'notes', 'Shared', 'Knowledge.md'), 'utf8');
+  await assert.rejects(cloneGitHubRepository({ ownerRepo: 'https://user:secret@github.com/fictional-org/org-brain', home, reservedPaths: [] }), /owner\/repository/);
+  await assert.rejects(cloneGitHubRepository({ ownerRepo: P.org.remote, home: f.vaults.org, reservedPaths: [f.vaults.org] }), /overlaps a vault/);
+  assert.equal(await readFile(path.join(result.path, 'BrainLink', 'notes', 'Shared', 'Knowledge.md'), 'utf8'), before, 'refused clone requests leave the first clone untouched');
+
+  const emptyBare = path.join(f.root, 'empty-remote.git');
+  await mkdir(emptyBare, { recursive: true });
+  git(emptyBare, 'init', '--bare', '--quiet');
+  const emptyRemote = 'https://github.com/fictional-org/empty-brain.git';
+  const empty = await cloneGitHubRepository({ ownerRepo: 'fictional-org/empty-brain', home, reservedPaths: [f.vaults.org] }, {
+    env: { GIT_CONFIG_COUNT: '1', GIT_CONFIG_KEY_0: `url.${pathToFileURL(emptyBare).href}.insteadOf`, GIT_CONFIG_VALUE_0: emptyRemote },
+  });
+  assert.equal(empty.head_found, false, 'an empty GitHub repository is connected without fabricating a branch or note');
+});
+
 test('Setup API: assignments need review plus an exact confirmation, are exclusive, and expose no URLs or credentials', async () => {
   const f = await fixture({ assign: false });
   const home = path.join(f.root, 'app-home');
@@ -270,6 +357,9 @@ test('Setup API: assignments need review plus an exact confirmation, are exclusi
     assert.equal(picked.status, 200);
     assert.equal(picked.body.path, f.repos.org);
     assert.equal((await post('/api/github/assignment/inspect', org, 'wrong')).status, 401);
+    assert.equal((await post('/api/github/assignment/test-access', org, 'wrong')).status, 401, 'the remote access check requires the Setup token');
+    assert.equal((await post('/api/github/repository/clone', { remote: P.org.remote, profile_id: 'org', vault: P.org.vault }, 'wrong')).status, 401, 'repository clone requires the Setup token');
+    assert.notEqual((await post('/api/github/repository/clone', { remote: P.org.remote, profile_id: 'client_a', vault: P.org.vault })).status, 200, 'a profile cannot clone for a vault it does not own');
     assert.equal((await post('/api/github/assignment/set', { ...org, confirm_remote: P.org.remote }, 'wrong')).status, 401);
     // Before confirmation, a normal operation is refused.
     assert.notEqual((await post('/api/github/share-candidates', { vault: P.org.vault, profile_id: 'org' })).status, 200);
@@ -327,7 +417,7 @@ test('Setup API: assignments need review plus an exact confirmation, are exclusi
 // Structural checks only: they prove the Setup page is wired to reset and bind state per profile,
 // not that a browser run behaved correctly (no desktop-UI validation has been done).
 test('Setup UI parses and clears selections, receipts and pending confirmations when the profile changes', async () => {
-  const html = await readFile(path.join(path.dirname(fileURLToPath(import.meta.url)), '..', 'ui', 'index.html'), 'utf8');
+  const html = await readSetupHtml();
   const scripts = [...html.matchAll(/<script(?![^>]*\bsrc=)[^>]*>([\s\S]*?)<\/script>/g)].map((m) => m[1]);
   assert.ok(scripts.length > 0);
   for (const code of scripts) assert.doesNotThrow(() => new vm.Script(code));
@@ -340,9 +430,19 @@ test('Setup UI parses and clears selections, receipts and pending confirmations 
   assert.match(html, /githubPendingPush\.profile !== githubProfileId\(\)/);
   assert.match(html, /id="github-no-profiles" class="notice" data-i18n="github\.noProfiles" hidden/);
   assert.match(html, /id="github-repository-pick" data-i18n="github\.repositoryBrowse"/);
+  assert.match(html, /id="github-assign-test" data-i18n="github\.accessTest" hidden/);
+  assert.match(html, /id="github-clone-remote" class="mono" data-i18n-placeholder="github\.cloneRemotePlaceholder"/);
+  assert.match(html, /github-clone'\)\.onclick = async \(\) => \{[\s\S]*?\/api\/github\/repository\/clone[\s\S]*?result\.path[\s\S]*?invalidateGitHubAssignmentReview\(\)/);
+  assert.match(html, /github-assign-test'\)\.onclick = async \(\) => \{[\s\S]*?\/api\/github\/assignment\/test-access[\s\S]*?github\.accessOk[\s\S]*?github\.accessEmpty/);
+  assert.match(html, /function invalidateGitHubAssignmentReview\(\)[\s\S]*?\$\('github-assign-test'\)\.hidden = true/);
   assert.match(html, /github-repository-pick'\)\.onclick = \(\) => act\(async \(\) => \{[\s\S]*?\/api\/github\/assignment\/pick-repository[\s\S]*?window\.promptForFolder\(\)[\s\S]*?githubInspected = null/);
   assert.match(html, /if \(!list\.length\) \{[\s\S]*?\$\('github-load'\)\.disabled = true;[\s\S]*?\$\('github-pull-check'\)\.disabled = true;/);
   for (const route of ['share-candidates', 'preview', 'commit-selected', 'push-selected', 'pull-candidates', 'import-selected']) {
     assert.match(html, new RegExp(`/api/github/${route}'[^\\n]*profile_id: githubProfileId\\(\\)`), `${route} must send the selected profile`);
+  }
+  for (const locale of ['en', 'zh-TW', 'pt']) {
+    const catalog = JSON.parse(await readFile(path.join(path.dirname(fileURLToPath(import.meta.url)), '..', 'ui', 'locales', `${locale}.json`), 'utf8'));
+    for (const key of ['github.accessTest', 'github.accessTesting', 'github.accessOk', 'github.accessEmpty', 'github.accessFailed']) assert.ok(catalog[key], `${locale} ${key}`);
+    for (const key of ['github.cloneHint', 'github.cloneRemote', 'github.cloneRemotePlaceholder', 'github.cloneButton', 'github.cloneChooseProfile', 'github.cloneConfirm', 'github.cloneRunning', 'github.cloneDone', 'github.cloneEmpty', 'github.cloneFailed']) assert.ok(catalog[key], `${locale} ${key}`);
   }
 });

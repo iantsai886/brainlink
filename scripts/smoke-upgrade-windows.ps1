@@ -19,6 +19,7 @@ $CurrentStage = Join-Path $Root 'build\windows\stage'
 if (-not (Test-Path (Join-Path $CurrentStage 'node\node.exe')) -or -not (Test-Path (Join-Path $CurrentStage 'app\bin\brainlink.mjs'))) {
   throw 'Current Windows stage is missing. Run packaging/windows/build-windows.ps1 first.'
 }
+& (Join-Path $PSScriptRoot 'assert-windows-stage-current.ps1') -Root $Root -Stage $CurrentStage
 $TestRoot = Join-Path $env:TEMP ('brainlink-upgrade-smoke-' + [guid]::NewGuid().ToString('N'))
 $OldRoot = Join-Path $TestRoot 'source-old'
 $OldStage = Join-Path $OldRoot 'build\windows\stage'
@@ -179,11 +180,13 @@ try {
   Invoke-HiddenAndWait $OldInstaller @('/VERYSILENT', '/SUPPRESSMSGBOXES', '/NORESTART', "/DIR=`"$InstallDir`"", '/GROUP="BrainLink QA Smoke"')
   $BaselineUninstallerHash = (Get-FileHash -LiteralPath (Join-Path $InstallDir 'unins000.dat') -Algorithm SHA256).Hash
   Start-IsolatedApp $OldVersion 'Baseline'
-  Stop-IsolatedApp
-  Write-Output "PASS: isolated v$OldVersion installation launched before upgrade."
+  $StaleOldFile = Join-Path $InstallDir 'app\stale-old-version-file.txt'
+  Set-Content -LiteralPath $StaleOldFile -Value 'stale-from-old-version' -NoNewline
+  Write-Output "PASS: isolated v$OldVersion installation launched and left running before upgrade."
 
   $CurrentInstalled = $true
   Invoke-HiddenAndWait $CurrentInstaller @('/VERYSILENT', '/SUPPRESSMSGBOXES', '/NORESTART', "/DIR=`"$InstallDir`"", '/GROUP="BrainLink QA Smoke"')
+  if (Test-Path -LiteralPath $StaleOldFile) { throw 'Upgrade left stale files from the old version in app/.' }
   $uninstaller = Join-Path $InstallDir 'unins000.exe'
   if (-not (Test-Path -LiteralPath $uninstaller)) { throw 'Upgrade did not leave an uninstaller in the isolated install.' }
   $uninstallerVersion = (Get-Item -LiteralPath $uninstaller).VersionInfo.ProductVersion

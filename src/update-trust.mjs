@@ -1,4 +1,6 @@
-// The release publisher's Ed25519 key must be added here in a reviewed source change.
-// Keep this empty until a publisher key is provisioned. Never load trust roots from
-// the network, a user-editable settings file, or an environment variable at runtime.
-export const UPDATE_PUBLIC_KEY = '';
+// Add release publisher Ed25519 public keys here only through a reviewed source change.
+// During rotation, ship an app that pins both old and new keys, then sign a later release
+// with the new key. Remove an old key only after its trust window has safely ended.
+// Never load trust roots from the network, user settings, or an environment variable.
+// No production publisher key is configured yet.
+export const UPDATE_PUBLIC_KEYS = Object.freeze([]);

@@ -1,10 +1,12 @@
 // Setup UI backend: a local-only web app (127.0.0.1, random session token) that picks the
 // vault folder, applies a rule pack and connects AI clients.
+import { runSelfTest } from './self-test.mjs';
+import { createReplayMisses } from './replay-misses.mjs';
 import { createServer } from 'node:http';
 import { createReadStream } from 'node:fs';
 import { existsSync } from 'node:fs';
 import { watch as watchFs } from 'node:fs';
-import { readFile, stat, lstat, cp, mkdir, writeFile, rename, unlink, readdir, rm } from 'node:fs/promises';
+import { readFile, stat, lstat, realpath, cp, mkdir, writeFile, rename, unlink, readdir, rm } from 'node:fs/promises';
 import { randomBytes, timingSafeEqual, createHash } from 'node:crypto';
 import { execFile } from 'node:child_process';
 import { setTimeout as delay } from 'node:timers/promises';
@@ -13,28 +15,32 @@ import path from 'node:path';
 import { loadConfig, saveConfig, configPath, normalize, validate, LOCALES, appHome, emptyConfig } from './config.mjs';
 import { PACKS, buildPack, scaffold, mergePack } from './packs.mjs';
 import { CLIENTS, resolveClient, detect, connectClient, disconnectClient, readClientAgentToken, test, deepSeekSessionCueStatus, setDeepSeekSessionCue } from './connectors.mjs';
-import { createContext, search, searchWithVerdict, readNote, related as relatedNotes, ensureDefaultIgnore, readExcludedFolders, writeExcludedFolders, DEFAULT_EXCLUDED_FOLDERS, SUGGESTED_EXCLUDED_FOLDERS, safeJoin, vaultRoot, countVisibleNotes } from './core.mjs';
+import { createContext, search, searchWithVerdict, semanticStatus, readNote, related as relatedNotes, relatedText, ensureDefaultIgnore, readExcludedFolders, writeExcludedFolders, DEFAULT_EXCLUDED_FOLDERS, SUGGESTED_EXCLUDED_FOLDERS, safeJoin, vaultRoot, countVisibleNotes, parseFrontmatter, inspectVaultStructure, findSecrets } from './core.mjs';
+import { extractTags } from './graph.mjs';
 import { ROOT, launchSpec, readActivity, refreshMap, logActivity } from './runtime.mjs';
 import { detectEmbedder } from './embed.mjs';
+import { validateRerankerSettings, testReranker } from './rerank.mjs';
 import { vaultHealth, brief as createBrief } from './insights.mjs';
 import { loadVault } from './core.mjs';
 import { resolveNoteWikilinks } from './links.mjs';
 import { VERSION, createMcp } from './server.mjs';
-import { findObsidianVaults, nestedVaults } from './obsidian.mjs';
+import { findObsidianVaults, nestedVaults, obsidianOpenUrl, obsidianVaultForPath } from './obsidian.mjs';
 import { syncSettings, chooseSync, suggestFolders, PROVIDERS, PROVIDER_LABELS } from './sync/settings.mjs';
 import { linuxDriveSetup, normalizeDriveSelection } from './sync/gdrive-linux.mjs';
 import { backupScheduleDue, normalizeBackupSchedule } from './backup-schedule.mjs';
 import { runSync } from './sync-cli.mjs';
-import { listGitHubShareCandidates, previewGitHubRepository, commitGitHubSelectedNotes, pushGitHubSelectedNotes, listGitHubPullCandidates, importGitHubSelectedNotes, saveGitHubConflictCopies, inspectGitHubAssignment, githubAssignmentStatus } from './sync/github-preview.mjs';
+import { listGitHubShareCandidates, previewGitHubRepository, commitGitHubSelectedNotes, pushGitHubSelectedNotes, listGitHubPullCandidates, importGitHubSelectedNotes, saveGitHubConflictCopies, inspectGitHubAssignment, testGitHubRepositoryAccess, cloneGitHubRepository, githubAssignmentStatus } from './sync/github-preview.mjs';
 import { githubAssignmentProjection } from './sync/github-assignment.mjs';
 import { runGitHubAutoSync } from './sync/github-auto-sync.mjs';
 import { sessionsService } from './host.mjs';
 import { addAgent, renameAgent, removeAgent, revokeAgent, markConnected, findAgentByToken, publicAgent, localAgentSnippet, remoteAgentSnippet, generateAgentToken, hashToken } from './mcp-agents.mjs';
-import { analyzeActivitySignals } from './rsi-observations.mjs';
+import { analyzeActivitySignals, attachRetrievalObservationSignals } from './rsi-observations.mjs';
 import { buildGraph3D, noteDetail3D, listProposedTypedRelations, discoverVaultRelationshipCandidates, listGraphVaults } from './graph3d.mjs';
-import { deriveTypedRelations, deriveProposedTypedRelations, deriveRejectedTypedRelations, discoverTypedRelationshipCandidates, typedEntityMetadataMap, typedRelationAllowed, appendTypedRelationProposal, approveTypedRelation, rejectTypedRelation, reopenTypedRelation } from './typed-graph.mjs';
+import { deriveTypedRelations, deriveProposedTypedRelations, deriveRejectedTypedRelations, deriveWithdrawnTypedRelations, discoverTypedRelationshipCandidates, typedEntityFields, typedEntityMetadataMap, typedRelationAllowed, updateTypedEntityFields, updateTypedRelation, appendTypedRelationProposal, approveTypedRelation, rejectTypedRelation, reopenTypedRelation, withdrawTypedRelation } from './typed-graph.mjs';
 import { snapshotSettings, chooseSnapshot, suggestSnapshotFolder, clearSnapshot, startSnapshotWatcher, writeSnapshotOnce, loadSnapshotStatus, saveSnapshotStatus } from './snapshot.mjs';
-import { listHandoffs, proposeNote } from './writes.mjs';
+import { listHandoffs, proposeNote, commitNew, appendTo, checkWritePath } from './writes.mjs';
+import { readMemoryForReview, saveMemoryForReview } from './memory-review.mjs';
+import { createProposalInbox } from './proposal-inbox.mjs';
 import { backupOnce, verifyBackup, restoreBackupToEmpty, loadBackupStatus, saveBackupStatus, pruneBackups, listVerifiedBackups } from './backup.mjs';
 import { createOrReadBackupRecoveryKey, parseBackupKey, requireBackupKey } from './backup-key.mjs';
 import { fileSessionSummary, readFiledSessionSummary, updateFiledSessionSummary, listFiledSessionSummaries, findFiledSessionSummary } from './sessions/filing.mjs';
@@ -47,28 +53,43 @@ import { sessionHookStatus, setSessionHook, hermesSessionHookStatus, setHermesSe
 import { twinProfileStatus, profileScopeEditable } from './twin-profiles.mjs';
 import { createRsiLedger } from './rsi-ledger.mjs';
 import { createRsiExperiments } from './rsi-experiments.mjs';
+import { listDecisionReviews, readDecisionReview, validReviewDate } from './decision-reviews.mjs';
+import { createConflictReviewStore, listConflictCandidates } from './conflict-review.mjs';
+import { buildTidyBatch, createTidyState, tidyAppendBlock } from './tidy.mjs';
 import { createRsiDiscovery } from './rsi-discovery.mjs';
 import { createRsiObservationSchedule } from './rsi-observation-schedule.mjs';
+import { retrievalUseReport } from './retrieval-use.mjs';
 import { createRsiWeekly, taipeiWeek } from './rsi-weekly.mjs';
 import { validateWeeklyBenchmarkSchedule, weeklyBenchmarkScheduleDue, weeklyScheduleWeek } from './rsi-weekly-schedule.mjs';
-import { readGitSourceState } from './git-source-state.mjs';
+import { hasGitCommit, readGitSourceState } from './git-source-state.mjs';
 import { inspectAgentSkills, installAgentSkills, removeAgentSkills, skillClientRoot } from './agent-skills.mjs';
 import { ingestionQueue, readIngestionSource, recordIngestion } from './ingestion.mjs';
 import { generateLocalIngestionDraft } from './ingestion-draft.mjs';
-import { ingestionDraftId, listIngestionDrafts, readIngestionDraft, removeIngestionDraft, saveIngestionDraft } from './ingestion-drafts-store.mjs';
+import { redactText } from './sessions/redact.mjs';
+import { ingestionDraftId, listIngestionDrafts, readIngestionDraft, removeIngestionDraft, saveIngestionDraft, updateIngestionDraftFiling } from './ingestion-drafts-store.mjs';
 import { INGESTION_MAX_ATTEMPTS, INGESTION_RETRY_DELAY_MS, ingestionScheduleDue, localDateAndTime, normalizeIngestionTargets, validateIngestionSchedule } from './ingestion-schedule.mjs';
 import { briefScheduleDue, validateBriefSchedule } from './brief-schedule.mjs';
 import { defaultRoot as hermesDefaultRoot } from './sessions/hermes.mjs';
 import { checkForUpdate, downloadVerifiedUpdate } from './update-client.mjs';
 import { openUpdatePackage } from './update-launcher.mjs';
-import { UPDATE_PUBLIC_KEY } from './update-trust.mjs';
+import { UPDATE_PUBLIC_KEYS } from './update-trust.mjs';
 import { inspectClaudeDesktopRuntime } from './client-runtime.mjs';
+import { renderSetupPage } from './setup-page.mjs';
+import { createFindRoutes } from './setup/routes/find.mjs';
+import { createReviewRoutes } from './setup/routes/review.mjs';
+import { createHandoffRoutes } from './setup/routes/handoffs.mjs';
+import { createMcpRoutes } from './setup/routes/mcp.mjs';
+import { createRsiRoutes } from './setup/routes/rsi.mjs';
+import { createAdvancedRoutes } from './setup/routes/advanced.mjs';
 
 const GRAPH_NOTE_MUTATIONS = new Set([
   '/api/graph3d/note/save',
+  '/api/graph3d/entity/save',
   '/api/graph3d/relationship/approve',
   '/api/graph3d/relationship/reject',
   '/api/graph3d/relationship/reopen',
+  '/api/graph3d/relationship/archive',
+  '/api/graph3d/relationship/edit',
   '/api/graph3d/relationship/propose',
   '/api/graph3d/relationship/propose-manual',
 ]);
@@ -105,6 +126,20 @@ async function readUiStatic(rel) {
 
 const json = (res, code, body) => res.writeHead(code, { 'Content-Type': 'application/json', 'Cache-Control': 'no-store' }).end(JSON.stringify(body));
 const LOCALES_DIR = path.join(ROOT, 'ui', 'locales');
+
+async function verifyStagedUpdate(pending) {
+  const root = path.resolve(pending.folder);
+  const file = path.resolve(pending.file);
+  const relative = path.relative(root, file);
+  if (!relative || relative === '..' || relative.startsWith(`..${path.sep}`) || path.isAbsolute(relative)) throw new Error('Verified update package path is invalid.');
+  const info = await lstat(file);
+  if (!info.isFile() || info.isSymbolicLink() || info.size !== pending.size) throw new Error('Verified update package changed after download. Prepare it again.');
+  const digest = createHash('sha256');
+  let bytes = 0;
+  for await (const chunk of createReadStream(file)) { bytes += chunk.length; digest.update(chunk); }
+  if (bytes !== pending.size || digest.digest('hex') !== pending.sha256) throw new Error('Verified update package changed after download. Prepare it again.');
+  return file;
+}
 
 async function markdownFingerprint(root) {
   const rows = [];
@@ -158,7 +193,9 @@ function startVaultChangeWatcher(vaults, onChange, { debounceMs = 300, pollMs = 
   // network/FUSE-backed vault (for example an rclone Google Drive mount). In that
   // case the user can refresh Setup manually; never scan the whole remote tree just
   // to start the local dashboard.
-  if (fallback.length && process.platform !== 'linux') {
+  // Linux always uses the fingerprint fallback because recursive fs.watch is unavailable.
+  // Non-Linux platforms use it only when their native recursive watcher could not start.
+  if (fallback.length) {
     const initialize = Promise.all(fallback.map(async (vault) => fingerprints.set(vault.name, await markdownFingerprint(vault.path))));
     pollTimer = setInterval(async () => {
       if (stopped || pollRunning) return;
@@ -180,7 +217,7 @@ function startVaultChangeWatcher(vaults, onChange, { debounceMs = 300, pollMs = 
 function assertTwinActionsMatchMemory(agentAccess, memoryPolicy) {
   const requiredMemory = {
     search: 'semantic', read_note: 'semantic',
-    read_session: 'episodic', log_session: 'episodic', propose_note: 'semantic',
+    read_session: 'episodic', log_session: 'episodic', propose_note: 'semantic', write_note: 'semantic',
     handoff_read: 'working', write_handoff: 'working',
   };
   for (const agent of agentAccess) for (const grant of agent.vaults) {
@@ -218,7 +255,7 @@ export function pickFolder(os = process.platform, prompt = 'Choose your Obsidian
 
 // A search snippet is raw note text (headings, **bold**, `code`); strip the Markdown so the
 // instant answer reads as prose instead of exposing the source's formatting.
-const plainText = (s) => String(s || '').replace(/^#+\s*/gm, '').replace(/\*\*([^*]+)\*\*/g, '$1').replace(/`([^`]+)`/g, '$1').replace(/\s+/g, ' ').trim();
+const plainText = (s) => String(s || '').replace(/^#+\s*/gm, '').replace(/\s#{1,6}\s+/g, ' · ').replace(/\[\[(?:[^\]|]*\|)?([^\]]+)\]\]/g, '$1').replace(/\*\*([^*]+)\*\*/g, '$1').replace(/`([^`]+)`/g, '$1').replace(/\s+/g, ' ').replace(/\s#{1,6}$/, '').trim();
 
 // opts: { env, home, os, port, pick, openUrl }
 export async function startSetup(opts = {}) {
@@ -237,6 +274,16 @@ export async function startSetup(opts = {}) {
   }
   const token = opts.token || randomBytes(18).toString('base64url');
   const updateDownloads = new Map();
+  function retainUpdatePackage(ticket, pending) {
+    clearTimeout(pending.timer);
+    pending.expiresAt = Date.now() + 24 * 60 * 60_000;
+    pending.timer = setTimeout(() => {
+      if (updateDownloads.get(ticket) !== pending) return;
+      updateDownloads.delete(ticket);
+      rm(pending.folder, { recursive: true, force: true }).catch(() => {});
+    }, 24 * 60 * 60_000);
+    pending.timer.unref?.();
+  }
   const pick = opts.pick || (() => pickFolder(os));
   const pickSnapshotFolder = opts.pickSnapshotFolder || (() => pickFolder(os, 'Choose a folder to share a read-only copy with cloud agents'));
   const pickBackupFolder = opts.pickBackupFolder || (() => pickFolder(os, 'Choose a private backup destination'));
@@ -246,17 +293,62 @@ export async function startSetup(opts = {}) {
   const clientOpts = () => ({ home, os, env, launch: launchSpec(env), useCli: opts.useCli });
   // Setup and its scheduled local jobs operate with the user's local authority. AI client
   // health checks intentionally use createContext() without this bypass.
-  const localContext = (cfg, contextEnv = env) => createContext(cfg, { env: contextEnv, trustedLocal: true });
+  // Reuse the local Setup index across API requests so every Ask query does not rebuild the
+  // entire vault index. Config/environment changes replace the context, while loadVault still
+  // checks file signatures and privacy metadata before reusing cached notes.
+  let cachedLocalContext = null;
+  const localContext = (cfg, contextEnv = env) => {
+    const identity = createHash('sha256').update(JSON.stringify({
+      cfg,
+      env: Object.fromEntries(['BRAINLINK_VAULTS', 'BRAINLINK_READ_ONLY', 'BRAINLINK_SEMANTIC', 'BRAINLINK_AI_PLATFORM', 'BRAINLINK_HOME', 'APPDATA']
+        .map((key) => [key, contextEnv[key] || null])),
+    })).digest('hex');
+    if (cachedLocalContext?.identity === identity) return cachedLocalContext.ctx;
+    const ctx = createContext(cfg, { env: contextEnv, trustedLocal: true });
+    cachedLocalContext = { identity, ctx };
+    return ctx;
+  };
+  const proposalInbox = createProposalInbox({ home: appHome(env) });
+  const conflictReviewStore = createConflictReviewStore(appHome(env));
+  const tidyState = createTidyState(appHome(env));
   const sessions = sessionsService(env, home); // src/host.mjs: imports only from this Setup user's home
-  const rsiLedger = createRsiLedger({ home: appHome(env) });
+  const rsiLedger = createRsiLedger({ home: appHome(env), verifyCommit: opts.rsiVerifyCommit || ((sha) => hasGitCommit(ROOT, sha)) });
+  let selfTestTickRunning = false;
+  let selfTestLastDate = null;
+  async function runDailySelfTest() {
+    if (selfTestTickRunning) return;
+    selfTestTickRunning = true;
+    try {
+      const cfg = normalize(await loadConfig(file));
+      const local = localContext(cfg, { ...env, BRAINLINK_AI_PLATFORM: '' });
+      const today = localDateAndTime(opts.selfTestNow?.() || new Date(), cfg.timezone).date;
+      if (selfTestLastDate === today) return;
+      const result = await runSelfTest(local);
+      selfTestLastDate = today;
+      const failures = result.checks.filter(check => check.status === 'fail').slice(0, 200).map(check => ({
+        check: String(check.id || 'unknown').replace(/[^a-z0-9-]/gi, '-').toLowerCase().slice(0, 64) || 'unknown',
+        key: createHash('sha256').update(JSON.stringify({ id: check.id || '', vault: check.vault || '', agent: check.agent || '', path: check.path || '' })).digest('hex'),
+      }));
+      await rsiLedger.appendSelfTestFailures(failures);
+    } catch { /* Self-test failures stay local and never affect BrainLink's serving lifecycle. */ }
+    finally { selfTestTickRunning = false; }
+  }
+  const selfTestTimer = setInterval(runDailySelfTest, opts.selfTestTickMs ?? 15 * 60e3);
+  selfTestTimer.unref?.();
+  runDailySelfTest().catch(() => {});
   const rsiWeekly = createRsiWeekly({ home: appHome(env) });
-  const rsiExperiments = createRsiExperiments({ env, ...(opts.rsiSourceState ? { sourceState: opts.rsiSourceState } : {}) });
+  const rsiExperiments = createRsiExperiments({
+    env,
+    getRerankerSettings: async () => (await loadConfig(file)).reranker,
+    ...(opts.rsiSourceState ? { sourceState: opts.rsiSourceState } : {}),
+  });
   // Opt-in research discovery: off until the user enables it; runs only while this process is open.
   const rsiDiscovery = createRsiDiscovery({ home: appHome(env), ledger: rsiLedger, fetchImpl: opts.discoveryFetch, lookup: opts.discoveryLookup });
   const initialDiscoveryStatus = await rsiDiscovery.status().catch(() => null);
   let discoveryKeepsAlive = Boolean(initialDiscoveryStatus?.settings.enabled && !initialDiscoveryStatus.settings.paused);
   const rsiObservationSchedule = createRsiObservationSchedule({
     home: appHome(env), readEntries: () => readActivity(env, 20000),
+    readRetrievalObservations: ({ since } = {}) => rsiWeekly.listRetrievalObservations({ since }),
     ledger: rsiLedger,
     readVaultHealth: async (name) => {
       const cfg = await loadConfig(file);
@@ -279,7 +371,7 @@ export async function startSetup(opts = {}) {
   let observationKeepsAlive = Boolean(initialObservationStatus?.settings.enabled);
   const initialWeeklyBenchmarkConfig = await loadConfig(file);
   let weeklyBenchmarkKeepsAlive = Boolean(initialWeeklyBenchmarkConfig.weekly_benchmark?.enabled);
-  const html = await readFile(path.join(ROOT, 'ui', 'index.html'), 'utf8');
+  const html = await renderSetupPage(ROOT);
   let port = opts.port ?? 0;
   // When started from the app (no terminal), exit after idleMinutes without requests. Closing
   // the Done button in the browser only hides that tab's view (see ui/index.html) — it must
@@ -473,10 +565,22 @@ export async function startSetup(opts = {}) {
   let backupTickRunning = false;
   let backupStatus = await loadBackupStatus(backupStateFile);
   const ingestionStateFile = path.join(appHome(env), 'ingestion-state.json');
-  let ingestionStatus = await readFile(ingestionStateFile, 'utf8').then((raw) => JSON.parse(raw)).catch(() => ({ ok: null, at: null, trigger: null, queued_total: 0, scanned: 0, skipped: 0, error: null }));
+  let ingestionStatus = await readFile(ingestionStateFile, 'utf8').then((raw) => JSON.parse(raw)).catch(() => ({ ok: null, at: null, trigger: null, queued_total: 0, scanned: 0, skipped: 0, unsupported_count: 0, unsupported_formats: [], error: null }));
   let ingestionRunning = false;
   const ingestionDraftsDir = path.join(appHome(env), 'ingestion', 'drafts');
   const ingestionDraftStatusFile = path.join(appHome(env), 'ingestion-draft-state.json');
+  async function typedEntitiesForIngestionSource(ctx, vaultName, source) {
+    const index = await loadVault(ctx, vaultName);
+    const visible = index.notes.filter((note) => !note.private && !note.generated);
+    const metadata = typedEntityMetadataMap(visible);
+    if (!metadata.size) return [];
+    const text = redactText(source.body).toLocaleLowerCase();
+    return visible.map((note) => ({ note, entity: metadata.get(note) }))
+      .filter(({ note, entity }) => entity && note.rel !== source.rel && note.title.length >= 3 && text.includes(note.title.toLocaleLowerCase()))
+      .sort((a, b) => b.note.title.length - a.note.title.length || a.note.rel.localeCompare(b.note.rel))
+      .slice(0, 12)
+      .map(({ note, entity }) => ({ id: entity.entity_id, title: note.title, type: entity.type, scope: entity.scope }));
+  }
   let ingestionDraftStatus = await readFile(ingestionDraftStatusFile, 'utf8').then((raw) => JSON.parse(raw)).catch(() => ({ ok: null, at: null, trigger: null, attempted: 0, created: 0, failed: 0 }));
   const briefStateFile = path.join(appHome(env), 'brief-state.json');
   let briefStatus = await readFile(briefStateFile, 'utf8').then((raw) => JSON.parse(raw)).catch(() => ({ ok: null, at: null, trigger: null, vault: null, result: null, error: null }));
@@ -538,42 +642,63 @@ export async function startSetup(opts = {}) {
     try {
       const ctx = localContext(cfg, { ...env, BRAINLINK_SEMANTIC: '0' });
       const candidates = [], folders = [];
-      let queued_total = 0, scanned = 0, skipped = 0, truncated = false;
+      let queued_total = 0, scanned = 0, skipped = 0, unsupported_count = 0, truncated = false;
+      const unsupportedCounts = new Map();
       for (const target of selected) {
         try {
           const remaining = Math.max(0, 100 - candidates.length);
           const queue = await ingestionQueue(ctx, target.vault, target.folder, { limit: Math.max(1, remaining) });
-          queued_total += queue.queued_total; scanned += queue.scanned; skipped += queue.skipped; truncated ||= queue.truncated;
-          folders.push({ vault: target.vault, folder: queue.folder, ok: true, queued_total: queue.queued_total, scanned: queue.scanned, skipped: queue.skipped, truncated: queue.truncated });
+          queued_total += queue.queued_total; scanned += queue.scanned; skipped += queue.skipped; unsupported_count += queue.unsupported_count || 0; truncated ||= queue.truncated;
+          for (const item of queue.unsupported_formats || []) {
+            const extension = String(item.extension || '');
+            const key = unsupportedCounts.has(extension) || unsupportedCounts.size < 19 ? extension : 'other';
+            unsupportedCounts.set(key, (unsupportedCounts.get(key) || 0) + Math.max(0, Number(item.count) || 0));
+          }
+          folders.push({ vault: target.vault, folder: queue.folder, ok: true, queued_total: queue.queued_total, scanned: queue.scanned, skipped: queue.skipped, unsupported_count: queue.unsupported_count || 0, unsupported_formats: queue.unsupported_formats || [], truncated: queue.truncated });
           const destinations = (await listSessionFilingFolders(ctx, target.vault))
             .map((entry) => entry.path)
             .filter((folder) => folder && folder !== target.folder && !folder.startsWith(`${target.folder}/`)
               && !(folder === ctx.byName.get(target.vault)?.intake_folder && ctx.byName.get(target.vault)?.decisions?.length));
-          for (const item of queue.candidates.slice(0, remaining)) candidates.push({ ...item, vault: target.vault, folder: queue.folder, destinations });
+          const configured = (cfg.ingestion?.targets || []).find((item) => item.vault === target.vault && item.folder === queue.folder);
+          const destination = target.destination || configured?.destination || null;
+          for (const item of queue.candidates.slice(0, remaining)) candidates.push({ ...item, vault: target.vault, folder: queue.folder, destination, destinations });
         } catch (error) {
           folders.push({ vault: target.vault, folder: target.folder, ok: false, error: error.message || String(error) });
         }
       }
       const failures = folders.filter((entry) => !entry.ok);
-      const status = { ok: failures.length === 0, at: new Date().toISOString(), trigger, vault: selected.length === 1 ? selected[0].vault : null, folder: selected.length === 1 ? selected[0].folder : null, targets: folders, queued_total, scanned, skipped, truncated, error: failures.length ? failures.map((entry) => `${entry.vault}: ${entry.error}`).join('; ').slice(0, 500) : null };
+      const unsupported_formats = [...unsupportedCounts.entries()].map(([extension, count]) => ({ extension, count })).sort((a, b) => a.extension.localeCompare(b.extension));
+      const status = { ok: failures.length === 0, at: new Date().toISOString(), trigger, vault: selected.length === 1 ? selected[0].vault : null, folder: selected.length === 1 ? selected[0].folder : null, targets: folders, queued_total, scanned, skipped, unsupported_count, unsupported_formats, truncated, error: failures.length ? failures.map((entry) => `${entry.vault}: ${entry.error}`).join('; ').slice(0, 500) : null };
       await saveIngestionStatus(status);
       await logActivity(env, { tool: 'source_scan', ok: status.ok });
       return { ...status, candidates, limited: queued_total > candidates.length };
     } catch (error) {
-      const status = { ok: false, at: new Date().toISOString(), trigger, vault: null, folder: null, queued_total: 0, scanned: 0, skipped: 0, error: error.message || String(error) };
+      const status = { ok: false, at: new Date().toISOString(), trigger, vault: null, folder: null, queued_total: 0, scanned: 0, skipped: 0, unsupported_count: 0, unsupported_formats: [], error: error.message || String(error) };
       await saveIngestionStatus(status).catch(() => {});
       await logActivity(env, { tool: 'source_scan', ok: false });
       throw error;
     } finally { ingestionRunning = false; }
   }
-  async function runScheduledIngestionDrafts(cfg, candidates) {
-    const record = { ok: true, at: new Date().toISOString(), trigger: 'schedule', attempted: 0, created: 0, already_pending: 0, failed: 0, limited: 0 };
+  async function runScheduledIngestionDrafts(cfg, candidates, { trigger = 'schedule' } = {}) {
+    const record = { ok: true, at: new Date().toISOString(), trigger, attempted: 0, created: 0, filed: 0, waiting_review: 0, already_pending: 0, failed: 0, limited: 0 };
     try {
       if (!cfg.ingestion?.autoDrafts || !cfg.sessions.localSummary?.enabled || !cfg.sessions.localSummary?.model) throw new Error('Local draft settings are not enabled.');
       const selected = [];
       for (const candidate of candidates) {
         const id = ingestionDraftId({ vault: candidate.vault, source_id: candidate.source_id, revision: candidate.revision });
-        if (await readIngestionDraft(ingestionDraftsDir, id)) { record.already_pending++; continue; }
+        const existing = await readIngestionDraft(ingestionDraftsDir, id);
+        if (existing) {
+          if (cfg.ingestion.autoFile && candidate.destination && existing.draft.destinations.includes(candidate.destination)) {
+            try {
+              const relationshipIndexes = (existing.draft.relationships || []).map((_, index) => index).slice(0, 12);
+              const filed = await saveIngestionDraftRecord(cfg, id, candidate.destination, null, [], relationshipIndexes);
+              if (filed.written && !filed.partial) record.filed++;
+              else if (filed.written) record.waiting_review++;
+              else record.waiting_review++;
+            } catch { record.failed++; }
+          } else record.already_pending++;
+          continue;
+        }
         if (selected.length < 5) selected.push(candidate);
       }
       record.attempted = selected.length; record.limited = Math.max(0, candidates.length - selected.length - record.already_pending);
@@ -581,12 +706,26 @@ export async function startSetup(opts = {}) {
       for (const candidate of selected) {
         try {
           const source = await readIngestionSource(ctx, candidate.vault, candidate.folder, { source_id: candidate.source_id, revision: candidate.revision });
+          source.typed_entities = await typedEntitiesForIngestionSource(ctx, candidate.vault, source);
           const draft = await generateLocalIngestionDraft(source, cfg.sessions.localSummary.model, { fetchImpl: opts.ingestionDraftFetch || fetch });
+          const related = await relatedText(ctx, draft.vault, `${draft.title}\n${draft.body}\n${redactText(source.body)}`, { excludePath: source.rel });
+          draft.related_basis = 'source_and_draft';
+          draft.related_notes = related.suggested
+            .filter((item) => typeof item.path === 'string' && !/[\[\]]/.test(item.path) && Array.isArray(item.shared_terms))
+            .slice(0, 8)
+            .map((item) => ({ path: item.path, title: String(item.title || '').slice(0, 160), shared_terms: item.shared_terms.slice(0, 6).map((term) => String(term).slice(0, 50)), score: Number(item.score) || 0 }));
           draft.destinations = (await listSessionFilingFolders(ctx, draft.vault)).map((entry) => entry.path)
             .filter((folder) => folder && folder !== draft.folder && !folder.startsWith(`${draft.folder}/`)
               && !(folder === ctx.byName.get(draft.vault)?.intake_folder && ctx.byName.get(draft.vault)?.decisions?.length));
-          await saveIngestionDraft(ingestionDraftsDir, draft);
+          const savedDraft = await saveIngestionDraft(ingestionDraftsDir, draft);
           record.created++;
+          if (cfg.ingestion.autoFile && candidate.destination && draft.destinations.includes(candidate.destination)) {
+            const relationshipIndexes = (draft.relationships || []).map((_, index) => index).slice(0, 12);
+            const filed = await saveIngestionDraftRecord(cfg, savedDraft.id, candidate.destination, null, [], relationshipIndexes);
+            if (filed.written && !filed.partial) record.filed++;
+            else if (filed.written) record.waiting_review++;
+            else record.waiting_review++;
+          }
         } catch { record.failed++; }
       }
       record.ok = record.failed === 0;
@@ -598,6 +737,171 @@ export async function startSetup(opts = {}) {
     await logActivity(env, { tool: 'source_auto_draft', ok: record.ok });
     return record;
   }
+  async function saveIngestionDraftRecord(cfg, id, destination, requestedRelated = null, entityChoices = [], relationChoices = [], dismissUnselectedEntities = false) {
+    const stored = await readIngestionDraft(ingestionDraftsDir, id);
+    const draft = stored?.draft;
+    if (!draft) throw new Error('This local draft is missing or damaged. Prepare it again from the source queue.');
+    const chosen = String(destination || '').trim().replace(/\\/g, '/').replace(/^\/+|\/+$/g, '');
+    if (!chosen || !Array.isArray(draft.destinations) || !draft.destinations.includes(chosen)) throw new Error('Choose an existing knowledge folder outside the selected source folder.');
+    if (stored.filing && stored.filing.destination !== chosen) throw new Error('This filing already saved its main note. Retry the remaining suggestions in the original destination.');
+    const ctx = localContext(cfg, { ...env, BRAINLINK_SEMANTIC: '0' });
+    const source = await readIngestionSource(ctx, draft.vault, draft.folder, { source_id: draft.source_id, revision: draft.revision });
+    const availableFolders = new Set((await listSessionFilingFolders(ctx, draft.vault)).map((entry) => entry.path));
+    if (!availableFolders.has(chosen)) throw new Error('The selected knowledge folder is no longer available in this vault.');
+    if (!Array.isArray(entityChoices) || entityChoices.length > 8) throw new Error('Choose only entity suggestions shown in this draft.');
+    if (new Set(entityChoices.map((choice) => choice?.index)).size !== entityChoices.length) throw new Error('An entity suggestion was selected more than once.');
+    const savedEntities = new Set(stored.filing?.saved_entities || []);
+    const savedChoices = (stored.filing?.entity_choices || []).filter((choice) => savedEntities.has(choice.index));
+    const mergedChoices = new Map(savedChoices.map((choice) => [choice.index, choice]));
+    for (const choice of entityChoices) {
+      const previous = mergedChoices.get(choice?.index);
+      if (previous && previous.scope !== choice.scope) throw new Error('An entity suggestion cannot be reassigned after it was saved.');
+      mergedChoices.set(choice?.index, choice);
+    }
+    const effectiveEntityChoices = [...mergedChoices.values()];
+    const effectiveRelationChoices = stored.filing?.relationship_indexes || relationChoices;
+    if (!Array.isArray(effectiveEntityChoices) || effectiveEntityChoices.length > 8 || effectiveEntityChoices.some((choice) => !choice || !Number.isSafeInteger(choice.index) || choice.index < 0 || choice.index >= (draft.entities || []).length || !['personal', 'organisation', 'client'].includes(choice.scope))) throw new Error('Choose only entity suggestions shown in this draft and set a valid scope.');
+    const uniqueIndexes = new Set(effectiveEntityChoices.map((choice) => choice.index));
+    if (uniqueIndexes.size !== effectiveEntityChoices.length) throw new Error('An entity suggestion was selected more than once.');
+    const selectedEntities = effectiveEntityChoices.map((choice) => ({ ...draft.entities[choice.index], index: choice.index, scope: choice.scope }));
+    if (!Array.isArray(effectiveRelationChoices) || effectiveRelationChoices.length > 12 || effectiveRelationChoices.some((index) => !Number.isSafeInteger(index) || index < 0 || index >= (draft.relationships || []).length)) throw new Error('Choose only relationship suggestions shown in this draft.');
+    const uniqueRelationIndexes = new Set(effectiveRelationChoices);
+    if (uniqueRelationIndexes.size !== effectiveRelationChoices.length) throw new Error('A relationship suggestion was selected more than once.');
+    const selectedRelationships = effectiveRelationChoices.map((index) => ({ ...draft.relationships[index], index }));
+    const redactedSource = redactText(source.body);
+    if (selectedEntities.some((entity) => !entity.evidence || !redactedSource.includes(entity.evidence))) throw new Error('An entity quote no longer matches the selected source. Prepare the draft again.');
+    if (selectedRelationships.some((relationship) => !relationship.evidence || !redactedSource.includes(relationship.evidence))) throw new Error('A relationship quote no longer matches the selected source. Prepare the draft again.');
+    let selectedPaths;
+    if (stored.filing) selectedPaths = stored.filing.related_paths;
+    else {
+      const originalCandidates = new Set((draft.related_notes || []).map((item) => item.path));
+      if (requestedRelated !== null && (!Array.isArray(requestedRelated) || requestedRelated.length > 5 || requestedRelated.some((item) => typeof item !== 'string'))) throw new Error('Choose up to five related-note suggestions from this draft.');
+      selectedPaths = requestedRelated === null ? [...originalCandidates].slice(0, 3) : [...new Set(requestedRelated)];
+      if (requestedRelated !== null && selectedPaths.length !== requestedRelated.length) throw new Error('A related-note suggestion was selected more than once.');
+      const relatedNow = draft.related_basis === 'source_and_draft'
+        ? await relatedText(ctx, draft.vault, `${draft.title}\n${draft.body}\n${redactText(source.body)}`, { excludePath: draft.source_path })
+        : await relatedNotes(ctx, draft.vault, draft.source_path);
+      const currentCandidates = new Set(relatedNow.suggested.map((item) => item.path));
+      if (selectedPaths.some((item) => !originalCandidates.has(item) || !currentCandidates.has(item))) throw new Error('A related-note suggestion is no longer visible. Review the source and prepare the draft again.');
+    }
+    const relatedSection = selectedPaths.length
+      ? `\n\n## Related notes (${requestedRelated === null ? 'automatic shared-term suggestions; unverified' : 'selected similarity suggestions; not verified facts'})\n${selectedPaths.map((item) => `- [[${item.replace(/\.md$/i, '')}]]`).join('\n')}`
+      : '';
+    const result = stored.filing ? { ok: true, written: true, path: `${draft.vault}/${stored.filing.note_path}` } : await proposeNote(ctx, {
+      vault: draft.vault, folder: chosen, title: draft.title, body: `${draft.body}${relatedSection}`,
+      type: 'note', memory_type: draft.memory_type, confidence: 'reported',
+      source: `Local AI draft from ${draft.source_path}`,
+      ai_platform: 'BrainLink Local Review', agent_or_role: 'Raw-to-Wiki draft',
+      session_or_task_id: `ingestion-${draft.source_id.slice(0, 12)}`, confirm: true, auto_link: false,
+    });
+    if (!result.ok || !result.written) return { ...result, written: false, saved_as_proposal: false };
+    const prefix = `${draft.vault}/`;
+    const notePath = result.path.startsWith(prefix) ? result.path.slice(prefix.length) : '';
+    if (!notePath) throw new Error('The saved note path could not be verified. The draft remains available for recovery.');
+    let filing = stored.filing || { destination: chosen, note_path: notePath, related_paths: selectedPaths, entity_choices: selectedEntities.map(({ index, scope }) => ({ index, scope })), relationship_indexes: selectedRelationships.map(({ index }) => index), saved_entities: [], dismissed_entity_indexes: [], saved_relationships: [] };
+    if (stored.filing) {
+      filing = { ...filing, entity_choices: effectiveEntityChoices };
+      await updateIngestionDraftFiling(ingestionDraftsDir, id, filing);
+    }
+    if (!stored.filing) {
+      await updateIngestionDraftFiling(ingestionDraftsDir, id, filing);
+    }
+    await logActivity(env, { tool: 'source_proposal_saved', ok: true });
+    const entityProposals = [];
+    for (const entity of selectedEntities) {
+      if (filing.saved_entities.includes(entity.index)) {
+        entityProposals.push({ title: entity.title, path: 'already saved', status: 'proposed', verified: false, saved: true });
+        continue;
+      }
+      const slug = entity.title.toLowerCase().normalize('NFKD').replace(/[\u0300-\u036f]/g, '').replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '').slice(0, 70);
+      if (!slug) { entityProposals.push({ title: entity.title, errors: ['This entity title cannot be converted to a safe record ID.'] }); continue; }
+      const entityId = `${entity.type}.${slug}`;
+      const current = await loadVault(ctx, draft.vault);
+      const existing = current.notes.find((note) => {
+        if (note.private || note.generated) return false;
+        const meta = parseFrontmatter(note.raw).meta;
+        return meta.id === entityId && meta.type === entity.type && meta.scope === entity.scope && meta.status === 'proposed'
+          && note.raw.includes(`> ${entity.evidence}`) && note.raw.includes(`[[${draft.source_path.replace(/\.md$/i, '')}]]`);
+      });
+      const entityResult = existing ? { ok: true, written: true, path: `${draft.vault}/${existing.rel}` } : await proposeNote(ctx, {
+        vault: draft.vault, folder: chosen, title: entity.title,
+        body: `## Description (AI draft; unverified)\n${entity.description}\n\n## Source evidence (exact quote; unverified)\n> ${entity.evidence}\n\n## Source\n[[${draft.source_path.replace(/\.md$/i, '')}]]\n\nReview this entity, its scope, and evidence before changing its status from proposed.`,
+        type: entity.type, entity_id: entityId, entity_scope: entity.scope,
+        memory_type: 'semantic', confidence: 'reported', source: `Exact quote from ${draft.source_path}`,
+        ai_platform: 'BrainLink Local Review', agent_or_role: 'Raw-to-Wiki entity suggestion',
+        session_or_task_id: `ingestion-${draft.source_id.slice(0, 12)}`, confirm: true, auto_link: false,
+      });
+      if (entityResult.ok && entityResult.written) {
+        filing = { ...filing, saved_entities: [...new Set([...filing.saved_entities, entity.index])] };
+        await updateIngestionDraftFiling(ingestionDraftsDir, id, filing);
+        entityProposals.push({ title: entity.title, path: entityResult.path, status: 'proposed', verified: false });
+      }
+      else entityProposals.push({ title: entity.title, errors: entityResult.errors || ['Could not save this entity proposal.'] });
+    }
+    if (dismissUnselectedEntities === true) {
+      const selectedIndexes = new Set(effectiveEntityChoices.map(({ index }) => index));
+      const dismissed = (draft.entities || []).map((_, index) => index).filter((index) => !selectedIndexes.has(index));
+      filing = { ...filing, dismissed_entity_indexes: [...new Set([...(filing.dismissed_entity_indexes || []), ...dismissed])] };
+      await updateIngestionDraftFiling(ingestionDraftsDir, id, filing);
+    }
+    const relationProposals = [];
+    const latestIndex = await loadVault(ctx, draft.vault);
+    const visible = latestIndex.notes.filter((note) => !note.private && !note.generated);
+    const entityMap = typedEntityMetadataMap(visible);
+    for (const relationship of selectedRelationships) {
+      if (filing.saved_relationships.includes(relationship.index)) {
+        relationProposals.push({ subject: relationship.subject_title, predicate: relationship.predicate, target: relationship.target_title, path: 'already saved', review: 'proposed', verified: false });
+        continue;
+      }
+      const subjectEntry = [...entityMap.entries()].find(([, meta]) => meta.entity_id === relationship.subject_id && meta.scope === relationship.scope);
+      const targetEntry = [...entityMap.entries()].find(([, meta]) => meta.entity_id === relationship.target_id && meta.scope === relationship.scope);
+      if (!subjectEntry || !targetEntry || subjectEntry[0] === targetEntry[0] || !typedRelationAllowed(relationship.predicate, subjectEntry[1].type, targetEntry[1].type)) {
+        relationProposals.push({ predicate: relationship.predicate, errors: ['The graph records changed or are no longer compatible. Review the current graph and try again.'] });
+        continue;
+      }
+      const subjectNote = subjectEntry[0];
+      const full = safeJoin(vaultRoot(ctx, draft.vault), subjectNote.rel);
+      const raw = await readFile(full, 'utf8');
+      if (raw !== subjectNote.raw) {
+        relationProposals.push({ predicate: relationship.predicate, errors: ['The graph record changed while saving. Reload it and review again.'] });
+        continue;
+      }
+      let next;
+      try { next = appendTypedRelationProposal(raw, { predicate: relationship.predicate, target_id: relationship.target_id, evidence: relationship.evidence, confidence: 0.5 }); }
+      catch {
+        const target = latestIndex.notes.findIndex((note) => {
+          const meta = parseFrontmatter(note.raw).meta;
+          return meta.id === relationship.target_id && meta.scope === relationship.scope && !note.private && !note.generated;
+        });
+        const source = latestIndex.notes.indexOf(subjectNote);
+        const alreadySaved = deriveProposedTypedRelations(latestIndex.notes).some((edge) => edge.source === source && edge.target === target && edge.predicate === relationship.predicate && edge.evidence === relationship.evidence);
+        if (alreadySaved) {
+          filing = { ...filing, saved_relationships: [...new Set([...filing.saved_relationships, relationship.index])] };
+          await updateIngestionDraftFiling(ingestionDraftsDir, id, filing);
+          relationProposals.push({ subject: relationship.subject_title, predicate: relationship.predicate, target: relationship.target_title, path: subjectNote.rel, review: 'proposed', verified: false });
+        } else relationProposals.push({ predicate: relationship.predicate, errors: ['This relationship is already present or is no longer valid.'] });
+        continue;
+      }
+      const sourceLink = draft.source_path.replace(/\.md$/i, '');
+      const linkLine = `- [[${sourceLink}]]`;
+      if (!next.includes(linkLine)) next += `\n\n## BrainLink proposed relationship sources\n\n${linkLine}\n`;
+      const temp = `${full}.brainlink-${randomBytes(6).toString('hex')}.tmp`;
+      try { await writeFile(temp, next, 'utf8'); await rename(temp, full); }
+      catch (error) { await unlink(temp).catch(() => {}); relationProposals.push({ predicate: relationship.predicate, errors: ['Could not save the relationship proposal.'] }); continue; }
+      subjectNote.raw = next;
+      filing = { ...filing, saved_relationships: [...new Set([...filing.saved_relationships, relationship.index])] };
+      await updateIngestionDraftFiling(ingestionDraftsDir, id, filing);
+      relationProposals.push({ subject: relationship.subject_title, predicate: relationship.predicate, target: relationship.target_title, path: subjectNote.rel, review: 'proposed', verified: false });
+    }
+    const resolvedEntities = new Set([...(filing.saved_entities || []), ...(filing.dismissed_entity_indexes || [])]);
+    const entityReviewRemaining = (draft.entities || []).filter((_, index) => !resolvedEntities.has(index)).length;
+    const partial = entityReviewRemaining > 0 || entityProposals.some((item) => !item.path) || relationProposals.some((item) => !item.path);
+    if (!partial) {
+      await recordIngestion(ctx, draft.vault, draft.folder, { source_id: draft.source_id, revision: draft.revision, outcome: 'filed', knowledge_path: notePath });
+      await removeIngestionDraft(ingestionDraftsDir, id);
+    }
+    return { ok: true, written: true, partial, entity_review_remaining: entityReviewRemaining, saved_as_proposal: true, path: result.path, entity_proposals: entityProposals, relationship_proposals: relationProposals, note_status: 'proposed', confidence: 'reported', verified: false };
+  }
   let ingestionTickRunning = false;
   const ingestionTimer = setInterval(async () => {
     if (ingestionTickRunning || ingestionRunning) return;
@@ -608,10 +912,16 @@ export async function startSetup(opts = {}) {
         const now = new Date();
         if (!ingestionScheduleDue(cfg.ingestion, now, cfg.timezone)) return null;
         const localDate = localDateAndTime(now, cfg.timezone).date;
-        const isRetry = cfg.ingestion.retry_date === localDate && Boolean(cfg.ingestion.retry_after);
+        const isRetry = Boolean(cfg.ingestion.retry_after)
+          && (cfg.ingestion.mode === 'watch' || cfg.ingestion.retry_date === localDate);
         const attempt = isRetry ? (Number(cfg.ingestion.retry_count) || 1) + 1 : 1;
-        // Mark the day before the initial run, then retry failures at a bounded interval.
-        if (!isRetry) {
+        // Reserve the next run before starting it, then retry failures at a bounded interval.
+        if (!isRetry && cfg.ingestion.mode === 'watch') {
+          cfg.ingestion.last_scan_at = now.toISOString();
+          cfg.ingestion.retry_count = 0;
+          cfg.ingestion.retry_date = null;
+          cfg.ingestion.retry_after = null;
+        } else if (!isRetry) {
           cfg.ingestion.last_scheduled_date = localDate;
           cfg.ingestion.retry_count = 0;
           cfg.ingestion.retry_date = null;
@@ -623,10 +933,20 @@ export async function startSetup(opts = {}) {
       if (!scheduled) return;
       const { cfg, localDate, attempt } = scheduled;
       try {
-        const result = await runIngestion(cfg, { trigger: 'schedule' });
+        const trigger = cfg.ingestion.mode === 'watch' ? 'watch' : 'schedule';
+        const result = await runIngestion(cfg, { trigger });
         if (!result.ok) throw new Error(result.error || 'One or more scan folders could not be read.');
-        if (cfg.ingestion.autoDrafts) {
-          const draftResult = await runScheduledIngestionDrafts(cfg, result.candidates);
+        const latestBeforeDrafts = await loadConfig(file);
+        const stillSameTargets = latestBeforeDrafts.ingestion?.enabled
+          && (latestBeforeDrafts.ingestion?.mode || 'daily') === (cfg.ingestion?.mode || 'daily')
+          && JSON.stringify(latestBeforeDrafts.ingestion?.targets || []) === JSON.stringify(cfg.ingestion?.targets || []);
+        if (stillSameTargets && latestBeforeDrafts.ingestion.autoDrafts) {
+          const currentTargets = new Map(latestBeforeDrafts.ingestion.targets.map((target) => [`${target.vault}\0${target.folder}`, target]));
+          const currentCandidates = result.candidates.map((candidate) => ({
+            ...candidate,
+            destination: currentTargets.get(`${candidate.vault}\0${candidate.folder}`)?.destination || null,
+          })).filter((candidate) => currentTargets.has(`${candidate.vault}\0${candidate.folder}`));
+          const draftResult = await runScheduledIngestionDrafts(latestBeforeDrafts, currentCandidates, { trigger });
           if (!draftResult.ok) throw new Error('One or more scheduled local drafts failed.');
         }
         await withConfigMutation(async () => {
@@ -641,7 +961,12 @@ export async function startSetup(opts = {}) {
       } catch (error) {
         const retryAt = await withConfigMutation(async () => {
           const latest = await loadConfig(file);
-          const sameSchedule = latest.ingestion?.enabled && JSON.stringify(latest.ingestion?.targets || []) === JSON.stringify(cfg.ingestion?.targets || []);
+          const sameSchedule = latest.ingestion?.enabled
+            && (latest.ingestion?.mode || 'daily') === (cfg.ingestion?.mode || 'daily')
+            && Number(latest.ingestion?.intervalMinutes || 5) === Number(cfg.ingestion?.intervalMinutes || 5)
+            && (latest.ingestion?.time || '02:00') === (cfg.ingestion?.time || '02:00')
+            && Boolean(latest.ingestion?.autoDrafts) === Boolean(cfg.ingestion?.autoDrafts)
+            && JSON.stringify(latest.ingestion?.targets || []) === JSON.stringify(cfg.ingestion?.targets || []);
           const retry = sameSchedule && attempt < (opts.ingestionMaxAttempts ?? INGESTION_MAX_ATTEMPTS)
             ? new Date(Date.now() + (opts.ingestionRetryMs ?? INGESTION_RETRY_DELAY_MS)).toISOString() : null;
           if (sameSchedule) {
@@ -895,6 +1220,7 @@ export async function startSetup(opts = {}) {
   if (await rsiObservationSchedule.due().catch(() => false)) rsiObservationSchedule.run('schedule').catch(() => {});
 
   let weeklyBenchmarkRunning = false;
+  const weeklyBenchmarkSourceState = opts.weeklyBenchmarkSourceState || (() => readGitSourceState(ROOT));
   async function runWeeklyBenchmark(trigger = 'manual', week = null) {
     if (weeklyBenchmarkRunning) throw new Error('A weekly benchmark is already running.');
     weeklyBenchmarkRunning = true;
@@ -907,7 +1233,8 @@ export async function startSetup(opts = {}) {
       const cfg = await loadConfig(file);
       const benchmarkWeek = week || weeklyScheduleWeek(opts.weeklyBenchmarkNow?.() || new Date(), cfg.timezone);
       const ctx = createContext({ ...emptyConfig(), vaults: [{ name: fixture.vault, path: vaultPath }] }, { env: { ...env, BRAINLINK_SEMANTIC: '0' }, trustedLocal: true });
-      const result = await rsiWeekly.runBenchmark({ ctx, fixture, fixtureBytes, week: benchmarkWeek, softwareVersion: VERSION, sourceState: readGitSourceState(ROOT) });
+      const sourceState = weeklyBenchmarkSourceState();
+      const result = await rsiWeekly.runBenchmark({ ctx, fixture, fixtureBytes, week: benchmarkWeek, softwareVersion: VERSION, sourceState, getSourceState: weeklyBenchmarkSourceState });
       return { ...result, trigger };
     } finally { weeklyBenchmarkRunning = false; }
   }
@@ -996,6 +1323,7 @@ export async function startSetup(opts = {}) {
     }
     return {
       version: VERSION, config_path: file, os, locale: cfg.locale,
+      mcp: cfg.mcp,
       default_excluded_folders: DEFAULT_EXCLUDED_FOLDERS, suggested_excluded_folders: SUGGESTED_EXCLUDED_FOLDERS,
       vaults, agents: cfg.agents, ai_agents: cfg.ai_agents.map(publicAgent), handoff: cfg.handoff, timezone: cfg.timezone,
       twin_profiles: twinProfileStatus(cfg),
@@ -1007,6 +1335,7 @@ export async function startSetup(opts = {}) {
       http: { port: cfg.http.port, token_set: Boolean(cfg.http.token) },
       activity: await readActivity(env, 15),
       semantic: await detectEmbedder(cfg, env),
+      reranker: cfg.reranker,
       obsidian_vaults: (await findObsidianVaults({ home, os, env })).filter((o) => !cfg.vaults.some((v) => path.resolve(v.path) === path.resolve(o.path))),
       sync: (() => {
         const current = syncSettings(cfg);
@@ -1014,6 +1343,7 @@ export async function startSetup(opts = {}) {
         return { ...current, providers: PROVIDERS, provider_labels: PROVIDER_LABELS, suggested_folders: suggestFolders(home), gdrive_setup: linuxDriveSetup({ home, os, env, sync: { ...current, drive: recordedDrive, folder: current.folder || recordedDrive?.mount_path || null } }), status: syncStatus, running: syncRunning };
       })(),
       sessions_sharing: cfg.sessions,
+      sessions_import_available: env.BRAINLINK_DISABLE_HISTORY_IMPORT !== '1',
       sessions_local_summary: cfg.sessions.localSummary,
       sessions_hermes_profile: { home: cfg.sessions.hermesHome, defaultHome: hermesDefaultRoot(home, env) },
       // P1a: imported sessions default to private, and a private session is invisible to every
@@ -1122,38 +1452,49 @@ export async function startSetup(opts = {}) {
     const client = resolveClient(clientId);
     if (!client) throw new Error('Choose a supported AI app.');
     const cfg = await loadConfig(file);
-    const profileId = String(b.profile_id || '');
-    const profile = cfg.twin_profiles.find((item) => item.id === profileId);
-    if (!profile) throw new Error('Choose an existing Twin profile.');
     const existingPresetAgent = cfg.ai_agents.find((item) => item.preset_client_id === clientId);
+    const selections = Array.isArray(b.profiles) ? b.profiles : (b.profile_id ? [{ profile_id: b.profile_id, vaults: b.vaults, memory_policy: b.memory_policy }] : []);
+    if (!selections.length) throw new Error('Choose at least one Twin profile.');
+    if (new Set(selections.map((item) => item.profile_id)).size !== selections.length) throw new Error('A Twin profile can be selected only once.');
+    const updates = [];
+    const namesAcrossProfiles = new Set();
+    for (const selection of selections) {
+    const profile = cfg.twin_profiles.find((item) => item.id === String(selection.profile_id || ''));
+    if (!profile) throw new Error('Choose existing Twin profiles.');
     const existingProfileGrant = existingPresetAgent && profile.agent_access.find((item) => item.agent_id === existingPresetAgent.id);
     const defaultAgentMemory = existingProfileGrant?.memory_policy || (existingProfileGrant ? profile.memory_policy : {
-      working: false, semantic: profile.memory_policy.semantic === true, procedural: false, episodic: false,
+      working: false, semantic: profile.memory_policy.semantic === true,
+      procedural: profile.memory_policy.procedural === true, episodic: profile.memory_policy.episodic === true,
     });
-    const memory_policy = normalizeAgentMemoryPolicy(b.memory_policy, profile.memory_policy, defaultAgentMemory);
-    const requested = Array.isArray(b.vaults) ? b.vaults : [];
-    if (!requested.length || requested.length > profile.vaults.length) throw new Error('Choose at least one vault for this AI app.');
+    const memory_policy = normalizeAgentMemoryPolicy(selection.memory_policy, profile.memory_policy, defaultAgentMemory);
+    const requested = Array.isArray(selection.vaults) ? selection.vaults : [];
+    if (!requested.length || requested.length > profile.vaults.length) throw new Error('Choose at least one vault for each selected Twin profile.');
     const seen = new Set();
     const grants = requested.map((item) => {
       const name = String(item?.name || '');
       const profileVault = profile.vaults.find((grant) => grant.name === name);
       const vault = cfg.vaults.find((entry) => entry.name === name);
       const operations = Array.isArray(item?.operations) ? [...new Set(item.operations)] : [];
-      if (!profileVault || !vault || vault.private || seen.has(name)) throw new Error('Choose only non-private vaults already included in this Twin profile.');
-      if (!operations.length || operations.some((action) => !['search', 'read_note', 'read_session', 'log_session', 'propose_note', 'handoff_read', 'write_handoff'].includes(action))) throw new Error('Choose supported search, note, session, or handoff actions.');
-      const needsSemantic = operations.some((action) => ['search', 'read_note', 'propose_note'].includes(action));
+      if (!profileVault || !vault || seen.has(name) || namesAcrossProfiles.has(name)) throw new Error('Choose available vaults only once across the selected Twin profiles.');
+      if (!operations.length || operations.some((action) => !['search', 'read_note', 'read_session', 'log_session', 'propose_note', 'write_note', 'handoff_read', 'write_handoff'].includes(action))) throw new Error('Choose supported search, note, session, or handoff actions.');
+      const needsSemantic = operations.some((action) => ['search', 'read_note', 'propose_note', 'write_note'].includes(action));
       const needsEpisodic = operations.includes('read_session');
       const needsWorking = operations.some((action) => ['handoff_read', 'write_handoff'].includes(action));
       if (needsSemantic && memory_policy.semantic !== true) throw new Error('Enable semantic memory for this AI before granting note or search access.');
       if ((needsEpisodic || operations.includes('log_session')) && memory_policy.episodic !== true) throw new Error('Enable episodic memory for this AI before granting session access.');
       if (needsWorking && memory_policy.working !== true) throw new Error('Enable working memory for this AI before granting handoff access.');
       if (operations.some((action) => ['handoff_read', 'write_handoff'].includes(action)) && cfg.handoff?.vault !== name) throw new Error('Handoff access is available only in the vault configured as BrainLink’s handoff mailbox.');
-      if (operations.some((action) => ['propose_note', 'write_handoff'].includes(action)) && profileVault.access !== 'propose') throw new Error('Choose propose access for a vault before allowing session closeouts or sending handoffs.');
+      if (operations.includes('write_note') && profileVault.access !== 'write') throw new Error('Choose full read and write access for a vault before granting note writes.');
+      if (operations.some((action) => ['propose_note', 'write_handoff'].includes(action)) && !['propose', 'write'].includes(profileVault.access)) throw new Error('Choose propose or write access for a vault before allowing note proposals or handoffs.');
       seen.add(name);
-      return { name, access: operations.some((action) => ['propose_note', 'write_handoff'].includes(action)) ? 'propose' : 'read', operations };
+      namesAcrossProfiles.add(name);
+      return { name, access: operations.includes('write_note') ? 'write' : operations.some((action) => ['propose_note', 'write_handoff'].includes(action)) ? 'propose' : 'read', operations };
     });
     if (grants.some((grant) => grant.operations.includes('read_session')) && grants.some((grant) => !grant.operations.includes('read_session'))) throw new Error('Session history access applies across this Twin. Select session access for every vault granted to this AI, or remove the other vaults from its access.');
     if (grants.some((grant) => grant.operations.includes('log_session')) && grants.some((grant) => !grant.operations.includes('log_session'))) throw new Error('Private session logging applies across this Twin. Select it for every vault granted to this AI, or remove the other vaults from its access.');
+
+    updates.push({ profile, memory_policy, grants });
+    }
 
     let agent = cfg.ai_agents.find((item) => item.preset_client_id === clientId);
     const token = generateAgentToken();
@@ -1168,9 +1509,10 @@ export async function startSetup(opts = {}) {
       agent.revoked = false;
     }
     for (const item of cfg.twin_profiles) item.agent_access = (item.agent_access || []).filter((grant) => grant.agent_id !== agent.id);
-    const currentProfile = cfg.twin_profiles.find((item) => item.id === profileId);
-    currentProfile.agent_access.push({ agent_id: agent.id, memory_policy, vaults: grants });
-    currentProfile.allowed_actions = [...new Set([...(currentProfile.allowed_actions || []), ...grants.flatMap((grant) => grant.operations)])];
+    for (const { profile, memory_policy, grants } of updates) {
+      profile.agent_access.push({ agent_id: agent.id, memory_policy, vaults: grants });
+      profile.allowed_actions = [...new Set([...(profile.allowed_actions || []), ...grants.flatMap((grant) => grant.operations)])];
+    }
     const validationErrors = validate(cfg);
     if (validationErrors.length) throw new Error(`These permissions cannot be saved: ${validationErrors[0]}`);
 
@@ -1184,7 +1526,7 @@ export async function startSetup(opts = {}) {
       if (!health.ok) throw new Error(health.message);
       const latest = await loadConfig(file);
       await saveConfig(markConnected(latest, agent.id), file);
-      return { ...connected, health, twin_profile: currentProfile.name };
+      return { ...connected, health, twin_profiles: updates.map((item) => item.profile.name) };
     } catch (error) {
       await saveConfig(before, file).catch(() => {});
       if (previousClientConfig !== null) await writeFile(clientConfigFile, previousClientConfig, 'utf8').catch(() => {});
@@ -1221,7 +1563,7 @@ export async function startSetup(opts = {}) {
   }
 
   // The one-click path: use an Obsidian vault, a folder, or a brand-new vault; then connect all AIs.
-  async function quickStart(b) {
+  async function quickStart(b, { connect = true } = {}) {
     const cfg = await loadConfig(file);
     let vaultPath;
     if (b.mode === 'new') {
@@ -1230,7 +1572,6 @@ export async function startSetup(opts = {}) {
       vaultPath = path.join(docs, 'My Brain');
       while (await stat(vaultPath).catch(() => null)) vaultPath = path.join(docs, `My Brain ${++n}`);
       await mkdir(vaultPath, { recursive: true });
-      await writeFile(path.join(vaultPath, 'Welcome.md'), '# Welcome to your brain\n\nThis folder is your second brain. Every AI you connect can read it and add notes here.\n\nTry it: open Claude and say **"Connect to my brain"**. At the end of a chat, say **"Close loop"** to save what you decided.\n\nYou can open this folder in Obsidian (free) any time to read and edit your notes.\n', { flag: 'wx' });
     } else {
       vaultPath = path.resolve(String(b.path || '').replace(/^~(?=$|[\/\\])/, home));
       if (!(await stat(vaultPath).then((x) => x.isDirectory(), () => false))) return { ok: false, error: `Folder not found: ${vaultPath}` };
@@ -1257,128 +1598,45 @@ export async function startSetup(opts = {}) {
     const saved = await loadConfig(file);
     const vault = saved.vaults.find((v) => path.resolve(v.path) === vaultPath);
     const agent = saved.agents.find((a) => a.vault === vault.name);
-    return { ok: true, vault: vault.name, path: vault.path, phrase: agent?.activation[0], close: agent?.close[0], ...(await connectAll(saved)) };
+    return { ok: true, vault: vault.name, path: vault.path, phrase: agent?.activation[0], close: agent?.close[0], ...(connect ? await connectAll(saved) : { connected: [], skipped: [] }) };
   }
 
+  const teachPreviews = new Map();
+  const decisionReviewPreviews = new Map();
+  const conflictReviewPreviews = new Map();
+  const handoffMailboxPreviews = new Map();
+  const tidyBatches = new Map(), tidyPreviews = new Map();
   const routes = {
     'GET /api/state': () => state(),
-    'GET /api/updates/check': async () => checkForUpdate({
-      publicKey: opts.updatePublicKey ?? UPDATE_PUBLIC_KEY,
-      currentVersion: VERSION,
-      platform: os,
-      arch: opts.arch || process.arch,
-      fetchImpl: opts.updateFetch || fetch,
+    ...createMcpRoutes({ file, loadConfig, saveConfig, normalize, withConfigMutation }),
+    ...createRsiRoutes({
+      file, env, loadConfig, saveConfig, stat, createHash,
+      rsiLedger, rsiWeekly, rsiObservationSchedule, rsiExperiments, rsiDiscovery,
+      validateWeeklyBenchmarkSchedule, setWeeklyBenchmarkKeepsAlive: (v) => { weeklyBenchmarkKeepsAlive = v; },
+      touch, runWeeklyBenchmark, refreshObservationIdlePolicy, analyzeActivitySignals,
+      attachRetrievalObservationSignals, readActivity, refreshDiscoveryIdlePolicy, runDiscovery,
     }),
-    'POST /api/updates/download': async () => {
-      const download = await downloadVerifiedUpdate({
-        publicKey: opts.updatePublicKey ?? UPDATE_PUBLIC_KEY,
-        currentVersion: VERSION,
-        platform: os,
-        arch: opts.arch || process.arch,
-        fetchImpl: opts.updateFetch || fetch,
-        tempRoot: opts.updateTempRoot,
-      });
-      const ticket = randomBytes(32).toString('base64url');
-      const timer = setTimeout(() => {
-        const pending = updateDownloads.get(ticket);
-        updateDownloads.delete(ticket);
-        if (pending) rm(pending.folder, { recursive: true, force: true }).catch(() => {});
-      }, 5 * 60_000);
-      timer.unref?.();
-      updateDownloads.set(ticket, { ...download, timer, expiresAt: Date.now() + 5 * 60_000, opened: false });
-      return { status: 'ready', version: download.version, filename: download.filename, format: download.format, size: download.size, sha256: download.sha256, ticket, download_url: `/api/updates/download/${ticket}?t=${encodeURIComponent(token)}` };
-    },
-    'POST /api/updates/open': async (b) => {
-      const ticket = String(b?.ticket || '');
-      if (!/^[A-Za-z0-9_-]{40,48}$/.test(ticket)) throw new Error('This verified update has expired. Check for updates and try again.');
-      const pending = updateDownloads.get(ticket);
-      if (!pending || pending.expiresAt <= Date.now()) throw new Error('This verified update has expired. Check for updates and try again.');
-      if (pending.opened) throw new Error('This package was already opened. Use its download link if you need another copy.');
-      const root = path.resolve(pending.folder);
-      const file = path.resolve(pending.file);
-      const relative = path.relative(root, file);
-      if (!relative || relative === '..' || relative.startsWith(`..${path.sep}`) || path.isAbsolute(relative)) throw new Error('Verified update package path is invalid.');
-      const info = await lstat(file);
-      if (!info.isFile() || info.isSymbolicLink() || info.size !== pending.size) throw new Error('Verified update package changed after download. Prepare it again.');
-      const digest = createHash('sha256');
-      let bytes = 0;
-      for await (const chunk of createReadStream(file)) { bytes += chunk.length; digest.update(chunk); }
-      if (bytes !== pending.size || digest.digest('hex') !== pending.sha256) throw new Error('Verified update package changed after download. Prepare it again.');
-      await (opts.updateLauncher || openUpdatePackage)({ file, format: pending.format, platform: os });
-      pending.opened = true;
-      clearTimeout(pending.timer);
-      pending.expiresAt = Date.now() + 24 * 60 * 60_000;
-      pending.timer = setTimeout(() => {
-        if (updateDownloads.get(ticket) !== pending) return;
-        updateDownloads.delete(ticket);
-        rm(pending.folder, { recursive: true, force: true }).catch(() => {});
-      }, 24 * 60 * 60_000);
-      pending.timer.unref?.();
-      return { status: 'opened', version: pending.version, format: pending.format };
-    },
-    'GET /api/rsi': async () => ({ ideas: await rsiLedger.list() }),
-    'GET /api/rsi/weekly-benchmark': async () => {
-      const cfg = await loadConfig(file);
-      return { runs: await rsiWeekly.benchmarkReport(8), schedule: validateWeeklyBenchmarkSchedule({}, cfg.weekly_benchmark) };
-    },
-    'POST /api/rsi/weekly-benchmark/settings': async (b) => {
-      const cfg = await loadConfig(file);
-      cfg.weekly_benchmark = validateWeeklyBenchmarkSchedule(b, cfg.weekly_benchmark);
-      await saveConfig(cfg, file);
-      weeklyBenchmarkKeepsAlive = cfg.weekly_benchmark.enabled;
-      touch();
-      return { schedule: cfg.weekly_benchmark };
-    },
-    'POST /api/rsi/weekly-benchmark/run': async () => {
-      const run = await runWeeklyBenchmark('manual');
-      const cfg = await loadConfig(file);
-      return { run, runs: await rsiWeekly.benchmarkReport(8), schedule: validateWeeklyBenchmarkSchedule({}, cfg.weekly_benchmark) };
-    },
-    'GET /api/rsi/observations': async () => ({ observations: await rsiObservationSchedule.status() }),
-    'POST /api/rsi/observations/settings': async (b) => {
-      if (b?.vault_health_enabled === true) {
-        const cfg = await loadConfig(file);
-        const selected = cfg.vaults.find((vault) => vault.name === b.vault_health_vault);
-        if (!selected || !await stat(selected.path).then((result) => result.isDirectory(), () => false)) throw new Error('Choose one available vault for link-health checks. The selected vault stays local and is not combined with another vault.');
-      }
-      let observations = await rsiObservationSchedule.configure(b);
-      refreshObservationIdlePolicy(observations);
-      // Give an enabled schedule its first observation promptly, then use the regular timer.
-      if (await rsiObservationSchedule.due()) await rsiObservationSchedule.run('schedule');
-      observations = await rsiObservationSchedule.status();
-      return { observations };
-    },
-    'POST /api/rsi/observations/run': async () => ({ run: await rsiObservationSchedule.run('manual'), observations: await rsiObservationSchedule.status() }),
-    'GET /api/rsi/export': async () => {
-      const record = { schema: 1, exported_at: new Date().toISOString(), ideas: await rsiLedger.list() };
-      return { ...record, sha256: createHash('sha256').update(JSON.stringify(record)).digest('hex') };
-    },
-    'POST /api/rsi/observations/analyze': async () => ({ report: analyzeActivitySignals(await readActivity(env, 20000)) }),
-    'GET /api/rsi/experiments': async () => ({ suites: rsiExperiments.suites() }),
-    'POST /api/rsi/experiments/run': async (b) => {
-      const ideas = await rsiLedger.list();
-      const idea = ideas.find((item) => item.id === b.idea_id);
-      if (!idea) throw new Error('RSI idea not found.');
-      if (idea.status !== 'testing') throw new Error('Move this RSI idea to testing before running an experiment.');
-      const suite = rsiExperiments.suites().find((item) => item.id === b.suite);
-      if (!suite) throw new Error('Choose one of the built-in fictional evaluation suites.');
-      if (idea.fields.candidate_version !== suite.candidate_version) throw new Error(`This test is for candidate ${suite.candidate_version}; update the RSI idea candidate version first.`);
-      const receipt = await rsiExperiments.run(b.suite);
-      return { idea: await rsiLedger.recordExperiment({ id: idea.id, expected_revision: idea.revision, receipt }) };
-    },
-    'POST /api/rsi/ideas/check': async (b) => ({ similar: await rsiLedger.similar(b) }),
-    'POST /api/rsi/ideas': async (b) => ({ idea: await rsiLedger.create(b) }),
-    'POST /api/rsi/ideas/update': async (b) => ({ idea: await rsiLedger.update(b) }),
-    'POST /api/rsi/ideas/monitor': async (b) => ({ idea: await rsiLedger.recordMonitoring(b) }),
-    'POST /api/rsi/ideas/rollback': async (b) => ({ idea: await rsiLedger.recordRollback(b) }),
-    'GET /api/rsi/discovery': async () => ({ discovery: await rsiDiscovery.status() }),
-    'POST /api/rsi/discovery/settings': async (b) => { const discovery = await rsiDiscovery.configure(b); refreshDiscoveryIdlePolicy(discovery); return { discovery }; },
-    'POST /api/rsi/discovery/pause': async () => { const discovery = await rsiDiscovery.pause(); refreshDiscoveryIdlePolicy(discovery); return { discovery }; },
-    'POST /api/rsi/discovery/resume': async () => { const discovery = await rsiDiscovery.resume(); refreshDiscoveryIdlePolicy(discovery); return { discovery }; },
-    'POST /api/rsi/discovery/run': async () => ({ run: await runDiscovery('manual'), discovery: await rsiDiscovery.status() }),
-    'POST /api/rsi/discovery/refresh-source': async (b) => ({ check: await rsiDiscovery.refreshSource(b.idea_id), discovery: await rsiDiscovery.status() }),
+    ...createAdvancedRoutes({
+      file, env, home, os, opts, token, VERSION, UPDATE_PUBLIC_KEYS,
+      loadConfig, saveConfig, normalize, validate, localContext, withConfigMutation,
+      stat, rm, randomBytes, timingSafeEqual,
+      checkForUpdate, downloadVerifiedUpdate, updateDownloads, verifyStagedUpdate, openUpdatePackage, retainUpdatePackage,
+      testReranker, validateRerankerSettings,
+      pickSnapshotFolder, chooseSnapshot, refreshSnapshotWatcher, loadSnapshotStatus, snapshotStateFile, snapshotSettings, suggestSnapshotFolder, clearSnapshot,
+      pickBackupFolder, requireBackupKey, listVerifiedBackups, createOrReadBackupRecoveryKey, pickRestoreSourceFolder, pickRestoreDestinationFolder,
+      normalizeBackupSchedule, parseBackupKey, runBackup, backupScheduleDue, localDateAndTime, refreshBackupTimer, getBackupStatus: () => backupStatus, restoreBackupToEmpty,
+      validateIngestionSchedule, listSessionFilingFolders, ingestionQueue, refreshIngestionSchedule, getIngestionStatus: () => ingestionStatus, runIngestion, runScheduledIngestionDrafts,
+      readIngestionSource, typedEntitiesForIngestionSource, generateLocalIngestionDraft, relatedText, redactText, saveIngestionDraft, ingestionDraftsDir,
+      listIngestionDrafts, readIngestionDraft, recordIngestion, removeIngestionDraft, saveIngestionDraftRecord,
+      validateBriefSchedule, refreshBriefSchedule, getBriefStatus: () => briefStatus, runBrief,
+      setStartupEnabled, logActivity, search, runSelfTest, retrievalUseReport, readActivity,
+      createReplayMisses, proposeNote, teachPreviews, commitNew, searchWithVerdict,
+    }),
     'POST /api/pick-folder': async () => { const p = await pick(); return p === undefined ? { path: null, unavailable: true } : { path: p }; },
+    'POST /api/vault/inspect': async (b) => inspectVaultStructure(String(b.path || '')),
+    ...createHandoffRoutes({ file, loadConfig, inspectVaultStructure, randomBytes, handoffMailboxPreviews, withConfigMutation, saveConfig, refreshVaultWatcher, localContext, env, listHandoffs }),
     'POST /api/quick': (b) => quickStart(b),
+    'POST /api/quick/prepare': (b) => quickStart(b, { connect: false }),
     'POST /api/graph': async (b) => {
       const cfg = await loadConfig(file);
       const name = b.vault || cfg.vaults[cfg.vaults.length - 1]?.name;
@@ -1398,25 +1656,60 @@ export async function startSetup(opts = {}) {
     },
     'POST /api/connect-all': async () => connectAll(await loadConfig(file)),
     'POST /api/vault': async (b) => {
-      const cfg = await loadConfig(file);
-      const vaultPath = path.resolve(String(b.path || '').replace(/^~(?=$|[\/\\])/, home));
-      if (!(await stat(vaultPath).then((s) => s.isDirectory(), () => false))) throw new Error(`Folder not found: ${vaultPath}`);
-      const name = String(b.name || path.basename(vaultPath)).trim();
-      // A real vault folder: write the shipped default excluded-folder list (unless the caller
-      // already chose one, e.g. from the "connect a vault" form), or keep an existing one as-is.
-      if (Array.isArray(b.excludedFolders)) await writeExcludedFolders(vaultPath, b.excludedFolders);
-      else await ensureDefaultIgnore(vaultPath);
-      const built = buildPack(b.pack || 'simple', { vaultName: name, vaultPath, agentName: String(b.agentName || '').trim() || undefined });
-      const drive = normalizeDriveSelection(b.drive);
-      if (drive) built.vault.drive = drive;
-      if (b.private !== undefined) built.vault.private = Boolean(b.private);
-      const created = b.scaffold === false ? [] : await scaffold(vaultPath, built.scaffold);
-      const next = mergePack(cfg, built);
-      if (!next.timezone) next.timezone = Intl.DateTimeFormat().resolvedOptions().timeZone;
-      await saveConfig(next, file);
+      const saved = await withConfigMutation(async () => {
+        const cfg = await loadConfig(file);
+        const vaultPath = path.resolve(String(b.path || '').replace(/^~(?=$|[\/\\])/, home));
+        if (!(await stat(vaultPath).then((s) => s.isDirectory(), () => false))) throw new Error(`Folder not found: ${vaultPath}`);
+        const name = String(b.name || path.basename(vaultPath)).trim();
+        let adopted = null;
+        if (b.adoptExisting === true) {
+          adopted = await inspectVaultStructure(vaultPath);
+          const folderSet = new Set(['', ...adopted.folders]), noteSet = new Set(adopted.notes.map((note) => note.path));
+          if (b.intakeFolder !== undefined && !folderSet.has(String(b.intakeFolder))) throw new Error('The selected intake folder is not an existing visible folder.');
+          if (b.mailboxFolder && !folderSet.has(String(b.mailboxFolder))) throw new Error('The selected handoff folder is not an existing visible folder.');
+          if (b.closeTarget && !noteSet.has(String(b.closeTarget))) throw new Error('The selected role capture note is not an existing visible note.');
+          for (const key of ['readFirst', 'roleNotes']) {
+            if (b[key] !== undefined && (!Array.isArray(b[key]) || b[key].some((rel) => !noteSet.has(String(rel))))) throw new Error(`Selected ${key} must use existing visible notes.`);
+          }
+          if (b.reviewed !== true) throw new Error('Preview the existing-vault configuration before saving.');
+        }
+        // A real vault folder: write the default exclusions unless the owner supplied an
+        // existing ignore file or an explicit list. Existing vault adoption never creates files.
+        if (!adopted && Array.isArray(b.excludedFolders)) await writeExcludedFolders(vaultPath, b.excludedFolders);
+        else if (!b.adoptExisting) await ensureDefaultIgnore(vaultPath);
+        let agentName = String(b.agentName || '').trim();
+        if (!agentName) {
+          const usedNames = new Set(cfg.agents.map(agent => String(agent.name).toLowerCase()));
+          agentName = usedNames.has('brain') ? name : 'Brain';
+          const baseName = agentName;
+          for (let suffix = 2; usedNames.has(agentName.toLowerCase()); suffix++) agentName = `${baseName} ${suffix}`;
+        }
+        const built = buildPack(b.pack || 'simple', { vaultName: name, vaultPath, agentName });
+        const drive = normalizeDriveSelection(b.drive);
+        if (drive) built.vault.drive = drive;
+        if (b.private !== undefined) built.vault.private = Boolean(b.private);
+        if (adopted) {
+          if (b.intakeFolder !== undefined) { built.vault.intake_folder = String(b.intakeFolder); built.vault.flat = !b.intakeFolder; }
+          if (Array.isArray(b.readFirst)) built.vault.read_first = b.readFirst.map(String);
+          if (Array.isArray(b.roleNotes) && built.agents[0]) built.agents[0].connect_notes = b.roleNotes.map(String);
+          if (b.closeTarget && built.agents[0]) built.agents[0].close_target = { mode: 'append-section', path: String(b.closeTarget) };
+          if (b.mailboxFolder) {
+            built.vault.folders = { ...(built.vault.folders || {}), [String(b.mailboxFolder)]: 'Inter-AI mailbox (use send_handoff)' };
+            built.handoff = { vault: name, folder: String(b.mailboxFolder) };
+          }
+        }
+        const created = b.scaffold === false || adopted && b.scaffold !== true ? [] : await scaffold(vaultPath, built.scaffold);
+        const next = mergePack(cfg, built, { moveHandoff: b.moveHandoff === true });
+        if (!next.timezone) next.timezone = Intl.DateTimeFormat().resolvedOptions().timeZone;
+        await saveConfig(next, file);
+        return { next, name, created, handoffOffered: Boolean(built.handoff), adopted: Boolean(adopted) };
+      });
+      const { next, name, created, handoffOffered, adopted } = saved;
       refreshVaultWatcher(next);
-      await refreshMap(next, name, env);
-      return { ok: true, vault: name, created };
+      if (!adopted) await refreshMap(next, name, env);
+      // Tell the owner when this vault's pack offered a mailbox but the existing one was kept.
+      const handoffKept = Boolean(handoffOffered && next.handoff && next.handoff.vault !== name);
+      return { ok: true, vault: name, created, handoff_mailbox: next.handoff ? { vault: next.handoff.vault, folder: next.handoff.folder } : null, handoff_kept: handoffKept };
     },
     'POST /api/vault/remove': async (b) => {
       const next = await withConfigMutation(async () => {
@@ -1424,7 +1717,7 @@ export async function startSetup(opts = {}) {
         const updated = { ...cfg, vaults: cfg.vaults.filter((v) => v.name !== b.name), agents: cfg.agents.filter((a) => a.vault !== b.name), handoff: cfg.handoff?.vault === b.name ? null : cfg.handoff };
         if ((updated.ingestion?.targets || []).some((target) => target.vault === b.name)) {
           const targets = updated.ingestion.targets.filter((target) => target.vault !== b.name);
-          updated.ingestion = { ...updated.ingestion, targets, vault: targets[0]?.vault || null, folder: targets[0]?.folder || null, enabled: Boolean(updated.ingestion.enabled && targets.length), last_scheduled_date: null, retry_count: 0, retry_date: null, retry_after: null };
+          updated.ingestion = { ...updated.ingestion, targets, vault: targets[0]?.vault || null, folder: targets[0]?.folder || null, enabled: Boolean(updated.ingestion.enabled && targets.length), last_scheduled_date: null, last_scan_at: null, retry_count: 0, retry_date: null, retry_after: null };
         }
         await saveConfig(updated, file);
         return updated;
@@ -1455,7 +1748,7 @@ export async function startSetup(opts = {}) {
         v.private = Boolean(b.private);
         if (v.private && (cfg.ingestion?.targets || []).some((target) => target.vault === v.name)) {
           const targets = cfg.ingestion.targets.filter((target) => target.vault !== v.name);
-          cfg.ingestion = { ...cfg.ingestion, targets, vault: targets[0]?.vault || null, folder: targets[0]?.folder || null, enabled: Boolean(cfg.ingestion.enabled && targets.length), last_scheduled_date: null, retry_count: 0, retry_date: null, retry_after: null };
+          cfg.ingestion = { ...cfg.ingestion, targets, vault: targets[0]?.vault || null, folder: targets[0]?.folder || null, enabled: Boolean(cfg.ingestion.enabled && targets.length), last_scheduled_date: null, last_scan_at: null, retry_count: 0, retry_date: null, retry_after: null };
         }
         await saveConfig(cfg, file);
         return { cfg, isPrivate: v.private };
@@ -1485,6 +1778,18 @@ export async function startSetup(opts = {}) {
     'POST /api/github/assignment/inspect': async (b) => {
       const cfg = await loadConfig(file);
       return inspectGitHubAssignment(cfg, b);
+    },
+    'POST /api/github/assignment/test-access': async (b) => {
+      const cfg = await loadConfig(file);
+      return testGitHubRepositoryAccess(cfg, b);
+    },
+    'POST /api/github/repository/clone': async (b) => {
+      const cfg = await loadConfig(file);
+      const profile = cfg.twin_profiles.find((item) => item.id === String(b.profile_id || ''));
+      const vault = cfg.vaults.find((item) => item.name === String(b.vault || ''));
+      if (!profile || !(profile.vaults || []).some((item) => item.name === vault?.name)) throw new Error('Choose one of this Twin profile\'s vaults first.');
+      if (!vault || vault.private) throw new Error('Private or unavailable vaults cannot be connected to GitHub.');
+      return cloneGitHubRepository({ ownerRepo: b.remote, home, reservedPaths: cfg.vaults.map((item) => item.path) });
     },
     'POST /api/github/assignment/pick-repository': async () => {
       const selected = await pickGitHubRepository();
@@ -1537,17 +1842,17 @@ export async function startSetup(opts = {}) {
       const mode = String(b.mode || '');
       if (!name || name.length > 120 || !owner || owner.length > 160 || !['personal', 'organisation', 'client'].includes(mode)) throw new Error('Enter a profile name and owner, then choose Personal, Organisation or Client.');
       const vaults = Array.isArray(b.vaults) ? b.vaults : [];
-      if (!vaults.length || vaults.length > 50) throw new Error('Choose at least one available non-private vault.');
+      if (!vaults.length || vaults.length > 50) throw new Error('Choose at least one available vault.');
       const profileVaults = [];
       for (const item of vaults) {
         const vault = cfg.vaults.find((entry) => entry.name === item?.name);
-        if (!vault || vault.private || !['read', 'propose'].includes(item?.access)) throw new Error('Twin profiles can use only available non-private vaults, with read or propose access.');
+        if (!vault || !['read', 'propose', 'write'].includes(item?.access)) throw new Error('Twin profiles can use only available vaults, with read, propose, or write access.');
         profileVaults.push({ name: vault.name, access: item.access });
       }
       if (new Set(profileVaults.map((item) => item.name)).size !== profileVaults.length) throw new Error('Choose each vault only once.');
       const memory = b.memory_policy || {};
       const memory_policy = Object.fromEntries(TWIN_MEMORY_TYPES.map((key) => [key, memory[key] === true]));
-      const allowedOperations = new Set(['search', 'read_note', 'read_session', 'log_session', 'propose_note', 'handoff_read', 'write_handoff']);
+      const allowedOperations = new Set(['search', 'read_note', 'read_session', 'log_session', 'propose_note', 'write_note', 'handoff_read', 'write_handoff']);
       const rawAgents = Array.isArray(b.agent_access) ? b.agent_access : [];
       const agentIds = new Set();
       const agentAccess = rawAgents.map((entry) => {
@@ -1561,9 +1866,10 @@ export async function startSetup(opts = {}) {
           const operations = Array.isArray(grant?.operations) ? [...new Set(grant.operations)] : [];
           if (!profileVault || grantNames.has(profileVault.name) || !operations.length || operations.some((operation) => !allowedOperations.has(operation))) throw new Error('Each AI permission must name a selected vault and at least one supported action.');
           if (operations.some((operation) => ['handoff_read', 'write_handoff'].includes(operation)) && cfg.handoff?.vault !== profileVault.name) throw new Error('Handoff actions must use the configured BrainLink handoff vault.');
-          if (operations.some((operation) => ['propose_note', 'write_handoff'].includes(operation)) && profileVault.access !== 'propose') throw new Error('Choose propose access for a vault before allowing session closeouts or handoff messages there.');
+          if (operations.includes('write_note') && profileVault.access !== 'write') throw new Error('Choose full read and write access for a vault before granting note writes.');
+          if (operations.some((operation) => ['propose_note', 'write_handoff'].includes(operation)) && !['propose', 'write'].includes(profileVault.access)) throw new Error('Choose propose or write access for a vault before allowing note proposals or handoff messages there.');
           grantNames.add(profileVault.name);
-          return { name: profileVault.name, access: operations.some((operation) => ['propose_note', 'write_handoff'].includes(operation)) ? 'propose' : 'read', operations };
+          return { name: profileVault.name, access: operations.includes('write_note') ? 'write' : operations.some((operation) => ['propose_note', 'write_handoff'].includes(operation)) ? 'propose' : 'read', operations };
         });
         if (vaultGrants.some((grant) => grant.operations.includes('read_session')) && vaultGrants.some((grant) => !grant.operations.includes('read_session'))) throw new Error('Session history access applies across this AI connection. Grant session access to every selected vault or remove the other vaults.');
         if (vaultGrants.some((grant) => grant.operations.includes('log_session')) && vaultGrants.some((grant) => !grant.operations.includes('log_session'))) throw new Error('Private session logging applies across this AI connection. Grant it for every selected vault or remove the other vaults.');
@@ -1575,7 +1881,7 @@ export async function startSetup(opts = {}) {
       const profile = {
         id: `${name.toLowerCase().replace(/[^a-z0-9]+/g, '_').replace(/^_|_$/g, '').slice(0, 48) || 'twin'}_${randomBytes(3).toString('hex')}`,
         name, mode, owner, vaults: profileVaults,
-        source_policy: { private_default: true, provenance_required: true, session_capture: 'metadata-only' },
+        source_policy: { private_default: true, provenance_required: true, session_capture: 'summary-proposal' },
         memory_policy, allowed_actions, agent_access: agentAccess,
       };
       const next = normalize({ ...cfg, twin_profiles: [...cfg.twin_profiles, profile] });
@@ -1595,11 +1901,11 @@ export async function startSetup(opts = {}) {
       if (!name || name.length > 120 || !owner || owner.length > 160 || !['personal', 'organisation', 'client'].includes(mode)) throw new Error('Enter a profile name and owner, then choose Personal, Organisation or Client.');
       if (mode !== profile.mode || owner !== profile.owner) throw new Error('A Twin’s type and owner cannot be changed after creation because stored sessions and handoffs belong to that identity.');
       const vaults = Array.isArray(b.vaults) ? b.vaults : [];
-      if (!vaults.length || vaults.length > 50) throw new Error('Choose at least one available non-private vault.');
+      if (!vaults.length || vaults.length > 50) throw new Error('Choose at least one available vault.');
       const profileVaults = [];
       for (const item of vaults) {
         const vault = cfg.vaults.find((entry) => entry.name === item?.name);
-        if (!vault || vault.private || !['read', 'propose'].includes(item?.access)) throw new Error('Twin profiles can use only available non-private vaults, with read or propose access.');
+        if (!vault || !['read', 'propose', 'write'].includes(item?.access)) throw new Error('Twin profiles can use only available vaults, with read, propose, or write access.');
         profileVaults.push({ name: vault.name, access: item.access });
       }
       if (new Set(profileVaults.map((item) => item.name)).size !== profileVaults.length) throw new Error('Choose each vault only once.');
@@ -1607,7 +1913,7 @@ export async function startSetup(opts = {}) {
       if (assignmentVault && !profileVaults.some((item) => item.name === assignmentVault)) throw new Error('Clear this profile’s GitHub assignment before removing its assigned vault.');
       const memory = b.memory_policy || {};
       const memory_policy = Object.fromEntries(TWIN_MEMORY_TYPES.map((key) => [key, memory[key] === true]));
-      const allowedOperations = new Set(['search', 'read_note', 'read_session', 'log_session', 'propose_note', 'handoff_read', 'write_handoff']);
+      const allowedOperations = new Set(['search', 'read_note', 'read_session', 'log_session', 'propose_note', 'write_note', 'handoff_read', 'write_handoff']);
       const rawAgents = Array.isArray(b.agent_access) ? b.agent_access : [];
       const agentIds = new Set();
       const agentAccess = rawAgents.map((entry) => {
@@ -1621,9 +1927,10 @@ export async function startSetup(opts = {}) {
           const operations = Array.isArray(grant?.operations) ? [...new Set(grant.operations)] : [];
           if (!profileVault || grantNames.has(profileVault.name) || !operations.length || operations.some((operation) => !allowedOperations.has(operation))) throw new Error('Each AI permission must name a selected vault and at least one supported action.');
           if (operations.some((operation) => ['handoff_read', 'write_handoff'].includes(operation)) && cfg.handoff?.vault !== profileVault.name) throw new Error('Handoff actions must use the configured BrainLink handoff vault.');
-          if (operations.some((operation) => ['propose_note', 'write_handoff'].includes(operation)) && profileVault.access !== 'propose') throw new Error('Choose propose access for a vault before allowing session closeouts or handoff messages there.');
+          if (operations.includes('write_note') && profileVault.access !== 'write') throw new Error('Choose full read and write access for a vault before granting note writes.');
+          if (operations.some((operation) => ['propose_note', 'write_handoff'].includes(operation)) && !['propose', 'write'].includes(profileVault.access)) throw new Error('Choose propose or write access for a vault before allowing note proposals or handoff messages there.');
           grantNames.add(profileVault.name);
-          return { name: profileVault.name, access: operations.some((operation) => ['propose_note', 'write_handoff'].includes(operation)) ? 'propose' : 'read', operations };
+          return { name: profileVault.name, access: operations.includes('write_note') ? 'write' : operations.some((operation) => ['propose_note', 'write_handoff'].includes(operation)) ? 'propose' : 'read', operations };
         });
         if (vaultGrants.some((grant) => grant.operations.includes('read_session')) && vaultGrants.some((grant) => !grant.operations.includes('read_session'))) throw new Error('Session history access applies across this AI connection. Grant session access to every selected vault or remove the other vaults.');
         if (vaultGrants.some((grant) => grant.operations.includes('log_session')) && vaultGrants.some((grant) => !grant.operations.includes('log_session'))) throw new Error('Private session logging applies across this AI connection. Grant it for every selected vault or remove the other vaults.');
@@ -1691,6 +1998,39 @@ export async function startSetup(opts = {}) {
       if (b.capture_approved !== undefined) a.capture_approved = Boolean(b.capture_approved);
       await saveConfig(cfg, file);
       return { ok: true, agent: a };
+    },
+    'POST /api/agent/add': async (b) => {
+      const cfg = await loadConfig(file);
+      const name = String(b.name || '').trim();
+      const vault = String(b.vault || '').trim();
+      if (!name || name.length > 120 || /[\\/:\r\n]/.test(name)) throw new Error('Enter a role name up to 120 characters without slashes or colons.');
+      if (cfg.agents.some((agent) => agent.name.toLowerCase() === name.toLowerCase())) throw new Error(`An agent named "${name}" already exists.`);
+      const targetVault = cfg.vaults.find((item) => item.name === vault);
+      if (!targetVault || targetVault.private) throw new Error('Choose an existing non-private vault for this role.');
+      const captureFile = `${name.replace(/[<>:"/\\|?*\x00-\x1f]/g, '-')} Session Captures.md`;
+      const agent = {
+        name,
+        vault,
+        role: `Assistant for ${vault}: answer from its notes and prepare safe, evidence-backed proposals within the user's instructions.`,
+        activation: [`Connect to ${name}`, name],
+        close: [`${name} close loop`, `${name}, close the loop`],
+        connect_notes: [],
+        tail_notes: [],
+        recent_dir: null,
+        stale_days: 14,
+        capture_approved: false,
+        close_target: { mode: 'append-section', path: captureFile },
+      };
+      const next = { ...cfg, agents: [...cfg.agents, agent] };
+      await saveConfig(next, file);
+      return { ok: true, agent };
+    },
+    'POST /api/agent/remove': async (b) => {
+      const cfg = await loadConfig(file);
+      const name = String(b.name || '').trim();
+      if (!cfg.agents.some((agent) => agent.name === name)) throw new Error(`Unknown agent "${name}".`);
+      await saveConfig({ ...cfg, agents: cfg.agents.filter((agent) => agent.name !== name) }, file);
+      return { ok: true };
     },
     'POST /api/connect': async (b) => {
       const cfg = await loadConfig(file);
@@ -1772,12 +2112,23 @@ export async function startSetup(opts = {}) {
       const cfg = await loadConfig(file);
       const ctx = localContext(cfg, { ...env, BRAINLINK_SEMANTIC: '0' });
       if (!ctx.enabled.length) return { nodes: [], links: [], shown: 0, total: 0 };
-      return buildGraph3D(ctx, b.vault && ctx.enabled.includes(b.vault) ? b.vault : undefined);
+      const selected = b.vault && ctx.enabled.includes(b.vault) ? b.vault : undefined;
+      const includePrivateVault = Boolean(selected && ctx.byName.get(selected)?.private);
+      return buildGraph3D(ctx, selected, { includePrivateVault });
     },
     'POST /api/graph3d/vaults': async () => {
       const cfg = await loadConfig(file);
-      return listGraphVaults(localContext(cfg, { ...env, BRAINLINK_SEMANTIC: '0' }));
+      return listGraphVaults(localContext(cfg, { ...env, BRAINLINK_SEMANTIC: '0' }), { includePrivateVaults: true });
     },
+    'POST /api/memory/review': async (b) => {
+      const cfg = await loadConfig(file);
+      return readMemoryForReview(localContext(cfg, { ...env, BRAINLINK_SEMANTIC: '0' }), String(b.vault || ''));
+    },
+    'POST /api/memory/save': async (b) => {
+      const cfg = await loadConfig(file);
+      return saveMemoryForReview(localContext(cfg, { ...env, BRAINLINK_SEMANTIC: '0' }), String(b.vault || ''), b.text, b.etag);
+    },
+    ...createReviewRoutes({ proposalInbox, createHash, loadConfig, file, normalize, localContext, env, findSecrets, path, stat, search, realpath, checkWritePath, mkdir, readFile, writeFile, appendTo, vaultRoot, commitNew, logActivity, listDecisionReviews, readDecisionReview, validReviewDate, proposeNote, safeJoin, decisionReviewPreviews, randomBytes, conflictReviewStore, listConflictCandidates, conflictReviewPreviews, buildTidyBatch, tidyState, tidyBatches, tidyPreviews, readNote, tidyAppendBlock }),
     'POST /api/graph3d/reviews': async (b) => {
       const cfg = await loadConfig(file);
       const ctx = localContext(cfg, { ...env, BRAINLINK_SEMANTIC: '0' });
@@ -1790,15 +2141,33 @@ export async function startSetup(opts = {}) {
       const cfg = await loadConfig(file);
       const ctx = localContext(cfg, { ...env, BRAINLINK_SEMANTIC: '0' });
       if (b.vault && !ctx.enabled.includes(b.vault)) throw new Error('Unknown vault.');
-      return discoverVaultRelationshipCandidates(ctx, { vault: b.vault, offset: b.offset ?? 0, limit: 20, scanId: b.scan_id });
+      return discoverVaultRelationshipCandidates(ctx, { vault: b.vault, offset: b.offset ?? 0, limit: b.limit ?? 20, scanId: b.scan_id });
     },
     'POST /api/graph3d/note': async (b) => {
       const cfg = await loadConfig(file);
       const ctx = localContext(cfg, { ...env, BRAINLINK_SEMANTIC: '0' });
       if (!b.vault || !ctx.enabled.includes(b.vault)) throw new Error('Unknown vault.');
-      const detail = await noteDetail3D(ctx, b.vault, String(b.path || ''));
+      const includePrivateVault = Boolean(ctx.byName.get(b.vault)?.private);
+      const detail = await noteDetail3D(ctx, b.vault, String(b.path || ''), { includePrivateVault });
       const raw = await readFile(safeJoin(vaultRoot(ctx, b.vault), detail.path), 'utf8');
-      return { ...detail, etag: createHash('sha256').update(raw).digest('hex'), writable: !ctx.readOnly && ctx.byName.get(b.vault).writes === 'on' };
+      const vaultPath = path.resolve(ctx.byName.get(b.vault).path);
+      const obsidianVault = obsidianVaultForPath(vaultPath, await findObsidianVaults({ home, os, env }));
+      const obsidian_url = obsidianVault ? obsidianOpenUrl(obsidianVault, detail.path, vaultPath) : null;
+      return { ...detail, etag: createHash('sha256').update(raw).digest('hex'), writable: !ctx.readOnly && ctx.byName.get(b.vault).writes === 'on', obsidian_registered: Boolean(obsidian_url), obsidian_url };
+    },
+    'POST /api/graph3d/note/preview': async (b) => {
+      const cfg = await loadConfig(file);
+      const ctx = localContext(cfg, { ...env, BRAINLINK_SEMANTIC: '0' });
+      if (!b.vault || !ctx.enabled.includes(b.vault)) throw new Error('Unknown vault.');
+      const rel = String(b.path || '');
+      const note = await readNote(ctx, b.vault, rel);
+      const raw = await readFile(safeJoin(vaultRoot(ctx, b.vault), note.path), 'utf8');
+      return {
+        vault: b.vault, path: note.path, title: path.posix.basename(note.path).replace(/\.md$/i, ''),
+        body: note.body, tags: extractTags(note.body, note.meta), graph_record: typedEntityFields(raw),
+        etag: createHash('sha256').update(raw).digest('hex'),
+        writable: !ctx.readOnly && ctx.byName.get(b.vault).writes === 'on',
+      };
     },
     'POST /api/graph3d/note/save': async (b) => {
       const cfg = await loadConfig(file);
@@ -1822,6 +2191,32 @@ export async function startSetup(opts = {}) {
       try { await writeFile(tmp, next, 'utf8'); await rename(tmp, full); }
       catch (e) { try { await (await import('node:fs/promises')).unlink(tmp); } catch {} throw e; }
       return { ok: true, etag: createHash('sha256').update(next).digest('hex') };
+    },
+    'POST /api/graph3d/entity/save': async (b) => {
+      const cfg = await loadConfig(file);
+      const ctx = localContext(cfg, { ...env, BRAINLINK_SEMANTIC: '0' });
+      if (!b.vault || !ctx.enabled.includes(b.vault)) throw new Error('Unknown vault.');
+      const vault = ctx.byName.get(b.vault);
+      if (vault.private) throw new Error('Graph records in a private vault cannot be edited in the shared graph.');
+      if (ctx.readOnly || vault.writes !== 'on') throw new Error('This vault does not allow graph record edits.');
+      const current = await readNote(ctx, b.vault, String(b.path || ''));
+      const index = await loadVault(ctx, b.vault);
+      const noteIndex = index.byRel.get(current.path);
+      if (noteIndex === undefined || index.notes[noteIndex].generated) throw new Error('This record cannot be edited.');
+      const full = safeJoin(vaultRoot(ctx, b.vault), current.path);
+      const raw = await readFile(full, 'utf8');
+      const etag = createHash('sha256').update(raw).digest('hex');
+      if (typeof b.etag !== 'string' || b.etag !== etag) throw new Error('This note changed since it was opened. Reload it before saving.');
+      const next = updateTypedEntityFields(raw, b.graph_record);
+      const fields = typedEntityFields(next);
+      if (fields.id && index.notes.some((note, i) => i !== noteIndex && !note.private && !note.generated && typedEntityFields(note.raw).id === fields.id)) {
+        throw new Error('That graph ID is already used by another visible note in this vault. Choose a unique ID.');
+      }
+      const tmp = `${full}.brainlink-${randomBytes(6).toString('hex')}.tmp`;
+      try { await writeFile(tmp, next, 'utf8'); await rename(tmp, full); }
+      catch (error) { await unlink(tmp).catch(() => {}); throw error; }
+      await logActivity(env, { tool: 'graph_entity_edit', ok: true });
+      return { ok: true, etag: createHash('sha256').update(next).digest('hex'), graph_record: fields };
     },
     'POST /api/graph3d/relationship/approve': async (b) => {
       const cfg = await loadConfig(file);
@@ -1890,16 +2285,86 @@ export async function startSetup(opts = {}) {
       const relationIndex = b.relation_index;
       const wasVerified = deriveTypedRelations(index.notes).some((edge) => edge.source === sourceIndex && edge.relation_index === relationIndex);
       const wasRejected = deriveRejectedTypedRelations(index.notes).some((edge) => edge.source === sourceIndex && edge.relation_index === relationIndex);
-      if (!wasVerified && !wasRejected) throw new Error('That relationship is no longer eligible to return to review. Reload the note and review it again.');
+      const wasWithdrawn = deriveWithdrawnTypedRelations(index.notes).some((edge) => edge.source === sourceIndex && edge.relation_index === relationIndex);
+      if (!wasVerified && !wasRejected && !wasWithdrawn) throw new Error('That relationship is no longer eligible to return to review. Reload the note and review it again.');
       const full = safeJoin(vaultRoot(ctx, b.vault), current.path);
       const raw = await readFile(full, 'utf8');
       const etag = createHash('sha256').update(raw).digest('hex');
       if (typeof b.etag !== 'string' || b.etag !== etag) throw new Error('This note changed since it was opened. Reload it before reviewing the relationship.');
-      const next = reopenTypedRelation(raw, relationIndex, wasVerified ? 'verified' : 'rejected');
+      const next = reopenTypedRelation(raw, relationIndex, wasWithdrawn ? 'withdrawn' : wasVerified ? 'verified' : 'rejected');
       const tmp = `${full}.brainlink-${randomBytes(6).toString('hex')}.tmp`;
       try { await writeFile(tmp, next, 'utf8'); await rename(tmp, full); }
       catch (e) { try { await unlink(tmp); } catch {} throw e; }
       await logActivity(env, { tool: 'graph_relationship_review', ok: true, action: 'reopened' });
+      return { ok: true, etag: createHash('sha256').update(next).digest('hex') };
+    },
+    'POST /api/graph3d/relationship/archive': async (b) => {
+      const cfg = await loadConfig(file);
+      const ctx = localContext(cfg, { ...env, BRAINLINK_SEMANTIC: '0' });
+      if (!b.vault || !ctx.enabled.includes(b.vault)) throw new Error('Unknown vault.');
+      const vault = ctx.byName.get(b.vault);
+      if (vault.private) throw new Error('Relationships in a private vault cannot be changed in the shared graph.');
+      if (ctx.readOnly || vault.writes !== 'on') throw new Error('This vault does not allow relationship changes.');
+      const current = await readNote(ctx, b.vault, String(b.path || ''));
+      const index = await loadVault(ctx, b.vault);
+      const sourceIndex = index.byRel.get(current.path);
+      if (sourceIndex === undefined || index.notes[sourceIndex].generated) throw new Error('This record cannot be changed.');
+      if (!Number.isSafeInteger(b.relation_index) || b.relation_index < 0) throw new Error('Invalid relationship selection.');
+      const relationIndex = b.relation_index;
+      const isVerified = deriveTypedRelations(index.notes).some((edge) => edge.source === sourceIndex && edge.relation_index === relationIndex);
+      const expectedReview = isVerified ? 'verified' : deriveProposedTypedRelations(index.notes).some((edge) => edge.source === sourceIndex && edge.relation_index === relationIndex)
+        ? 'proposed' : deriveRejectedTypedRelations(index.notes).some((edge) => edge.source === sourceIndex && edge.relation_index === relationIndex) ? 'rejected' : null;
+      if (!expectedReview) throw new Error('That relationship is no longer active. Reload the note and review it again.');
+      const full = safeJoin(vaultRoot(ctx, b.vault), current.path);
+      const raw = await readFile(full, 'utf8');
+      const etag = createHash('sha256').update(raw).digest('hex');
+      if (typeof b.etag !== 'string' || b.etag !== etag) throw new Error('This note changed since it was opened. Reload it before changing the relationship.');
+      const next = withdrawTypedRelation(raw, relationIndex, expectedReview);
+      const tmp = `${full}.brainlink-${randomBytes(6).toString('hex')}.tmp`;
+      try { await writeFile(tmp, next, 'utf8'); await rename(tmp, full); }
+      catch (e) { try { await unlink(tmp); } catch {} throw e; }
+      await logActivity(env, { tool: 'graph_relationship_review', ok: true, action: 'archived' });
+      return { ok: true, etag: createHash('sha256').update(next).digest('hex') };
+    },
+    'POST /api/graph3d/relationship/edit': async (b) => {
+      const cfg = await loadConfig(file);
+      const ctx = localContext(cfg, { ...env, BRAINLINK_SEMANTIC: '0' });
+      if (!b.vault || !ctx.enabled.includes(b.vault)) throw new Error('Unknown vault.');
+      const vault = ctx.byName.get(b.vault);
+      if (vault.private) throw new Error('Relationships in a private vault cannot be changed in the shared graph.');
+      if (ctx.readOnly || vault.writes !== 'on') throw new Error('This vault does not allow relationship changes.');
+      const current = await readNote(ctx, b.vault, String(b.path || ''));
+      const index = await loadVault(ctx, b.vault);
+      const sourceIndex = index.byRel.get(current.path);
+      if (sourceIndex === undefined || index.notes[sourceIndex].generated) throw new Error('This record cannot be changed.');
+      if (!Number.isSafeInteger(b.relation_index) || b.relation_index < 0) throw new Error('Invalid relationship selection.');
+      const relationIndex = b.relation_index;
+      const matches = [
+        ['verified', deriveTypedRelations(index.notes)],
+        ['proposed', deriveProposedTypedRelations(index.notes)],
+        ['rejected', deriveRejectedTypedRelations(index.notes)],
+      ];
+      const expectedReview = matches.find(([, edges]) => edges.some((edge) => edge.source === sourceIndex && edge.relation_index === relationIndex))?.[0];
+      if (!expectedReview) throw new Error('That relationship is no longer active. Reload the note and review it again.');
+      const full = safeJoin(vaultRoot(ctx, b.vault), current.path);
+      const raw = await readFile(full, 'utf8');
+      const etag = createHash('sha256').update(raw).digest('hex');
+      if (typeof b.etag !== 'string' || b.etag !== etag) throw new Error('This note changed since it was opened. Reload it before editing the relationship.');
+      const entityMap = typedEntityMetadataMap(index.notes);
+      const sourceNote = index.notes[sourceIndex];
+      const sourceMeta = entityMap.get(sourceNote);
+      const targetId = String(b.target_id || '').trim();
+      const targetEntry = [...entityMap.entries()].find(([, meta]) => meta.entity_id === targetId);
+      const targetMeta = targetEntry?.[1];
+      const evidence = String(b.evidence || '').trim();
+      if (!sourceMeta || !targetMeta || targetEntry[0] === sourceNote || sourceMeta.scope !== targetMeta.scope) throw new Error('Choose a current visible record in the same Twin scope.');
+      if (!evidence || evidence.length > 300 || !String(sourceNote.body || '').includes(evidence)) throw new Error('Evidence must be an exact excerpt of up to 300 characters from this note.');
+      if (!typedRelationAllowed(String(b.predicate || ''), sourceMeta.type, targetMeta.type)) throw new Error('Choose a relationship type that matches both record types.');
+      const next = updateTypedRelation(raw, relationIndex, { predicate: b.predicate, target_id: targetId, evidence, confidence: b.confidence }, expectedReview);
+      const tmp = `${full}.brainlink-${randomBytes(6).toString('hex')}.tmp`;
+      try { await writeFile(tmp, next, 'utf8'); await rename(tmp, full); }
+      catch (e) { try { await unlink(tmp); } catch {} throw e; }
+      await logActivity(env, { tool: 'graph_relationship_review', ok: true, action: 'edited' });
       return { ok: true, etag: createHash('sha256').update(next).digest('hex') };
     },
     'POST /api/graph3d/relationship/propose': async (b) => {
@@ -2109,6 +2574,18 @@ export async function startSetup(opts = {}) {
       return listFiledSessionSummaries(ctx, String(b.vault || ''), { limit: 100 });
     },
     'POST /api/sessions/private': (b) => sessions.setPrivate(b.id, b.private),
+    'POST /api/sessions/import-setting': async (b) => {
+      if (typeof b.enabled !== 'boolean') throw new Error('Choose whether to import local AI session history.');
+      if (b.enabled && env.BRAINLINK_DISABLE_HISTORY_IMPORT === '1') throw new Error('Session-history import is unavailable in demo mode.');
+      const cfg = await loadConfig(file);
+      const next = { ...cfg, sessions: { ...cfg.sessions, importHistory: b.enabled } };
+      await saveConfig(next, file);
+      // Drain this Setup process's current refresh and re-read the new setting. Other
+      // BrainLink processes can have an import already in progress; they read the saved
+      // setting again on their next refresh.
+      await sessions.refresh();
+      return { ok: true, sessions: next.sessions };
+    },
     // What connected AI apps (not this local UI) may see of imported/logged sessions. The user's
     // own choice; session_list/session_read in src/server.mjs always read this, never a caller flag.
     'POST /api/sessions/sharing': async (b) => {
@@ -2148,7 +2625,7 @@ export async function startSetup(opts = {}) {
       const autoDraftOnEnd = enabled && typeof b.autoDraftOnEnd === 'boolean' ? b.autoDraftOnEnd : enabled ? cfg.sessions.localSummary.autoDraftOnEnd : false;
       const autoFileOnEnd = enabled && autoDraftOnEnd && typeof b.autoFileOnEnd === 'boolean' ? b.autoFileOnEnd : enabled && autoDraftOnEnd ? cfg.sessions.localSummary.autoFileOnEnd : false;
       if (enabled && (!validLocalModelName(model) || !model)) throw new Error('Enter a valid local Ollama model name before enabling summaries.');
-      const next = { ...cfg, sessions: { ...cfg.sessions, localSummary: { enabled, model, autoDraftOnEnd, autoFileOnEnd } }, ingestion: enabled ? cfg.ingestion : { ...cfg.ingestion, autoDrafts: false } };
+      const next = { ...cfg, sessions: { ...cfg.sessions, localSummary: { enabled, model, autoDraftOnEnd, autoFileOnEnd } }, ingestion: enabled ? cfg.ingestion : { ...cfg.ingestion, autoDrafts: false, autoFile: false } };
       await saveConfig(next, file);
       localSummaryAutoDraftKeepsAlive = Boolean(enabled && autoDraftOnEnd);
       touch();
@@ -2169,6 +2646,24 @@ export async function startSetup(opts = {}) {
       } catch { return { available: false, models: [] }; }
       finally { clearTimeout(timer); }
     },
+    'POST /api/sessions/local-summary/model-capabilities': async (b) => {
+      const model = typeof b.model === 'string' ? b.model.trim() : '';
+      if (!validLocalModelName(model)) throw new Error('Enter a valid local Ollama model name.');
+      const controller = new AbortController();
+      const timer = setTimeout(() => controller.abort(), 4000);
+      timer.unref?.();
+      try {
+        const response = await (opts.localSummaryModelInfoFetch || fetch)(`${LOCAL_OLLAMA_URL}/api/show`, {
+          method: 'POST', headers: { 'Content-Type': 'application/json' }, signal: controller.signal,
+          body: JSON.stringify({ model }),
+        });
+        if (!response?.ok) return { available: false, model, vision: null };
+        const payload = await response.json();
+        const capabilities = Array.isArray(payload?.capabilities) ? payload.capabilities.filter((item) => typeof item === 'string') : null;
+        return { available: true, model, vision: capabilities ? capabilities.includes('vision') : null };
+      } catch { return { available: false, model, vision: null }; }
+      finally { clearTimeout(timer); }
+    },
     'POST /api/sessions/local-summary/generate': async (b) => {
       const cfg = await loadConfig(file);
       if (!cfg.sessions.localSummary.enabled) throw new Error('Turn on local summaries in Sessions settings first.');
@@ -2181,262 +2676,7 @@ export async function startSetup(opts = {}) {
       const draft = await saveLocalSummaryDraft(path.join(appHome(env), 'sessions', 'auto-summary'), id, generated);
       return { ok: true, draft: { summary: draft.summary, model: draft.model, generated_at: draft.generated_at, source: draft.source }, session: { id: session.id } };
     },
-    // P0: two-AI handoff receipt -- who handed off, who picked it up (if anyone yet), and when.
-    // listHandoffs() already drops anything under an excluded ("00 Home"-style) folder or marked
-    // private, so this never has to re-check that itself; it only has to pair each handoff with
-    // the later handoff (if any) that acks it via `ack_of` to know whether it was picked up.
-    'POST /api/handoffs': async (b) => {
-      const cfg = await loadConfig(file);
-      const ctx = localContext(cfg, { ...env, BRAINLINK_SEMANTIC: '0' });
-      if (!cfg.handoff || !ctx.enabled.includes(cfg.handoff.vault)) return { enabled: false, receipts: [] };
-      const list = await listHandoffs(ctx, { limit: b.limit || 30 });
-      // Replies are append-only. If multiple agents update a request at the same
-      // timestamp, do not choose one arbitrarily and present it as authoritative.
-      const updatesByTarget = new Map();
-      for (const update of list) if (update.ack_of) {
-        const updates = updatesByTarget.get(update.ack_of) || [];
-        updates.push(update);
-        updatesByTarget.set(update.ack_of, updates);
-      }
-      const receipts = list.filter((x) => !x.ack_of).map((x) => {
-        const updates = updatesByTarget.get(x.path) || [];
-        const latestTime = updates.reduce((latest, item) => Math.max(latest, Date.parse(item.sent_at) || 0), 0);
-        const latestUpdates = updates.filter((item) => (Date.parse(item.sent_at) || 0) === latestTime);
-        const updateConflict = latestUpdates.length > 1;
-        const update = updateConflict ? null : latestUpdates[0];
-        const legacyStatus = { ACK: 'ACKNOWLEDGED', DONE: 'COMPLETED', COMPLETE: 'COMPLETED' }[String(update?.status || '').toUpperCase()];
-        return {
-          from: x.from, to: x.to, subject: x.subject, sent_at: x.sent_at, status: x.status, priority: x.priority,
-          picked_up: updates.length > 0, picked_up_by: update ? update.from : null, picked_up_at: latestUpdates[0]?.sent_at || null,
-          update_conflict: updateConflict,
-          update_status: updateConflict ? 'CONCURRENT_UPDATES' : update ? (legacyStatus || update.status || 'ACKNOWLEDGED') : null,
-          update_subject: updateConflict ? `${latestUpdates.length} updates need review` : update ? update.subject : null,
-        };
-      });
-      return { enabled: true, receipts };
-    },
-    // ---- Shared snapshot: a read-only copy of the notes for cloud agents (Ian's RB8) ----
-    'POST /api/snapshot/pick-folder': async () => { const p = await pickSnapshotFolder(); return p === undefined ? { path: null, unavailable: true } : { path: p }; },
-    'POST /api/snapshot': async (b) => {
-      const cfg = await loadConfig(file);
-      const next = chooseSnapshot(cfg, { enabled: b.enabled, folder: b.folder, includeSessions: b.includeSessions });
-      await saveConfig(next, file);
-      // Writes once immediately on enabling (or on any change), not just on the next interval or
-      // vault edit, and picks up errors (e.g. the folder disappeared) right away.
-      await refreshSnapshotWatcher(next);
-      const status = await loadSnapshotStatus(snapshotStateFile);
-      return { ok: true, snapshot: { ...snapshotSettings(next), suggested_folder: suggestSnapshotFolder(home), ...status } };
-    },
-    // F2 recovery: force=true is the "Clear and re-share" action -- a full reset of the
-    // dedicated subfolder when the manifest was lost, not the normal "Stop sharing" toggle-off.
-    'POST /api/snapshot/clear': async (b) => {
-      const cfg = await loadConfig(file);
-      await clearSnapshot(snapshotSettings(cfg).folder, env, cfg.vaults, { force: Boolean(b?.force) });
-      if (b?.force) await refreshSnapshotWatcher(cfg);
-      return { ok: true };
-    },
-    'POST /api/backup/pick-folder': async () => { const p = await pickBackupFolder(); return p === undefined ? { path: null, unavailable: true } : { path: p }; },
-    'POST /api/backup/history': async () => {
-      const cfg = await loadConfig(file);
-      if (!cfg.backup?.folder) throw new Error('Choose a backup folder first.');
-      const key = cfg.backup.encrypted ? await requireBackupKey(env).catch(() => null) : null;
-      return listVerifiedBackups(cfg.backup.folder, key);
-    },
-    'POST /api/backup/encryption-key': async () => createOrReadBackupRecoveryKey(env),
-    'POST /api/backup/restore/pick-source': async () => { const p = await pickRestoreSourceFolder(); return p === undefined ? { path: null, unavailable: true } : { path: p }; },
-    'POST /api/backup/restore/pick-destination': async () => { const p = await pickRestoreDestinationFolder(); return p === undefined ? { path: null, unavailable: true } : { path: p }; },
-    'POST /api/backup': async (b) => {
-      const cfg = await loadConfig(file);
-      const backupSchedule = normalizeBackupSchedule({
-        scheduleMode: b.scheduleMode, intervalHours: b.intervalHours === undefined ? cfg.backup.intervalHours : Number(b.intervalHours), time: b.time,
-      }, cfg.backup);
-      const scheduleChanged = backupSchedule.scheduleMode !== cfg.backup.scheduleMode || backupSchedule.time !== cfg.backup.time;
-      const next = { ...cfg, backup: { ...cfg.backup, ...backupSchedule, last_scheduled_date: scheduleChanged ? null : backupSchedule.last_scheduled_date,
-        enabled: Boolean(b.enabled), folder: b.folder || null, keepCount: Number(b.keepCount ?? cfg.backup.keepCount ?? 0), encrypted: Boolean(b.encrypted) } };
-      if (next.backup.encrypted && !cfg.backup.encrypted) {
-        const storedKey = await requireBackupKey(env);
-        const confirmedKey = parseBackupKey(String(b.recoveryKeyConfirmation || ''));
-        if (!timingSafeEqual(storedKey, confirmedKey)) throw new Error('The recovery key did not match. Copy the displayed key and try again.');
-      } else if (next.backup.encrypted) {
-        await requireBackupKey(env);
-      }
-      if (next.backup.enabled) {
-        await runBackup(next, 'setup'); // verify before enabling the schedule
-        if (backupScheduleDue(next.backup, new Date(), next.timezone)) next.backup.last_scheduled_date = localDateAndTime(new Date(), next.timezone).date;
-      }
-      await saveConfig(next, file);
-      refreshBackupTimer(next);
-      return { ok: true, backup: { ...next.backup, status: backupStatus } };
-    },
-    'POST /api/backup/run': async () => {
-      const cfg = await loadConfig(file);
-      return runBackup(cfg, 'manual');
-    },
-    'POST /api/ingestion/settings': async (b) => {
-      const next = await withConfigMutation(async () => {
-        const cfg = await loadConfig(file);
-        const updated = { ...cfg, ingestion: validateIngestionSchedule(b, cfg.ingestion) };
-        if (updated.ingestion.autoDrafts && (!cfg.sessions.localSummary?.enabled || !cfg.sessions.localSummary?.model)) throw new Error('Enable Local summary drafts and choose an Ollama model before scheduling AI drafts.');
-        if (updated.ingestion.enabled) {
-          const ctx = localContext(updated, { ...env, BRAINLINK_SEMANTIC: '0' });
-          for (const target of updated.ingestion.targets) await ingestionQueue(ctx, target.vault, target.folder, { limit: 1 });
-        }
-        await saveConfig(updated, file);
-        return updated;
-      });
-      refreshIngestionSchedule(next);
-      return { ok: true, ingestion: { ...next.ingestion, status: ingestionStatus } };
-    },
-    'POST /api/ingestion/folders': async (b) => {
-      const cfg = await loadConfig(file);
-      const vaultName = String(b.vault || '');
-      const selected = cfg.vaults.find((item) => item.name === vaultName);
-      if (!selected || selected.private) throw new Error('Choose an existing non-private vault.');
-      const ctx = localContext(cfg, { ...env, BRAINLINK_SEMANTIC: '0' });
-      const folders = await listSessionFilingFolders(ctx, vaultName);
-      return { folders: folders.map((item) => item.path).filter(Boolean) };
-    },
-    'POST /api/ingestion/run': async (b) => {
-      const cfg = await loadConfig(file);
-      const targets = Array.isArray(b.targets) ? b.targets : b.vault && b.folder ? [{ vault: String(b.vault), folder: String(b.folder) }] : undefined;
-      return runIngestion(cfg, { trigger: 'manual', targets });
-    },
-    'POST /api/ingestion/draft': async (b) => {
-      const cfg = await loadConfig(file);
-      const local = cfg.sessions.localSummary;
-      if (!local.enabled || !local.model) throw new Error('Enable Local summary drafts and choose an Ollama model in Sessions first.');
-      const ctx = localContext(cfg, { ...env, BRAINLINK_SEMANTIC: '0' });
-      const source = await readIngestionSource(ctx, String(b.vault || ''), String(b.folder || ''), { source_id: b.source_id, revision: b.revision });
-      const draft = await generateLocalIngestionDraft(source, local.model, { fetchImpl: opts.ingestionDraftFetch || fetch });
-      const related = await relatedNotes(ctx, draft.vault, source.rel);
-      draft.related_notes = related.suggested
-        .filter((item) => typeof item.path === 'string' && !/[[\]]/.test(item.path) && Array.isArray(item.shared_terms))
-        .slice(0, 8)
-        .map((item) => ({ path: item.path, title: String(item.title || '').slice(0, 160), shared_terms: item.shared_terms.slice(0, 6).map((term) => String(term).slice(0, 50)), score: Number(item.score) || 0 }));
-      draft.destinations = (await listSessionFilingFolders(ctx, draft.vault))
-        .map((entry) => entry.path)
-        .filter((folder) => folder && folder !== draft.folder && !folder.startsWith(`${draft.folder}/`)
-          && !(folder === ctx.byName.get(draft.vault)?.intake_folder && ctx.byName.get(draft.vault)?.decisions?.length));
-      const savedDraft = await saveIngestionDraft(ingestionDraftsDir, draft);
-      await logActivity(env, { tool: 'source_draft', ok: true });
-      return { ok: true, draft_id: savedDraft.id, draft };
-    },
-    'GET /api/ingestion/drafts': async () => ({ drafts: await listIngestionDrafts(ingestionDraftsDir) }),
-    'POST /api/ingestion/discard-draft': async (b) => {
-      if (b.confirm !== true) throw new Error('Confirm removing this local draft.');
-      const id = String(b.draft_id || '');
-      const stored = await readIngestionDraft(ingestionDraftsDir, id);
-      if (!stored?.draft) throw new Error('This local draft is missing or damaged.');
-      try {
-          const draft = stored.draft;
-          const ctx = localContext(await loadConfig(file), { ...env, BRAINLINK_SEMANTIC: '0' });
-          await readIngestionSource(ctx, draft.vault, draft.folder, { source_id: draft.source_id, revision: draft.revision });
-          await recordIngestion(ctx, draft.vault, draft.folder, { source_id: draft.source_id, revision: draft.revision, outcome: 'skipped' });
-      } catch { /* stale or withdrawn sources are simply removed from the local review list */ }
-      await removeIngestionDraft(ingestionDraftsDir, id);
-      await logActivity(env, { tool: 'source_draft_discard', ok: true });
-      return { ok: true };
-    },
-    'POST /api/ingestion/save-draft': async (b) => {
-      const cfg = await loadConfig(file);
-      if (b.confirm !== true) throw new Error('Review the draft and explicitly confirm saving it as a proposed note.');
-      const id = String(b.draft_id || '');
-      const stored = await readIngestionDraft(ingestionDraftsDir, id);
-      const draft = stored?.draft;
-      if (!draft) throw new Error('This local draft is missing or damaged. Prepare it again from the source queue.');
-      const destination = String(b.destination || '').trim().replace(/\\/g, '/').replace(/^\/+|\/+$/g, '');
-      if (!destination || !Array.isArray(draft.destinations) || !draft.destinations.includes(destination)) throw new Error('Choose an existing knowledge folder outside the selected source folder.');
-      const ctx = localContext(cfg, { ...env, BRAINLINK_SEMANTIC: '0' });
-      await readIngestionSource(ctx, draft.vault, draft.folder, { source_id: draft.source_id, revision: draft.revision });
-      const requestedRelated = b.related_note_paths === undefined ? [] : b.related_note_paths;
-      if (!Array.isArray(requestedRelated) || requestedRelated.length > 5 || requestedRelated.some((item) => typeof item !== 'string')) throw new Error('Choose up to five related-note suggestions from this draft.');
-      const selectedPaths = [...new Set(requestedRelated)];
-      if (selectedPaths.length !== requestedRelated.length) throw new Error('A related-note suggestion was selected more than once.');
-      const originalCandidates = new Set((draft.related_notes || []).map((item) => item.path));
-      const currentCandidates = new Set((await relatedNotes(ctx, draft.vault, draft.source_path)).suggested.map((item) => item.path));
-      if (selectedPaths.some((item) => !originalCandidates.has(item) || !currentCandidates.has(item))) throw new Error('A related-note suggestion is no longer visible. Review the source and prepare the draft again.');
-      const relatedSection = selectedPaths.length
-        ? `\n\n## Related notes (selected similarity suggestions; not verified facts)\n${selectedPaths.map((item) => `- [[${item.replace(/\.md$/i, '')}]]`).join('\n')}`
-        : '';
-      const result = await proposeNote(ctx, {
-        vault: draft.vault, folder: destination, title: draft.title, body: `${draft.body}${relatedSection}`,
-        type: draft.memory_type, confidence: 'reported',
-        source: `Local AI draft from ${draft.source_path}`,
-        ai_platform: 'BrainLink Local Review', agent_or_role: 'Raw-to-Wiki draft',
-        session_or_task_id: `ingestion-${draft.source_id.slice(0, 12)}`, confirm: true, auto_link: false,
-      });
-      if (!result.ok || !result.written) return { ...result, saved_as_proposal: false };
-      const prefix = `${draft.vault}/`;
-      const notePath = result.path.startsWith(prefix) ? result.path.slice(prefix.length) : '';
-      await recordIngestion(ctx, draft.vault, draft.folder, { source_id: draft.source_id, revision: draft.revision, outcome: 'filed', knowledge_path: notePath });
-      await removeIngestionDraft(ingestionDraftsDir, id);
-      await logActivity(env, { tool: 'source_proposal_saved', ok: true });
-      return { ok: true, written: true, saved_as_proposal: true, path: result.path, note_status: 'proposed', confidence: 'reported', verified: false };
-    },
-    'POST /api/brief/settings': async (b) => {
-      const cfg = await loadConfig(file);
-      const next = { ...cfg, brief: validateBriefSchedule(b, cfg.brief) };
-      if (next.brief.enabled) {
-        const selected = next.vaults.find((item) => item.name === next.brief.vault);
-        if (!selected || !(await stat(selected.path).then((s) => s.isDirectory(), () => false))) throw new Error('Choose an existing vault before enabling scheduled briefs.');
-      }
-      await saveConfig(next, file);
-      refreshBriefSchedule(next);
-      return { ok: true, brief: { ...next.brief, status: briefStatus } };
-    },
-    'POST /api/brief/run': async (b) => {
-      const cfg = await loadConfig(file);
-      return runBrief(cfg, { trigger: 'manual', vaultName: String(b.vault || cfg.brief?.vault || '') });
-    },
-    'POST /api/startup': async (b) => ({ ok: true, enabled: await setStartupEnabled(Boolean(b.enabled), { env, home, os }) }),
-    'POST /api/backup/restore': async (b) => {
-      if (b.confirm !== true) throw new Error('Confirm restoring into an empty folder first.');
-      const recoveryKey = b.recoveryKey ? String(b.recoveryKey) : await requireBackupKey(env).catch(() => null);
-      try {
-        const restored = await restoreBackupToEmpty(String(b.backupFolder || ''), String(b.destination || ''), recoveryKey);
-        await logActivity(env, { tool: 'backup_restore', ok: true });
-        return { ok: true, ...restored };
-      } catch (error) {
-        await logActivity(env, { tool: 'backup_restore', ok: false });
-        throw error;
-      }
-    },
-    'POST /api/test': async (b) => {
-      const cfg = normalize(await loadConfig(file));
-      const ctx = localContext(cfg, { ...env, BRAINLINK_AI_PLATFORM: '' });
-      if (!ctx.enabled.length) throw new Error('Add a vault first.');
-      const v = b.vault && ctx.enabled.includes(b.vault) ? b.vault : ctx.enabled[0];
-      return { vault: v, results: (await search(ctx, v, String(b.query || 'goal'), 5)).map((r) => ({ title: r.title, path: r.path, heading: r.heading, score: r.score })) };
-    },
-    // Cited instant answer: the same ranked search + status verdict the vault_search MCP tool uses,
-    // reshaped for a one-paragraph answer with clickable source chips (/api/note opens each one).
-    'POST /api/ask': async (b) => {
-      const cfg = normalize(await loadConfig(file));
-      const ctx = localContext(cfg, { ...env, BRAINLINK_AI_PLATFORM: '' });
-      if (!ctx.enabled.length) throw new Error('Add a vault first.');
-      const query = String(b.query || '').trim();
-      if (!query) throw new Error('Ask a question first.');
-      const v = b.vault && ctx.enabled.includes(b.vault) ? b.vault : ctx.enabled[0];
-      const r = await searchWithVerdict(ctx, v, query, { limit: 5 });
-      const top = r.results.slice(0, 3);
-      const answer = r.status === 'not_in_brain' ? null : plainText(top[0]?.snippet) || null;
-      return {
-        vault: v, query, status: r.status, coverage: r.coverage, note: r.note || null, answer,
-        sources: top.map((x) => ({ vault: v, path: x.path, title: x.title, heading: x.heading || '', score: x.score })),
-      };
-    },
-    // Opens one of the answer's source chips (or a citation modal's own wikilink): full
-    // frontmatter + body, read-only, plus each [[wikilink]] in the body already resolved (or not)
-    // against this vault's privacy-filtered index — P1b: the modal renders formatted text and
-    // real links, and a dead/private target must never be distinguishable from the other.
-    'POST /api/note': async (b) => {
-      const cfg = normalize(await loadConfig(file));
-      const ctx = localContext(cfg, { ...env, BRAINLINK_AI_PLATFORM: '' });
-      if (!b.vault || !ctx.enabled.includes(b.vault)) throw new Error('Unknown vault.');
-      const note = await readNote(ctx, b.vault, String(b.path || ''));
-      const index = await loadVault(ctx, b.vault);
-      return { vault: b.vault, ...note, wikilinks: resolveNoteWikilinks(index, note.body) };
-    },
+    ...createFindRoutes({ file, env, normalize, loadConfig, localContext, searchWithVerdict, createReplayMisses, semanticStatus, plainText, readNote, loadVault, resolveNoteWikilinks }),
   };
 
   const server = createServer(async (req, res) => {
@@ -2451,14 +2691,9 @@ export async function startSetup(opts = {}) {
       if (given.length !== want.length || !timingSafeEqual(given, want)) { res.writeHead(401).end(); return; }
       res.writeHead(200, { 'Content-Type': 'text/event-stream; charset=utf-8', 'Cache-Control': 'no-store', Connection: 'keep-alive', 'X-Accel-Buffering': 'no' });
       res.write(': connected\n\n'); eventClients.add(res);
-      res.on('close', () => eventClients.delete(res));
-      return;
-    }
-    if (req.method === 'GET' && url.pathname === '/api/events') {
-      const given = Buffer.from(url.searchParams.get('t') || ''); const want = Buffer.from(token);
-      if (given.length !== want.length || !timingSafeEqual(given, want)) { res.writeHead(401).end(); return; }
-      res.writeHead(200, { 'Content-Type': 'text/event-stream; charset=utf-8', 'Cache-Control': 'no-store', Connection: 'keep-alive', 'X-Accel-Buffering': 'no' });
-      res.write(': connected\n\n'); eventClients.add(res);
+      for (const [name, result] of vaultNoteCounts) {
+        if (result.status !== 'scanning') res.write(`event: vault-counts-updated\ndata: ${JSON.stringify({ vault: name, ...result })}\n\n`);
+      }
       res.on('close', () => eventClients.delete(res));
       return;
     }
@@ -2488,14 +2723,20 @@ export async function startSetup(opts = {}) {
       if (given.length !== want.length || !timingSafeEqual(given, want)) { json(res, 401, { error: 'Setup session expired. Reopen BrainLink.' }); return; }
       const ticket = updateDownloadMatch[1];
       const pending = updateDownloads.get(ticket);
-      if (pending?.opened) { json(res, 409, { error: 'This package is already open. Check for updates again if you need another copy.' }); return; }
       if (!pending || pending.expiresAt <= Date.now()) {
         if (pending) { clearTimeout(pending.timer); updateDownloads.delete(ticket); await rm(pending.folder, { recursive: true, force: true }).catch(() => {}); }
         json(res, 404, { error: 'This verified download expired. Check for updates and try again.' });
         return;
       }
-      updateDownloads.delete(ticket);
-      clearTimeout(pending.timer);
+      if (pending.downloaded || pending.downloadInProgress || pending.opening) { json(res, 409, { error: 'This verified download is already in progress or has already been downloaded.' }); return; }
+      pending.downloadInProgress = true;
+      let file;
+      try { file = await verifyStagedUpdate(pending); }
+      catch (error) {
+        pending.downloadInProgress = false;
+        json(res, 409, { error: error.message || 'This verified package is no longer available.' });
+        return;
+      }
       res.writeHead(200, {
         'Content-Type': 'application/octet-stream',
         'Content-Length': String(pending.size),
@@ -2503,9 +2744,14 @@ export async function startSetup(opts = {}) {
         'Cache-Control': 'no-store',
         'X-Content-Type-Options': 'nosniff',
       });
-      const stream = createReadStream(pending.file);
+      const stream = createReadStream(file);
       stream.once('error', () => res.destroy());
-      stream.once('close', () => { rm(pending.folder, { recursive: true, force: true }).catch(() => {}); });
+      res.once('finish', () => {
+        pending.downloadInProgress = false;
+        pending.downloaded = true;
+        retainUpdatePackage(ticket, pending);
+      });
+      res.once('close', () => { if (!res.writableFinished) pending.downloadInProgress = false; });
       res.once('close', () => stream.destroy());
       stream.pipe(res);
       return;
@@ -2522,13 +2768,15 @@ export async function startSetup(opts = {}) {
       try { body = raw ? JSON.parse(raw) : {}; } catch { json(res, 400, { error: 'Bad JSON' }); return; }
     }
     try {
-      const result = GRAPH_NOTE_MUTATIONS.has(url.pathname)
+      const result = url.pathname === '/api/memory/save'
+        ? await serializeGraphNoteMutation({ ...body, path: 'BrainLink/Memories.md' }, () => route(body))
+        : GRAPH_NOTE_MUTATIONS.has(url.pathname)
         ? await serializeGraphNoteMutation(body, () => route(body))
         : await route(body);
       json(res, 200, result);
     } catch (e) { json(res, 400, { error: String(e.message || e) }); }
   });
-  server.once('close', () => { snapshotWatcher?.stop(); vaultWatcher?.stop(); for (const client of eventClients) client.end(); eventClients.clear(); for (const pending of updateDownloads.values()) { clearTimeout(pending.timer); if (!pending.opened) rm(pending.folder, { recursive: true, force: true }).catch(() => {}); } updateDownloads.clear(); clearInterval(discoveryTimer); clearInterval(observationTimer); clearInterval(weeklyBenchmarkTimer); clearInterval(ingestionTimer); clearInterval(githubAutoTimer); clearInterval(localSummaryAutoDraftTimer); if (backupTimer) { clearTimeout(backupTimer); clearInterval(backupTimer); } if (syncTimer) { clearTimeout(syncTimer); clearInterval(syncTimer); } });
+  server.once('close', () => { snapshotWatcher?.stop(); vaultWatcher?.stop(); for (const client of eventClients) client.end(); eventClients.clear(); for (const pending of updateDownloads.values()) { clearTimeout(pending.timer); if (!pending.opened) rm(pending.folder, { recursive: true, force: true }).catch(() => {}); } updateDownloads.clear(); clearInterval(selfTestTimer); clearInterval(discoveryTimer); clearInterval(observationTimer); clearInterval(weeklyBenchmarkTimer); clearInterval(ingestionTimer); clearInterval(githubAutoTimer); clearInterval(localSummaryAutoDraftTimer); if (backupTimer) { clearTimeout(backupTimer); clearInterval(backupTimer); } if (syncTimer) { clearTimeout(syncTimer); clearInterval(syncTimer); } });
   await new Promise((resolve, reject) => { server.once('error', reject); server.listen(port, '127.0.0.1', resolve); });
   port = server.address().port;
   const startupConfig = await loadConfig(file);

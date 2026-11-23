@@ -1,13 +1,17 @@
 // Identity-aware writes. Every write is a new file or an append (never an overwrite), carries
 // attribution in the vault's frontmatter schema, passes a secret scan, and returns a preview
 // unless confirm=true.
-import { writeFile, appendFile, readdir, readFile, stat, open, mkdir, realpath } from 'node:fs/promises';
+import { writeFile, appendFile, readdir, readFile, stat, lstat, open, mkdir, realpath } from 'node:fs/promises';
+import { createHash } from 'node:crypto';
+import { twinCanWriteNotes, twinMemoryAllowed, twinProfileForVault } from './twin-profiles.mjs';
 import path from 'node:path';
 import { TEMPLATES, renderTemplate } from './templates.mjs';
 import { suggestLinks, relatedSection, safeUpdateMap } from './links.mjs';
-import { vault, vaultRoot, safeJoin, findSecrets, zonedNow, parseFrontmatter, isExcludedPath, isPrivateMeta, fmSaysPrivate, readNote, loadVault } from './core.mjs';
+import { vault, vaultRoot, safeJoin, findSecrets, zonedNow, parseFrontmatter, isExcludedPath, isPrivateMeta, fmSaysPrivate, readNote, loadVault, assertRegularWritePath as checkWritePath } from './core.mjs';
+export { assertRegularWritePath as checkWritePath } from './core.mjs';
 import { typedEntityMetadataMap, typedRelationAllowed } from './typed-graph.mjs';
 import { createHandoffGitVerifier } from './handoff-git.mjs';
+import { validReviewDate } from './decision-reviews.mjs';
 
 export const slug = (s) => String(s || '').toLowerCase().replace(/[^a-z0-9㐀-鿿]+/g, '-').replace(/^-|-$/g, '') || 'unknown';
 
@@ -24,6 +28,7 @@ export function resolveIdentity(ctx, a = {}) {
 const q = (s) => JSON.stringify(String(s ?? ''));
 export const madeBy = (id) => `**Made by ${id.ai_platform} (${id.agent_or_role}).**`;
 const TYPED_ENTITY_TYPES = new Set(['person', 'team', 'workflow', 'dataset', 'artifact', 'project', 'policy', 'concept']);
+const MEMORY_TYPES = new Set(['working', 'semantic', 'procedural', 'episodic']);
 const TYPED_PREDICATES = new Set(['owned_by', 'runs', 'consumes', 'produces', 'depends_on', 'part_of', 'assigned_to', 'informed_by', 'communicates_with']);
 const TYPED_ID = /^[a-z][a-z0-9._:-]{1,127}$/;
 
@@ -33,6 +38,7 @@ export function frontmatter(ctx, vaultName, id, f, now = new Date()) {
   const tags = `[${(f.tags || []).map((t) => String(t).replace(/[^\w㐀-鿿-]/g, '')).filter(Boolean).join(', ')}]`;
   const sourceSession = typeof f.source_session_id === 'string' && /^[A-Za-z0-9_-]{1,160}$/.test(f.source_session_id)
     ? [`source_session_id: ${q(f.source_session_id)}`] : [];
+  const twinProfile = twinProfileForVault(ctx, vaultName);
   const extra = Object.entries(v.extra_fields || {}).filter(([k]) => !(sourceSession.length && k.toLowerCase() === 'source_session_id')).map(([k, val]) => `${k}: ${q(val)}`);
   const typed = TYPED_ENTITY_TYPES.has(f.type) && f.entity_id && f.entity_scope;
   const typedFields = typed ? [`id: ${f.entity_id}`, `scope: ${f.entity_scope}`,
@@ -40,18 +46,23 @@ export function frontmatter(ctx, vaultName, id, f, now = new Date()) {
       '  - predicate: ' + r.predicate, `    target: ${r.target}`, '    review: proposed',
       `    source: ${q(r.source)}`, `    confidence: ${r.confidence}`,
     ])] : [])] : [];
+  const memoryTypeField = MEMORY_TYPES.has(f.memory_type) ? [`memory_type: ${f.memory_type}`] : [];
+  const reviewDateField = f.type === 'decision' && /^\d{4}-\d{2}-\d{2}$/.test(String(f.review_date || ''))
+    ? [`review_date: ${q(f.review_date)}`] : [];
   if (v.schema === 'provenance') {
     const date = ts.slice(0, 10);
-    return ['---', `type: ${f.type || 'log'}`, `status: ${f.status || 'proposed'}`, `tags: ${tags}`, ...extra,
+    return ['---', `type: ${f.type || 'log'}`, `status: ${f.status || 'proposed'}`, ...memoryTypeField, ...reviewDateField, `tags: ${tags}`, ...extra,
       ...(f.private ? ['private: true'] : []),
+      ...(twinProfile ? [`twin_profile_id: ${q(twinProfile.profile_id)}`] : []),
       `created_by_platform: ${slug(id.ai_platform)}`, `created_by_agent: ${slug(id.agent_or_role)}`, `created_session_or_task_id: ${q(id.session_or_task_id)}`, `created_date: ${date}`,
       `last_material_revision_by_platform: ${slug(id.ai_platform)}`, `last_material_revision_by_agent: ${slug(id.agent_or_role)}`,
       `last_material_revision_session_or_task_id: ${q(id.session_or_task_id)}`, `last_material_revision_date: ${date}`,
       ...sourceSession, ...typedFields,
       `provenance_confidence: ${['verified', 'reported', 'inferred'].includes(f.confidence) ? f.confidence : 'unknown'}`, `source: ${q(f.source)}`, '---'].join('\n');
   }
-  return ['---', `type: ${f.type || 'note'}`, `status: ${f.status || 'proposed'}`, `ai_platform: ${q(id.ai_platform)}`, `agent_or_role: ${q(id.agent_or_role)}`,
+  return ['---', `type: ${f.type || 'note'}`, `status: ${f.status || 'proposed'}`, ...memoryTypeField, ...reviewDateField, `ai_platform: ${q(id.ai_platform)}`, `agent_or_role: ${q(id.agent_or_role)}`,
     ...(f.private ? ['private: true'] : []),
+    ...(twinProfile ? [`twin_profile_id: ${q(twinProfile.profile_id)}`] : []),
     `session_or_task_id: ${q(id.session_or_task_id)}`, `written_at: ${ts}`, `source: ${q(f.source)}`, `confidence: ${q(f.confidence || 'proposed')}`, `tags: ${tags}`, ...extra, ...sourceSession, ...typedFields, '---'].join('\n');
 }
 
@@ -79,7 +90,13 @@ export async function proposeNote(ctx, a, now = new Date()) {
   const root = vaultRoot(ctx, vaultName);
   const id = resolveIdentity(ctx, a);
   const errors = checkCommon(ctx, vaultName, a, id);
-  const twinSourcePolicy = ctx.twinScope?.mode === 'scoped' ? ctx.twinScope.source_policy : null;
+  if (a.memory_type !== undefined && !MEMORY_TYPES.has(a.memory_type)) errors.push('memory_type must be working, semantic, procedural, or episodic');
+  if (ctx.twinScope?.mode === 'scoped' && a.memory_type && !twinMemoryAllowed(ctx, a.memory_type, vaultName)) {
+    errors.push(`this Twin profile does not allow proposing ${a.memory_type} memory`);
+  }
+  const twinProfile = twinProfileForVault(ctx, vaultName);
+  if (ctx.twinScope?.mode === 'scoped' && !twinProfile) errors.push('the selected vault must match the active Twin profile grant');
+  const twinSourcePolicy = twinProfile?.source_policy || null;
   let twinConfidence = a.confidence;
   if (twinSourcePolicy?.provenance_required) {
     const sourceId = String(a.session_or_task_id || '').trim();
@@ -93,12 +110,14 @@ export async function proposeNote(ctx, a, now = new Date()) {
   const te = titleError(title); if (te) errors.push(te);
   const tpl = a.template ? TEMPLATES[a.template] : null;
   if (a.template && !tpl) errors.push(`template must be one of ${Object.keys(TEMPLATES).join(', ')}`);
+  const reviewDate = a.review_date || (a.template === 'decision' ? a.fields?.review_date : undefined);
+  if (reviewDate && (a.type || tpl?.type) === 'decision' && !validReviewDate(reviewDate)) errors.push('review_date must be a real date using YYYY-MM-DD');
   if (!tpl && (!a.body || !String(a.body).trim())) errors.push('body is required');
   const typed = TYPED_ENTITY_TYPES.has(a.type);
   if (typed) {
     if (!TYPED_ID.test(String(a.entity_id || ''))) errors.push('typed entity records require entity_id using lowercase letters, numbers, dot, underscore, colon or hyphen');
     if (!['personal', 'organisation', 'client'].includes(a.entity_scope)) errors.push('typed entity records require entity_scope: personal, organisation, or client');
-    if (ctx.twinScope?.mode === 'scoped' && a.entity_scope !== ctx.twinScope.mode) errors.push('typed entity scope must match the active Twin profile');
+    if (twinProfile && a.entity_scope !== twinProfile.mode) errors.push('typed entity scope must match the active Twin profile for this vault');
     if (a.relations !== undefined && (!Array.isArray(a.relations) || a.relations.length > 20)) errors.push('relations must be a list of at most 20 proposed relationships');
     else for (const relation of a.relations || []) {
       if (!relation || typeof relation !== 'object' || !TYPED_PREDICATES.has(relation.predicate)) errors.push('each relationship needs a supported predicate');
@@ -138,22 +157,29 @@ export async function proposeNote(ctx, a, now = new Date()) {
   const date = zonedNow(ctx.tz, now).slice(0, 10);
   const name = `${date} — ${title}.md`;
   const rel = folder ? `${folder}/${name}` : name;
-  const fm = frontmatter(ctx, vaultName, id, { ...a, confidence: twinConfidence, private: twinSourcePolicy?.private_default === true ? true : a.private,
-    type: a.type || tpl?.type || (intake ? 'intake' : undefined),
+  // Vault access is the visibility boundary for newly-created notes. A profile's legacy
+  // private_default setting must not silently turn notes in a shared vault into owner-only
+  // notes; private vaults are already isolated by their explicit per-agent vault grants.
+  const fm = frontmatter(ctx, vaultName, id, { ...a, review_date: reviewDate, confidence: twinConfidence, private: a.private === true,
+    type: a.type || tpl?.type || (intake ? 'intake' : undefined), memory_type: a.memory_type,
     status: typed ? 'proposed' : a.status, relations: typed ? a.relations : undefined }, now);
   const decision = needsDecision ? `## Decision\n\n**${String(a.decision).toUpperCase()}**\n\n` : '';
   const body = tpl ? renderTemplate(a.template, a.fields || {}, a.body) : String(a.body).trim();
   const links = a.auto_link === false ? [] : await suggestLinks(ctx, vaultName, `${title}\n${body}`, { limit: 5 }).catch(() => []);
   const content = `${fm}\n\n# ${title}\n\n${madeBy(id)}\nOther AI platforms also write this vault — do not treat unsigned edits as this note's author.\n\n${decision}${body}\n\n${relatedSection(links)}## Changelog\n\n- ${date} — Created. Made by ${id.ai_platform} (${id.agent_or_role}).\n`;
-  const r = await commitNew(ctx, vaultName, rel, content, a.confirm);
+  const r = await commitNew(ctx, vaultName, rel, content, a.confirm, { profileWrite: twinCanWriteNotes(ctx, vaultName) });
   return r.ok ? { ...r, linked_to: links.map((l) => l.target) } : r;
 }
 
-export async function commitNew(ctx, vaultName, rel, content, confirm) {
+export async function commitNew(ctx, vaultName, rel, content, confirm, { ownerApproved = false, profileWrite = false } = {}) {
   const v = vault(ctx, vaultName);
-  const full = safeJoin(vaultRoot(ctx, vaultName), rel);
+  if (ctx.readOnly || v.writes === 'off') return { ok: false, errors: [`${vaultName} is read-only; no file was created.`] };
+  let full;
+  try { full = await checkWritePath(vaultRoot(ctx, vaultName), rel); }
+  catch { return { ok: false, errors: ['Destination is excluded or not a regular path in the vault.'] }; }
   if (await exists(full)) return { ok: false, conflict: true, path: `${vaultName}/${rel}`, errors: [`refused: ${vaultName}/${rel} already exists; never overwrite — choose a new path`] };
-  if (v.writes === 'proposal-only') return { ok: true, written: false, path: `${vaultName}/${rel}`, preview: content, next: `${vaultName} is proposal-only: show this to the user; do not write it elsewhere.` };
+  if (((v.private && !ctx.trustedLocal) || v.writes === 'proposal-only') && !ownerApproved && !profileWrite) return { ok: true, written: false, path: `${vaultName}/${rel}`, preview: content, next: `${vaultName} is proposal-only: show this to the user; do not write it elsewhere.` };
+  if (ownerApproved && !ctx.trustedLocal) return { ok: false, errors: ['Only the local vault owner can approve a saved proposal.'] };
   if (!confirm) return { ok: true, written: false, path: `${vaultName}/${rel}`, preview: content, next: 'Show the preview to the user; call again with confirm=true after approval.' };
   try { await writeFile(full, content, { flag: 'wx' }); }
   catch (error) {
@@ -179,6 +205,11 @@ export async function appendTo(root, rel, text) {
   await appendFile(full, text);
 }
 
+export async function appendProposalState(root, rel, header = '') {
+  try { return { proposal_action: 'append', proposal_expected_hash: createHash('sha256').update(await readFile(safeJoin(root, rel))).digest('hex'), proposal_header: header }; }
+  catch (error) { if (error.code === 'ENOENT') return { proposal_action: 'append', proposal_expected_hash: null, proposal_header: header }; throw error; }
+}
+
 // ---- remember: durable facts the user wants every AI to know ----
 
 export const MEMORY_NOTE = 'BrainLink/Memories.md';
@@ -196,8 +227,10 @@ function memoryFact(line) {
 
 export async function readMemories(ctx, vaultName, limit = 30) {
   try {
-    const raw = await readFile(safeJoin(vaultRoot(ctx, vaultName), MEMORY_NOTE), 'utf8');
-    return raw.split('\n').map(memoryFact).filter(Boolean).slice(-limit);
+    // Memory activation must obey the same private-note, exclusion, Twin and symlink
+    // checks as any other direct note read. A configured vault is not a bypass.
+    const { body } = await readNote(ctx, vaultName, MEMORY_NOTE);
+    return body.split('\n').map(memoryFact).filter(Boolean).slice(-limit);
   } catch { return []; }
 }
 
@@ -213,6 +246,19 @@ export async function remember(ctx, a, now = new Date()) {
   if (!facts.length) errors.push('fact is required (one short sentence the user wants remembered)');
   if (facts.some((f) => f.length > 300)) errors.push('keep each fact under 300 characters');
   if (errors.length) return { ok: false, errors };
+  // Reject link-backed or excluded destinations before even returning a preview. Existing
+  // memory notes also pass the ordinary private-note and Twin memory checks before append.
+  const memoryDir = safeJoin(root, 'BrainLink');
+  const dirInfo = await lstat(memoryDir).catch((error) => { if (error.code === 'ENOENT') return null; throw error; });
+  if (dirInfo && (dirInfo.isSymbolicLink() || !dirInfo.isDirectory())) return { ok: false, errors: ['Memory destination is not a regular directory.'] };
+  const memoryFile = safeJoin(root, MEMORY_NOTE);
+  const fileInfo = dirInfo ? await lstat(memoryFile).catch((error) => { if (error.code === 'ENOENT') return null; throw error; }) : null;
+  if (fileInfo && (fileInfo.isSymbolicLink() || !fileInfo.isFile())) return { ok: false, errors: ['Memory destination is not a regular file.'] };
+  if (await isExcludedPath(root, MEMORY_NOTE)) return { ok: false, errors: ['Memory destination is excluded.'] };
+  if (fileInfo) {
+    try { await readNote(ctx, vaultName, MEMORY_NOTE); }
+    catch { return { ok: false, errors: ['Memory destination is not accessible to this connection.'] }; }
+  }
   const known = new Set((await readMemories(ctx, vaultName, 1000)).map(normFact));
   const fresh = facts.filter((f) => !known.has(normFact(f)));
   if (!fresh.length) return { ok: true, written: false, already_known: facts };
@@ -220,7 +266,7 @@ export async function remember(ctx, a, now = new Date()) {
   // A user-requested memory is user-reported, not independently verified. Preserve its origin
   // beside the compact fact so later reviewers can trace it without retaining the conversation.
   const text = fresh.map((f) => `- ${f} _(BrainLink memory; date: ${date}; platform: ${q(id.ai_platform)}; source: ${q(source)}; confidence: reported)_`).join('\n') + '\n';
-  if (vault(ctx, vaultName).writes === 'proposal-only') return { ok: true, written: false, preview: text, next: 'This vault is proposal-only: show the memory to the user.' };
+  if (((vault(ctx, vaultName).private && !ctx.trustedLocal) || vault(ctx, vaultName).writes === 'proposal-only') && !twinCanWriteNotes(ctx, vaultName)) return { ok: true, written: false, path: `${vaultName}/${MEMORY_NOTE}`, preview: text, ...await appendProposalState(root, MEMORY_NOTE, '# Memories\n\nFacts every connected AI should know. Added by AIs when you say "remember".\n\n'), next: 'This vault is proposal-only: show the memory to the user.' };
   if (!a.confirm) return { ok: true, written: false, path: `${vaultName}/${MEMORY_NOTE}`, preview: text, next: 'Confirm with the user (or their "remember this" already did), then call again with confirm=true.' };
   const full = safeJoin(root, MEMORY_NOTE);
   if (!(await exists(full))) { await mkdir(path.dirname(full), { recursive: true }); await writeFile(full, '# Memories\n\nFacts every connected AI should know. Added by AIs when you say "remember".\n\n', { flag: 'wx' }); }
@@ -254,10 +300,14 @@ export async function appendDaily(ctx, a, now = new Date()) {
   const ds = await dailySettings(root);
   const name = /[^\w\s.-]/.test(ds.format) ? ts.slice(0, 10) : formatDate(ds.format, ts);
   const rel = `${ds.folder ? ds.folder + '/' : ''}${name}.md`;
+  let full;
+  try {
+    full = await checkWritePath(root, rel);
+    if (await exists(full)) await readNote(ctx, vaultName, rel);
+  } catch { return { ok: false, errors: ['Daily note destination is not accessible to this connection.'] }; }
   const entry = `${text.split('\n').map((l, i) => (i ? `  ${l}` : `- ${ts.slice(11, 16)} ${l}`)).join('\n')} _(${id.ai_platform})_\n`;
-  if (vault(ctx, vaultName).writes === 'proposal-only') return { ok: true, written: false, path: `${vaultName}/${rel}`, preview: entry, next: 'This vault is proposal-only.' };
+  if (((vault(ctx, vaultName).private && !ctx.trustedLocal) || vault(ctx, vaultName).writes === 'proposal-only') && !twinCanWriteNotes(ctx, vaultName)) return { ok: true, written: false, path: `${vaultName}/${rel}`, preview: entry, ...await appendProposalState(root, rel, `# ${ts.slice(0, 10)}\n\n`), next: 'This vault is proposal-only.' };
   if (!a.confirm) return { ok: true, written: false, path: `${vaultName}/${rel}`, preview: entry, next: 'Call again with confirm=true to add it to today\'s note.' };
-  const full = safeJoin(root, rel);
   if (!(await exists(full))) { await mkdir(path.dirname(full), { recursive: true }); await writeFile(full, `# ${ts.slice(0, 10)}\n\n`, { flag: 'wx' }); }
   await appendTo(root, rel, entry);
   await safeUpdateMap(ctx, vaultName);
@@ -366,8 +416,9 @@ export async function sendHandoff(ctx, a, now = new Date()) {
         const relative = path.relative(realRoot, realTarget);
         if (relative && relative !== '..' && !relative.startsWith(`..${path.sep}`) && !path.isAbsolute(relative)) {
           header = await readHandoffHeader(realTarget);
+          const mailboxProfile = twinProfileForVault(ctx, h.vault);
           unavailable = !header || isPrivateMeta(header.meta) || fmSaysPrivate(header.block) || await isExcludedPath(root, rel)
-            || (ctx.twinScope?.mode === 'scoped' && header.meta.twin_profile_id !== ctx.twinScope.profile_id);
+            || (mailboxProfile && header.meta.twin_profile_id !== mailboxProfile.profile_id);
         }
       } catch {}
       if (unavailable) errors.push('ack_of does not identify an available handoff within this Twin profile');
@@ -419,7 +470,7 @@ export async function sendHandoff(ctx, a, now = new Date()) {
     `decision_needed: ${a.decision_needed ? 'yes' : 'no'}`, `deadline: ${a.deadline || ''}`, `ack_of: ${a.ack_of || ''}`, `source: ${q(a.source || 'handoff')}`,
     `scope: ${q(a.scope || 'unspecified')}`, `confidence: ${q(a.confidence || 'unknown')}`,
     ...(git.value ? ['git_checkpoint_schema: 1', `git_repo: ${q(git.value.repo)}`, `git_branch: ${q(git.value.branch)}`, `git_head: ${q(git.value.head)}`, `git_dirty: ${git.value.dirty ? 'true' : 'false'}`, `git_ahead: ${git.value.ahead}`] : []),
-    ...(ctx.twinScope?.mode === 'scoped' ? [`twin_profile_id: ${q(ctx.twinScope.profile_id)}`] : []), '---'].join('\n');
+    ...(twinProfileForVault(ctx, h.vault) ? [`twin_profile_id: ${q(twinProfileForVault(ctx, h.vault).profile_id)}`] : []), '---'].join('\n');
   const sections = HANDOFF_FIELDS.map(([field, label]) => handoffSection(label, a[field])).join('');
   const gitSection = git.value ? handoffSection('Git checkpoint (reported by sender; not verified by BrainLink)', `Repository: ${git.value.repo}\nBranch: ${git.value.branch}\nCommit: ${git.value.head}\nWorking tree dirty: ${git.value.dirty}\nCommits ahead: ${git.value.ahead}`) : '';
   const sources = refs.length ? handoffSection('Sources', refs.map((ref) => `\`${ref}\``)) : '';
@@ -446,7 +497,8 @@ export async function listHandoffs(ctx, { to, limit = 10 } = {}) {
     const full = safeJoin(dir, f);
     const header = await readHandoffHeader(full).catch(() => null);
     if (!header || isPrivateMeta(header.meta) || fmSaysPrivate(header.block)) continue;
-    if (ctx.twinScope?.mode === 'scoped' && header.meta.twin_profile_id !== ctx.twinScope.profile_id) continue;
+    const mailboxProfile = twinProfileForVault(ctx, h.vault);
+    if (mailboxProfile && header.meta.twin_profile_id !== mailboxProfile.profile_id) continue;
     // Read the recipient from frontmatter: splitting a slugged name such as "Claude Code"
     // at hyphens makes filename-only matching ambiguous with the subject slug.
     const recipient = slug(header.meta.to || f.match(/-to-([a-z0-9-]+?)-/)?.[1] || '');

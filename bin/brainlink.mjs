@@ -6,14 +6,18 @@ import { homedir, tmpdir } from 'node:os';
 import { stat, readFile, writeFile, mkdir, cp, mkdtemp, rename, unlink } from 'node:fs/promises';
 import { randomBytes } from 'node:crypto';
 import { loadConfig, saveConfig, configPath, appHome, emptyConfig, normalize } from '../src/config.mjs';
-import { markConnected } from '../src/mcp-agents.mjs';
 import { buildPack, scaffold, mergePack, PACKS } from '../src/packs.mjs';
 import { CLIENTS, detect, connectClient, disconnectClient } from '../src/connectors.mjs';
 import { createMcp, serveStdio, serveHttp, VERSION } from '../src/server.mjs';
-import { openContext, launchSpec, logActivity, refreshMap, ROOT } from '../src/runtime.mjs';
+import { createLiveMcp } from '../src/live-mcp.mjs';
+import { createProposalInbox } from '../src/proposal-inbox.mjs';
+import { openContext, launchSpec, logActivity, readActivity, refreshMap, ROOT } from '../src/runtime.mjs';
 import { readGitSourceState } from '../src/git-source-state.mjs';
 import { createContext, warmSemantic } from '../src/core.mjs';
 import { brief } from '../src/insights.mjs';
+import { runSelfTest } from '../src/self-test.mjs';
+import { createReplayMisses } from '../src/replay-misses.mjs';
+import { retrievalUseReport } from '../src/retrieval-use.mjs';
 import { startSetup, openInBrowser, openInAppWindow } from '../src/setup.mjs';
 import { runSync } from '../src/sync-cli.mjs';
 import { PROVIDER_LABELS } from '../src/sync/settings.mjs';
@@ -88,6 +92,7 @@ const HELP = `BrainLink MCP ${VERSION} — one Markdown brain for every AI
   brainlink brief [--vault V] [--days 7]  what changed and what is open
   brainlink miss add --profile NAME --agent NAME --question TEXT --result found|not_found|stale --seconds N --fix-needed TYPE [--date ISO]
   brainlink miss import --file FILE | miss list --profile NAME [--week YYYY-Www]
+  brainlink miss observations --profile TWIN_ID [--week YYYY-Www] (content-free automatic totals)
   brainlink bench run --fixture FILE [--vault-root DIR --vault-name NAME] [--week YYYY-Www]
   brainlink bench report [--weeks N]
   brainlink eval --fixture FILE [--vault-root DIR --vault-name NAME]  compare labelled retrieval (read-only)
@@ -98,7 +103,7 @@ const HELP = `BrainLink MCP ${VERSION} — one Markdown brain for every AI
   brainlink session-end-cue --client claude-code|codex|hermes  record a local, metadata-only end cue from stdin
   brainlink session-end-cues            list local end cues (no transcripts are read)
   brainlink ui [--no-open] [--port N]  open the milestone UI (notes, search, graph) on your vaults
-  brainlink demo [--no-open]           try the UI on a throwaway sample vault; touches nothing real
+  brainlink demo [--no-open]           try the UI with a sample vault; session-history import is disabled
   brainlink serve                      MCP over stdio (what AI apps run)
   brainlink serve --http [PORT]        MCP over local HTTP (bearer token from Setup)
 
@@ -109,15 +114,11 @@ async function main() {
     case 'serve': {
       const { ctx, cfg } = await openContext();
       importAll({ env: ctx.env }).catch(() => {}); // keep the local session index warm at server start; cheap and incremental after the first run
-      const mcp = createMcp(ctx, { onCall: (e) => {
-        logActivity(process.env, { ...e, platform: ctx.platform || 'unknown', mode: flag('http') ? 'http' : 'stdio' });
-        // Connected only after a verified call that used that agent's token — same rule as the
-        // Connect buttons (clientHealthCheck in src/setup.mjs). Written once, not on every call.
-        if (ctx.mcpAgent && e.ok && !ctx.mcpAgent.connected) {
-          ctx.mcpAgent.connected = true; // avoid re-saving on every subsequent call this process makes
-          loadConfig().then((c) => saveConfig(markConnected(c, ctx.mcpAgent.id))).catch(() => {});
-        }
-      } });
+      const proposalInbox = createProposalInbox({ home: ctx.dataDir });
+      const createServer = (connectionCtx) => createMcp(connectionCtx, { onCall: (e) => {
+        logActivity(process.env, { ...e, platform: connectionCtx.platform || 'unknown', client_role: connectionCtx.agentRole || 'unknown', mode: flag('http') ? 'http' : 'stdio' });
+      }, onProposal: (proposal) => proposalInbox.add(proposal) });
+      const mcp = createLiveMcp({ env: ctx.env, initialConfig: cfg, initialContext: ctx, createServer, httpTokenFromConfig: flag('http') && !process.env.BRAINLINK_MCP_TOKEN });
       if (flag('http')) {
         const port = Number(opt('http', cfg.http.port)) || cfg.http.port;
         const token = process.env.BRAINLINK_MCP_TOKEN || cfg.http.token;
@@ -219,6 +220,17 @@ async function main() {
       for (const a of ctx.agents) out(`agent  ${a.name} @ ${a.vault}: "${a.activation[0]}" / "${a.close[0]}"`);
       return;
     }
+    case 'selftest': {
+      const { ctx } = await openContext(process.env, { trustedLocal: true });
+      const report = await runSelfTest(ctx);
+      if (argv.includes('--json')) out(JSON.stringify(report, null, 2));
+      else {
+        for (const check of report.checks.filter((item) => item.status !== 'pass')) out(`${check.status.toUpperCase()}  ${check.message}`);
+        out(`${report.summary.pass} passed, ${report.summary.warn} to review, ${report.summary.fail} failed`);
+      }
+      if (!report.ok) process.exitCode = 1;
+      return;
+    }
     case 'brief': {
       const { ctx } = await openContext(process.env, { trustedLocal: true });
       const v = opt('vault', ctx.enabled[0]);
@@ -239,7 +251,16 @@ async function main() {
       }
       if (argv[1] === 'import') { if (!opt('file')) fail('--file required'); out(JSON.stringify(await rsi.importMarkdown(path.resolve(opt('file'))))); return; }
       if (argv[1] === 'list') { if (!opt('profile')) fail('--profile required'); out(JSON.stringify({ misses: await rsi.listMisses(opt('profile'), opt('week')), summary: await rsi.aggregateMisses(opt('profile'), opt('week')) }, null, 2)); return; }
-      fail('use miss add, import or list');
+      if (argv[1] === 'observations') { if (!opt('profile')) fail('--profile required'); out(JSON.stringify(await rsi.retrievalObservationReport(opt('profile'), opt('week')), null, 2)); return; }
+      if (argv[1] === 'replay') { const { ctx } = await openContext(process.env, { trustedLocal: true }); out(JSON.stringify(await createReplayMisses({ home: appHome() }).replay(ctx), null, 2)); return; }
+      fail('use miss add, import, list, observations or replay');
+    }
+    case 'retrieval-use': {
+      const { ctx } = await openContext(process.env, { trustedLocal: true });
+      const report = await retrievalUseReport(ctx, await readActivity(process.env, 20000), {
+        days: Number(opt('days', 60)), vault: opt('vault', ''),
+      });
+      out(JSON.stringify(report, null, 2)); return;
     }
     case 'bench': {
       const rsi = createRsiWeekly({ home: appHome() });
@@ -250,7 +271,7 @@ async function main() {
       const fixture = JSON.parse(fixtureBytes.toString('utf8'));
       const root = opt('vault-root'), name = opt('vault-name', fixture.vault);
       const { ctx } = root ? { ctx: createContext(normalize({ vaults: [{ name, path: path.resolve(root) }] }), { env: { ...process.env, BRAINLINK_SEMANTIC: '0' } }) } : await openContext(process.env, { trustedLocal: true });
-      out(JSON.stringify(await rsi.runBenchmark({ ctx, fixture, fixtureBytes, week: opt('week', taipeiWeek(new Date().toISOString())), softwareVersion: VERSION, sourceState: readGitSourceState(ROOT) }), null, 2)); return;
+      out(JSON.stringify(await rsi.runBenchmark({ ctx, fixture, fixtureBytes, week: opt('week', taipeiWeek(new Date().toISOString())), softwareVersion: VERSION, sourceState: readGitSourceState(ROOT), getSourceState: () => readGitSourceState(ROOT) }), null, 2)); return;
     }
     case 'eval': {
       const fixtureFile = opt('fixture');
@@ -349,19 +370,18 @@ async function main() {
     case 'demo': {
       // Throwaway vault + throwaway config/session home (BRAINLINK_HOME), pre-populated with the
       // sample vault under the Founder OS pack, so the demo opens straight into the v1.1
-      // experience (vault, agent, graph, sessions) with nothing real touched.
+      // experience (vault, agent, graph, sessions). Import of local AI history is disabled.
       const demoRoot = await mkdtemp(path.join(tmpdir(), 'brainlink-demo-'));
       const demoPath = path.join(demoRoot, 'Acme Studio');
       await cp(path.join(ROOT, 'samples', 'acme-studio'), demoPath, { recursive: true });
-      const demoEnv = { ...process.env, BRAINLINK_HOME: path.join(demoRoot, 'home') };
+      const demoEnv = { ...process.env, BRAINLINK_HOME: path.join(demoRoot, 'home'), BRAINLINK_DISABLE_HISTORY_IMPORT: '1' };
       const built = buildPack('founder-os', { vaultName: 'Acme Studio', vaultPath: demoPath, agentName: 'Chief of Staff' });
       const cfg = mergePack(emptyConfig(), built);
       cfg.timezone = Intl.DateTimeFormat().resolvedOptions().timeZone;
       await saveConfig(cfg, configPath(demoEnv));
       await refreshMap(cfg, 'Acme Studio', demoEnv);
-      importAll({ env: demoEnv }).catch(() => {}); // same session-index warm-up as `brainlink ui`
       const s = await startSetup({ env: demoEnv, port: 0, openUrl: flag('no-open') ? null : (u) => openInBrowser(u) });
-      out(`BrainLink demo (made-up sample notes, nothing real touched): ${maskUrl(s.url)}\nVault copied to: ${demoPath}\nPress Control-C when done.`);
+      out(`BrainLink demo (sample notes; local AI session-history import disabled): ${maskUrl(s.url)}\nVault copied to: ${demoPath}\nPress Control-C when done.`);
       return;
     }
     case 'version': case '--version': out(VERSION); return;

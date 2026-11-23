@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { analyzeActivitySignals, compareVaultHealth, sanitizeVaultHealthSnapshot } from '../src/rsi-observations.mjs';
+import { analyzeActivitySignals, analyzeRetrievalObservations, compareVaultHealth, sanitizeVaultHealthSnapshot } from '../src/rsi-observations.mjs';
 
 test('RSI observation compares local tool failure counts and returns aggregates only', () => {
   const now = new Date('2026-10-27T12:00:00.000Z');
@@ -59,6 +59,22 @@ test('RSI observation labels small or empty samples as unknown, not as zero fail
   assert.deepEqual(sessions.current_result_tokens, { samples: 0, mean_estimate: null }, 'write previews are not included in read-response size metrics');
   assert.deepEqual(graph.current_review_actions, { approved: 0, rejected: 0, reopened: 0 });
   assert.deepEqual(report.findings, []);
+});
+
+test('retrieval quality signals are per-profile, require 20 current calls, and never retain query content', () => {
+  const now = new Date('2026-10-27T12:00:00.000Z');
+  const entries = [
+    ...Array.from({ length: 20 }, (_, i) => ({ date: new Date(now.getTime() - 45 * 86400000).toISOString(), profile_id: 'fictional_org', tool: 'vault_search', status: 'hits' })),
+    ...Array.from({ length: 20 }, (_, i) => ({ date: now.toISOString(), profile_id: 'fictional_org', tool: 'context_packet', status: i < 12 ? 'not_in_brain' : i < 16 ? 'weak' : 'hits', query: 'PRIVATE_QUERY_CANARY', note: 'PRIVATE_NOTE_CANARY' })),
+    ...Array.from({ length: 19 }, () => ({ date: now.toISOString(), profile_id: 'fictional_personal', tool: 'vault_search', status: 'not_in_brain' })),
+    { date: now.toISOString(), profile_id: 'bad/profile', tool: 'vault_search', status: 'not_in_brain' },
+  ];
+  const report = analyzeRetrievalObservations(entries, { now });
+  assert.equal(report.profiles.length, 2);
+  assert.equal(report.profiles.find(item => item.profile_id === 'fictional_org').signal, 'review_retrieval_increase');
+  assert.equal(report.profiles.find(item => item.profile_id === 'fictional_personal').signal, 'insufficient_data');
+  assert.equal(report.findings.length, 1);
+  assert.doesNotMatch(JSON.stringify(report), /PRIVATE_QUERY_CANARY|PRIVATE_NOTE_CANARY|bad\/profile/);
 });
 
 test('vault health comparison uses only counts, keeps vaults separate, and reports structural signals', () => {

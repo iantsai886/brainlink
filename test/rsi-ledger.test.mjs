@@ -1,10 +1,12 @@
 import test from 'node:test';
+import { readSetupHtml } from './helpers/setup-html.mjs';
 import assert from 'node:assert/strict';
 import { mkdir, mkdtemp, readFile, writeFile } from 'node:fs/promises';
 import { createHash } from 'node:crypto';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { createRsiLedger } from '../src/rsi-ledger.mjs';
+import { createRsiWeekly } from '../src/rsi-weekly.mjs';
 import { findSecrets } from '../src/core.mjs';
 import { normalize, saveConfig } from '../src/config.mjs';
 import { startSetup } from '../src/setup.mjs';
@@ -29,8 +31,25 @@ test('RSI ledger appends proposals, enforces transitions and optimistic revision
   assert.equal((await readFile(ledger.file, 'utf8')).trim().split(/\r?\n/).length, 3);
 });
 
+test('daily self-test failures create one content-free discovered proposal per opaque failure key', async () => {
+  const ledger = createRsiLedger({ home: await temp('self-test') });
+  const failure = { check: 'role-notes', key: 'a'.repeat(64) };
+  const first = await ledger.appendSelfTestFailures([failure]);
+  const second = await ledger.appendSelfTestFailures([failure]);
+  assert.equal(first.created.length, 1);
+  assert.equal(second.created.length, 0);
+  assert.equal(second.duplicates.length, 1);
+  const [idea] = await ledger.list();
+  assert.equal(idea.origin, 'self_test');
+  assert.equal(idea.status, 'discovered');
+  const raw = await readFile(ledger.file, 'utf8');
+  assert.match(raw, /failure_key/);
+  assert.doesNotMatch(raw, /TEMPLATE_PRIVATE_CANARY|ACTUAL_QUESTION_VALUE/);
+});
+
 test('RSI acceptance requires recorded evidence, reviewer, promotion commit and rollback', async () => {
-  const ledger = createRsiLedger({ home: await temp('accept') });
+  let availableCommits = new Set();
+  const ledger = createRsiLedger({ home: await temp('accept'), verifyCommit: (sha) => availableCommits.has(sha) });
   const idea = await ledger.create(validIdea);
   let current = idea;
   for (const status of ['triaged', 'proposed']) current = await ledger.update({ id: idea.id, expected_revision: current.revision, status });
@@ -58,6 +77,10 @@ test('RSI acceptance requires recorded evidence, reviewer, promotion commit and 
   await assert.rejects(ledger.update({ id: idea.id, expected_revision: current.revision, status: 'accepted', fields: { ...evidence, experiment_run_id: unboundReceipt.run_id, promotion_commit_sha: 'a'.repeat(40) } }), /eligible for human review/);
   await assert.rejects(ledger.update({ id: idea.id, expected_revision: current.revision, status: 'accepted', fields: { ...evidence, promotion_commit_sha: 'b'.repeat(40) } }), /exactly match/);
   await assert.rejects(ledger.update({ id: idea.id, expected_revision: current.revision, status: 'accepted', fields: { ...evidence, test_set_version: '0'.repeat(64), promotion_commit_sha: 'a'.repeat(40) } }), /fixture SHA-256/);
+  await assert.rejects(ledger.update({ id: idea.id, expected_revision: current.revision, status: 'accepted', fields: {
+    ...evidence, promotion_commit_sha: 'a'.repeat(40),
+  } }), /not found in the local BrainLink Git repository/);
+  availableCommits = new Set(['a'.repeat(40), 'b'.repeat(40)]);
   const accepted = await ledger.update({ id: idea.id, expected_revision: current.revision, status: 'accepted', fields: {
     ...evidence, promotion_commit_sha: 'a'.repeat(40),
   } });
@@ -83,6 +106,9 @@ test('RSI acceptance requires recorded evidence, reviewer, promotion commit and 
   await assert.rejects(ledger.recordRollback({ id: idea.id, expected_revision: monitored.revision, rollback: { ...rollback, restored_commit_sha: 'a'.repeat(40) } }), /must differ/);
   await assert.rejects(ledger.recordRollback({ id: idea.id, expected_revision: monitored.revision - 1, rollback }), /changed/);
   await assert.rejects(ledger.recordRollback({ id: idea.id, expected_revision: monitored.revision, rollback: { ...rollback, reviewer: '' } }), /reviewer/);
+  availableCommits.delete('b'.repeat(40));
+  await assert.rejects(ledger.recordRollback({ id: idea.id, expected_revision: monitored.revision, rollback }), /not found in the local BrainLink Git repository/);
+  availableCommits.add('b'.repeat(40));
   const rolledBack = await ledger.recordRollback({ id: idea.id, expected_revision: monitored.revision, rollback });
   assert.equal(rolledBack.status, 'rolled_back');
   assert.equal(rolledBack.rollbacks.length, 1);
@@ -124,6 +150,13 @@ test('RSI experiment receipts are aggregate-only, append-only, and require a fre
   const compactRecorded = await ledger.recordExperiment({ id: compactIdea.id, expected_revision: compactIdea.revision, receipt: compactReceipt });
   assert.equal(compactRecorded.experiments[0].evaluator_version, 'retrieval-eval-v3');
   assert.equal(compactRecorded.experiments[0].candidate_version, 'compact-search-v1');
+  let rerankerIdea = await ledger.create({ ...validIdea, title: 'Independent reranker evaluation' });
+  for (const status of ['triaged', 'proposed']) rerankerIdea = await ledger.update({ id: rerankerIdea.id, expected_revision: rerankerIdea.revision, status });
+  rerankerIdea = await ledger.update({ id: rerankerIdea.id, expected_revision: rerankerIdea.revision, status: 'testing', fields: { candidate_version: 'local-reranker-independent-v1' } });
+  const rerankerReceipt = { ...receipt, run_id: 'BL-RSI-RUN-20261103-abcdef02', suite: 'local-reranker-independent-v1', evaluator_version: 'retrieval-eval-v4', candidate_version: 'local-reranker-independent-v1', candidate_policy: '30 synthetic independent tasks; source rank and privacy measured', sample_count: 30, decision: 'no_demonstrated_gain' };
+  const rerankerRecorded = await ledger.recordExperiment({ id: rerankerIdea.id, expected_revision: rerankerIdea.revision, receipt: rerankerReceipt });
+  assert.equal(rerankerRecorded.experiments[0].suite, 'local-reranker-independent-v1');
+  assert.equal(rerankerRecorded.experiments[0].secondary_metric.name, 'mean_reciprocal_rank');
 });
 
 test('ledger still reads existing schema-1 experiment history without treating it as bound proof', async () => {
@@ -218,7 +251,7 @@ test('scheduled aggregate observation can create one review proposal without per
 });
 
 test('RSI Setup panel has unique ids and one render/submit path', async () => {
-  const html = await readFile(new URL('../ui/index.html', import.meta.url), 'utf8');
+  const html = await readSetupHtml();
   assert.equal((html.match(/id="rsi-panel"/g) || []).length, 1);
   assert.equal((html.match(/id="rsi-idea-form"/g) || []).length, 1);
   assert.match(html, /data-rsi-field="promotion_commit_sha"/);
@@ -239,13 +272,22 @@ test('RSI Setup panel has unique ids and one render/submit path', async () => {
   assert.match(html, /current_result_tokens/);
   assert.match(html, /rsi\.observe\.resultSize/);
   assert.match(html, /rsi\.observe\.graphActions/);
+  assert.match(html, /report\.retrieval_profiles/);
+  assert.match(html, /api\('GET', '\/api\/rsi\/experiments'\)/);
+  assert.match(html, /experimentSuites\.map\(suite/);
+  assert.match(html, /suite\.label_key/);
+  assert.match(html, /rsi\.observe\.retrievalCaveat/);
+  assert.match(html, /rsi\.observe\.retrievalProposalEvidence/);
   assert.match(html, /data-rsi-observe-draft/);
   assert.match(html, /form\.elements\.namedItem\('hypothesis'\)\.value/);
   for (const locale of ['en', 'zh-TW', 'pt']) {
     const catalog = JSON.parse(await readFile(new URL(`../ui/locales/${locale}.json`, import.meta.url), 'utf8'));
     assert.ok(catalog['rsi.promotionCommit'], `${locale} promotion commit label`);
     assert.ok(catalog['rsi.promotionCommitHint'], `${locale} promotion commit limitation`);
-    for (const key of ['rsi.rollback.title', 'rsi.rollback.hint', 'rsi.rollback.restoredVersion', 'rsi.rollback.commit', 'rsi.rollback.reviewer', 'rsi.rollback.evidence', 'rsi.rollback.reason', 'rsi.rollback.record', 'rsi.rollback.confirm', 'rsi.rollback.saved', 'rsi.rollback.history', 'rsi.observe.title', 'rsi.observe.hint', 'rsi.observe.scheduleEnabled', 'rsi.observe.interval', 'rsi.observe.daily', 'rsi.observe.weekly', 'rsi.observe.fortnightly', 'rsi.observe.monthly', 'rsi.observe.saveSchedule', 'rsi.observe.scheduleSaved', 'rsi.observe.scheduleOff', 'rsi.observe.firstRunDue', 'rsi.observe.lastRun', 'rsi.observe.lastFailed', 'rsi.observe.nextRun', 'rsi.observe.run', 'rsi.observe.window', 'rsi.observe.stats', 'rsi.observe.noRate', 'rsi.observe.resultSize', 'rsi.observe.graphActions', 'rsi.observe.findings', 'rsi.observe.noFindings', 'rsi.observe.generated', 'rsi.observe.vaultHealthEnabled', 'rsi.observe.vaultHealthVault', 'rsi.observe.vaultHealthNone', 'rsi.observe.vaultHealthPrivate', 'rsi.observe.vaultHealthHint', 'rsi.observe.vaultHealthSummary', 'rsi.observe.vaultHealthSignal.baseline_unavailable', 'rsi.observe.vaultHealthSignal.stable', 'rsi.observe.vaultHealthSignal.improved', 'rsi.observe.vaultHealthSignal.regressed', 'rsi.observe.vaultHealthSignal.mixed', 'rsi.observe.group.retrieval', 'rsi.observe.group.sessions', 'rsi.observe.group.filing', 'rsi.observe.group.handoff', 'rsi.observe.group.recovery', 'rsi.observe.group.graph_review', 'rsi.observe.signal.insufficient_data', 'rsi.observe.signal.stable', 'rsi.observe.signal.review_failures', 'rsi.observe.signal.review_increase', 'rsi.observe.draft', 'rsi.observe.draft.title', 'rsi.observe.draft.problem', 'rsi.observe.draft.hypothesis', 'rsi.observe.proposalBadge', 'rsi.observe.proposalEvidence', 'rsi.observe.proposalHistory', 'rsi.observe.proposalIntake']) assert.ok(catalog[key], `${locale} ${key}`);
+    const localRepositoryPhrase = { en: 'local BrainLink Git repository', pt: 'repositório Git local do BrainLink', 'zh-TW': '本機 BrainLink Git 儲存庫' }[locale];
+    assert.ok(catalog['rsi.promotionCommitHint'].includes(localRepositoryPhrase), `${locale} says the promotion commit must exist locally`);
+    assert.ok(catalog['rsi.rollback.hint'].includes(localRepositoryPhrase), `${locale} says the restored commit must exist locally`);
+    for (const key of ['rsi.rollback.title', 'rsi.rollback.hint', 'rsi.rollback.restoredVersion', 'rsi.rollback.commit', 'rsi.rollback.reviewer', 'rsi.rollback.evidence', 'rsi.rollback.reason', 'rsi.rollback.record', 'rsi.rollback.confirm', 'rsi.rollback.saved', 'rsi.rollback.history', 'rsi.observe.title', 'rsi.observe.hint', 'rsi.observe.scheduleEnabled', 'rsi.observe.interval', 'rsi.observe.daily', 'rsi.observe.weekly', 'rsi.observe.fortnightly', 'rsi.observe.monthly', 'rsi.observe.saveSchedule', 'rsi.observe.scheduleSaved', 'rsi.observe.scheduleOff', 'rsi.observe.firstRunDue', 'rsi.observe.lastRun', 'rsi.observe.lastFailed', 'rsi.observe.nextRun', 'rsi.observe.run', 'rsi.observe.window', 'rsi.observe.stats', 'rsi.observe.noRate', 'rsi.observe.resultSize', 'rsi.observe.graphActions', 'rsi.observe.findings', 'rsi.observe.noFindings', 'rsi.observe.generated', 'rsi.observe.vaultHealthEnabled', 'rsi.observe.vaultHealthVault', 'rsi.observe.vaultHealthNone', 'rsi.observe.vaultHealthPrivate', 'rsi.observe.vaultHealthHint', 'rsi.observe.vaultHealthSummary', 'rsi.observe.vaultHealthSignal.baseline_unavailable', 'rsi.observe.vaultHealthSignal.stable', 'rsi.observe.vaultHealthSignal.improved', 'rsi.observe.vaultHealthSignal.regressed', 'rsi.observe.vaultHealthSignal.mixed', 'rsi.observe.group.retrieval', 'rsi.observe.group.retrieval_match', 'rsi.observe.group.sessions', 'rsi.observe.group.filing', 'rsi.observe.group.handoff', 'rsi.observe.group.recovery', 'rsi.observe.group.graph_review', 'rsi.observe.signal.insufficient_data', 'rsi.observe.signal.stable', 'rsi.observe.signal.review_failures', 'rsi.observe.signal.review_increase', 'rsi.observe.signal.review_weak_match_rate', 'rsi.observe.signal.review_retrieval_increase', 'rsi.observe.retrievalProfile', 'rsi.observe.retrievalStats', 'rsi.observe.retrievalCaveat', 'rsi.observe.retrievalProposalEvidence', 'rsi.observe.draft', 'rsi.observe.draft.title', 'rsi.observe.draft.problem', 'rsi.observe.draft.hypothesis', 'rsi.observe.proposalBadge', 'rsi.observe.proposalEvidence', 'rsi.observe.proposalHistory', 'rsi.observe.proposalIntake']) assert.ok(catalog[key], `${locale} ${key}`);
     for (const key of ['rsi.monitor.title', 'rsi.monitor.hint', 'rsi.monitor.start', 'rsi.monitor.end', 'rsi.monitor.testSet', 'rsi.monitor.samples', 'rsi.monitor.decision.stable', 'rsi.monitor.decision.regression', 'rsi.monitor.decision.inconclusive', 'rsi.monitor.guardrail.pass', 'rsi.monitor.guardrail.fail', 'rsi.monitor.guardrail.unknown', 'rsi.monitor.metricName', 'rsi.monitor.baseline', 'rsi.monitor.observed', 'rsi.monitor.reviewer', 'rsi.monitor.guardrails', 'rsi.monitor.results', 'rsi.monitor.evidenceRef', 'rsi.monitor.save', 'rsi.monitor.saved', 'rsi.monitor.history']) assert.ok(catalog[key], `${locale} ${key}`);
   }
   assert.equal((html.match(/async function loadRsi\(\)/g) || []).length, 1);
@@ -256,7 +298,7 @@ test('RSI Setup panel has unique ids and one render/submit path', async () => {
 
 test('Setup exposes the RSI ledger only through authenticated local APIs', async () => {
   const home = await temp('api'), env = { BRAINLINK_HOME: path.join(home, 'app'), BRAINLINK_SEMANTIC: '0' };
-  const app = await startSetup({ env, home, os: 'linux', port: 0, useCli: false, rsiSourceState: () => ({ commit_sha: 'c'.repeat(40), clean: true }) });
+  const app = await startSetup({ env, home, os: 'linux', port: 0, useCli: false, rsiSourceState: () => ({ commit_sha: 'c'.repeat(40), clean: true }), rsiVerifyCommit: (sha) => ['c'.repeat(40), 'd'.repeat(40)].includes(sha) });
   const base = 'http://127.0.0.1:' + app.port;
   const post = (route, body, token = app.token) => fetch(base + route, { method: 'POST', headers: { 'Content-Type': 'application/json', 'X-BrainLink-Token': token }, body: JSON.stringify(body) });
   try {
@@ -270,10 +312,15 @@ test('Setup exposes the RSI ledger only through authenticated local APIs', async
     assert.equal((await post('/api/rsi/observations/run', {}, 'wrong-token')).status, 401);
     assert.equal((await post('/api/rsi/observations/analyze', {}, 'wrong-token')).status, 401);
     for (let i = 0; i < 5; i++) await logActivity(env, { tool: 'vault_search', ok: false, platform: 'PRIVATE_ACTIVITY_CANARY', message: 'PRIVATE_NOTE_CANARY' });
+    const feedback = createRsiWeekly({ home: env.BRAINLINK_HOME });
+    for (let i = 0; i < 20; i++) await feedback.recordRetrievalObservation({ profileId: 'fictional_org', tool: 'vault_search', status: 'not_in_brain', durationMs: 500 });
     const observation = await post('/api/rsi/observations/analyze', {}).then(r => r.json());
     const retrievalSignal = observation.report.categories.find(item => item.id === 'retrieval');
     assert.equal(retrievalSignal.signal, 'review_failures');
     assert.equal(retrievalSignal.current.failures, 5);
+    assert.equal(observation.report.retrieval_profiles[0].profile_id, 'fictional_org');
+    assert.equal(observation.report.retrieval_profiles[0].current.weak_match_rate, 1);
+    assert.equal(observation.report.retrieval_profiles[0].signal, 'review_weak_match_rate');
     assert.doesNotMatch(JSON.stringify(observation), /PRIVATE_ACTIVITY_CANARY|PRIVATE_NOTE_CANARY/);
     assert.equal(observation.report.privacy.report_saved, false);
     const savedObservation = await post('/api/rsi/observations/run', {}).then(r => r.json());
@@ -289,7 +336,7 @@ test('Setup exposes the RSI ledger only through authenticated local APIs', async
     assert.equal(similar.similar[0].id, created.idea.id);
     assert.equal((await fetch(base + '/api/rsi', { headers: { 'X-BrainLink-Token': 'wrong-token' } })).status, 401);
     const listed = await fetch(base + '/api/rsi', { headers: { 'X-BrainLink-Token': app.token } }).then(r => r.json());
-    assert.equal(listed.ideas.length, 1);
+    assert.ok(listed.ideas.some(idea => idea.id === created.idea.id && idea.origin === 'manual'), 'the manually created proposal remains present alongside any daily self-test review item');
     const bad = await post('/api/rsi/ideas/update', { id: created.idea.id, expected_revision: 1, status: 'accepted' }).then(r => r.json());
     assert.match(bad.error, /cannot move/);
     assert.equal((await post('/api/rsi/experiments/run', { idea_id: created.idea.id, suite: 'retrieval-rsi-v1' }, 'wrong-token')).status, 401);

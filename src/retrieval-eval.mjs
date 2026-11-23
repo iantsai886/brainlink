@@ -7,7 +7,14 @@ import { compactSearchResult } from './search-projection.mjs';
 
 const sha256 = (value) => createHash('sha256').update(value).digest('hex');
 const boundedMean = (values) => values.length ? Math.round(values.reduce((a, b) => a + b, 0) / values.length) : 0;
-export const RETRIEVAL_EVALUATOR_VERSION = 'retrieval-eval-v3';
+export const RETRIEVAL_EVALUATOR_VERSION = 'retrieval-eval-v4';
+
+export function decideRetrievalComparison({ privacyOk, enoughCases, qualityRegression, qualityGain }) {
+  if (!privacyOk) return 'blocked_privacy';
+  if (!enoughCases) return 'needs_more_cases';
+  if (qualityRegression) return 'quality_regression';
+  return qualityGain ? 'eligible_for_review' : 'no_demonstrated_gain';
+}
 
 export function validateRetrievalFixture(fixture) {
   const errors = [];
@@ -85,9 +92,15 @@ function independentMetrics(cases, observations) {
   const successful = outcomes.filter((o) => o.success).length;
   const privacyViolations = outcomes.filter((o) => o.privacy_violation).length;
   const casesById = outcomes.map((o, i) => ({ id: cases[i].id, ...o }));
+  const answerableRanks = cases.flatMap((c, i) => {
+    if (!c.answerable) return [];
+    const rank = observations[i].results.findIndex((r) => c.expected.includes(r.path)) + 1;
+    return [rank ? 1 / rank : 0];
+  });
   return {
     task_success: { count: successful, total: cases.length, rate: +(successful / cases.length).toFixed(3) },
     source_correctness: { top_k_all_sources_correct: outcomes.filter((o, i) => cases[i].answerable && o.sources_complete).length, answerable_cases: answerable.length, source_recall: expectedSourceCount ? +(returnedSourceCount / expectedSourceCount).toFixed(3) : 1 },
+    ranking: { mean_reciprocal_rank: answerableRanks.length ? +(answerableRanks.reduce((sum, rank) => sum + rank, 0) / answerableRanks.length).toFixed(3) : 0, answerable_cases: answerableRanks.length },
     abstention: {
       expected: cases.filter((c) => !c.answerable).length,
       returned: outcomes.filter((o) => o.abstained).length,
@@ -120,24 +133,36 @@ async function evaluateIndependent(ctx, fixture, options) {
   if (errors.length) throw new Error(errors.join('; '));
   vault(ctx, fixture.vault);
   for (const c of fixture.cases) for (const p of c.expected) await readNote(ctx, fixture.vault, p);
-  const run = async (compact) => Promise.all(fixture.cases.map(async (c) => {
+  const run = async ({ context = ctx, compact = false, strictReranker = false } = {}) => Promise.all(fixture.cases.map(async (c) => {
     const start = performance.now();
-    const found = await searchWithVerdict(ctx, fixture.vault, c.query, { limit: fixture.topK, semantic: false });
+    const found = await searchWithVerdict(context, fixture.vault, c.query, { limit: fixture.topK, semantic: false, ...(strictReranker ? { strictReranker: true } : {}) });
     const results = compact ? compactResults(found.results) : found.results;
     return { status: found.status, results, latency_ms: Math.max(0, performance.now() - start) };
   }));
-  const baseline = await run(false);
-  const candidate = await run(true);
+  const rerankerComparison = options.rerankerComparison === true;
+  if (rerankerComparison && (!options.candidateContext || options.requireCandidateReranker !== true)) throw new Error('The independent reranker evaluation requires its explicitly configured candidate service.');
+  const baseline = await run();
+  const candidate = rerankerComparison
+    ? await run({ context: options.candidateContext, strictReranker: true })
+    : await run({ compact: true });
   const baselineMetrics = independentMetrics(fixture.cases, baseline);
   const candidateMetrics = independentMetrics(fixture.cases, candidate);
   const enough = fixture.cases.length >= 20;
   const privacyOk = baselineMetrics.privacy_violations === 0 && candidateMetrics.privacy_violations === 0;
   const qualityOk = candidateMetrics.task_success.rate >= baselineMetrics.task_success.rate
     && candidateMetrics.source_correctness.source_recall >= baselineMetrics.source_correctness.source_recall
+    && candidateMetrics.ranking.mean_reciprocal_rank >= baselineMetrics.ranking.mean_reciprocal_rank
     && candidateMetrics.abstention.false <= baselineMetrics.abstention.false
     && candidateMetrics.abstention.missed <= baselineMetrics.abstention.missed;
   const smaller = candidateMetrics.context.mean_estimated_tokens < baselineMetrics.context.mean_estimated_tokens;
-  const decision = decideIndependentComparison({ privacyOk, enoughCases: enough, qualityOk, smallerContext: smaller });
+  const qualityGain = candidateMetrics.task_success.rate > baselineMetrics.task_success.rate
+    || candidateMetrics.source_correctness.source_recall > baselineMetrics.source_correctness.source_recall
+    || candidateMetrics.ranking.mean_reciprocal_rank > baselineMetrics.ranking.mean_reciprocal_rank
+    || candidateMetrics.abstention.false < baselineMetrics.abstention.false
+    || candidateMetrics.abstention.missed < baselineMetrics.abstention.missed;
+  const decision = rerankerComparison
+    ? !privacyOk ? 'blocked_privacy' : !enough ? 'needs_more_cases' : !qualityOk ? 'quality_regression' : qualityGain ? 'eligible_for_review' : 'no_demonstrated_gain'
+    : decideIndependentComparison({ privacyOk, enoughCases: enough, qualityOk, smallerContext: smaller });
   return {
     schema: 2,
     fixture_sha256: sha256(options.fixtureBytes ?? JSON.stringify(fixture)),
@@ -146,12 +171,14 @@ async function evaluateIndependent(ctx, fixture, options) {
     evaluator_version: RETRIEVAL_EVALUATOR_VERSION,
     minimum_cases_for_review: 20,
     ...(options.receipt || {}),
-    comparison: 'same questions, vault scope, topK, lexical search, and semantic=false',
-    candidate_policy: { id: 'compact-search-v1', selected_sources_preserved: true, note_text_truncated: false, tuned_on_fixture: false },
+    comparison: rerankerComparison ? 'same questions, vault scope, topK, and lexical search; candidate reorders the baseline candidate pool with the explicitly configured loopback reranker' : 'same questions, vault scope, topK, lexical search, and semantic=false',
+    candidate_policy: rerankerComparison
+      ? { id: 'local-reranker-independent-v1', selected_sources_preserved: true, note_text_truncated: false, tuned_on_fixture: false }
+      : { id: 'compact-search-v1', selected_sources_preserved: true, note_text_truncated: false, tuned_on_fixture: false },
     baseline: baselineMetrics,
     candidate: candidateMetrics,
     decision,
-    limitations: ['Task success is a source and required-context proxy; no language model generated answers.', 'Token values are local estimates, not provider-billed counts or real-world savings.', 'Latency is local and environment-dependent.', 'Only this fictional frozen corpus and configured vault scope were evaluated.', 'This result does not establish cross-client isolation or production readiness.'],
+    limitations: ['Task success is a source and required-context proxy; no language model generated answers.', 'Token values are local estimates, not provider-billed counts or real-world savings.', 'Latency is local and environment-dependent.', 'Only this fictional frozen corpus and configured vault scope were evaluated.', ...(rerankerComparison ? ['The loopback reranker receives only eligible synthetic queries and snippets; service failure aborts the run.', 'The report does not identify or certify the configured model.'] : []), 'This result does not establish cross-client isolation or production readiness.'],
   };
 }
 
@@ -166,7 +193,12 @@ export async function evaluateRetrieval(ctx, fixture, options = {}) {
     const details = [], times = [], tokens = [];
     for (const c of fixture.cases) {
       const start = now();
-      const results = await search(ctx, fixture.vault, c.query, { limit: fixture.topK, semantic: false, queries: candidate ? c.queries || [] : [] });
+      const searchContext = candidate ? options.candidateContext || ctx : ctx;
+      const candidateQueries = candidate && options.candidateRephrasing !== false ? c.queries || [] : [];
+      const results = await search(searchContext, fixture.vault, c.query, {
+        limit: fixture.topK, semantic: false, queries: candidateQueries,
+        ...(candidate && options.requireCandidateReranker ? { strictReranker: true } : {}),
+      });
       times.push(Math.max(0, now() - start));
       tokens.push(estTokens(JSON.stringify(results)));
       const rank = results.findIndex((r) => c.expected.includes(r.path)) + 1;
@@ -183,11 +215,12 @@ export async function evaluateRetrieval(ctx, fixture, options = {}) {
   const candidate = await measure(true);
   const enough = fixture.cases.length >= minimumCases;
   const qualityGain = candidate.hit_at_k > baseline.hit_at_k || (candidate.hit_at_k === baseline.hit_at_k && candidate.reciprocal_rank > baseline.reciprocal_rank);
+  const qualityRegression = candidate.hit_at_k < baseline.hit_at_k || candidate.reciprocal_rank < baseline.reciprocal_rank;
   const privacyOk = baseline.privacy_violations === 0 && candidate.privacy_violations === 0;
-  const decision = !privacyOk ? 'blocked_privacy' : !enough ? 'needs_more_cases' : qualityGain ? 'eligible_for_review' : 'no_demonstrated_gain';
+  const decision = decideRetrievalComparison({ privacyOk, enoughCases: enough, qualityRegression, qualityGain });
   return {
     schema: 1, fixture_sha256: sha256(options.fixtureBytes ?? JSON.stringify(fixture)), vault: fixture.vault, case_count: fixture.cases.length,
-    minimum_cases_for_review: minimumCases, top_k: fixture.topK, candidate: 'per-case query rephrasings; semantic search off',
+    minimum_cases_for_review: minimumCases, top_k: fixture.topK, candidate: options.candidatePolicy || 'per-case query rephrasings; semantic search off',
     baseline, result: candidate, decision,
     limitations: ['Output tokens are locally estimated, not provider billing.', 'Latency is environment-dependent.', 'Only labelled fixture queries are evaluated.', 'No live ranking or knowledge is changed.'],
   };

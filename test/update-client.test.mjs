@@ -39,6 +39,7 @@ test('does not contact the network when this build has no publisher key', async 
   let called = false;
   const result = await checkForUpdate({ ...options, publicKey: '', fetchImpl: async () => { called = true; } });
   assert.equal(result.status, 'unavailable');
+  assert.equal((await checkForUpdate({ ...options, publicKey: [], fetchImpl: async () => { called = true; } })).status, 'unavailable');
   assert.equal(called, false);
 });
 

@@ -1,7 +1,7 @@
 // User-reviewed GitHub shared-note preview, selected commit/push, and add-only import operations.
 // Repository changes and vault writes remain separate, explicit actions with privacy checks.
 import { execFile } from 'node:child_process';
-import { createHash } from 'node:crypto';
+import { createHash, randomBytes } from 'node:crypto';
 import { promisify } from 'node:util';
 import { lstat, readFile, realpath, mkdir, writeFile, rm, mkdtemp, rename } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
@@ -144,6 +144,86 @@ export async function inspectGitHubAssignment(cfg, input) {
   if (wholeVault && folders.length) blocked.push('Choose either the whole vault or specific folders, not both.');
   if (!wholeVault && !folders.length) blocked.push('Choose specific folders or explicitly confirm sharing the whole vault.');
   return { profile_id: profile.id, profile_name: profile.name, mode: profile.mode, vault: vaultName, remote: identity, path: root, folders, whole_vault: wholeVault, branch, replaces: profile.github_repository?.remote || null, blocked };
+}
+
+// Read-only credential/connectivity check used before the user confirms a GitHub assignment.
+// Git's saved credential helper remains authoritative; no token is accepted, persisted or logged.
+export async function testGitHubRepositoryAccess(cfg, input, { runGit = run } = {}) {
+  const inspected = await inspectGitHubAssignment(cfg, input);
+  if (inspected.blocked.length) throw new Error(inspected.blocked[0]);
+  try {
+    const { stdout = '' } = await runGit('git', ['-C', inspected.path, 'ls-remote', '--symref', 'origin', 'HEAD'], {
+      windowsHide: true, timeout: 30_000, maxBuffer: 64 * 1024,
+      env: { ...process.env, GIT_TERMINAL_PROMPT: '0', GCM_INTERACTIVE: 'never' },
+    });
+    return { ok: true, remote: inspected.remote, head_found: Boolean(stdout.trim()) };
+  } catch {
+    // Git stderr may contain a credential-bearing URL. Return only a fixed, actionable message.
+    throw new Error('GitHub could not verify access. Check the internet connection and Git sign-in, then try again. No credentials were shown or saved.');
+  }
+}
+
+// Clone only BrainLink's shared-note subtree into a new app-managed directory. Existing
+// directories are never reused or overwritten, and the caller must still review/assign it.
+export async function cloneGitHubRepository({ ownerRepo, home, reservedPaths = [] }, { runGit = run, env = process.env } = {}) {
+  const rawIdentity = String(ownerRepo || '').trim();
+  const remote = githubRemoteIdentity(`https://github.com/${rawIdentity}.git`);
+  if (!remote || rawIdentity.includes('://') || rawIdentity.includes('@')) throw new Error('Enter a GitHub repository as owner/repository. Do not paste a URL or credentials.');
+  if (typeof home !== 'string' || !path.isAbsolute(home)) throw new Error('BrainLink could not find its local data folder.');
+  let homeRoot;
+  try { homeRoot = await realpath(home); } catch { throw new Error('BrainLink local data folder is unavailable.'); }
+  const base = path.join(homeRoot, 'github-repositories', remote.split('/')[0]);
+  const repoName = remote.split('/')[1];
+  const destination = path.join(base, `${repoName}-${Date.now()}-${randomBytes(16).toString('hex')}`);
+  const repositoriesRoot = path.dirname(base);
+  const reserved = reservedPaths.filter((item) => typeof item === 'string' && path.isAbsolute(item));
+  const canonicalReserved = await Promise.all(reserved.map((item) => realpath(item).catch(() => path.resolve(item))));
+  if (canonicalReserved.some((other) => {
+    const relA = path.relative(other, destination);
+    const relB = path.relative(destination, other);
+    return relA === '' || (!relA.startsWith(`..${path.sep}`) && relA !== '..' && !path.isAbsolute(relA))
+      || relB === '' || (!relB.startsWith(`..${path.sep}`) && relB !== '..' && !path.isAbsolute(relB));
+  })) throw new Error('The managed GitHub folder overlaps a vault or protected BrainLink data folder.');
+  await mkdir(repositoriesRoot, { recursive: true });
+  const repositoriesStat = await lstat(repositoriesRoot);
+  if (repositoriesStat.isSymbolicLink() || !repositoriesStat.isDirectory()) throw new Error('The local GitHub clone folder is not a safe directory.');
+  await mkdir(base, { recursive: true });
+  const baseStat = await lstat(base);
+  if (baseStat.isSymbolicLink() || !baseStat.isDirectory()) throw new Error('The local GitHub clone folder is not a safe directory.');
+  let destinationRealBase;
+  try { destinationRealBase = await realpath(base); } catch { throw new Error('BrainLink could not prepare its local GitHub folder.'); }
+  const temp = await mkdtemp(path.join(destinationRealBase, '.brainlink-clone-'));
+  const gitEnv = { ...env, GIT_TERMINAL_PROMPT: '0', GCM_INTERACTIVE: 'never' };
+  const runGitSafe = async (args, cwd) => {
+    try {
+      return await runGit('git', [...(cwd ? ['-C', cwd] : []), ...args], { windowsHide: true, timeout: 120_000, maxBuffer: 1024 * 1024, env: gitEnv });
+    } catch {
+      throw new Error('GitHub clone failed. Check the internet connection and saved Git sign-in; no credentials were shown or saved.');
+    }
+  };
+  try {
+    const cloned = await runGitSafe(['clone', '--filter=blob:none', '--sparse', '--no-checkout', '--', `https://github.com/${remote}.git`, temp]);
+    if (/filtering.*(?:not recognized|not supported|ignored)/i.test(String(cloned.stderr || ''))) {
+      throw new Error('This Git host does not support a notes-only clone. Choose a host that supports partial clones; no files were saved.');
+    }
+    const hasHead = !/cloned an empty repository/i.test(String(cloned.stderr || ''));
+    if (hasHead) await runGitSafe(['rev-parse', '--verify', 'HEAD'], temp);
+    if (hasHead) {
+      await runGitSafe(['sparse-checkout', 'init', '--no-cone'], temp);
+      await runGitSafe(['sparse-checkout', 'set', '/BrainLink/notes/**'], temp);
+      await runGitSafe(['checkout'], temp);
+      const changed = await runGitSafe(['status', '--porcelain=v1', '--untracked-files=all'], temp);
+      if (String(changed.stdout || '').trim()) throw new Error('The new Git clone did not finish cleanly.');
+    }
+    const opened = await openRepository(temp);
+    if (opened.identity !== remote) throw new Error('The cloned repository identity did not match the selected GitHub repository.');
+    await rename(temp, destination);
+    return { ok: true, remote, path: destination, head_found: hasHead, sparse_folder: 'BrainLink/notes' };
+  } catch (error) {
+    await rm(temp, { recursive: true, force: true }).catch(() => {});
+    if (error.message.startsWith('GitHub clone failed.') || error.message.startsWith('The new Git clone') || error.message.startsWith('This Git host does not support')) throw error;
+    throw new Error('BrainLink could not safely finish this clone. Check the repository and try again; existing files were left alone.');
+  }
 }
 
 // Projection for the Setup UI, including whether each assigned clone still matches on disk.

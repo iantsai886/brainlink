@@ -10,23 +10,33 @@ import { normalize } from './config.mjs';
 import { createContext } from './core.mjs';
 import { evaluateRetrieval, RETRIEVAL_EVALUATOR_VERSION } from './retrieval-eval.mjs';
 import { readGitSourceState } from './git-source-state.mjs';
+import { validateRerankerSettings } from './rerank.mjs';
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 export const RSI_EXPERIMENT_SUITES = Object.freeze({
-  'retrieval-rsi-v1': Object.freeze({ fixture: 'retrieval-rsi-v1.json', vault: 'vault', candidate_version: 'per-case-rephrasing-v1', policy: 'fixed rephrasing policy; semantic search off' }),
-  'retrieval-independent-v1': Object.freeze({ fixture: 'retrieval-independent-v1.json', vault: 'independent-vault', candidate_version: 'compact-search-v1', policy: 'lossless production MCP compact-search projection; evaluation only' }),
+  'retrieval-rsi-v1': Object.freeze({ fixture: 'retrieval-rsi-v1.json', vault: 'vault', candidate_version: 'per-case-rephrasing-v1', policy: 'fixed rephrasing policy; semantic search off', label_key: 'rsi.experiment.suite1' }),
+  'retrieval-independent-v1': Object.freeze({ fixture: 'retrieval-independent-v1.json', vault: 'independent-vault', candidate_version: 'compact-search-v1', policy: 'lossless production MCP compact-search projection; evaluation only', label_key: 'rsi.experiment.suite2' }),
+  'local-reranker-v1': Object.freeze({ fixture: 'retrieval-rsi-v1.json', vault: 'vault', candidate_version: 'local-reranker-v1', policy: 'explicitly enabled loopback reranker against 21 fictional cases; development evidence only', label_key: 'rsi.experiment.reranker', requires_reranker: true }),
+  'local-reranker-independent-v1': Object.freeze({ fixture: 'retrieval-independent-v1.json', vault: 'independent-vault', candidate_version: 'local-reranker-independent-v1', policy: 'explicitly enabled loopback reranker against 30 frozen synthetic independent tasks; evaluation only, not customer validation', label_key: 'rsi.experiment.rerankerIndependent', requires_reranker: true, rerankerComparison: true }),
 });
 
 const safeRatio = (value) => Number.isFinite(value) ? Math.max(0, Math.min(1, Number(value))) : 0;
 
-export function createRsiExperiments({ root = ROOT, env = process.env, now = () => new Date(), sourceState = readGitSourceState } = {}) {
+export function createRsiExperiments({ root = ROOT, env = process.env, now = () => new Date(), sourceState = readGitSourceState, getRerankerSettings = async () => ({ enabled: false }) } = {}) {
   let running = false;
   return {
-    suites: () => Object.entries(RSI_EXPERIMENT_SUITES).map(([id, suite]) => ({ id, fixture: suite.fixture, candidate_version: suite.candidate_version, candidate_policy: suite.policy })),
+    suites: ({ rerankerEnabled = false } = {}) => Object.entries(RSI_EXPERIMENT_SUITES)
+      .filter(([, suite]) => !suite.requires_reranker || rerankerEnabled)
+      .map(([id, suite]) => ({ id, fixture: suite.fixture, candidate_version: suite.candidate_version, candidate_policy: suite.policy, label_key: suite.label_key })),
     run: async (suiteId) => {
       if (running) throw new Error('An RSI experiment is already running. Try again when it finishes.');
       const suite = RSI_EXPERIMENT_SUITES[suiteId];
       if (!suite) throw new Error('Choose one of BrainLink’s built-in fictional retrieval suites.');
+      let rerankerSettings = null;
+      if (suite.requires_reranker) {
+        rerankerSettings = validateRerankerSettings(await getRerankerSettings());
+        if (!rerankerSettings.enabled) throw new Error('Enable and test the local reranking service in Setup before running this experiment.');
+      }
       running = true;
       try {
         const startedAt = now().toISOString();
@@ -41,7 +51,16 @@ export function createRsiExperiments({ root = ROOT, env = process.env, now = () 
           const ctx = createContext(normalize({ vaults: [{ name: fixture.vault, path: vaultRoot }] }), {
             env: { ...env, BRAINLINK_HOME: isolatedHome, BRAINLINK_VAULTS: fixture.vault, BRAINLINK_SEMANTIC: '0' },
           });
-          report = await evaluateRetrieval(ctx, fixture, { fixtureBytes });
+          if (suite.requires_reranker) {
+            const candidateContext = createContext(normalize({ vaults: [{ name: fixture.vault, path: vaultRoot }], reranker: rerankerSettings }), {
+              env: { ...env, BRAINLINK_HOME: isolatedHome, BRAINLINK_VAULTS: fixture.vault, BRAINLINK_SEMANTIC: '0' },
+            });
+            report = await evaluateRetrieval(ctx, fixture, {
+              fixtureBytes, candidateContext, candidateRephrasing: false, requireCandidateReranker: true,
+              candidatePolicy: suite.policy,
+              rerankerComparison: suite.rerankerComparison === true,
+            });
+          } else report = await evaluateRetrieval(ctx, fixture, { fixtureBytes });
         } finally { await rm(isolatedHome, { recursive: true, force: true }); }
         const sourceAfter = sourceState(root);
         const sourceStable = Boolean(sourceBefore?.clean && sourceAfter?.clean
@@ -50,8 +69,8 @@ export function createRsiExperiments({ root = ROOT, env = process.env, now = () 
         const independent = report.schema === 2;
         const baselineQuality = independent ? report.baseline.task_success.rate : report.baseline.hit_at_k / report.case_count;
         const candidateQuality = independent ? report.candidate.task_success.rate : report.result.hit_at_k / report.case_count;
-        const baselineCoverage = independent ? report.baseline.source_correctness.source_recall : report.baseline.reciprocal_rank;
-        const candidateCoverage = independent ? report.candidate.source_correctness.source_recall : report.result.reciprocal_rank;
+        const baselineCoverage = independent ? (suite.rerankerComparison ? report.baseline.ranking.mean_reciprocal_rank : report.baseline.source_correctness.source_recall) : report.baseline.reciprocal_rank;
+        const candidateCoverage = independent ? (suite.rerankerComparison ? report.candidate.ranking.mean_reciprocal_rank : report.candidate.source_correctness.source_recall) : report.result.reciprocal_rank;
         const baselinePrivacy = report.baseline.privacy_violations;
         const candidatePrivacy = independent ? report.candidate.privacy_violations : report.result.privacy_violations;
         const baselineTokens = independent ? report.baseline.context.mean_estimated_tokens : report.baseline.mean_estimated_output_tokens;
@@ -78,12 +97,16 @@ export function createRsiExperiments({ root = ROOT, env = process.env, now = () 
             baseline: safeRatio(baselineQuality), candidate: safeRatio(candidateQuality),
           },
           secondary_metric: {
-            name: independent ? 'required_source_recall' : 'mean_reciprocal_rank',
+            name: independent ? (suite.rerankerComparison ? 'mean_reciprocal_rank' : 'required_source_recall') : 'mean_reciprocal_rank',
             baseline: safeRatio(baselineCoverage), candidate: safeRatio(candidateCoverage),
           },
           guardrails: { baseline_privacy_violations: baselinePrivacy, candidate_privacy_violations: candidatePrivacy },
           estimated_context_tokens: { baseline: baselineTokens, candidate: candidateTokens },
-          limitations: independent
+          limitations: suite.rerankerComparison
+            ? ['Frozen synthetic evaluation set only; it is not customer validation.', 'Only synthetic fixture queries and eligible snippets are sent to the explicitly configured loopback reranker.', 'The receipt does not identify or certify the installed model.', 'No model-generated answer quality, provider-billed token savings, or production result is measured.']
+            : suite.requires_reranker
+            ? ['Development fixture only; these cases are not an independent held-out set.', 'Only synthetic fixture queries and eligible snippets are sent to the explicitly configured loopback reranker.', 'The receipt does not identify or certify the installed model.', 'No model-generated answer quality, provider-billed token savings, or production result is measured.']
+            : independent
             ? ['Fictional frozen corpus only; no model-generated answers.', 'Token values are local estimates, not provider billing.', 'No cross-client or production claim.']
             : ['Fictional frozen corpus only.', 'Token values are local estimates, not provider billing.', 'No live ranking or knowledge is changed.'],
         };

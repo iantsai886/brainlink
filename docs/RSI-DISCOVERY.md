@@ -1,6 +1,6 @@
 # RSI research discovery (opt-in)
 
-Status: implemented and locally tested on 2026-10-30 (Asia/Taipei). arXiv, Crossref, Semantic Scholar, public GitHub repository search, and public GitHub issue search adapters are covered with synthetic responses; live source access was not exercised in this development run.
+Status: implemented and locally tested on 2026-10-30 (Asia/Taipei). arXiv, Crossref, Semantic Scholar, public GitHub repository search, and public GitHub issue search adapters are covered with synthetic responses. A later live check is recorded below; it confirmed four sources responded and Semantic Scholar rate-limited the request.
 
 ## What it does
 
@@ -78,6 +78,12 @@ The check does not verify the truth of the source content, automatically update 
 - [GitHub REST API rate limits](https://docs.github.com/en/rest/using-the-rest-api/rate-limits-for-the-rest-api) — unauthenticated public access and stricter limits for search endpoints.
 - [Semantic Scholar Academic Graph API](https://api.semanticscholar.org/api-docs/graphs) — paper search, requested fields, and exact paper-ID lookup used for freshness checks.
 - [Semantic Scholar API access and rate limits](https://www.semanticscholar.org/product/api) — public endpoints do not require authentication but may be throttled; higher-rate access uses an API key, which BrainLink does not require.
+
+## Live connector check (2026-11-03)
+
+On Windows with Node.js 24.22.1 at source commit `a179aa2`, a one-time run used a temporary app-data directory and fictional BrainLink topics/problem text. It selected all five built-in public metadata sources. Four source requests succeeded; Semantic Scholar returned HTTP 429 (rate limited), so the run status was `partial`. The successful responses contained 100 entries total; the filters counted 12 invalid, 4 secret-like, 39 irrelevant and 40 over-limit entries, and filed 5 low-confidence proposals in the temporary ledger. The run reported no instruction-like entries. The temporary directory was deleted after the run; no real vault or persistent RSI settings were read or changed.
+
+This confirms that four adapters can return live public metadata in this environment and that a throttled source is reported without blocking the other sources. It is one check, not a reliability, relevance, or product-quality benchmark. Semantic Scholar's live behavior remains limited by its unauthenticated rate limit; its parser and failure paths are covered separately with synthetic tests. No automatic retry was added, to avoid increasing request pressure.
 
 ## Rollback
 

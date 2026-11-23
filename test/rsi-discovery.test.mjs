@@ -1,4 +1,5 @@
 import test from 'node:test';
+import { readSetupHtml } from './helpers/setup-html.mjs';
 import assert from 'node:assert/strict';
 import { createHash } from 'node:crypto';
 import { mkdtemp, mkdir, readFile, writeFile } from 'node:fs/promises';
@@ -134,6 +135,7 @@ test('feed fetching refuses hosts outside the allowlist, private DNS answers, re
 
   const url = feedUrl('arxiv', 'agent memory');
   await assert.rejects(fetchFeed(url, { fetchImpl: async () => response('', { status: 302, headers: { location: 'http://169.254.169.254/' } }), lookup: publicLookup }), /redirect/);
+  await assert.rejects(fetchFeed(url, { fetchImpl: async () => response('', { status: 429 }), lookup: publicLookup }), /rate limiting requests \(HTTP 429\); try again later/);
   await assert.rejects(fetchFeed(url, { fetchImpl: async () => response('busy', { status: 503 }), lookup: publicLookup }), /HTTP 503/);
   await assert.rejects(fetchFeed(url, { fetchImpl: async () => response('<html></html>', { type: 'text/html' }), lookup: publicLookup }), /content type/);
   await assert.rejects(fetchFeed(url, { fetchImpl: async () => response('x', { headers: { 'content-length': String(50_000_000) } }), lookup: publicLookup }), /larger/);
@@ -743,8 +745,9 @@ test('Setup exposes discovery only through authenticated local APIs and runs the
     assert.equal(manual.run.trigger, 'manual');
     assert.equal(manual.run.duplicates, 1);
     const ideas = await fetch(base + '/api/rsi', { headers: { 'X-BrainLink-Token': app.token } }).then(r => r.json());
-    assert.equal(ideas.ideas.length, 1);
-    assert.equal(ideas.ideas[0].origin, 'discovery');
+    assert.equal(ideas.ideas.length, 2, 'the immediate daily self-test also records the expected empty-vault setup failure');
+    assert.equal(ideas.ideas.filter((idea) => idea.origin === 'discovery').length, 1);
+    assert.equal(ideas.ideas.filter((idea) => idea.origin === 'self_test' && idea.observation?.check === 'vaults').length, 1);
     const exported = await fetch(base + '/api/rsi/export', { headers: { 'X-BrainLink-Token': app.token } }).then(r => r.json());
     assert.equal(exported.schema, 1);
     assert.ok(exported.exported_at);
@@ -837,7 +840,7 @@ test('Setup activity cancels shutdown during the idle-exit grace period', async 
 });
 
 test('RSI discovery UI has one form, selectable fixed sources, unique controls, and translated labels', async () => {
-  const html = await readFile(new URL('../ui/index.html', import.meta.url), 'utf8');
+  const html = await readSetupHtml();
   assert.equal((html.match(/id="rsi-export"/g) || []).length, 1, 'review export has one visible control');
   assert.match(html, /api\('GET', '\/api\/rsi\/export'\)/, 'download uses the authenticated local API helper');
   assert.match(html, /URL\.createObjectURL\(blob\)/, 'export is downloaded as a file');

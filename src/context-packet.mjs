@@ -1,3 +1,4 @@
+import { buildAnswerReceipt } from './answer-receipt.mjs';
 const CONFIDENCE = new Set(['verified', 'reported', 'inferred', 'unknown']);
 
 // A packet is a bounded projection of already-authorized search results. It does not
@@ -35,6 +36,10 @@ export function buildContextPacket(result, { vault, maxSources = 4, excerptChars
   return {
     vault,
     status: result?.status || 'not_in_brain',
+    ...(Number.isFinite(result?.coverage) ? { coverage: result.coverage } : {}),
+    ...(Array.isArray(result?.missing_words) && result.missing_words.length ? { missing_words: result.missing_words.slice(0, 20) } : {}),
+    ...(result?.needs_translation ? { needs_translation: true } : {}),
+    receipt: buildAnswerReceipt(result, { vault, sources }),
     excerpt_chars_budget: totalLimit,
     excerpt_chars_used: excerptCharsUsed,
     sources,

@@ -2,6 +2,7 @@ import { spawnSync } from 'node:child_process';
 import { realpathSync } from 'node:fs';
 import path from 'node:path';
 import { resolveGitHubScope, githubRemoteIdentity } from './sync/github-assignment.mjs';
+import { twinProfileForVault } from './twin-profiles.mjs';
 
 function gitEnvironment() {
   const env = { ...process.env };
@@ -63,9 +64,11 @@ export function createHandoffGitVerifier(ctx) {
   function getLocal() {
     if (loaded) return { local, reason };
     loaded = true;
-    if (scope.mode !== 'scoped' || !scope.profile_id) reason = 'No scoped Twin assignment is active.';
+    if (scope.mode !== 'scoped') reason = 'No scoped Twin assignment is active.';
     else {
-      const profile = (ctx.cfg.twin_profiles || []).find((item) => item.id === scope.profile_id);
+      const profiles = scope.profiles || [];
+      const candidates = profiles.map((item) => (ctx.cfg.twin_profiles || []).find((profile) => profile.id === item.profile_id)).filter((item) => item?.github_repository);
+      const profile = candidates.length === 1 ? candidates[0] : null;
       const assignment = profile?.github_repository;
       if (!assignment) reason = 'This Twin has no confirmed local repository assignment.';
       else {
@@ -73,7 +76,7 @@ export function createHandoffGitVerifier(ctx) {
         if (!ctx.enabled.includes(assignment.vault) || !grant?.operations?.includes('read_note')) reason = 'This agent cannot read the assigned project vault.';
         else {
           let resolved;
-          try { resolved = resolveGitHubScope(ctx.cfg, { profileId: scope.profile_id, vaultName: assignment.vault }); }
+          try { resolved = resolveGitHubScope(ctx.cfg, { profileId: profile.id, vaultName: assignment.vault }); }
           catch { reason = 'The Twin repository assignment is unavailable or invalid.'; }
           if (resolved) {
             local = readAssignedCheckout(resolved.assignment.path);

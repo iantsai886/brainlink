@@ -16,6 +16,7 @@ $Stage = Join-Path $Root 'build\windows\stage'
 if (-not (Test-Path (Join-Path $Stage 'node\node.exe')) -or -not (Test-Path (Join-Path $Stage 'app\bin\brainlink.mjs'))) {
   throw 'The Windows package stage is missing. Run packaging/windows/build-windows.ps1 first.'
 }
+& (Join-Path $PSScriptRoot 'assert-windows-stage-current.ps1') -Root $Root -Stage $Stage
 $TestRoot = Join-Path $env:TEMP ('brainlink-install-smoke-' + [guid]::NewGuid().ToString('N'))
 $InstallDir = Join-Path $TestRoot 'installed'
 $BrainLinkHome = Join-Path $TestRoot 'home'
@@ -30,6 +31,8 @@ $Installer = if ($SkipCompile) { $ReusableInstaller } else { Join-Path $TestRoot
 $OriginalPathExists = Test-Path 'HKCU:\Environment'
 $OriginalPath = if ($OriginalPathExists) { (Get-ItemProperty 'HKCU:\Environment' -Name Path -ErrorAction SilentlyContinue).Path } else { $null }
 $OldBrainLinkHome = $env:BRAINLINK_HOME
+$OldAppData = $env:APPDATA
+$IsolatedAppData = Join-Path $TestRoot 'roaming'
 $OldBrainLinkVersion = $env:BRAINLINK_VERSION
 $OldHermesHome = $env:HERMES_HOME
 $OldSetupPort = $env:BRAINLINK_SETUP_PORT
@@ -72,6 +75,13 @@ try {
   }
 
   $env:BRAINLINK_HOME = $BrainLinkHome
+  New-Item -ItemType Directory -Path $IsolatedAppData -Force | Out-Null
+  # Keep the app's managed sign-in launcher inside this isolated test profile.
+  $env:APPDATA = $IsolatedAppData
+  $InstalledApp = Join-Path $InstallDir 'app'
+  $InstalledNode = Join-Path $InstallDir 'node\node.exe'
+  $OcrSmoke = Join-Path $Root 'scripts\smoke-installed-ocr.mjs'
+  $HtmlSmoke = Join-Path $Root 'scripts\smoke-installed-html.mjs'
   $HermesHome = Join-Path $TestRoot 'hermes-profile'
   New-Item -ItemType Directory -Path $HermesHome -Force | Out-Null
   $HermesConfig = Join-Path $HermesHome 'config.yaml'
@@ -109,6 +119,78 @@ try {
   $token = (Get-Content -LiteralPath (Join-Path $BrainLinkHome 'setup-token') -Raw).Trim()
   $page = Invoke-WebRequest "http://127.0.0.1:$($instance.port)/?t=$token" -Headers @{ 'X-BrainLink-Token' = $token } -TimeoutSec 5
   if ($page.StatusCode -ne 200 -or $page.Content -notmatch 'BrainLink Setup') { throw 'Installed Setup UI did not load with its local session token.' }
+  if (-not $page.Content.Contains('href="#proposal-review-panel" data-nav-group-link="review"') -or -not $page.Content.Contains('"review":["proposal-review-panel","memory-review-panel","decision-reviews-panel","conflicts-panel","tidy-panel","sessions-panel","s-ingestion"]')) { throw 'Installed Setup is missing Review navigation to folder scanning.' }
+  if ($page.Content -notmatch 'id="ingestion-model-setup"' -or $page.Content -notmatch 'href="#sessions-panel" data-main-nav="sessions-panel" data-i18n="ingestion.modelSetupLink"') { throw 'Installed Setup is missing the local-model setup link for automatic source analysis.' }
+  if ($page.Content -notmatch 'id="ingestion-enabled"' -or $page.Content -notmatch 'id="ingestion-auto-file"' -or $page.Content -notmatch 'id="ingestion-run"' -or $page.Content -notmatch 'id="ingestion-startup-warning"') { throw 'Installed Setup is missing the scheduled scan, auto-file, manual scan, or sign-in startup guidance control.' }
+  $OcrFixtures = @('ocr-sample.png', 'ocr-portuguese.png', 'ocr-traditional-chinese.png') | ForEach-Object { Join-Path $Root "test\fixtures\$_" }
+  & $InstalledNode $OcrSmoke $InstalledApp @OcrFixtures | Out-Host
+  if ($LASTEXITCODE -ne 0) { throw "The installed OCR runtime could not read its local image fixture (exit code $LASTEXITCODE)." }
+  & $InstalledNode $HtmlSmoke $InstalledApp | Out-Host
+  if ($LASTEXITCODE -ne 0) { throw 'The installed HTML parser could not safely extract its fictional fixture.' }
+  $englishLocale = Invoke-RestMethod "http://127.0.0.1:$($instance.port)/locales/en.json" -TimeoutSec 5
+  if ($englishLocale.'nav.sources' -ne 'Sources') { throw 'Installed Setup is missing the Sources navigation label.' }
+  foreach ($key in @('ingestion.enabled', 'ingestion.autoFile', 'ingestion.run', 'ingestion.destination', 'ingestion.modelSetup', 'ingestion.modelSetupLink')) {
+    if (-not $englishLocale.PSObject.Properties[$key].Value) { throw "Installed Setup is missing the folder-ingestion label: $key" }
+  }
+  foreach ($key in @('ingestion.retryProposal', 'ingestion.partialFiling', 'ingestion.confirmRetryProposal')) {
+    if (-not $englishLocale.PSObject.Properties[$key].Value) { throw "Installed Setup is missing the partial-filing recovery label: $key" }
+  }
+  # Exercise the installed local API with a fictional vault: force an entity-note
+  # collision, confirm the existing file is preserved and retry is available, then
+  # remove only the fixture collision and verify the main note is not duplicated.
+  $vaultPath = Join-Path $TestRoot 'fictional-vault'
+  $rawFolder = Join-Path $vaultPath 'Raw'
+  $knowledgeFolder = Join-Path $vaultPath 'Knowledge'
+  New-Item -ItemType Directory -Path $rawFolder -Force | Out-Null
+  New-Item -ItemType Directory -Path $knowledgeFolder -Force | Out-Null
+  Set-Content -LiteralPath (Join-Path $rawFolder 'Source.md') -Value "# Fictional source`n`nA fictional Quality team runs a short checklist." -NoNewline
+  $vaultBody = @{ name = 'Fictional QA'; path = $vaultPath } | ConvertTo-Json -Compress
+  $headers = @{ 'X-BrainLink-Token' = $token }
+  $connect = Invoke-RestMethod -Uri "http://127.0.0.1:$($instance.port)/api/vault" -Method Post -Headers $headers -ContentType 'application/json' -Body $vaultBody -TimeoutSec 5
+  if (-not $connect.ok) { throw 'Could not connect the isolated fictional vault to installed Setup.' }
+  $scanBody = @{ targets = @(@{ vault = 'Fictional QA'; folder = 'Raw' }) } | ConvertTo-Json -Depth 5 -Compress
+  $scan = Invoke-RestMethod -Uri "http://127.0.0.1:$($instance.port)/api/ingestion/run" -Method Post -Headers $headers -ContentType 'application/json' -Body $scanBody -TimeoutSec 10
+  if (@($scan.candidates).Count -ne 1) { throw 'Installed folder scan did not find exactly the fictional source.' }
+  # Seed a valid local draft from the scanned source revision. This exercises the
+  # installed filing path without requiring Ollama or sending fixture data anywhere.
+  $sourceId = [string]$scan.candidates[0].source_id
+  $revision = [string]$scan.candidates[0].revision
+  $draftIdentity = [Text.Encoding]::UTF8.GetBytes("Fictional QA`0$sourceId`0$revision")
+  $sha = [Security.Cryptography.SHA256]::HashData($draftIdentity)
+  $draftId = [Convert]::ToHexString($sha).ToLowerInvariant()
+  $now = [DateTime]::UtcNow.ToString('o')
+  $draftRecord = [ordered]@{
+    schema = 1; id = $draftId; status = 'pending'; created_at = $now
+    draft = [ordered]@{
+      status = 'unverified_draft'; source_id = $sourceId; revision = $revision
+      vault = 'Fictional QA'; folder = 'Raw'; source_path = 'Raw/Source.md'
+      title = 'Fictional filing retry'; summary = 'A fictional installer recovery test.'
+      body = "# Fictional filing retry`n`nThis fixture tests safe retry behavior.`n`n## Source`n[[Raw/Source]]"
+      memory_type = 'episodic'; entities = @(@{ type = 'team'; title = 'Fictional quality team'; description = 'A fictional team for the installer retry smoke.'; evidence = 'A fictional Quality team runs a short checklist.' })
+      relationships = @(); related_notes = @(); related_basis = 'source_and_draft'; destinations = @('Knowledge'); model = 'fixture'; generated_at = $now
+    }
+  }
+  $draftDir = Join-Path $BrainLinkHome 'ingestion\drafts'
+  New-Item -ItemType Directory -Path $draftDir -Force | Out-Null
+  $draftFile = Join-Path $draftDir "$draftId.json"
+  $draftRecord | ConvertTo-Json -Depth 12 | Set-Content -LiteralPath $draftFile -NoNewline
+  $localDate = Get-Date -Format 'yyyy-MM-dd'
+  $conflictPath = Join-Path $knowledgeFolder "$localDate — Fictional quality team.md"
+  Set-Content -LiteralPath $conflictPath -Value "# Existing user file`n`nKeep this exact content." -NoNewline
+  $saveBody = @{ draft_id = $draftId; destination = 'Knowledge'; related_note_paths = @(); entity_choices = @(@{ index = 0; scope = 'organisation' }); relationship_indexes = @(); confirm = $true } | ConvertTo-Json -Depth 5 -Compress
+  $partial = Invoke-RestMethod -Uri "http://127.0.0.1:$($instance.port)/api/ingestion/save-draft" -Method Post -Headers $headers -ContentType 'application/json' -Body $saveBody -TimeoutSec 10
+  if (-not $partial.partial -or -not $partial.written) { throw 'Installed filing did not report the expected recoverable entity-name conflict.' }
+  if ((Get-Content -LiteralPath $conflictPath -Raw) -ne "# Existing user file`n`nKeep this exact content.") { throw 'Installed filing changed the existing conflict file.' }
+  $pending = Invoke-RestMethod -Uri "http://127.0.0.1:$($instance.port)/api/ingestion/drafts" -Method Get -Headers $headers -TimeoutSec 5
+  if (@($pending.drafts).Count -ne 1 -or -not $pending.drafts[0].filing) { throw 'Installed UI does not retain the partial draft for retry.' }
+  Remove-Item -LiteralPath $conflictPath
+  $retryBody = @{ draft_id = $draftId; destination = 'Knowledge'; entity_choices = @(@{ index = 0; scope = 'organisation' }); confirm = $true } | ConvertTo-Json -Depth 5 -Compress
+  $retried = Invoke-RestMethod -Uri "http://127.0.0.1:$($instance.port)/api/ingestion/save-draft" -Method Post -Headers $headers -ContentType 'application/json' -Body $retryBody -TimeoutSec 10
+  if ($retried.partial -or $retried.path -ne $partial.path) { throw 'Installed retry did not finish using the already-saved main note.' }
+  $savedRelative = [string]$partial.path -replace '^Fictional QA/', ''
+  if (-not $savedRelative -or (Get-Content -LiteralPath (Join-Path $vaultPath $savedRelative) -Raw).Length -eq 0) { throw 'Installed retry lost the already-saved main note.' }
+  $pendingAfterRetry = Invoke-RestMethod -Uri "http://127.0.0.1:$($instance.port)/api/ingestion/drafts" -Method Get -Headers $headers -TimeoutSec 5
+  if (@($pendingAfterRetry.drafts).Count -ne 0) { throw 'Installed retry left a completed draft in the pending list.' }
   $headers = @{ 'X-BrainLink-Token' = $token }
   $hooksUrl = "http://127.0.0.1:$($instance.port)/api/sessions/hooks"
   $hookSetUrl = "http://127.0.0.1:$($instance.port)/api/sessions/hooks/set"
@@ -125,7 +207,51 @@ try {
   $restoredYaml = Get-Content -LiteralPath $HermesConfig -Raw
   if ($disabledHook.configured -or $restoredYaml -notmatch 'echo preserve-user-hook' -or $restoredYaml -match 'session-end-cue') { throw 'Installed Hermes setup did not remove only its own hook.' }
   if ($page.Content -notmatch 'sessions\.hookHermesConfirm|user permissions') { throw 'Installed UI is missing the Hermes shell-hook permission warning.' }
-  Write-Output "PASS: installed BrainLink $Version starts from its bundled runtime; both shortcuts work; Setup loads; and Hermes hook enable/disable preserves only the temporary profile settings."
+
+  # Verify the actual Windows sign-in launcher in isolated APPDATA. Stop the first
+  # instance, invoke the managed VBS as Windows Startup would, and require a fresh
+  # installed process plus a healthy authenticated Setup endpoint.
+  $startupEnabled = Invoke-RestMethod -Uri "http://127.0.0.1:$($instance.port)/api/startup" -Method Post -Headers $headers -ContentType 'application/json' -Body '{"enabled":true}' -TimeoutSec 5
+  if (-not $startupEnabled.enabled) { throw 'Installed Setup could not enable start-at-sign-in in the isolated profile.' }
+  $InstalledStartupFile = Join-Path $IsolatedAppData 'Microsoft\Windows\Start Menu\Programs\Startup\BrainLink Background.vbs'
+  if (-not (Test-Path -LiteralPath $InstalledStartupFile)) { throw 'Installed Setup did not create its managed Windows startup launcher.' }
+  $startupSource = Get-Content -LiteralPath $InstalledStartupFile -Raw
+  $InstalledCli = Join-Path $InstalledApp 'bin\brainlink.mjs'
+  if ($startupSource -notmatch 'BrainLink managed startup launcher' -or -not $startupSource.Contains($InstalledNode) -or -not $startupSource.Contains($InstalledCli) -or $startupSource -notmatch 'setup --app --no-open') { throw 'The sign-in launcher does not target the installed BrainLink runtime and app.' }
+  $previousPid = [int]$instance.pid
+  Stop-Process -Id $previousPid -Force -ErrorAction Stop
+  Wait-Process -Id $previousPid -Timeout 10 -ErrorAction SilentlyContinue
+  $shutdownDeadline = [DateTime]::UtcNow.AddSeconds(10)
+  $oldInstanceStopped = $false
+  while ([DateTime]::UtcNow -lt $shutdownDeadline) {
+    try { Invoke-RestMethod "http://127.0.0.1:$($instance.port)/health" -TimeoutSec 1 | Out-Null }
+    catch { $oldInstanceStopped = $true; break }
+    Start-Sleep -Milliseconds 100
+  }
+  if (-not $oldInstanceStopped) { throw 'The first installed Setup instance did not stop before the sign-in restart test.' }
+  $Process = $null
+  Start-Process -FilePath (Join-Path $env:WINDIR 'System32\wscript.exe') -ArgumentList @('//B', '//NoLogo', "`"$InstalledStartupFile`"") -WindowStyle Hidden | Out-Null
+  $startupDeadline = [DateTime]::UtcNow.AddSeconds(30)
+  $startupInstance = $null
+  $startupHealth = $null
+  while ([DateTime]::UtcNow -lt $startupDeadline) {
+    if (Test-Path -LiteralPath $InstanceFile) {
+      try { $candidate = Get-Content -LiteralPath $InstanceFile -Raw | ConvertFrom-Json } catch { $candidate = $null }
+      if ($candidate) {
+        $candidateProcess = Get-CimInstance Win32_Process -Filter "ProcessId = $($candidate.pid)" -ErrorAction SilentlyContinue
+        if ($candidateProcess -and $candidateProcess.ExecutablePath -and $candidateProcess.ExecutablePath.StartsWith((Join-Path $InstallDir ''), [StringComparison]::OrdinalIgnoreCase)) {
+          try { $startupHealth = Invoke-RestMethod "http://127.0.0.1:$($candidate.port)/health" -TimeoutSec 2 } catch { $startupHealth = $null }
+          if ($startupHealth) { $startupInstance = $candidate; $Process = $candidateProcess; break }
+        }
+      }
+    }
+    Start-Sleep -Milliseconds 250
+  }
+  if (-not $startupInstance -or $startupHealth.app -ne 'brainlink' -or $startupHealth.version -ne $Version) { throw 'Running the isolated Windows sign-in launcher did not start a healthy installed BrainLink instance.' }
+  $startupDisabled = Invoke-RestMethod -Uri "http://127.0.0.1:$($startupInstance.port)/api/startup" -Method Post -Headers $headers -ContentType 'application/json' -Body '{"enabled":false}' -TimeoutSec 5
+  if ($startupDisabled.enabled -or (Test-Path -LiteralPath $InstalledStartupFile)) { throw 'Turning start-at-sign-in off did not remove only the isolated BrainLink managed entry.' }
+  Write-Output 'PASS: the isolated Windows sign-in launcher started the installed BrainLink runtime, passed its health check, and removed only its own entry when disabled.'
+  Write-Output "PASS: installed BrainLink $Version starts from its bundled runtime; both shortcuts work; Setup and folder-ingestion controls load; partial filing preserves a conflict and retries without duplicating the main note; and Hermes hook enable/disable preserves only the temporary profile settings."
   $Success = $true
 } finally {
   try {
@@ -149,6 +275,7 @@ try {
     }
   } finally {
     $env:BRAINLINK_HOME = $OldBrainLinkHome
+    $env:APPDATA = $OldAppData
     $env:BRAINLINK_VERSION = $OldBrainLinkVersion
     $env:HERMES_HOME = $OldHermesHome
     $env:BRAINLINK_SETUP_PORT = $OldSetupPort

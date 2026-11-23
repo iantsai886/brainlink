@@ -10,25 +10,26 @@ HERE="$(cd "$(dirname "$0")" && pwd)"
 ROOT="$(cd "$HERE/../.." && pwd)"
 VERSION="$(node -p "require('$ROOT/package.json').version")"
 BUNDLE_ID="${BUNDLE_ID:-com.iango.brainlink}"
-NODE_VERSION="$(cat "$ROOT/vendor/node/VERSION")"
+NODE_VERSION="22.23.3"
 NODE_DIST="https://nodejs.org/dist/v$NODE_VERSION"
+NODE_RT="${BRAINLINK_MAC_NODE_RT:-$ROOT/vendor/node-macos}"
 WORK="$ROOT/build/macos"
 DIST="$ROOT/dist"
 APP="$WORK/root/Applications/BrainLink.app"
 
 echo "BrainLink $VERSION · Node $NODE_VERSION · $BUNDLE_ID"
-rm -rf "$WORK" && mkdir -p "$WORK/node" "$APP/Contents/MacOS" "$APP/Contents/Resources/bin" "$APP/Contents/Resources/node/bin" "$DIST"
+rm -rf "$WORK" && mkdir -p "$WORK/node" "$APP/Contents/MacOS" "$APP/Contents/Resources/bin" "$APP/Contents/Resources/node/bin" "$DIST" "$NODE_RT"
 
 # 1. Universal Node runtime from the checksum-verified official tarballs.
-[ -f "$ROOT/vendor/node/SHASUMS256.txt" ] || curl -fsS "$NODE_DIST/SHASUMS256.txt" -o "$ROOT/vendor/node/SHASUMS256.txt"
+[ -f "$NODE_RT/SHASUMS256.txt" ] || curl -fsS "$NODE_DIST/SHASUMS256.txt" -o "$NODE_RT/SHASUMS256.txt"
 for arch in arm64 x64; do
-  archive="$ROOT/vendor/node/node-v$NODE_VERSION-darwin-$arch.tar.gz"
+  archive="$NODE_RT/node-v$NODE_VERSION-darwin-$arch.tar.gz"
   [ -f "$archive" ] || curl -fsS "$NODE_DIST/$(basename "$archive")" -o "$archive"
 done
-(cd "$ROOT/vendor/node" && grep -E "darwin-(arm64|x64).tar.gz" SHASUMS256.txt | shasum -a 256 -c --quiet)
+(cd "$NODE_RT" && grep -E "node-v$NODE_VERSION-darwin-(arm64|x64)\.tar\.gz$" SHASUMS256.txt | shasum -a 256 -c --quiet)
 for arch in arm64 x64; do
   mkdir -p "$WORK/node/$arch"
-  tar -xzf "$ROOT/vendor/node/node-v$NODE_VERSION-darwin-$arch.tar.gz" -C "$WORK/node/$arch" --strip-components=1 "node-v$NODE_VERSION-darwin-$arch/bin/node" "node-v$NODE_VERSION-darwin-$arch/LICENSE"
+  tar -xzf "$NODE_RT/node-v$NODE_VERSION-darwin-$arch.tar.gz" -C "$WORK/node/$arch" --strip-components=1 "node-v$NODE_VERSION-darwin-$arch/bin/node" "node-v$NODE_VERSION-darwin-$arch/LICENSE"
 done
 lipo -create "$WORK/node/arm64/bin/node" "$WORK/node/x64/bin/node" -output "$APP/Contents/Resources/node/bin/node"
 cp "$WORK/node/arm64/LICENSE" "$APP/Contents/Resources/node/LICENSE"
@@ -39,8 +40,11 @@ cp -R "$ROOT/bin" "$ROOT/src" "$ROOT/ui" "$ROOT/samples" "$ROOT/skills" "$ROOT/p
 rm -rf "$APP/Contents/Resources/app/ui/app/test"
 mkdir -p "$APP/Contents/Resources/app/node_modules/brainlink-store"
 cp "$ROOT/vendor/brainlink-store/memory-store.mjs" "$ROOT/vendor/brainlink-store/errors.mjs" "$ROOT/vendor/brainlink-store/package.json" "$APP/Contents/Resources/app/node_modules/brainlink-store/"
-mkdir -p "$APP/Contents/Resources/app/node_modules/yaml"
-cp -R "$ROOT/node_modules/yaml/." "$APP/Contents/Resources/app/node_modules/yaml/"
+node "$ROOT/scripts/stage-runtime-dependencies.mjs" "$APP/Contents/Resources/app/node_modules"
+npm --prefix "$ROOT" run stage:canvas-platforms -- "$APP/Contents/Resources/app/node_modules" darwin-x64 darwin-arm64
+mkdir -p "$APP/Contents/Resources/app/src/ingestion"
+cp "$ROOT/src/ingestion/image-ocr.mjs" "$APP/Contents/Resources/app/src/ingestion/image-ocr.mjs"
+node "$ROOT/scripts/stage-ocr-data.mjs" "$APP/Contents/Resources/app/src/ingestion/tessdata"
 cp "$HERE/icon/BrainLink.icns" "$APP/Contents/Resources/BrainLink.icns"
 
 cat > "$APP/Contents/Resources/bin/brainlink" <<'SH'
@@ -50,13 +54,9 @@ SELF="$0"; while [ -L "$SELF" ]; do T="$(readlink "$SELF")"; case "$T" in /*) SE
 RES="$(cd "$(dirname "$SELF")/.." && pwd)"
 exec "$RES/node/bin/node" "$RES/app/bin/brainlink.mjs" "$@"
 SH
-cat > "$APP/Contents/MacOS/BrainLink" <<'SH'
-#!/bin/bash
-# Finder launch: open Setup in the browser; it closes itself after 30 idle minutes or on Done.
-RES="$(cd "$(dirname "$0")/../Resources" && pwd)"
-exec "$RES/node/bin/node" "$RES/app/bin/brainlink.mjs" setup --app
-SH
-chmod +x "$APP/Contents/Resources/bin/brainlink" "$APP/Contents/MacOS/BrainLink"
+chmod +x "$APP/Contents/Resources/bin/brainlink"
+cp "$HERE/scripts/install-cli-link" "$APP/Contents/Resources/bin/install-cli-link"
+chmod 755 "$APP/Contents/Resources/bin/install-cli-link"
 
 cat > "$APP/Contents/Info.plist" <<PLIST
 <?xml version="1.0" encoding="UTF-8"?>
@@ -72,12 +72,19 @@ cat > "$APP/Contents/Info.plist" <<PLIST
   <key>CFBundleIconFile</key><string>BrainLink</string>
   <key>CFBundlePackageType</key><string>APPL</string>
   <key>LSMinimumSystemVersion</key><string>11.0</string>
-  <key>LSUIElement</key><true/>
+  <key>NSHighResolutionCapable</key><true/>
   <key>LSApplicationCategoryType</key><string>public.app-category.productivity</string>
   <key>NSHumanReadableCopyright</key><string>© $(date +%Y) Iango. All rights reserved.</string>
 </dict>
 </plist>
 PLIST
+
+# 2b. A native AppKit + WebKit host keeps one responsive BrainLink window in the Dock.
+SDK="$(xcrun --sdk macosx --show-sdk-path)"
+swiftc -O -parse-as-library -target arm64-apple-macos11.0 -sdk "$SDK" -framework AppKit -framework WebKit -framework Foundation "$HERE/BrainLinkApp.swift" -o "$WORK/BrainLink-arm64"
+swiftc -O -parse-as-library -target x86_64-apple-macos11.0 -sdk "$SDK" -framework AppKit -framework WebKit -framework Foundation "$HERE/BrainLinkApp.swift" -o "$WORK/BrainLink-x86_64"
+lipo -create "$WORK/BrainLink-arm64" "$WORK/BrainLink-x86_64" -output "$APP/Contents/MacOS/BrainLink"
+chmod 755 "$APP/Contents/MacOS/BrainLink"
 
 # 3. Code signing (hardened runtime for notarisation; ad-hoc otherwise).
 if [ -n "${DEVELOPER_ID_APP:-}" ]; then
@@ -91,7 +98,8 @@ codesign --verify --strict "$APP"
 
 # 4. Installer: component package (not relocatable) wrapped in a product archive.
 pkgbuild --analyze --root "$WORK/root" "$WORK/component.plist" >/dev/null
-/usr/libexec/PlistBuddy -c "Set :0:BundleIsRelocatable false" "$WORK/component.plist"
+/usr/libexec/PlistBuddy -c "Set :0:BundleIsRelocatable false" "$WORK/component.plist" 2>/dev/null \
+  || /usr/libexec/PlistBuddy -c "Add :0:BundleIsRelocatable bool false" "$WORK/component.plist"
 pkgbuild --root "$WORK/root" --component-plist "$WORK/component.plist" --scripts "$HERE/scripts" --identifier "$BUNDLE_ID.pkg" --version "$VERSION" --install-location / "$WORK/BrainLink-component.pkg" >/dev/null
 cp "$ROOT/LICENSE.txt" "$HERE/resources/license.txt"
 cat > "$WORK/distribution.xml" <<XML

@@ -6,6 +6,7 @@ import path from 'node:path';
 import { redactText } from './redact.mjs';
 
 export const LOCAL_OLLAMA_URL = 'http://127.0.0.1:11434';
+export const LOCAL_MODEL_TIMEOUT_MS = 300_000;
 export const AUTO_SUMMARY_MAX_MESSAGES = 80;
 export const AUTO_SUMMARY_MAX_CHARS = 28_000;
 
@@ -61,7 +62,7 @@ export function formatLocalSummary(data) {
   return sections.join('\n\n');
 }
 
-export async function generateLocalSessionSummary(messages, model, { fetchImpl = fetch, timeoutMs = 120_000 } = {}) {
+export async function generateLocalSessionSummary(messages, model, { fetchImpl = fetch, timeoutMs = LOCAL_MODEL_TIMEOUT_MS } = {}) {
   if (!validLocalModelName(model)) throw new Error('Choose a valid local Ollama model name.');
   const turns = selectSummaryTurns(messages);
   if (!turns.length) throw new Error('This session has no user or assistant text to summarize.');

@@ -1,4 +1,5 @@
 import test from 'node:test';
+import { readSetupHtml } from './helpers/setup-html.mjs';
 import assert from 'node:assert/strict';
 import path from 'node:path';
 import { mkdtemp, mkdir, readdir, readFile, writeFile } from 'node:fs/promises';
@@ -21,7 +22,7 @@ test('Harness automatic drafts wait 30 idle minutes and reject sessions with lat
 });
 
 test('pending session cue offers a safe copy request for an authorized AI', async () => {
-  const html = await readFile(new URL('../ui/index.html', import.meta.url), 'utf8');
+  const html = await readSetupHtml();
   assert.match(html, /data-cue-review-request="\$\{esc\(cue\.session_ref\)\}"/);
   assert.match(html, /data-sess-file="\$\{esc\(cue\.session_ref\)\}"/);
   assert.match(html, /if \(choices\) await previewSessionFile\(id\)/, 'opening a closeout from the reminder prepares a private preview immediately');
@@ -111,6 +112,7 @@ test('local cue UI API requires authentication, minimizes metadata, and preserve
   ].map((row) => JSON.stringify(row)).join('\n') + '\n');
   await recordSessionEndCue({ input: hookEvent(), client: 'codex', dir });
   const app = await startSetup({ env, home: taskHome, os: 'win32', port: 0, useCli: false });
+  await fetch(`http://127.0.0.1:${app.port}/api/sessions/import-setting`, { method: 'POST', headers: { 'Content-Type': 'application/json', 'X-BrainLink-Token': app.token }, body: JSON.stringify({ enabled: true }) });
   const call = (route, body = {}, token = app.token) => fetch(`http://127.0.0.1:${app.port}/api/sessions/end-cues${route}`, {
     method: 'POST', headers: { 'Content-Type': 'application/json', 'X-BrainLink-Token': token }, body: JSON.stringify(body),
   });

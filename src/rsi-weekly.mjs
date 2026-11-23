@@ -1,5 +1,5 @@
 // BrainLink RSI retrieval miss and weekly benchmark evidence; backed by the existing RSI ledger.
-import { createHash } from 'node:crypto';
+import { createHash, randomUUID } from 'node:crypto';
 import { readFile } from 'node:fs/promises';
 import { createRsiLedger } from './rsi-ledger.mjs';
 import { evaluateRetrieval } from './retrieval-eval.mjs';
@@ -49,6 +49,44 @@ export function validateMiss(m) {
 export function createRsiWeekly({ home, now = () => new Date() }) {
   const ledger = createRsiLedger({ home, now });
   return {
+    // Content-free retrieval telemetry. Only registered Twin profiles are recorded;
+    // legacy/unassigned connections produce no persistent observation.
+    async recordRetrievalObservation({ profileId, tool, status, durationMs }) {
+      if (typeof profileId !== 'string' || !profileId.trim() || profileId.length > 100) return { recorded: false, reason: 'unscoped' };
+      if (!['vault_search', 'context_packet'].includes(tool) || !['hits', 'weak', 'not_in_brain'].includes(status)) return { recorded: false, reason: 'invalid_observation' };
+      if (!Number.isFinite(durationMs) || durationMs < 0) return { recorded: false, reason: 'invalid_duration' };
+      const at = now();
+      const observation = {
+        date: at.toISOString(), profile_id: profileId.trim(), tool, status,
+        // Keep timing coarse and bounded; do not retain exact request-level timings.
+        duration_bucket_ms: Math.min(120000, Math.round(durationMs / 250) * 250),
+      };
+      const key = sha({ ...observation, nonce: randomUUID() });
+      await ledger.appendRsiEvidence('retrieval_observation', observation, key);
+      return { recorded: true };
+    },
+    async retrievalObservationReport(profileId, week) {
+      if (typeof profileId !== 'string' || !profileId.trim()) throw new Error('A profile is required to keep Personal, Organisation and Client evidence separate.');
+      const all = await ledger.listRsiEvidence('retrieval_observation');
+      const selected = all.filter(item => item.profile_id === profileId && (!week || taipeiWeek(item.date) === week));
+      const by_week = {}, by_tool = {}, by_status = {}, durations = [];
+      for (const item of selected) {
+        const itemWeek = taipeiWeek(item.date);
+        by_week[itemWeek] = (by_week[itemWeek] || 0) + 1;
+        by_tool[item.tool] = (by_tool[item.tool] || 0) + 1;
+        by_status[item.status] = (by_status[item.status] || 0) + 1;
+        durations.push(item.duration_bucket_ms);
+      }
+      return { profile_id: profileId, total: selected.length, by_week, by_tool, by_status,
+        average_duration_bucket_ms: durations.length ? Math.round(durations.reduce((sum, value) => sum + value, 0) / durations.length) : null };
+    },
+    async listRetrievalObservations({ since } = {}) {
+      const cutoff = since === undefined ? -Infinity : Date.parse(since);
+      if (since !== undefined && !Number.isFinite(cutoff)) throw new Error('since must be a valid timestamp.');
+      const all = await ledger.listRsiEvidence('retrieval_observation');
+      return all.filter(item => Date.parse(item.date) >= cutoff)
+        .map(({ date, profile_id, tool, status, duration_bucket_ms }) => ({ date, profile_id, tool, status, duration_bucket_ms }));
+    },
     async addMiss(input) {
       const miss = validateMiss(input);
       const key = sha(miss);
@@ -93,12 +131,19 @@ export function createRsiWeekly({ home, now = () => new Date() }) {
       }
       return { added, skipped };
     },
-    async runBenchmark({ ctx, fixture, fixtureBytes, week = taipeiWeek(now().toISOString()), softwareVersion = 'unknown', sourceState = { commit_sha: null, clean: false } }) {
+    async runBenchmark({ ctx, fixture, fixtureBytes, week = taipeiWeek(now().toISOString()), softwareVersion = 'unknown', sourceState = { commit_sha: null, clean: false }, getSourceState = null }) {
       if (!validWeek(week) || fixture.schema !== 2 || fixture.cases?.length !== 20) throw new Error('Weekly benchmark requires a schema-2 fixture of exactly 20 cases and valid week.');
+      const startedAt = now().toISOString();
       const report = await evaluateRetrieval(ctx, fixture, { fixtureBytes });
+      const sourceAfter = typeof getSourceState === 'function' ? await getSourceState() : sourceState;
+      const sourceCommitBefore = /^[a-f0-9]{40}$/i.test(sourceState?.commit_sha || '') ? sourceState.commit_sha.toLowerCase() : null;
+      const sourceCommitAfter = /^[a-f0-9]{40}$/i.test(sourceAfter?.commit_sha || '') ? sourceAfter.commit_sha.toLowerCase() : null;
+      const sourceCleanBefore = sourceState?.clean === true;
+      const sourceCleanAfter = sourceAfter?.clean === true;
+      const sourceStable = Boolean(sourceCommitBefore && sourceCommitBefore === sourceCommitAfter && sourceCleanBefore && sourceCleanAfter);
       const score = report.baseline.task_success.count / 20;
-      const evidence = { week, fixture_sha256: report.fixture_sha256, evaluator_version: report.evaluator_version, software_version: String(softwareVersion).slice(0, 64), source_commit_sha: /^[a-f0-9]{40}$/i.test(sourceState?.commit_sha || '') ? sourceState.commit_sha.toLowerCase() : null, source_tree_clean: sourceState?.clean === true, case_count: 20, first_try_correct: { count: report.baseline.task_success.count, total: 20, percent: +(100 * score).toFixed(1) }, privacy_violations: report.baseline.privacy_violations, failed_case_count: report.baseline.failures.length };
-      const saved = await ledger.appendRsiEvidence('weekly_benchmark', evidence, sha({ week, fixture_sha256: evidence.fixture_sha256, evaluator_version: evidence.evaluator_version, software_version: evidence.software_version, source_commit_sha: evidence.source_commit_sha, source_tree_clean: evidence.source_tree_clean }));
+      const evidence = { week, started_at: startedAt, completed_at: now().toISOString(), fixture_sha256: report.fixture_sha256, evaluator_version: report.evaluator_version, software_version: String(softwareVersion).slice(0, 64), source_commit_sha: sourceCommitBefore, source_commit_sha_after: sourceCommitAfter, source_tree_clean: sourceCleanBefore, source_tree_clean_after: sourceCleanAfter, source_stable: sourceStable, case_count: 20, first_try_correct: { count: report.baseline.task_success.count, total: 20, percent: +(100 * score).toFixed(1) }, privacy_violations: report.baseline.privacy_violations, failed_case_count: report.baseline.failures.length };
+      const saved = await ledger.appendRsiEvidence('weekly_benchmark', evidence, sha({ week, fixture_sha256: evidence.fixture_sha256, evaluator_version: evidence.evaluator_version, software_version: evidence.software_version, source_commit_sha: evidence.source_commit_sha, source_commit_sha_after: evidence.source_commit_sha_after, source_tree_clean: evidence.source_tree_clean, source_tree_clean_after: evidence.source_tree_clean_after, source_stable: evidence.source_stable }));
       return { ...evidence, recorded: saved.added };
     },
     async benchmarkReport(weeks = 8) {

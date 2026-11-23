@@ -29,6 +29,21 @@ async function walkMarkdown(root) {
 // Minimal YAML-lite frontmatter: scalars, flow lists `[a, b]` and block lists, matching the
 // shapes BrainLink itself writes. Round-trips BRAIN_STANDARD_KEYS (string | string[]) exactly;
 // anything more exotic (nested maps, multiline scalars) survives as a best-effort string.
+function parseFlowList(value) {
+  const decode=(item)=>{const text=item.trim();if(text.startsWith('"')){try{return JSON.parse(text);}catch{}}return text.replace(/^"|"$/g,'').replace(/^'|'$/g,'');};
+  const body=value.slice(1,-1);const out=[];let token='',quote='',escaped=false;
+  for(const char of body){
+    if(escaped){token+=char;escaped=false;continue;}
+    if(char==='\\'&&quote==='"'){token+=char;escaped=true;continue;}
+    if(quote){token+=char;if(char===quote)quote='';continue;}
+    if(char==='"'||char==="'"){quote=char;token+=char;continue;}
+    if(char===','){if(token.trim())out.push(decode(token));token='';continue;}
+    token+=char;
+  }
+  if(token.trim())out.push(decode(token));
+  return out;
+}
+
 function parseNoteFile(raw) {
   const m = raw.match(/^---\r?\n([\s\S]*?)\r?\n---\r?\n?/);
   if (!m) return { meta: {}, body: raw };
@@ -43,7 +58,7 @@ function parseNoteFile(raw) {
       while (i + 1 < lines.length && /^\s*-\s+/.test(lines[i + 1])) { items.push(lines[++i].replace(/^\s*-\s+/, '').trim().replace(/^["']|["']$/g, '')); }
       meta[key] = items.length ? items : '';
     } else if (/^\[.*\]$/.test(val)) {
-      meta[key] = val.slice(1, -1).split(',').map((s) => s.trim().replace(/^["']|["']$/g, '')).filter(Boolean);
+      meta[key] = parseFlowList(val);
     } else if (/^".*"$|^'.*'$/.test(val)) meta[key] = val.slice(1, -1);
     else if (val === 'true' || val === 'false') meta[key] = val === 'true';
     else if (/^-?\d+(\.\d+)?$/.test(val)) meta[key] = Number(val);
@@ -52,7 +67,7 @@ function parseNoteFile(raw) {
   return { meta, body: raw.slice(m[0].length) };
 }
 
-const dumpScalar = (v) => (typeof v === 'string' ? (/[:#[\]{}",\n]|^\s|\s$|^$/.test(v) ? JSON.stringify(v) : v) : String(v));
+const dumpScalar = (v) => (typeof v === 'string' ? (/[:,#[\]{}",\n]|^\s|\s$|^$/.test(v) ? JSON.stringify(v) : v) : String(v));
 function renderNoteFile(frontmatter, body) {
   const keys = Object.keys(frontmatter || {});
   if (!keys.length) return body;

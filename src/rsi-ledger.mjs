@@ -24,7 +24,7 @@ const clean = (v, max = MAX_TEXT) => typeof v === 'string' ? v.trim().slice(0, m
 const canonical = (v) => JSON.stringify(v);
 const digest = (v) => createHash('sha256').update(canonical(v)).digest('hex');
 const OBSERVATION_CATEGORIES = Object.freeze({
-  retrieval: 'Search and reading', sessions: 'Session capture', filing: 'Filing and organization',
+  retrieval: 'Search and reading', retrieval_match: 'Retrieval matching', sessions: 'Session capture', filing: 'Filing and organization',
   handoff: 'AI handoffs', recovery: 'Backup and restore', graph_review: 'Graph review',
 });
 
@@ -180,7 +180,7 @@ function project(events) {
   return [...records.values()].sort((a, b) => b.updated_at.localeCompare(a.updated_at));
 }
 
-export function createRsiLedger({ home, now = () => new Date() }) {
+export function createRsiLedger({ home, now = () => new Date(), verifyCommit = () => false }) {
   const file = path.join(home, 'rsi', 'ledger.jsonl');
   const lockFile = file + '.lock';
   let queue = Promise.resolve();
@@ -193,6 +193,11 @@ export function createRsiLedger({ home, now = () => new Date() }) {
         handle = await open(lockFile, 'wx', 0o600);
         await handle.writeFile(JSON.stringify({ pid: process.pid, owner, created_at: new Date().toISOString() }));
       } catch (error) {
+        if (handle) {
+          await handle.close().catch(() => {});
+          await unlink(lockFile).catch(() => {});
+          throw error;
+        }
         if (error.code !== 'EEXIST') {
           // Windows may report EPERM/EACCES when another process already created the
           // exclusive lock file. Treat it as contention only when lstat confirms a
@@ -200,7 +205,13 @@ export function createRsiLedger({ home, now = () => new Date() }) {
           const existing = ['EPERM', 'EACCES'].includes(error.code)
             ? await lstat(lockFile).catch(() => null)
             : null;
-          if (!existing?.isFile() || existing.isSymbolicLink()) { await handle?.close().catch(() => {}); throw error; }
+          if (!existing && ['EPERM', 'EACCES'].includes(error.code) && Date.now() < until) {
+            // Another writer may have released its lock between open() and lstat().
+            // Retry exclusive creation; never assume we own the absent lock.
+            await delay(25);
+            continue;
+          }
+          if (!existing?.isFile() || existing.isSymbolicLink()) throw error;
         }
         // Recover only a lock whose recorded process is definitely gone. Unknown/malformed locks
         // fail closed instead of risking concurrent writes to the hash chain.
@@ -274,10 +285,38 @@ export function createRsiLedger({ home, now = () => new Date() }) {
     // Scheduled observations may open a review item from fixed aggregate signals only.
     // No note text, paths, tool arguments, or caller-supplied proposal copy is accepted.
     appendObservationSignals: (findings) => locked(async () => {
-      if (!Array.isArray(findings) || findings.length > Object.keys(OBSERVATION_CATEGORIES).length) throw new Error('Observation findings are invalid.');
+      if (!Array.isArray(findings) || findings.length > 200) throw new Error('Observation findings are invalid.');
       const created = [], duplicates = [];
       const rows = project(await readEvents(file));
       for (const finding of findings) {
+        if (finding?.category === 'retrieval_match') {
+          const { profile_id, signal, current_calls, weak_calls, current_weak_match_rate, previous_calls, previous_weak_match_rate } = finding;
+          if (!/^[a-zA-Z0-9_-]{1,64}$/.test(profile_id || '') || !['review_weak_match_rate', 'review_retrieval_increase'].includes(signal)
+            || !Number.isInteger(current_calls) || current_calls < 20 || current_calls > 20000
+            || !Number.isInteger(weak_calls) || weak_calls < 0 || weak_calls > current_calls
+            || typeof current_weak_match_rate !== 'number' || Math.abs(current_weak_match_rate - weak_calls / current_calls) > 0.001
+            || !Number.isInteger(previous_calls) || previous_calls < 0 || previous_calls > 20000
+            || !(previous_weak_match_rate === null || (typeof previous_weak_match_rate === 'number' && previous_weak_match_rate >= 0 && previous_weak_match_rate <= 1))) continue;
+          if (signal === 'review_weak_match_rate' && current_weak_match_rate < 0.5) continue;
+          if (signal === 'review_retrieval_increase' && (previous_calls < 20 || typeof previous_weak_match_rate !== 'number' || current_weak_match_rate - previous_weak_match_rate < 0.2)) continue;
+          const existing = rows.find(row => row.origin === 'observation' && row.observation?.category === finding.category
+            && row.observation?.profile_id === profile_id && !['rejected', 'deferred'].includes(row.status));
+          if (existing) { duplicates.push({ category: finding.category, profile_id, existing_id: existing.id }); continue; }
+          const fields = validatePayload({
+            title: 'Review weak retrieval matches',
+            user_problem: `For one scoped Twin profile, ${weak_calls} of ${current_calls} recent searches returned weak or empty matches (${Math.round(current_weak_match_rate * 100)}%). This may be correct abstention; the aggregate signal does not show answer quality or the cause.`,
+            hypothesis: 'Review fictional search cases for missing aliases, links, or source coverage. Propose a retrieval change only if a fixed test shows better task success without reducing correct abstention or privacy.',
+            memory_types: ['semantic'], sources: [], metrics: ['Task success on fixed retrieval cases', 'Correct abstention rate', 'Privacy violations'],
+            guardrails: ['Keep the profile boundary unchanged', 'No query text, note content, or paths in RSI evidence', 'No automatic ranking or vault changes'],
+            privacy_scope: 'Aggregate retrieval-status counts for one opaque Twin profile only.',
+          });
+          const observation = { schema: 1, category: finding.category, profile_id, signal, current_calls, weak_calls, current_weak_match_rate, previous_calls, previous_weak_match_rate };
+          const id = newId(), at = now().toISOString();
+          await append({ kind: 'created', idea_id: id, at, origin: 'observation', observation, fields });
+          rows.push({ id, status: 'discovered', origin: 'observation', observation, fields });
+          created.push(id);
+          continue;
+        }
         if (!finding || !Object.hasOwn(OBSERVATION_CATEGORIES, finding.category) || !['review_failures', 'review_increase'].includes(finding.signal)) continue;
         const calls = finding.current_calls, failures = finding.current_failures;
         if (!Number.isInteger(calls) || calls < 5 || calls > 20000 || !Number.isInteger(failures) || failures < 2 || failures > calls) continue;
@@ -301,6 +340,31 @@ export function createRsiLedger({ home, now = () => new Date() }) {
       }
       return { created, duplicates };
     }),
+    // Daily local self-tests may create one review proposal per distinct, opaque failure.
+    // The key is a hash of check identity and scope; no note body, question, or path is stored.
+    appendSelfTestFailures: (failures) => locked(async () => {
+      if (!Array.isArray(failures) || failures.length > 200) throw new Error('Self-test failures are invalid.');
+      const rows = project(await readEvents(file)), created = [], duplicates = [];
+      for (const failure of failures) {
+        if (!failure || typeof failure.key !== 'string' || !/^[a-f0-9]{64}$/.test(failure.key)
+          || typeof failure.check !== 'string' || !/^[a-z][a-z0-9-]{0,63}$/.test(failure.check)) continue;
+        const existing = rows.find(row => row.origin === 'self_test' && row.observation?.failure_key === failure.key);
+        if (existing) { duplicates.push(existing.id); continue; }
+        const fields = validatePayload({
+          title: `Review BrainLink self-test failure: ${failure.check}`,
+          user_problem: `A daily local BrainLink self-test found check "${failure.check}" failing. Inspect the current Setup self-test output to identify the cause; the RSI entry contains no vault path, note content, or question.`,
+          hypothesis: 'Fix the underlying configuration or code issue and add a fictional regression case; keep permission and privacy boundaries unchanged.',
+          memory_types: [], sources: [], metrics: ['Self-test check passes after the reviewed fix', 'No privacy or permission regressions'],
+          guardrails: ['No automatic configuration, code, or vault changes', 'No note content, question text, or paths in this proposal'],
+          privacy_scope: 'Opaque hash of a local self-test check and scope; no content or paths.',
+        });
+        const observation = { schema: 1, category: 'self_test', check: failure.check, failure_key: failure.key };
+        const id = newId(), at = now().toISOString();
+        await append({ kind: 'created', idea_id: id, at, origin: 'self_test', observation, fields });
+        rows.push({ id, status: 'discovered', origin: 'self_test', observation, fields }); created.push(id);
+      }
+      return { created, duplicates };
+    }),
     update: ({ id, expected_revision, fields: changes, status, note }) => locked(async () => {
       if (typeof id !== 'string' || !/^BL-RSI-\d{8}-[a-f0-9-]{8,36}$/.test(id)) throw new Error('Invalid RSI idea id.');
       const rows = project(await readEvents(file)); const row = rows.find(x => x.id === id);
@@ -320,6 +384,7 @@ export function createRsiLedger({ home, now = () => new Date() }) {
         if (experiment.candidate_version !== merged.candidate_version) throw new Error('The experiment candidate does not match the candidate being accepted.');
         if (experiment.fixture_sha256 !== merged.test_set_version) throw new Error('The test-set field must match the selected run fixture SHA-256.');
         if (experiment.source_commit_sha !== merged.promotion_commit_sha.toLowerCase()) throw new Error('The promotion commit must exactly match the commit tested by the selected experiment.');
+        if (!verifyCommit(merged.promotion_commit_sha.toLowerCase())) throw new Error('The promotion commit was not found in the local BrainLink Git repository; acceptance is blocked.');
       }
       const safeNote = clean(note, 500);
       if (status === 'rolled_back' && !safeNote) throw new Error('Record why the accepted change was rolled back.');
@@ -336,7 +401,7 @@ export function createRsiLedger({ home, now = () => new Date() }) {
       if (!Number.isInteger(expected_revision) || expected_revision !== row.revision) throw new Error('RSI idea changed; reload it before recording an experiment.');
       if (row.status !== 'testing') throw new Error('Only an RSI idea in testing status can run an experiment.');
       const allowed = ['schema', 'run_id', 'suite', 'started_at', 'completed_at', 'fixture_sha256', 'evaluator_version', 'software_version', 'source_commit_sha', 'source_tree_clean', 'source_tree_clean_after', 'source_stable', 'candidate_version', 'candidate_policy', 'sample_count', 'decision', 'primary_metric', 'secondary_metric', 'guardrails', 'estimated_context_tokens', 'limitations'];
-      if (!receipt || typeof receipt !== 'object' || Array.isArray(receipt) || Object.keys(receipt).some(key => !allowed.includes(key)) || allowed.some(key => !(key in receipt)) || receipt.schema !== 2 || !/^BL-RSI-RUN-\d{8}-[a-f0-9-]{8,36}$/.test(receipt.run_id || '') || !['retrieval-rsi-v1', 'retrieval-independent-v1'].includes(receipt.suite) || !/^\d{4}-\d\d-\d\dT/.test(receipt.started_at || '') || !/^\d{4}-\d\d-\d\dT/.test(receipt.completed_at || '') || !/^[a-f0-9]{64}$/.test(receipt.fixture_sha256 || '') || !['retrieval-eval-v2', 'retrieval-eval-v3'].includes(receipt.evaluator_version) || typeof receipt.software_version !== 'string' || receipt.software_version.length > 64 || !(receipt.source_commit_sha === null || /^[a-f0-9]{40}$/.test(receipt.source_commit_sha)) || typeof receipt.source_tree_clean !== 'boolean' || typeof receipt.source_tree_clean_after !== 'boolean' || typeof receipt.source_stable !== 'boolean' || (receipt.source_stable && (!receipt.source_commit_sha || !receipt.source_tree_clean || !receipt.source_tree_clean_after)) || typeof receipt.candidate_version !== 'string' || !['per-case-rephrasing-v1', 'compact-coverage-v1', 'compact-search-v1'].includes(receipt.candidate_version) || typeof receipt.candidate_policy !== 'string' || receipt.candidate_policy.length > 160 || !Number.isInteger(receipt.sample_count) || receipt.sample_count < 1 || receipt.sample_count > 500 || !['eligible_for_review', 'needs_more_cases', 'no_demonstrated_gain', 'blocked_privacy', 'quality_regression', 'no_demonstrated_efficiency_gain', 'source_unbound'].includes(receipt.decision) || (receipt.decision === 'eligible_for_review' && !receipt.source_stable)) throw new Error('Experiment receipt is invalid.');
+      if (!receipt || typeof receipt !== 'object' || Array.isArray(receipt) || Object.keys(receipt).some(key => !allowed.includes(key)) || allowed.some(key => !(key in receipt)) || receipt.schema !== 2 || !/^BL-RSI-RUN-\d{8}-[a-f0-9-]{8,36}$/.test(receipt.run_id || '') || !['retrieval-rsi-v1', 'retrieval-independent-v1', 'local-reranker-v1', 'local-reranker-independent-v1'].includes(receipt.suite) || !/^\d{4}-\d\d-\d\dT/.test(receipt.started_at || '') || !/^\d{4}-\d\d-\d\dT/.test(receipt.completed_at || '') || !/^[a-f0-9]{64}$/.test(receipt.fixture_sha256 || '') || !['retrieval-eval-v2', 'retrieval-eval-v3', 'retrieval-eval-v4'].includes(receipt.evaluator_version) || typeof receipt.software_version !== 'string' || receipt.software_version.length > 64 || !(receipt.source_commit_sha === null || /^[a-f0-9]{40}$/.test(receipt.source_commit_sha)) || typeof receipt.source_tree_clean !== 'boolean' || typeof receipt.source_tree_clean_after !== 'boolean' || typeof receipt.source_stable !== 'boolean' || (receipt.source_stable && (!receipt.source_commit_sha || !receipt.source_tree_clean || !receipt.source_tree_clean_after)) || typeof receipt.candidate_version !== 'string' || !['per-case-rephrasing-v1', 'compact-coverage-v1', 'compact-search-v1', 'local-reranker-v1', 'local-reranker-independent-v1'].includes(receipt.candidate_version) || typeof receipt.candidate_policy !== 'string' || receipt.candidate_policy.length > 160 || !Number.isInteger(receipt.sample_count) || receipt.sample_count < 1 || receipt.sample_count > 500 || !['eligible_for_review', 'needs_more_cases', 'no_demonstrated_gain', 'blocked_privacy', 'quality_regression', 'no_demonstrated_efficiency_gain', 'source_unbound'].includes(receipt.decision) || (receipt.decision === 'eligible_for_review' && !receipt.source_stable)) throw new Error('Experiment receipt is invalid.');
       const metricValid = (metric) => metric && typeof metric === 'object' && Object.keys(metric).length === 3 && typeof metric.name === 'string' && metric.name.length <= 48 && [metric.baseline, metric.candidate].every(value => typeof value === 'number' && Number.isFinite(value) && value >= 0 && value <= 1);
       if (!metricValid(receipt.primary_metric) || !metricValid(receipt.secondary_metric) || !receipt.guardrails || Object.keys(receipt.guardrails).length !== 2 || !Number.isInteger(receipt.guardrails.baseline_privacy_violations) || !Number.isInteger(receipt.guardrails.candidate_privacy_violations) || receipt.guardrails.baseline_privacy_violations < 0 || receipt.guardrails.candidate_privacy_violations < 0 || !receipt.estimated_context_tokens || Object.keys(receipt.estimated_context_tokens).length !== 2 || !Number.isInteger(receipt.estimated_context_tokens.baseline) || !Number.isInteger(receipt.estimated_context_tokens.candidate) || !Array.isArray(receipt.limitations) || receipt.limitations.length > 8 || receipt.limitations.some(value => typeof value !== 'string' || value.length > 200)) throw new Error('Experiment receipt metrics are invalid.');
       if (row.fields.candidate_version !== receipt.candidate_version) throw new Error('Experiment suite does not match the candidate version in this RSI idea.');
@@ -402,6 +467,7 @@ export function createRsiLedger({ home, now = () => new Date() }) {
       const restoredSha = clean(input.restored_commit_sha, 40).toLowerCase();
       const promotedSha = String(row.fields.promotion_commit_sha || '').toLowerCase();
       if (!/^[a-f0-9]{40}$/.test(restoredSha) || restoredSha === promotedSha) throw new Error('Enter a full commit SHA for the restored version; it must differ from the accepted commit.');
+      if (!verifyCommit(restoredSha)) throw new Error('The restored commit was not found in the local BrainLink Git repository; rollback evidence is blocked.');
       const restoredVersion = clean(input.restored_version, 160), reason = clean(input.reason, 500), reviewer = clean(input.reviewer, 160), evidenceRef = clean(input.evidence_ref, 500);
       if (!restoredVersion || !reason || !reviewer) throw new Error('Rollback needs the restored version, reason, and reviewer.');
       const scanned = JSON.stringify({ restoredVersion, reason, reviewer, evidenceRef });
@@ -415,7 +481,7 @@ export function createRsiLedger({ home, now = () => new Date() }) {
     // RSI miss and weekly benchmark evidence share the existing verified hash-chain and lock.
     // These events do not change idea status, experiment acceptance, or monitoring rules.
     appendRsiEvidence: (kind, data, key) => locked(async () => {
-      if (!['retrieval_miss', 'weekly_benchmark'].includes(kind)) throw new Error('Unsupported RSI evidence kind.');
+      if (!['retrieval_miss', 'retrieval_observation', 'weekly_benchmark'].includes(kind)) throw new Error('Unsupported RSI evidence kind.');
       if (typeof key !== 'string' || !/^[a-f0-9]{64}$/.test(key)) throw new Error('Invalid RSI evidence key.');
       if (!data || typeof data !== 'object' || Array.isArray(data)) throw new Error('Invalid RSI evidence.');
       const serial = JSON.stringify(data);
@@ -426,7 +492,7 @@ export function createRsiLedger({ home, now = () => new Date() }) {
       return { added: true };
     }),
     listRsiEvidence: (kind) => locked(async () => {
-      if (!['retrieval_miss', 'weekly_benchmark'].includes(kind)) throw new Error('Unsupported RSI evidence kind.');
+      if (!['retrieval_miss', 'retrieval_observation', 'weekly_benchmark'].includes(kind)) throw new Error('Unsupported RSI evidence kind.');
       return (await readEvents(file)).filter(e => e.kind === kind).map(e => ({ ...e.data, key: e.key, recorded_at: e.at }));
     }),
     file,

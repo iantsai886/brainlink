@@ -24,8 +24,11 @@ cp -R "$ROOT/bin" "$ROOT/src" "$ROOT/ui" "$ROOT/samples" "$ROOT/skills" "$ROOT/p
 rm -rf "$STAGE/app/ui/app/test"
 mkdir -p "$STAGE/app/node_modules/brainlink-store"
 cp "$ROOT/vendor/brainlink-store/memory-store.mjs" "$ROOT/vendor/brainlink-store/errors.mjs" "$ROOT/vendor/brainlink-store/package.json" "$STAGE/app/node_modules/brainlink-store/"
-mkdir -p "$STAGE/app/node_modules/yaml"
-cp -R "$ROOT/node_modules/yaml/." "$STAGE/app/node_modules/yaml/"
+node "$ROOT/scripts/stage-runtime-dependencies.mjs" "$STAGE/app/node_modules"
+npm --prefix "$ROOT" run stage:canvas-platforms -- "$STAGE/app/node_modules" win32-x64-msvc
+mkdir -p "$STAGE/app/src/ingestion"
+cp "$ROOT/src/ingestion/image-ocr.mjs" "$STAGE/app/src/ingestion/image-ocr.mjs"
+node "$ROOT/scripts/stage-ocr-data.mjs" "$STAGE/app/src/ingestion/tessdata"
 cp "$HERE/brainlink.cmd" "$STAGE/bin/brainlink.cmd"
 cp "$HERE/BrainLink.vbs" "$HERE/BrainLink.ico" "$STAGE/"
 # Windows line endings for the scripts Windows runs directly.

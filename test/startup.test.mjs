@@ -1,4 +1,5 @@
 import test from 'node:test';
+import { readSetupHtml } from './helpers/setup-html.mjs';
 import assert from 'node:assert/strict';
 import { mkdtemp, readFile, rm, writeFile, mkdir } from 'node:fs/promises';
 import os from 'node:os';
@@ -15,7 +16,7 @@ test('startup launcher is hidden, opens no browser, and safely quotes paths', ()
 });
 
 test('the shared background-start control is outside Backup and explains scheduled work', async () => {
-  const html = await readFile(new URL('../ui/index.html', import.meta.url), 'utf8');
+  const html = await readSetupHtml();
   assert.equal((html.match(/id="startup-at-login"/g) || []).length, 1);
   const background = html.match(/<section id="s-background">([\s\S]*?)<\/section>/)?.[1] || '';
   const backup = html.match(/<section id="s-backup">([\s\S]*?)<\/section>/)?.[1] || '';

@@ -129,6 +129,8 @@ test('session refresher throttles routine transcript scans but can force a fresh
   const home = await tmp('session-refresh');
   const appHome = path.join(home, 'brainlink-data');
   const env = { HOME: home, BRAINLINK_HOME: appHome };
+  await mkdir(appHome, { recursive: true });
+  await writeFile(path.join(appHome, 'config.json'), JSON.stringify({ version: 2, sessions: { importHistory: true } }));
   const store = await createSessionStore({ dir: path.join(appHome, 'sessions') });
   let now = 1_000_000;
   const refresh = createSessionRefresher({ getStore: async () => store, env, clock: () => now, cooldownMs: 5000 });
@@ -455,7 +457,7 @@ test('importAll follows the Hermes profile explicitly selected in BrainLink sett
   await createHermes(defaultHome, 'default-session', 'Default profile canary.');
   await createHermes(chosenHome, 'chosen-session', 'Chosen fictional profile.');
   await mkdir(app, { recursive: true });
-  await writeFile(path.join(app, 'config.json'), JSON.stringify({ version: 2, sessions: { hermesHome: chosenHome } }));
+  await writeFile(path.join(app, 'config.json'), JSON.stringify({ version: 2, sessions: { hermesHome: chosenHome, importHistory: true } }));
   const store = await createSessionStore({ dir: path.join(app, 'sessions') });
   await importAll({ store, env });
   const rows = await store.listSessions({ client: 'hermes', limit: 20 });

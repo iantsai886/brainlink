@@ -27,13 +27,32 @@ export async function findObsidianVaults(opts) {
   for (const file of obsidianConfigPaths(opts)) {
     let json;
     try { json = JSON.parse(await readFile(file, 'utf8')); } catch { continue; }
-    for (const v of Object.values(json.vaults || {})) {
+    for (const [id, v] of Object.entries(json.vaults || {})) {
       if (!v?.path || seen.has(v.path) || !(await isDir(v.path))) continue;
       seen.add(v.path);
-      out.push({ name: path.basename(v.path), path: v.path, open: Boolean(v.open), ts: v.ts || 0 });
+      out.push({ id, name: path.basename(v.path), path: v.path, open: Boolean(v.open), ts: v.ts || 0 });
     }
   }
   return out.sort((a, b) => Number(b.open) - Number(a.open) || b.ts - a.ts);
+}
+
+// Return the most specific registered Obsidian vault containing a BrainLink folder.
+// BrainLink may intentionally scope itself to a subfolder of the Obsidian vault.
+export function obsidianVaultForPath(target, vaults) {
+  const targetPath = path.resolve(target);
+  return (vaults || [])
+    .map((vault) => ({ ...vault, root: path.resolve(vault.path), relative: path.relative(path.resolve(vault.path), targetPath) }))
+    .filter((vault) => vault.relative === '' || (!vault.relative.startsWith(`..${path.sep}`) && vault.relative !== '..' && !path.isAbsolute(vault.relative)))
+    .sort((a, b) => b.root.length - a.root.length)[0] || null;
+}
+
+export function obsidianOpenUrl(vault, notePath, brainlinkRoot) {
+  if (!vault?.id || !vault?.path || !brainlinkRoot || !notePath) return null;
+  const absoluteNote = path.resolve(brainlinkRoot, notePath);
+  const relative = path.relative(path.resolve(vault.path), absoluteNote);
+  if (relative === '..' || relative.startsWith(`..${path.sep}`) || path.isAbsolute(relative)) return null;
+  const file = relative.split(path.sep).join('/').replace(/\.md$/i, '');
+  return `obsidian://open?vault=${encodeURIComponent(vault.id)}&file=${encodeURIComponent(file)}`;
 }
 
 // Child folders that are vaults of their own (contain .obsidian), when the folder itself is not one.

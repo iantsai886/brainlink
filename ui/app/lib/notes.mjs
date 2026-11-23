@@ -8,6 +8,40 @@ export function useNotes(api) {
   function setVault(selectedVault) { const allowed=new Set(api.vaults().map(v=>v.name));h.set({selectedVault:allowed.has(selectedVault)?selectedVault:''}); }
   function changeBody(body) { h.set({body,dirty:body !== (h.get().note?.body || '') || h.get().frontmatter !== JSON.stringify(h.get().note?.frontmatter||{},null,2)}); }
   function changeMeta(frontmatter) { h.set({frontmatter,dirty:frontmatter !== JSON.stringify(h.get().note?.frontmatter||{},null,2) || h.get().body !== h.get().note?.body}); }
+  function changeTypedField(field, value) {
+    const allowed = {
+      type: new Set(['person','team','workflow','dataset','artifact','project','policy','concept']),
+      scope: new Set(['personal','organisation','client']),
+      status: new Set(['proposed','current','archived']),
+    };
+    const s = h.get();
+    if (!s.note || !['type','id','scope','status'].includes(field)) return false;
+    let frontmatter;
+    try { frontmatter = JSON.parse(s.frontmatter || '{}'); } catch { h.set({error:'Fix the frontmatter JSON before editing graph fields.'}); return false; }
+    if (!frontmatter || Array.isArray(frontmatter) || typeof frontmatter !== 'object') { h.set({error:'Frontmatter must be a JSON object before editing graph fields.'}); return false; }
+    const next = String(value || '').trim();
+    if (next && field === 'id' && !/^[a-z][a-z0-9._:-]{1,127}$/.test(next)) { h.set({error:'Graph IDs must start with a lowercase letter and use only lowercase letters, numbers, dot, underscore, colon, or hyphen.'}); return false; }
+    if (next && allowed[field] && !allowed[field].has(next) && next !== frontmatter[field]) { h.set({error:`Choose a supported graph ${field}.`}); return false; }
+    if (next) frontmatter[field] = next; else delete frontmatter[field];
+    const serialized = JSON.stringify(frontmatter, null, 2);
+    h.set({frontmatter:serialized,dirty:serialized!==JSON.stringify(s.note.frontmatter||{},null,2)||s.body!==s.note.body,error:null,editingMeta:true});
+    return true;
+  }
+  function changeWorkflowField(field, value) {
+    const limits={triggers:20,inputs:30,steps:50,outputs:30,exception_handling:30};
+    const s=h.get();
+    if(!s.note||!Object.hasOwn(limits,field))return false;
+    let frontmatter;
+    try{frontmatter=JSON.parse(s.frontmatter||'{}');}catch{h.set({error:'Fix the frontmatter JSON before editing workflow details.'});return false;}
+    if(!frontmatter||Array.isArray(frontmatter)||typeof frontmatter!=='object'||frontmatter.type!=='workflow'){h.set({error:'Choose workflow as the graph record type before editing workflow details.'});return false;}
+    if(typeof value!=='string'||value.length>12000){h.set({error:'Workflow details are too long. Shorten the text and try again.'});return false;}
+    const items=value.split(/\r?\n/).map(item=>item.trim()).filter(Boolean);
+    if(items.length>limits[field]||items.some(item=>item.length>500||/[\u0000-\u0008\u000b\u000c\u000e-\u001f]/.test(item))){h.set({error:`Use up to ${limits[field]} lines, with no more than 500 characters per line.`});return false;}
+    if(items.length)frontmatter[field]=items;else delete frontmatter[field];
+    const serialized=JSON.stringify(frontmatter,null,2);
+    h.set({frontmatter:serialized,dirty:serialized!==JSON.stringify(s.note.frontmatter||{},null,2)||s.body!==s.note.body,error:null,editingMeta:true});
+    return true;
+  }
   function changeMemoryType(memoryType) {
     const allowed = ['working', 'semantic', 'procedural', 'episodic'];
     if (!allowed.includes(memoryType)) { h.set({error:'Choose one of the four supported memory types.'}); return false; }
@@ -33,7 +67,7 @@ export function useNotes(api) {
     const detail = fields.length ? `fields: ${fields.join(', ')}` : `${keys.length} field${keys.length === 1 ? '' : 's'} (names omitted)`;
     return `Metadata updated (${detail})`;
   }
-  async function save() { const s=h.get(); if(!s.note) return false; try { const frontmatter=JSON.parse(s.frontmatter); if(!frontmatter || typeof frontmatter !== 'object' || Array.isArray(frontmatter)) throw Error('Frontmatter must be a JSON object'); let body=s.body; const episode=isEpisode(s.note)||isEpisode(s.note,frontmatter); if(episode){if(body !== s.note.body) body=history(body,'Summary corrected');const audit=metadataAudit(s.note.frontmatter||{},frontmatter);if(audit)body=history(body,audit);} await api.writeNote({id:s.note.id,vault:s.note.vault,path:s.note.path,body,frontmatter},s.note.etag); const note=await api.readNote(s.note.id); h.set({note,body:note.body,frontmatter:JSON.stringify(note.frontmatter||{},null,2),dirty:false,editing:false,error:null,message:'Saved'}); await load(); return true; } catch(e) { h.set({error:e.code==='E_CONFLICT' ? 'E_CONFLICT: This note was changed elsewhere. Copy your edits before reloading.' : errText(e)}); return false; } }
+  async function save() { const s=h.get(); if(!s.note) return false; try { const frontmatter=JSON.parse(s.frontmatter); if(!frontmatter || typeof frontmatter !== 'object' || Array.isArray(frontmatter)) throw Error('Frontmatter must be a JSON object'); if(frontmatter.id && frontmatter.id !== s.note.frontmatter?.id) { const candidates=(await api.listNotes()).filter(item=>item.vault===s.note.vault&&item.id!==s.note.id); for(const item of candidates){const existing=await api.readNote(item.id);if(existing.frontmatter?.private!==true&&existing.frontmatter?.id===frontmatter.id) throw Error('That graph ID is already used by another visible note in this vault. Choose a unique ID.');} } let body=s.body; const episode=isEpisode(s.note)||isEpisode(s.note,frontmatter); if(episode){if(body !== s.note.body) body=history(body,'Summary corrected');const audit=metadataAudit(s.note.frontmatter||{},frontmatter);if(audit)body=history(body,audit);} await api.writeNote({id:s.note.id,vault:s.note.vault,path:s.note.path,body,frontmatter},s.note.etag); const note=await api.readNote(s.note.id); h.set({note,body:note.body,frontmatter:JSON.stringify(note.frontmatter||{},null,2),dirty:false,editing:false,error:null,message:'Saved'}); await load(); return true; } catch(e) { h.set({error:e.code==='E_CONFLICT' ? 'E_CONFLICT: This note was changed elsewhere. Copy your edits before reloading.' : errText(e)}); return false; } }
   async function withdrawEpisode(now = new Date()) {
     const s=h.get(), n=s.note, fm=n?.frontmatter || {};
     if (!n || !isEpisode(n, fm) || String(fm.status || '').toLowerCase() !== 'proposed' || fm.private !== true) {
@@ -53,5 +87,5 @@ export function useNotes(api) {
   async function rename(path) { const s=h.get(); if(!s.note || !guard()) return false; if(!api.renameNote) {h.set({error:'Rename is not supported by this store.'});return false;} try { await api.renameNote(s.note.id,path,s.note.etag); await load(); await open(s.note.id); return true; } catch(e){h.set({error:errText(e)});return false;} }
   function close() {if(!guard())return false;h.set({note:null,dirty:false,editing:false,error:null});return true;}
   function cancel() {if(!guard())return false;const n=h.get().note;h.set({editing:false,editingMeta:false,dirty:false,body:n?.body||'',frontmatter:JSON.stringify(n?.frontmatter||{},null,2)});return true;}
-  return {...h,load,open,edit,setVault,changeBody,changeMeta,changeMemoryType,save,withdrawEpisode,create,rename,close,cancel,guard};
+  return {...h,load,open,edit,setVault,changeBody,changeMeta,changeTypedField,changeWorkflowField,changeMemoryType,save,withdrawEpisode,create,rename,close,cancel,guard};
 }

@@ -6,7 +6,7 @@ import { checkCommon, resolveIdentity } from '../writes.mjs';
 import { clientIdFor, sessionMetadata } from './mcp.mjs';
 import { fileSessionSummary } from './filing.mjs';
 import { suggestedSessionFolder } from './folders.mjs';
-import { twinToolAuthorization } from '../twin-profiles.mjs';
+import { twinToolAuthorization, twinProfileForVault, twinSessionProfileIds } from '../twin-profiles.mjs';
 import { recommendSessionVault } from './routing.mjs';
 
 const lines = (value) => (Array.isArray(value) ? value : value ? [value] : []).map((x) => String(x).trim()).filter(Boolean);
@@ -49,7 +49,8 @@ export async function closeSession(ctx, store, args, now = new Date(), { fileSum
   const id = resolveIdentity(ctx, args);
   const sourceId = String(args.session_or_task_id || '').trim();
   const errors = checkCommon(ctx, destinationVault, { ...args, source: 'session_close' }, id);
-  const profileId = ctx.twinScope?.mode === 'scoped' ? ctx.twinScope.profile_id : null;
+  const destinationProfile = twinProfileForVault(ctx, destinationVault);
+  const profileId = destinationProfile?.profile_id || null;
   if (!sourceId || sourceId.length > 120 || /[\r\n]/.test(sourceId)) errors.push('stable session_or_task_id is required (up to 120 characters)');
   if (args.source_session_id !== undefined && (typeof args.source_session_id !== 'string' || !/^[A-Za-z0-9_-]{1,160}$/.test(args.source_session_id))) errors.push('source_session_id must be an exact safe BrainLink session ID');
   if (!String(args.title || '').trim()) errors.push('title is required');
@@ -59,6 +60,7 @@ export async function closeSession(ctx, store, args, now = new Date(), { fileSum
     try {
       const sourceAccess = await sessionMetadata(store, args.source_session_id, {
         allow_imported_private: ctx.cfg.sessions?.shareSummaries === true,
+        profile_ids: ctx.twinScope?.mode === 'scoped' ? twinSessionProfileIds(ctx) : undefined,
         profile_id: profileId || undefined,
         allow_profile_private: Boolean(profileId),
       });

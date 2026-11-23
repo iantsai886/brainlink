@@ -1,4 +1,5 @@
 import test from 'node:test';
+import { readSetupHtml } from './helpers/setup-html.mjs';
 import assert from 'node:assert/strict';
 import { mkdtemp, mkdir, readFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
@@ -32,11 +33,12 @@ test('Sessions lets a user select one Hermes profile and switch back to the defa
   try {
     assert.equal((await api('/api/sessions/hermes-profile', { home: chosenHome }, 'bad-token')).status, 401);
     assert.equal((await api('/api/sessions/hermes-profile', { home: path.join(base, 'missing') })).status, 400);
+    assert.equal((await api('/api/sessions/import-setting', { enabled: true })).status, 200);
     const selectedResponse = await api('/api/sessions/hermes-profile', { home: chosenHome });
     assert.equal(selectedResponse.status, 200);
     const selected = await selectedResponse.json();
     assert.equal(selected.profile.home, chosenHome);
-    assert.equal(selected.sessionCount, 1);
+    assert.equal(selected.sessionCount, 2, 'the opt-in imports the default profile before switching to the chosen profile');
     assert.equal((await loadConfig(path.join(appHome, 'config.json'))).sessions.hermesHome, chosenHome);
 
     const clearedResponse = await api('/api/sessions/hermes-profile', { home: null });
@@ -50,7 +52,7 @@ test('Sessions lets a user select one Hermes profile and switch back to the defa
 });
 
 test('Hermes profile Settings exposes a native folder chooser and explains profile switching', async () => {
-  const html = await readFile(new URL('../ui/index.html', import.meta.url), 'utf8');
+  const html = await readSetupHtml();
   assert.match(html, /id="sessions-hermes-profile-choose"/);
   assert.match(html, /POST', '\/api\/sessions\/hermes-profile\/pick'/);
   assert.match(html, /POST', '\/api\/sessions\/hermes-profile'/);

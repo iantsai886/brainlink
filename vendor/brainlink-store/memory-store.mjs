@@ -245,12 +245,15 @@ export function createMemoryStore({ vaults, readOnly = false, clock = () => new 
     async listSessions(o = {}) {
       const q = o.q ? norm(o.q) : '';
       return [...sessions.values()].map((x) => x.s)
-        .filter((s) => allowed(s.vault, o) && !(o.remote && s.private) && (!o.profile_id || s.profile_id === o.profile_id) && (!o.client || s.client === o.client) && (!o.vault || s.vault === o.vault)
+        .filter((s) => allowed(s.vault, o) && !(o.remote && s.private) && (!o.profile_id || s.profile_id === o.profile_id)
+          && (!Array.isArray(o.profile_ids) || (s.profile_id ? o.profile_ids.includes(s.profile_id) : o.include_unowned === true))
+          && (!o.client || s.client === o.client) && (!o.vault || s.vault === o.vault)
           && (!o.since || s.updated_at >= o.since) && (!q || norm(`${s.title} ${s.summary}`).includes(q)))
         .sort((a, b) => b.updated_at.localeCompare(a.updated_at)).slice(0, o.limit || 20).map((s) => structuredClone(s));
     },
     async readSession(id, o = {}) {
-      const x = sessions.get(id); if (!x || (o.profile_id && x.s.profile_id !== o.profile_id)) throw new NotFound('session', { id }); guard(x.s.vault, o);
+      const x = sessions.get(id); if (!x || (o.profile_id && x.s.profile_id !== o.profile_id)
+        || (Array.isArray(o.profile_ids) && (x.s.profile_id ? !o.profile_ids.includes(x.s.profile_id) : o.include_unowned !== true))) throw new NotFound('session', { id }); guard(x.s.vault, o);
       if (o.remote && x.s.private) throw new PrivacyDenied('session is private', { id });
       const off = o.offset || 0; const lim = o.limit || 0;
       const messages = lim ? x.msgs.slice(off, off + lim).map((m) => ({ ...m })) : [];

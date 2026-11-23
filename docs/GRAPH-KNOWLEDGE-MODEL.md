@@ -1,5 +1,7 @@
 # Typed knowledge graph: BrainLink design review
 
+The development preview editor and installed Setup graph panel both support structured entity fields. The installed panel also supports reviewing, editing, withdrawing, and restoring typed relationships through revision-checked local APIs. See the latest dated receipt in `docs/IMPLEMENTATION-STATUS.md`.
+
 Status: typed relationship candidates can now be included in an attributed `propose_note` call. BrainLink stores typed records as `status: proposed` and all candidate edges as `review: proposed`, regardless of caller-supplied status, so they remain outside graph retrieval until a person reviews them. A local Setup review queue lists bounded proposals from enabled non-private vaults, shows source evidence and target, and rechecks the source revision before approval or rejection. Rejection records `review: rejected` while preserving source, target, and evidence; users can restore rejected suggestions or undo approvals. An on-demand graph-wide scan checks up to 20 source notes per request and only returns deterministic, same-scope text candidates from caller-visible non-private vaults. The selected-note panel also lets a user manually propose a typed relation to a compatible current entity in the same vault and Twin scope, supported by an exact quote from that note. Saving and approving remain separate user actions. Deterministic rules recognize a small set of explicit relation phrases in English, Portuguese, and Traditional/Simplified Chinese, including named team/person communications and handoffs. Membership phrases such as “belongs to” / “pertence a” map to `part_of`; explicit “owned by” phrases map to `owned_by`, avoiding a duplicate conflicting suggestion. A bounded negation check blocks common explicit denials before proposing an edge; complex sentence meaning still requires review. `brainlink eval-graph --fixture FILE` measures proposal precision/recall, privacy canaries and latency without outputting note content. This evaluator needs diverse, independently authored cases before its results can support a quality claim; live-client workflow and token savings remain unproven.
 
 The 3D graph now derives its nodes, typed-entity uniqueness, Markdown links, typed edges, and degree ranking only from visible, non-generated notes. Multiple approved predicates between the same notes remain separate directional edges and retain their own evidence and confidence; the UI curves parallel edges apart and shows the cited evidence on hover. This is covered by an automated private-canary regression test. Real desktop visual acceptance is still pending.
@@ -22,10 +24,10 @@ The supplied keyframes at 00:12 and 02:00 show governance/data-sensitivity examp
 
 | Capability | Verified in this repository | Gap relative to the reel |
 |---|---|---|
-| Note graph | `src/graph.mjs` extracts Obsidian wikilinks and Markdown links; `src/typed-graph.mjs` also derives directional typed edges from verified frontmatter relations. Deterministic suggestions match a small multilingual phrase set to unique, same-scope entity titles, including team/person communication and handoff phrases. The authenticated Setup UI can scan visible vaults in bounded pages; it only saves unverified proposals. | No automatic entity extraction or relation inference from arbitrary wording, sessions, or documents; scanner suggestions cover fixed phrase patterns and require review. |
-| 3D graph | `src/graph3d.mjs` builds nodes and edge metadata from visible, non-generated notes only; nodes can show validated entity type/ID, each typed edge retains its own predicate/evidence/confidence, and parallel relations are curved apart. Note details show incoming/outgoing relations and allow manual proposal of a typed relation with an exact source-note excerpt. | Still a note graph with optional entity metadata, not a full entity editor or workflow simulator. |
+| Note graph | `src/graph.mjs` extracts Obsidian wikilinks and Markdown links; `src/typed-graph.mjs` also derives directional typed edges from verified frontmatter relations. Deterministic suggestions match a small multilingual phrase set to unique, same-scope entity titles, including team/person communication and handoff phrases. Local Raw-to-Wiki drafts may suggest up to eight entities with exact quotes and relations among existing same-vault entities explicitly named in the selected source. Selected entity and relation candidates are saved as proposed. | No unsourced/general relation inference, session entity extraction, or quality proof; deterministic scanner suggestions cover fixed phrase patterns and require review. |
+| 3D graph | `src/graph3d.mjs` builds nodes and edge metadata from visible, non-generated notes only; nodes can show validated entity type/ID, each typed edge retains its own predicate/evidence/confidence, and parallel relations are curved apart. Note details show incoming/outgoing relations and allow manual proposal and editing of a typed relation with an exact source-note excerpt. Changed verified links return to review; removal preserves evidence and can be restored. Notes provides structured fields for type, stable ID, scope, and status while preserving the Markdown record. | Workflow simulation and automatic arbitrary-language entity/relation extraction remain future work. |
 | Related suggestions | `src/core.mjs` and `src/graph.mjs` suggest links using shared terms and graph neighbors. | A suggested association is not a verified semantic relationship. |
-| Structured workflows | A Markdown note can use `type: workflow`, a stable `id`, an explicit scope, and verified relations to teams, datasets, and artifacts. Typed edges join the existing graph-aware ranking. | Workflow steps, triggers, input/output schemas, and process execution are still prose; no automatic workflow extraction exists. |
+| Structured workflows | A Markdown note can use `type: workflow`, a stable `id`, an explicit scope, verified relations to teams, datasets, and artifacts, and editable `triggers`, `inputs`, `steps`, `outputs`, and `exception_handling` lists in frontmatter. The active installed Setup Notes/Graph panel edits each list as one item per line; the local authenticated save checks the selected vault, note privacy, generated-note status, uniqueness, and ETag before writing. Lists round-trip as structured YAML and retain the Markdown body and links. | The lists are descriptive records only: there is no workflow runner, schema enforcement for domain-specific inputs/outputs, or automatic extraction from arbitrary text. |
 | Authorization | Vault and note privacy are filtered before indexing, search, reads, graph construction, and graph-wide discovery. Typed candidates stay within one visible vault and matching declared scope. | Future graph traversal across vaults must apply access policy to both endpoints before an edge, expansion, excerpt, or log is exposed. |
 
 This is based on code inspection and local tests on the current branch, not on the reel's marketing claims.
@@ -55,6 +57,17 @@ type: workflow
 id: workflow.collect-product-questions
 scope: organisation
 status: current
+triggers:
+  - A support question is received
+inputs:
+  - Support ticket text
+steps:
+  - Collect questions from the approved channel
+  - Check ticket details and draft an answer
+outputs:
+  - Draft answer with ticket source
+exception_handling:
+  - Keep incomplete drafts in review
 relations:
   - predicate: owned_by
     target: team.product
@@ -73,8 +86,10 @@ relations:
     review: verified
 ---
 # Collect product questions
-Trigger, inputs, steps, exception handling, outputs, and owner responsibilities.
+Owner responsibilities and additional context for the workflow.
 ```
+
+The structured workflow lists are portable descriptive metadata. BrainLink does not execute them or infer/validate a domain-specific input/output schema. Keep supporting detail and sources in the Markdown body.
 
 Recommended initial predicates: `owned_by`, `runs`, `consumes`, `produces`, `depends_on`, `part_of`, `assigned_to`, `informed_by`, and `communicates_with`. Keep them directional and version the vocabulary. Unknown predicates should remain unresolved proposals rather than silently becoming graph edges.
 
@@ -119,7 +134,7 @@ Minimum acceptance gates:
 
 - Every returned edge resolves to authorized source and target records; unknown targets and predicates abstain visibly.
 - Synthetic Personal, Organisation, and Client canaries never cross scopes in search, graph expansion, excerpts, handoffs, or logs.
-- Users can inspect, correct, approve, and reject generated relationships. They can undo an approval from the source note panel; BrainLink returns the link to review, removes it from graph retrieval, and keeps its source evidence.
+- Users can inspect, correct, approve, reject, and remove relationships from graph view. Undoing approval returns a link to review; removing a link archives its review state, hides it from graph retrieval, and preserves evidence for later restoration. Both operations are revision-checked.
 - Broken and stale relations are detected without auto-deleting original notes or source evidence.
 - Typed graph retrieval improves answer success or reduces tokens at equal success on a frozen evaluation set; publish sample size, baseline, failures, and limits.
 
@@ -127,7 +142,7 @@ Minimum acceptance gates:
 
 Add typed entities, workflows, and relationships to BrainLink's architecture as an optional semantic layer above the existing Markdown link graph. Preserve simple note links. Start with fictional company data and a narrow set of workflows; do not build an open-ended ontology editor or autonomous graph rewriting yet.
 
-Implemented first slice: parse a bounded allowlist of entity types and predicates from explicit Markdown frontmatter; materialize only verified edges with evidence, confidence, current records, unique IDs, and matching scope inside the same authorized vault; include the edges in graph-aware ranking; and render typed labels in the existing graph and note details. Fictional tests cover valid relations and fail-closed cases. AI clients can create proposed typed metadata through `propose_note`; users can review proposals in the graph panel or through the central queue. The graph panel also supports manual same-vault/same-scope relation proposals with quote validation. Automatic entity/relation extraction and quality evaluation are still missing.
+Implemented first slice: parse a bounded allowlist of entity types and predicates from explicit Markdown frontmatter; materialize only verified edges with evidence, confidence, current records, unique IDs, and matching scope inside the same authorized vault; include the edges in graph-aware ranking; and render typed labels in the existing graph and note details. Fictional tests cover valid relations and fail-closed cases. AI clients can create proposed typed metadata through `propose_note`; users can review proposals in the graph panel or through the central queue. The graph panel also supports manual same-vault/same-scope relation proposals with quote validation, approval rollback, rejection, and reversible removal from graph view. Removed relations remain in the source note as `review: withdrawn`; restoring one returns it to the proposed review state. Local Raw-to-Wiki suggests exact-quote-backed entity notes and relationships between current same-vault entities mentioned by the source. These remain proposed until separate user review. Unbounded relation extraction, automated session extraction, broad extraction-quality evaluation, and token-savings proof remain open.
 
 Next: build a larger independently authored relation set with ambiguous, negated, stale, multilingual and cross-scope cases, and compare typed-graph retrieval with the existing note-link/lexical baseline on the same tasks. Until that work is complete, general extraction quality and token savings remain unproven.
 

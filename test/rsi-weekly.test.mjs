@@ -1,4 +1,5 @@
 import test from 'node:test';
+import { readSetupHtml } from './helpers/setup-html.mjs';
 import assert from 'node:assert/strict';
 import { mkdtemp, writeFile, readFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
@@ -49,6 +50,27 @@ test('aggregation groups normalized questions and week/fix type', async () => {
   assert.equal(a.by_week['2026-W45'], 1);
   assert.equal(a.by_fix_needed.add_link, 1);
 });
+test('automatic retrieval observations keep only coarse outcomes and separate Twin profiles', async () => {
+  const home = await mkdtemp(path.join(tmpdir(), 'brainlink-rsi-observations-'));
+  const r = createRsiWeekly({ home, now: () => new Date('2026-10-30T04:00:00.000Z') });
+  assert.deepEqual(await r.recordRetrievalObservation({ profileId: null, tool: 'vault_search', status: 'not_in_brain', durationMs: 400 }), { recorded: false, reason: 'unscoped' });
+  assert.deepEqual(await r.recordRetrievalObservation({ profileId: 'fictional_org', tool: 'vault_search', status: 'not_in_brain', durationMs: 389 }), { recorded: true });
+  await r.recordRetrievalObservation({ profileId: 'fictional_org', tool: 'context_packet', status: 'hits', durationMs: 741 });
+  await r.recordRetrievalObservation({ profileId: 'fictional_personal', tool: 'vault_search', status: 'weak', durationMs: 525 });
+  const report = await r.retrievalObservationReport('fictional_org');
+  assert.equal(report.total, 2);
+  assert.deepEqual(report.by_status, { not_in_brain: 1, hits: 1 });
+  assert.deepEqual(report.by_tool, { vault_search: 1, context_packet: 1 });
+  assert.equal((await r.retrievalObservationReport('fictional_personal')).total, 1);
+  const { createRsiLedger } = await import('../src/rsi-ledger.mjs');
+  const ledger = await readFile(createRsiLedger({ home }).file, 'utf8');
+  assert.doesNotMatch(ledger, /question|query|note content|private-folder|secret-note/i);
+  assert.match(ledger, /\"profile_id\":\"fictional_org\"/);
+  assert.match(ledger, /\"duration_bucket_ms\":500/);
+  const stored = ledger.trim().split(/\r?\n/).map((line) => JSON.parse(line));
+  assert.ok(stored.every((row) => !Object.hasOwn(row.data, 'duration_ms') && !Object.hasOwn(row.data, 'duration')),
+    'the journal must not store exact response durations');
+});
 test('week-on-week delta and applied fix type', async () => {
   const home = await mkdtemp(path.join(tmpdir(), 'brainlink-rsi-weekly-'));
   const r = createRsiWeekly({ home });
@@ -67,7 +89,9 @@ test('week-on-week delta and applied fix type', async () => {
 
 test('Setup weekly benchmark is authenticated, uses only the built-in fictional vault, and stores aggregates', async () => {
   const home = await mkdtemp(path.join(tmpdir(), 'brainlink-rsi-weekly-setup-'));
-  const app = await startSetup({ env: { BRAINLINK_HOME: path.join(home, 'app'), BRAINLINK_SEMANTIC: '0' }, home, os: 'linux', port: 0, useCli: false });
+  let sourcePair = ['a'.repeat(40), 'a'.repeat(40)], sourceRead = 0;
+  const weeklyBenchmarkSourceState = () => ({ commit_sha: sourcePair[sourceRead++ % 2], clean: true });
+  const app = await startSetup({ env: { BRAINLINK_HOME: path.join(home, 'app'), BRAINLINK_SEMANTIC: '0' }, home, os: 'linux', port: 0, useCli: false, weeklyBenchmarkSourceState });
   const base = `http://127.0.0.1:${app.port}`;
   const api = (route, { method = 'GET', token = app.token } = {}) => fetch(`${base}${route}`, {
     method,
@@ -86,9 +110,13 @@ test('Setup weekly benchmark is authenticated, uses only the built-in fictional 
     assert.equal(saved.run.case_count, 20);
     assert.equal(saved.run.first_try_correct.total, 20);
     assert.equal(saved.run.privacy_violations, 0);
-    assert.equal(saved.run.software_version, '1.2.8');
+    assert.equal(saved.run.software_version, JSON.parse(await readFile(path.join(ROOT, 'package.json'), 'utf8')).version);
     assert.match(saved.run.source_commit_sha, /^[a-f0-9]{40}$/);
-    assert.equal(typeof saved.run.source_tree_clean, 'boolean');
+    assert.equal(saved.run.source_commit_sha_after, 'a'.repeat(40));
+    assert.equal(saved.run.source_tree_clean, true);
+    assert.equal(saved.run.source_tree_clean_after, true);
+    assert.equal(saved.run.source_stable, true);
+    assert.ok(Date.parse(saved.run.started_at) <= Date.parse(saved.run.completed_at));
     assert.match(saved.run.fixture_sha256, /^[a-f0-9]{64}$/);
     assert.equal(saved.runs.length, 1);
     const serialized = JSON.stringify(saved);
@@ -97,13 +125,21 @@ test('Setup weekly benchmark is authenticated, uses only the built-in fictional 
     const repeated = await (await api('/api/rsi/weekly-benchmark/run', { method: 'POST' })).json();
     assert.equal(repeated.run.recorded, false, 'the same week, fixture, evaluator and source revision is idempotent');
     assert.equal(repeated.runs.length, 1);
+    sourcePair = ['b'.repeat(40), 'c'.repeat(40)];
+    sourceRead = 0;
+    const changed = await (await api('/api/rsi/weekly-benchmark/run', { method: 'POST' })).json();
+    assert.equal(changed.run.recorded, true, 'a different source interval receives a distinct receipt');
+    assert.equal(changed.run.source_commit_sha, 'b'.repeat(40));
+    assert.equal(changed.run.source_commit_sha_after, 'c'.repeat(40));
+    assert.equal(changed.run.source_stable, false, 'a source change during evaluation is not reported as stable');
+    assert.equal(changed.runs.length, 1, 'history presents the latest receipt for the week');
     const fixture = JSON.parse(await readFile(path.join(ROOT, 'samples', 'evaluation', 'rsi-weekly-fictional-20.json'), 'utf8'));
     assert.equal(fixture.cases.length, 20);
   } finally { app.server.close(); }
 });
 
 test('Setup exposes localized weekly benchmark controls and labels their evidence limits', async () => {
-  const html = await readFile(path.join(ROOT, 'ui', 'index.html'), 'utf8');
+  const html = await readSetupHtml();
   assert.match(html, /id="rsi-weekly-run"/);
   assert.match(html, /id="rsi-weekly-schedule-form"/);
   assert.match(html, /POST', '\/api\/rsi\/weekly-benchmark\/settings/);
@@ -111,7 +147,7 @@ test('Setup exposes localized weekly benchmark controls and labels their evidenc
   assert.match(html, /loadWeeklyBenchmark\(\)\.catch/);
   for (const locale of ['en', 'pt', 'zh-TW']) {
     const catalog = JSON.parse(await readFile(path.join(ROOT, 'ui', 'locales', `${locale}.json`), 'utf8'));
-    for (const key of ['rsi.weekly.title', 'rsi.weekly.hint', 'rsi.weekly.run', 'rsi.weekly.running', 'rsi.weekly.saved', 'rsi.weekly.empty', 'rsi.weekly.result', 'rsi.weekly.sourceClean', 'rsi.weekly.sourceWorking', 'rsi.weekly.sourceUnknown', 'rsi.weekly.scheduleEnabled', 'rsi.weekly.saveSchedule', 'rsi.weekly.scheduleOff', 'rsi.weekly.scheduleOn', 'rsi.weekly.scheduleDone', 'rsi.weekly.scheduleFailed']) assert.ok(catalog[key], `${locale} ${key}`);
+    for (const key of ['rsi.weekly.title', 'rsi.weekly.hint', 'rsi.weekly.run', 'rsi.weekly.running', 'rsi.weekly.saved', 'rsi.weekly.empty', 'rsi.weekly.result', 'rsi.weekly.sourceClean', 'rsi.weekly.sourceWorking', 'rsi.weekly.sourceStable', 'rsi.weekly.sourceUnstable', 'rsi.weekly.sourceUnknown', 'rsi.weekly.scheduleEnabled', 'rsi.weekly.saveSchedule', 'rsi.weekly.scheduleOff', 'rsi.weekly.scheduleOn', 'rsi.weekly.scheduleDone', 'rsi.weekly.scheduleFailed']) assert.ok(catalog[key], `${locale} ${key}`);
   }
 });
 

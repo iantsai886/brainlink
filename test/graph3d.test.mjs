@@ -1,5 +1,6 @@
 // RB7 item 2: the 3D notes graph API. Excluded folders and private notes/vaults must never
 // appear in the graph, the side panel, or backlinks/outlinks — same promise as search/answers.
+import { readSetupHtml } from './helpers/setup-html.mjs';
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { mkdtemp, mkdir, writeFile } from 'node:fs/promises';
@@ -8,7 +9,7 @@ import path from 'node:path';
 
 import { normalize } from '../src/config.mjs';
 import { createContext } from '../src/core.mjs';
-import { buildGraph3D, noteDetail3D } from '../src/graph3d.mjs';
+import { buildGraph3D, listGraphVaults, noteDetail3D } from '../src/graph3d.mjs';
 import { startSetup } from '../src/setup.mjs';
 
 const tmp = (p) => mkdtemp(path.join(tmpdir(), `brainlink-${p}-`));
@@ -27,6 +28,24 @@ async function ctxFor(vaultPath, extraVaults = []) {
   const cfg = normalize({ vaults: [{ name: 'Main', path: vaultPath }, ...extraVaults] });
   return createContext(cfg, { env: { BRAINLINK_SEMANTIC: '0' } });
 }
+
+test('graph vault picker returns names without scanning vault files and fingerprints access configuration', async () => {
+  const firstPath = path.join(await tmp('graph3d-picker-first'), 'not-mounted');
+  const secondPath = path.join(await tmp('graph3d-picker-second'), 'not-mounted');
+  const makeContext = (root) => createContext(normalize({ vaults: [
+    { name: 'Main', path: root }, { name: 'Diary', path: path.join(root, 'private'), private: true },
+  ] }), { env: { BRAINLINK_SEMANTIC: '0' } });
+  const first = makeContext(firstPath);
+  const second = makeContext(secondPath);
+  const picker = await listGraphVaults(first, { includePrivateVaults: true });
+  const refreshed = await listGraphVaults(second, { includePrivateVaults: true });
+  assert.deepEqual(picker.vaults, [
+    { name: 'Main', private: false, notes: null },
+    { name: 'Diary', private: true, notes: null },
+  ]);
+  assert.match(picker.revision, /^[a-f0-9]{64}$/);
+  assert.notEqual(picker.revision, refreshed.revision, 'changing the configured vault path invalidates a cached graph');
+});
 
 test('buildGraph3D: excluded-folder notes never appear as nodes or edges', async () => {
   const dir = await buildVault(await tmp('graph3d-excl'));
@@ -49,6 +68,16 @@ test('buildGraph3D: a note with frontmatter "private: true" never appears as a n
   // No link can target a node that was never added to the node list.
   for (const l of g.links) { assert.notEqual(l.target, undefined); assert.ok(g.nodes[l.target]); }
   assert.ok(alpha && beta);
+});
+
+test('graph cache immediately drops notes newly marked private or excluded', async () => {
+  const dir = await buildVault(await tmp('graph3d-privacy-refresh'));
+  const ctx = await ctxFor(dir);
+  assert.ok((await buildGraph3D(ctx, 'Main')).nodes.some((node) => node.title === 'Alpha'));
+  await writeFile(path.join(dir, 'Alpha.md'), '---\nprivate: true\n---\n# Alpha\n');
+  assert.ok(!(await buildGraph3D(ctx, 'Main')).nodes.some((node) => node.title === 'Alpha'));
+  await writeFile(path.join(dir, '.brainlinkignore'), 'Secret Stuff/\nBeta.md\n');
+  assert.ok(!(await buildGraph3D(ctx, 'Main')).nodes.some((node) => node.title === 'Beta'));
 });
 
 test('buildGraph3D: a whole private vault is omitted even when another vault is enabled', async () => {
@@ -196,7 +225,7 @@ test('/api/graph3d and /api/graph3d/note: same exclusion guarantee over HTTP', a
     assert.ok(titles.includes('External') && !titles.includes('External Private'), JSON.stringify(titles));
     const available = await api('/api/graph3d/vaults', {});
     assert.deepEqual(available.vaults.map((v) => v.name), ['Main']);
-    assert.ok(available.vaults[0].notes >= titles.length);
+    assert.equal(available.vaults[0].notes, null, 'the picker avoids scanning vault files before the graph is requested');
     const filtered = await api('/api/graph3d', { vault: 'Main' });
     assert.deepEqual(filtered.nodes.map((n) => n.title), titles);
     assert.equal(filtered.total, g.total);
@@ -234,6 +263,74 @@ test('/api/graph3d and /api/graph3d/note: same exclusion guarantee over HTTP', a
     assert.equal(headerSave.ok, true, JSON.stringify(headerSave));
     const headerRaw = await (await import('node:fs/promises')).readFile(path.join(vaultPath, 'Frontmatter.md'), 'utf8');
     assert.equal(headerRaw, '---\ntitle: Kept title\ntags: [one, two]\n---\nNew body\n', 'editing the body preserves exact frontmatter bytes');
+  } finally { s.server.close(); }
+});
+
+test('/api/graph3d/note builds an Obsidian URI for a BrainLink subfolder inside a registered vault', async () => {
+  const home = await tmp('graph3d-obsidian-home');
+  const obsidianRoot = path.join(home, 'Obsidian Vault');
+  const brainlinkRoot = path.join(obsidianRoot, '20 Iango');
+  await mkdir(path.join(obsidianRoot, '.obsidian'), { recursive: true });
+  await mkdir(brainlinkRoot, { recursive: true });
+  await writeFile(path.join(brainlinkRoot, 'Target Note.md'), '# Target\n');
+  const obsidianConfig = path.join(home, '.config', 'obsidian', 'obsidian.json');
+  await mkdir(path.dirname(obsidianConfig), { recursive: true });
+  await writeFile(obsidianConfig, JSON.stringify({ vaults: { 'stable-vault-id': { path: obsidianRoot, open: true } } }));
+  const env = { BRAINLINK_HOME: path.join(home, 'app'), BRAINLINK_SEMANTIC: '0' };
+  const s = await startSetup({ env, home, os: 'linux', port: 0, useCli: false });
+  const api = (p, body) => fetch(`http://127.0.0.1:${s.port}${p}`, { method: 'POST', headers: { 'X-BrainLink-Token': s.token, 'Content-Type': 'application/json' }, body: JSON.stringify(body || {}) }).then((r) => r.json());
+  try {
+    const added = await api('/api/vault', { path: brainlinkRoot, name: 'Company', pack: 'simple', scaffold: false });
+    assert.equal(added.ok, true, JSON.stringify(added));
+    const detail = await api('/api/graph3d/note', { vault: 'Company', path: 'Target Note.md' });
+    assert.equal(detail.obsidian_registered, true);
+    assert.equal(detail.obsidian_url, 'obsidian://open?vault=stable-vault-id&file=20%20Iango%2FTarget%20Note');
+  } finally { await s.server.close(); }
+});
+
+test('/api/graph3d/entity/save edits only the selected public note, checks unique IDs, and preserves its body', async () => {
+  const home = await tmp('graph3d-entity-home');
+  const vaultPath = await buildVault(path.join(home, 'vault'));
+  await writeFile(path.join(vaultPath, 'Team.md'), '---\ntype: team\nid: team.product\nscope: organisation\nstatus: current\n---\n# Product team\n');
+  const s = await startSetup({ env: { BRAINLINK_HOME: path.join(home, 'app'), BRAINLINK_SEMANTIC: '0' }, home, os: 'linux', port: 0, useCli: false });
+  const base = `http://127.0.0.1:${s.port}`;
+  const api = (p, body) => fetch(base + p, { method: 'POST', headers: { 'X-BrainLink-Token': s.token, 'Content-Type': 'application/json' }, body: JSON.stringify(body || {}) }).then((r) => r.json());
+  try {
+    await api('/api/vault', { path: vaultPath, name: 'Main', pack: 'simple', scaffold: false });
+    await new Promise((resolve) => setTimeout(resolve, 250));
+    const note = await api('/api/graph3d/note', { vault: 'Main', path: 'Beta.md' });
+    assert.deepEqual(note.graph_record, {});
+    const fields = { type: 'concept', id: 'concept.beta', scope: 'organisation', status: 'proposed' };
+    const saved = await api('/api/graph3d/entity/save', { vault: 'Main', path: 'Beta.md', etag: note.etag, graph_record: fields });
+    assert.equal(saved.ok, true, JSON.stringify(saved)); assert.deepEqual(saved.graph_record, fields);
+    const savedNote = await api('/api/graph3d/note', { vault: 'Main', path: 'Beta.md' });
+    assert.deepEqual(savedNote.graph_record, fields); assert.match(savedNote.body, /Backlinked from Alpha/);
+    const stale = await api('/api/graph3d/entity/save', { vault: 'Main', path: 'Beta.md', etag: note.etag, graph_record: { ...fields, id: 'concept.changed' } });
+    assert.match(stale.error || '', /changed since it was opened/);
+    const duplicate = await api('/api/graph3d/entity/save', { vault: 'Main', path: 'Beta.md', etag: savedNote.etag, graph_record: { ...fields, id: 'team.product' } });
+    assert.match(duplicate.error || '', /already used/);
+    const privateEdit = await api('/api/graph3d/entity/save', { vault: 'Main', path: 'Hidden Note.md', etag: 'x', graph_record: fields });
+    assert.ok(privateEdit.error || privateEdit.message);
+  } finally { s.server.close(); }
+});
+
+test('/api/graph3d/entity/save stores structured workflow details in the selected writable public note', async () => {
+  const home = await tmp('graph3d-workflow-edit');
+  const vaultPath = await buildVault(path.join(home, 'vault'));
+  await writeFile(path.join(vaultPath, 'Workflow.md'), '---\ntype: workflow\nid: workflow.demo\nscope: organisation\nstatus: current\n---\n# Demo workflow\n\nKeep body and [[Beta]].\n');
+  const s = await startSetup({ env: { BRAINLINK_HOME: path.join(home, 'app'), BRAINLINK_SEMANTIC: '0' }, home, os: 'linux', port: 0, useCli: false });
+  const api = (p, body) => fetch(`http://127.0.0.1:${s.port}${p}`, { method: 'POST', headers: { 'X-BrainLink-Token': s.token, 'Content-Type': 'application/json' }, body: JSON.stringify(body || {}) }).then((r) => r.json());
+  try {
+    await api('/api/vault', { path: vaultPath, name: 'Main', pack: 'simple', scaffold: false });
+    await new Promise((resolve) => setTimeout(resolve, 250));
+    const note = await api('/api/graph3d/note', { vault: 'Main', path: 'Workflow.md' });
+    const record = { ...note.graph_record, triggers: ['New ticket'], inputs: ['Ticket data'], steps: ['Review, classify', 'Assign owner'], outputs: ['Draft response'], exception_handling: ['Escalate to team'] };
+    const saved = await api('/api/graph3d/entity/save', { vault: 'Main', path: 'Workflow.md', etag: note.etag, graph_record: record });
+    assert.equal(saved.ok, true, JSON.stringify(saved));
+    assert.deepEqual(saved.graph_record, record);
+    const reopened = await api('/api/graph3d/note', { vault: 'Main', path: 'Workflow.md' });
+    assert.deepEqual(reopened.graph_record, record);
+    assert.match(reopened.body, /Keep body and \[\[Beta\]\]/);
   } finally { s.server.close(); }
 });
 
@@ -394,6 +491,60 @@ test('typed relationship rejection is revision-checked, keeps evidence, and remo
   } finally { s.server.close(); }
 });
 
+test('typed relationship archive is revision-checked, hidden from the graph, and reversible from note detail', async () => {
+  const home = await tmp('graph3d-archive-home');
+  const vaultPath = path.join(home, 'vault');
+  await mkdir(vaultPath, { recursive: true });
+  const env = { BRAINLINK_HOME: path.join(home, 'app'), BRAINLINK_SEMANTIC: '0' };
+  const s = await startSetup({ env, home, os: 'linux', port: 0, useCli: false });
+  const base = `http://127.0.0.1:${s.port}`;
+  const api = (p, body) => fetch(base + p, { method: 'POST', headers: { 'X-BrainLink-Token': s.token, 'Content-Type': 'application/json' }, body: JSON.stringify(body || {}) }).then((r) => r.json());
+  try {
+    assert.equal((await api('/api/vault', { path: vaultPath, name: 'Main', pack: 'simple', scaffold: false })).ok, true);
+    await new Promise((resolve) => setTimeout(resolve, 350));
+    const fs = await import('node:fs/promises');
+    await fs.writeFile(path.join(vaultPath, 'Workflow.md'), '---\ntype: workflow\nid: workflow.collect\nscope: organisation\nstatus: current\n---\n# Collect questions\n');
+    const original = '---\ntype: team\nid: team.product\nscope: organisation\nstatus: current\nrelations:\n  - predicate: runs\n    target: workflow.collect\n    review: verified\n    source: "Operations handbook section 2"\n    confidence: 0.9\n---\n# Product team\n\nOperations handbook section 2\n';
+    await fs.writeFile(path.join(vaultPath, 'Team.md'), original);
+    const detail = await api('/api/graph3d/note', { vault: 'Main', path: 'Team.md' });
+    assert.equal(detail.relationships.length, 1);
+    assert.equal((await api('/api/graph3d', {})).links.some((link) => link.predicate === 'runs'), true);
+    const stale = await api('/api/graph3d/relationship/edit', { vault: 'Main', path: 'Team.md', etag: 'stale', relation_index: 0, predicate: 'runs', target_id: 'workflow.collect', evidence: 'Operations handbook section 2', confidence: 0.9 });
+    assert.match(stale.error, /changed since it was opened/i);
+    const edited = await api('/api/graph3d/relationship/edit', { vault: 'Main', path: 'Team.md', etag: detail.etag, relation_index: 0, predicate: 'runs', target_id: 'workflow.collect', evidence: 'Operations handbook section 2', confidence: 0.85 });
+    assert.equal(edited.ok, true, JSON.stringify(edited));
+    assert.equal((await api('/api/graph3d', {})).links.some((link) => link.predicate === 'runs'), false, 'a changed verified edge must leave graph retrieval pending review');
+    const editedDetail = await api('/api/graph3d/note', { vault: 'Main', path: 'Team.md' });
+    assert.equal(editedDetail.proposed_relationships.length, 1);
+    assert.equal(editedDetail.proposed_relationships[0].confidence, 0.85);
+    const approved = await api('/api/graph3d/relationship/approve', { vault: 'Main', path: 'Team.md', etag: editedDetail.etag, relation_index: 0 });
+    assert.equal(approved.ok, true, JSON.stringify(approved));
+    const archiveDetail = await api('/api/graph3d/note', { vault: 'Main', path: 'Team.md' });
+    const staleArchive = await api('/api/graph3d/relationship/archive', { vault: 'Main', path: 'Team.md', etag: detail.etag, relation_index: 0 });
+    assert.match(staleArchive.error, /changed since it was opened/i);
+    const archived = await api('/api/graph3d/relationship/archive', { vault: 'Main', path: 'Team.md', etag: archiveDetail.etag, relation_index: 0 });
+    assert.equal(archived.ok, true, JSON.stringify(archived));
+    const graph = await api('/api/graph3d', {});
+    assert.equal(graph.links.some((link) => link.predicate === 'runs'), false);
+    const archivedDetail = await api('/api/graph3d/note', { vault: 'Main', path: 'Team.md' });
+    assert.equal(archivedDetail.relationships.length, 0);
+    assert.equal(archivedDetail.withdrawn_relationships.length, 1);
+    const archivedRaw = await fs.readFile(path.join(vaultPath, 'Team.md'), 'utf8');
+    assert.match(archivedRaw, /^    review: withdrawn$/m);
+    assert.match(archivedRaw, /^    source: "Operations handbook section 2"$/m);
+    const restored = await api('/api/graph3d/relationship/reopen', { vault: 'Main', path: 'Team.md', etag: archivedDetail.etag, relation_index: 0 });
+    assert.equal(restored.ok, true, JSON.stringify(restored));
+    const restoredDetail = await api('/api/graph3d/note', { vault: 'Main', path: 'Team.md' });
+    assert.equal(restoredDetail.withdrawn_relationships.length, 0);
+    assert.equal(restoredDetail.proposed_relationships.length, 1);
+    assert.equal((await api('/api/graph3d', {})).links.some((link) => link.predicate === 'runs'), false, 'restoring returns the relation to review, not straight to the graph');
+    const activity = (await fs.readFile(path.join(home, 'app', 'activity.log'), 'utf8')).trim().split(/\r?\n/).map(JSON.parse)
+      .filter((entry) => entry.tool === 'graph_relationship_review');
+    assert.deepEqual(activity.map((entry) => entry.action), ['edited', 'approved', 'archived', 'reopened']);
+    assert.doesNotMatch(JSON.stringify(activity), /Team\.md|Operations handbook section 2|team\.product/);
+  } finally { s.server.close(); }
+});
+
 test('graph review queue returns bounded public proposals and excludes private notes and vaults', async () => {
   const home = await tmp('graph3d-review-queue');
   const main = path.join(home, 'main');
@@ -484,12 +635,38 @@ test('ui/notes3d.js: clicking a node opens its note via the same path as a wikil
 
 test('active Setup UI reloads the graph on vault events and keeps an open editor intact', async () => {
   const { readFile } = await import('node:fs/promises');
-  const page = await readFile(new URL('../ui/index.html', import.meta.url), 'utf8');
+  const page = await readSetupHtml();
   const graph = await readFile(new URL('../ui/notes3d.js', import.meta.url), 'utf8');
+  const core = await readFile(new URL('../src/core.mjs', import.meta.url), 'utf8');
   assert.match(page, /new EventSource\('\/api\/events\?t=' \+ encodeURIComponent\(T\)\)/);
   assert.match(page, /dispatchEvent\(new Event\('brainlink:vault-changed'\)\)/);
   assert.match(graph, /addEventListener\('brainlink:vault-changed',[\s\S]*?refreshGraph\(\)/);
+  assert.match(graph, /addEventListener\('brainlink:vault-changed',[\s\S]*?clearGraphClientCache\(\)/, 'vault mutations invalidate cached public graphs before refresh');
+  assert.match(graph, /addEventListener\('brainlink:state-updated', clearGraphClientCache\)/, 'config changes invalidate cached graphs');
+  assert.match(graph, /selected\?\.private\) return null/, 'private vault graphs are never cached in the browser');
+  assert.match(graph, /GRAPH_CLIENT_CACHE_LIMIT = 2/, 'the in-memory cache stays bounded');
+  assert.match(graph, /revision = optionData\.revision/, 'cached graphs are keyed to current access configuration');
+  assert.match(core, /if \(isPrivateVault\) \{[\s\S]*?return buildVaultGraph\(ctx, name\);/, 'server graph cache does not retain private-vault note bodies');
+  assert.match(core, /GRAPH_CACHE_MAX_ENTRIES = 4/, 'server graph cache has a fixed entry limit');
+  assert.match(core, /GRAPH_CACHE_TTL_MS = 60_000/, 'server graph cache entries expire after one minute');
+  assert.match(core, /private: Boolean\(vault\?\.private\)/, 'changing vault privacy changes the server cache key');
   assert.match(graph, /if \(editor && !editor\.hidden\) \{ pendingVaultRefresh = true; return; \}/);
+});
+
+test('installed Setup graph panel exposes structured record fields and saves only its selected note', async () => {
+  const { readFile } = await import('node:fs/promises');
+  const page = await readSetupHtml();
+  const graph = await readFile(new URL('../ui/notes3d.js', import.meta.url), 'utf8');
+  assert.match(page, /notes3d\.js/, 'the installed Setup page loads this graph panel');
+  for (const field of ['type','scope','status']) assert.ok(graph.includes(`graphChoices('${field}',`), `form includes ${field}`);
+  assert.match(graph, /data-graph-record-field="id"/);
+  assert.match(graph, /data-graph-record-field="\$\{field\}"/);
+  assert.match(graph, /workflowKeys\.map\(\(key\) =>/);
+  assert.match(graph, /data-graph-workflow-field="\$\{key\}"/);
+  for (const field of ['triggers','inputs','steps','outputs','exception_handling']) assert.ok(graph.includes(`'${field}'`), `workflow form supports ${field}`);
+  assert.match(graph, /api\('\/api\/graph3d\/entity\/save'/);
+  assert.match(graph, /notes3d-links'\)\.querySelectorAll\('\[data-graph-record-field\]'\)/, 'save reads only fields inside the selected note detail');
+  assert.match(graph, /etag: currentDetail\.etag/, 'save is tied to the note revision currently shown');
 });
 
 test('graph UI exposes a confirmation-gated action for reviewing a suggested relationship', async () => {
@@ -503,6 +680,13 @@ test('graph UI exposes a confirmation-gated action for reviewing a suggested rel
   assert.match(src, /api\('\/api\/graph3d\/relationship\/reopen'/);
   assert.match(src, /data-reopen-relation/);
   assert.match(src, /data-reopen-rejected/);
+  assert.match(src, /data-archive-relation/);
+  assert.match(src, /api\('\/api\/graph3d\/relationship\/archive'/);
+  assert.match(src, /data-save-relation/);
+  assert.match(src, /api\('\/api\/graph3d\/relationship\/edit'/);
+  assert.match(src, /data-edit-evidence/);
+  assert.match(src, /withdrawn_relationships/);
+  assert.match(src, /data-restore-withdrawn/);
   assert.match(src, /rejected_relationships/);
   assert.match(src, /data-reject-queued/);
   assert.match(src, /api\('\/api\/graph3d\/relationship\/propose'/);
@@ -567,12 +751,14 @@ test('3D graph has a searchable, keyboard-accessible note list in every supporte
   assert.match(src, /if \(graphNote\) \{ openById\(graphNote\.dataset\.graphNoteId\); return; \}/, 'keyboard activation of a note button must open the same detail panel as a graph click');
   assert.match(src, /brainlink:locale-changed/);
   assert.match(src, /api\('\/api\/graph3d\/discover'/, 'vault-wide discovery must call its authenticated local API');
+  assert.match(src, /id="notes3d-discover-all"[^>]*data-i18n="notes3d\.discoverAll"/, 'vault-wide discovery offers a one-click full scan');
+  assert.match(src, /while \(all && !result\.done\)/, 'full scan walks every bounded page until all notes are checked');
   assert.match(src, /data-discover-save/, 'each discovered link must be saved through the review flow');
   assert.match(src, /id="notes3d-vault-select"/, 'graph must let the user focus on one vault');
   assert.match(src, /api\('\/api\/graph3d\/vaults'/, 'vault choices must come from the privacy-filtered API');
   assert.match(src, /brainlink:locale-changed[\s\S]*?renderVaultOptions\(\);/, 'vault filter choices must update when the app language changes');
   assert.match(css, /\.notes3d-node:focus-visible/);
-  const keys = ['notes3d.browseNotes', 'notes3d.browseSearch', 'notes3d.browsePlaceholder', 'notes3d.browseEmpty', 'notes3d.browseCount', 'notes3d.browseMore', 'notes3d.vaultFilter', 'notes3d.allVaults', 'notes3d.resetView', 'notes3d.discoverVault', 'notes3d.discoverHint', 'notes3d.discoverRun', 'notes3d.discoverMore', 'notes3d.discoverDone', 'notes3d.discoverProgress', 'notes3d.discoverFailed', 'notes3d.discoverChanged', 'notes3d.discoverReadOnly'];
+  const keys = ['notes3d.browseNotes', 'notes3d.browseSearch', 'notes3d.browsePlaceholder', 'notes3d.browseEmpty', 'notes3d.browseCount', 'notes3d.browseMore', 'notes3d.vaultFilter', 'notes3d.allVaults', 'notes3d.resetView', 'notes3d.discoverVault', 'notes3d.discoverHint', 'notes3d.discoverRun', 'notes3d.discoverAll', 'notes3d.discoverMore', 'notes3d.discoverDone', 'notes3d.discoverProgress', 'notes3d.discoverFailed', 'notes3d.discoverChanged', 'notes3d.discoverReadOnly'];
   for (const locale of ['en', 'zh-TW', 'pt']) {
     const localeText = await readFile(new URL(`../ui/locales/${locale}.json`, import.meta.url), 'utf8');
     const catalog = JSON.parse(localeText);

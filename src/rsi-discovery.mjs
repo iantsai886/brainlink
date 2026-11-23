@@ -179,6 +179,7 @@ export async function fetchFeed(rawUrl, { fetchImpl = fetch, lookup = dnsLookup,
 
 async function readFeed(response, maxBytes) {
   if (response.status >= 300 && response.status < 400) throw new Error('Discovery refused a redirect from the feed.');
+  if (response.status === 429) throw new Error('The public source is rate limiting requests (HTTP 429); try again later.');
   if (response.status !== 200) throw new Error(`Feed answered HTTP ${response.status}.`);
   const type = String(response.headers.get('content-type') || '').toLowerCase();
   if (!/^(?:application\/atom\+xml|application\/xml|text\/xml|application\/json)\b/.test(type)) throw new Error('Feed returned an unexpected content type.');

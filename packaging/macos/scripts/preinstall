@@ -1,0 +1,15 @@
+#!/bin/bash
+# Runs as root before the payload is extracted. Stops any running BrainLink process
+# inside the target bundle and removes the previous app bundle so upgrades never leave
+# stale files behind. User settings and vaults are stored outside the app bundle and
+# are never touched.
+APP="$2/Applications/BrainLink.app"
+[ -d "$APP" ] || APP="/Applications/BrainLink.app"
+
+if [ -d "$APP" ]; then
+  pkill -f "$APP/Contents/MacOS/BrainLink" >/dev/null 2>&1 || true
+  pkill -f "$APP/Contents/Resources/node/bin/node" >/dev/null 2>&1 || true
+  sleep 1
+  rm -rf "$APP"
+fi
+exit 0

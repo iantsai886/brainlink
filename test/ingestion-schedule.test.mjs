@@ -1,4 +1,5 @@
 import test from 'node:test';
+import { readSetupHtml } from './helpers/setup-html.mjs';
 import assert from 'node:assert/strict';
 import path from 'node:path';
 import { mkdtemp, mkdir, writeFile, readFile } from 'node:fs/promises';
@@ -16,6 +17,13 @@ test('daily scan schedule validates input and follows the configured local time'
   assert.throws(() => validateIngestionSchedule({ enabled: true, targets: [{ vault: 'Team', folder: '../private' }], time: '02:00' }), /safe folder path/i);
   assert.throws(() => validateIngestionSchedule({ enabled: true, targets: [{ vault: 'Team', folder: 'Raw' }, { vault: 'team', folder: 'raw' }], time: '02:00' }), /only be added once/i);
   assert.throws(() => validateIngestionSchedule({ enabled: true, targets: Array.from({ length: 21 }, (_, i) => ({ vault: 'Team', folder: `Raw${i}` })), time: '02:00' }), /no more than 20/i);
+  assert.throws(() => validateIngestionSchedule({ enabled: true, mode: 'watch', intervalMinutes: 2, targets: [{ vault: 'Team', folder: 'Raw' }] }), /supported background check interval/i);
+  const watch = { enabled: true, mode: 'watch', intervalMinutes: 5, targets: [{ vault: 'Team', folder: 'Raw' }] };
+  assert.equal(ingestionScheduleDue(watch, new Date('2026-10-25T12:30:00.000Z')), true, 'a new background check runs immediately');
+  assert.equal(ingestionScheduleDue({ ...watch, last_scan_at: '2026-10-25T12:25:00.000Z' }, new Date('2026-10-25T12:29:59.999Z')), false);
+  assert.equal(ingestionScheduleDue({ ...watch, last_scan_at: '2026-10-25T12:25:00.000Z' }, new Date('2026-10-25T12:30:00.000Z')), true);
+  assert.equal(ingestionScheduleDue({ ...watch, last_scan_at: 'invalid' }, new Date('2026-10-25T12:40:00.000Z')), false, 'corrupt scan state fails closed');
+  assert.equal(ingestionScheduleDue({ ...watch, retry_after: '2026-10-25T12:29:00.000Z' }, new Date('2026-10-25T12:30:00.000Z')), true, 'background retries are bounded by their saved retry time');
   const at = new Date('2026-10-25T12:30:00.000Z');
   assert.deepEqual(localDateAndTime(at, 'UTC'), { date: '2026-10-25', time: '12:30' });
   const schedule = { enabled: true, vault: 'Team', folder: 'Raw', time: '12:00' };
@@ -29,6 +37,37 @@ test('daily scan schedule validates input and follows the configured local time'
   assert.equal(retried.retry_count, 1, 'saving unchanged settings preserves the retry schedule');
   assert.equal(validateIngestionSchedule({ ...schedule, time: '13:00' }, { ...schedule, retry_count: 1 }).retry_after, null, 'changing the schedule clears stale retries');
   assert.deepEqual(normalize({ ingestion: { vault: 'Legacy', folder: 'Raw' } }).ingestion.targets, [{ vault: 'Legacy', folder: 'Raw' }], 'old single-folder settings migrate to a one-item list');
+});
+
+test('background folder checks scan only selected folders and report their own trigger', async () => {
+  const home = await temp('watch');
+  const appHome = path.join(home, 'app');
+  const vault = path.join(home, 'vault');
+  await mkdir(path.join(vault, 'Raw'), { recursive: true });
+  await mkdir(path.join(vault, 'Other'), { recursive: true });
+  await writeFile(path.join(vault, 'Raw', 'First.md'), '# First\n\nA fictional selected-folder source.');
+  await writeFile(path.join(vault, 'Other', 'Ignored.md'), '# Ignored\n\nThis folder is outside the selected target.');
+  const env = { BRAINLINK_HOME: appHome, HOME: home, BRAINLINK_SEMANTIC: '0' };
+  const oldScan = new Date(Date.now() - 10 * 60_000).toISOString();
+  await saveConfig(normalize({ vaults: [{ name: 'Fictional Team', path: vault }], ingestion: { enabled: true, mode: 'watch', intervalMinutes: 1, last_scan_at: oldScan, targets: [{ vault: 'Fictional Team', folder: 'Raw' }] } }), path.join(appHome, 'config.json'));
+  const app = await startSetup({ env, home, os: 'linux', port: 0, useCli: false, ingestionTickMs: 10 });
+  const base = `http://127.0.0.1:${app.port}`;
+  const headers = { 'X-BrainLink-Token': app.token };
+  try {
+    const deadline = Date.now() + 5000;
+    let state;
+    while (Date.now() < deadline) {
+      state = await fetch(base + '/api/state', { headers }).then((r) => r.json());
+      if (state.ingestion.status?.trigger === 'watch' && !state.ingestion.running) break;
+      await delay(10);
+    }
+    assert.equal(state.ingestion.status?.trigger, 'watch');
+    assert.equal(state.ingestion.status.queued_total, 1, 'only files under configured folders are scanned');
+    const configPath = path.join(appHome, 'config.json');
+    const cfg = JSON.parse(await readFile(configPath, 'utf8'));
+    assert.ok(Date.parse(cfg.ingestion.last_scan_at) >= Date.now() - 5000, 'the next interval is measured from the completed scan reservation');
+    assert.equal(state.ingestion.status.targets[0].folder, 'Raw');
+  } finally { await new Promise((resolve) => app.server.close(resolve)); }
 });
 
 test('failed scheduled scan retries once the source folder returns, without logging note content', async () => {
@@ -88,6 +127,7 @@ test('Setup offers authenticated manual scans and runs an enabled daily scan in 
   const privateVault = path.join(home, 'private-vault');
   await mkdir(path.join(vault, 'Raw'), { recursive: true });
   await writeFile(path.join(vault, 'Raw', 'Source.md'), '# Source\n\nFictional intake item.');
+  await writeFile(path.join(vault, 'Raw', 'Unsupported.mp4'), 'UNSUPPORTED_MEDIA_BODY_CANARY');
   await mkdir(path.join(secondVault, 'Incoming'), { recursive: true });
   await writeFile(path.join(secondVault, 'Incoming', 'Second.md'), '# Second\n\nAnother fictional intake item.');
   await mkdir(path.join(privateVault, 'Raw'), { recursive: true });
@@ -119,15 +159,20 @@ test('Setup offers authenticated manual scans and runs an enabled daily scan in 
     }
     assert.equal(status.ingestion.status.trigger, 'schedule', `the background timer scans at the configured local time: ${JSON.stringify(status.ingestion)}`);
     assert.equal(status.ingestion.status.queued_total, 2);
+    assert.equal(status.ingestion.status.unsupported_count, 1);
+    assert.deepEqual(status.ingestion.status.unsupported_formats, [{ extension: '.mp4', count: 1 }]);
     assert.equal(status.ingestion.status.targets.length, 2);
     for (let i = 0; i < 100 && status.ingestion.running; i++) { await delay(10); status = await get('/api/state').then((r) => r.json()); }
     assert.equal(status.ingestion.running, false, 'scheduled work finishes before the manual run starts');
     assert.equal((await readFile(path.join(appHome, 'ingestion-state.json'), 'utf8')).includes('Fictional intake item'), false, 'saved scan status contains no note body');
+    assert.doesNotMatch(await readFile(path.join(appHome, 'ingestion-state.json'), 'utf8'), /UNSUPPORTED_MEDIA_BODY_CANARY|Unsupported\.mp4/);
     const manual = await post('/api/ingestion/run', { vault: 'Fictional Team', folder: 'Raw' });
     assert.equal(manual.status, 200, await manual.clone().text());
     const manualResult = await manual.json();
     assert.equal(manualResult.trigger, 'manual');
     assert.equal(manualResult.queued_total, 1);
+    assert.equal(manualResult.unsupported_count, 1);
+    assert.deepEqual(manualResult.unsupported_formats, [{ extension: '.mp4', count: 1 }]);
     assert.equal(manualResult.candidates[0].path, 'Raw/Source.md');
     const scanEvents = (await readFile(path.join(appHome, 'activity.log'), 'utf8')).trim().split(/\r?\n/).map(JSON.parse).filter((entry) => entry.tool === 'source_scan');
     assert.ok(scanEvents.length >= 2, 'scheduled and manual scans are observed');
@@ -151,25 +196,51 @@ test('Setup offers authenticated manual scans and runs an enabled daily scan in 
   } finally { app.server.close(); }
 });
 
-test('ingestion scan UI has manual and scheduled controls with all locale strings', async () => {
-  const html = await readFile(new URL('../ui/index.html', import.meta.url), 'utf8');
-  for (const id of ['ingestion-enabled', 'ingestion-auto-drafts', 'ingestion-vault', 'ingestion-folder', 'ingestion-add', 'ingestion-target-list', 'ingestion-time', 'ingestion-save', 'ingestion-run', 'ingestion-status', 'ingestion-queue', 'ingestion-draft-status', 'ingestion-draft-list']) {
+test('ingestion scan UI has manual, scheduled and startup guidance controls in every locale', async () => {
+  const html = await readSetupHtml();
+  assert.equal((html.match(/id="ingestion-startup-warning"/g) || []).length, 1, 'scheduled scans explain that the app must resume at sign-in');
+  assert.match(html, /id="ingestion-startup-warning"[\s\S]*?data-main-nav="s-background"/, 'the warning links directly to the background startup setting');
+  assert.match(html, /id="ingestion-enable-startup" data-i18n="ingestion\.startupEnable"/, 'the warning offers a one-click way to keep scans running after sign-in');
+  assert.match(html, /ingestion-enable-startup'\)\.onclick = async \(\) => \{[\s\S]*?api\('POST', '\/api\/startup', \{ enabled: true \}\)/, 'the scan page enables the same managed login launcher');
+  assert.match(html, /ingestion-startup-warning'\)\.hidden = !S\.ingestion\?\.enabled \|\| Boolean\(S\.startup_at_login\)/, 'startup guidance appears only when scans are enabled and login startup is off');
+  for (const id of ['ingestion-enabled', 'ingestion-enable-startup', 'ingestion-mode', 'ingestion-interval', 'ingestion-auto-drafts', 'ingestion-model-setup', 'ingestion-auto-file', 'ingestion-vault', 'ingestion-folder', 'ingestion-add', 'ingestion-target-list', 'ingestion-time', 'ingestion-save', 'ingestion-run', 'ingestion-status', 'ingestion-schedule-status', 'ingestion-queue', 'ingestion-draft-status', 'ingestion-draft-list']) {
     assert.equal((html.match(new RegExp(`id="${id}"`, 'g')) || []).length, 1, id);
   }
   assert.match(html, /<select id="ingestion-folder"><\/select>/, 'folder target is selected from existing directories, not typed as a path');
   assert.match(html, /api\('POST', '\/api\/ingestion\/folders', \{ vault \}\)/, 'folder options come from the authenticated vault-scoped endpoint');
+  assert.match(html, /id="ingestion-model-setup"[\s\S]*?href="#sessions-panel" data-main-nav="sessions-panel"/, 'the model setup hint opens Sessions settings');
+  assert.match(html, /ingestion-model-setup'\)\.hidden = Boolean\(S\.sessions_local_summary\?\.enabled && S\.sessions_local_summary\?\.model\)/, 'model setup hint hides after a local model is ready');
+  assert.match(html, /destinationOnly: true/, 'automatic filing destinations use the existing same-vault folder picker');
+  assert.match(html, /function canRunIngestionNow\(\)[\s\S]*?return !S\?\.ingestion\?\.running && currentIngestionTargets\(\)\.some\(\(target\) => publicVaults\.has\(target\.vault\) && target\.folder\)/, 'manual scans require a selected folder in an existing non-private vault and are disabled while scanning');
+  assert.equal((html.match(/\$\('ingestion-run'\)\.disabled = !canRunIngestionNow\(\);/g) || []).length, 2, 'both target rendering and state refresh use the same manual-scan eligibility check');
+  assert.match(html, /mode: \$\('ingestion-mode'\)\.value/);
+  assert.match(html, /const ingestionSchedule = S\.ingestion\?\.enabled[\s\S]*?ingestion\.backgroundWatch[\s\S]*?ingestion\.backgroundDaily[\s\S]*?\$\('ingestion-schedule-status'\)\.textContent = ingestionSchedule;/, 'enabled background scans state their interval and that BrainLink must remain open');
+  assert.match(html, /intervalMinutes: Number\(\$\('ingestion-interval'\)\.value\)/);
+  assert.match(html, /#ingestion-time-wrap\[hidden\], #ingestion-interval-wrap\[hidden\] \{ display: none; \}/, 'daily and repeated-scan controls hide the inactive input');
   assert.match(html, /api\('POST', '\/api\/ingestion\/run', \{ targets: currentIngestionTargets\(\) \}\)/);
+  assert.match(html, /function ingestionUnsupportedText\(result\)[\s\S]*?unsupported_formats/);
+  assert.match(html, /const unsupportedCard = unsupported \? /, 'manual scan results show skipped format counts even when no supported files remain');
   assert.match(html, /api\('POST', '\/api\/ingestion\/draft'/, 'the selected source can be summarized by the local draft route');
   assert.match(html, /api\('POST', '\/api\/ingestion\/save-draft'.*confirm: true/, 'saving requires a separate confirmation action');
   assert.match(html, /api\('GET', '\/api\/ingestion\/drafts'\)/, 'local drafts reload from private app data');
   assert.match(html, /api\('POST', '\/api\/ingestion\/discard-draft'/, 'stale or unwanted local drafts can be removed');
   assert.match(html, /autoDrafts: \$\('ingestion-auto-drafts'\)\.checked/, 'scheduled local draft processing is a separate opt-in');
-  assert.match(html, /window\.confirm\(t\('ingestion\.confirmSaveProposal'\)\)/);
+  assert.match(html, /autoFile: \$\('ingestion-auto-file'\)\.checked/, 'saving proposed notes is a separate opt-in');
+  assert.match(html, /await confirmInPage\(t\(saveDraft\.dataset\.ingestionRetry === 'true' \? 'ingestion\.confirmRetryProposal' : 'ingestion\.confirmSaveProposal'\)\)/);
+  assert.match(html, /data-ingestion-retry=.*ingestion\.retryProposal/, 'a partial filing shows a retry action and its saved destination');
+  assert.match(html, /ingestion\.confirmRetryProposal/, 'retry asks for confirmation using a clear retry message');
+  assert.match(html, /ingestion\.partialFiling/, 'the local draft view explains when a main note was saved but suggestions remain');
+  assert.match(html, /data-ingestion-dismiss-entities/, 'remaining entity suggestions require an explicit review decision');
+  assert.match(html, /dismiss_unselected_entities/, 'the review decision is submitted to the authenticated local API');
   assert.match(html, /data-open-note="\$\{esc\(item\.vault \|\| r\.vault\)\}::\$\{esc\(item\.path\)\}"/, 'queue entries open each source note in its own vault');
   assert.match(html, /document\.addEventListener\('click', async \(event\) => \{\s*const removeIngestionTarget/);
   assert.match(html, /currentIngestionTargets\(\)\.push\(target\)/);
   for (const locale of ['en', 'zh-TW', 'pt']) {
     const catalog = JSON.parse(await readFile(new URL(`../ui/locales/${locale}.json`, import.meta.url), 'utf8'));
-    for (const key of ['ingestion.title', 'ingestion.hint', 'ingestion.enabled', 'ingestion.autoDrafts', 'ingestion.autoDraftsHint', 'ingestion.pendingDrafts', 'ingestion.noPendingDrafts', 'ingestion.localDraftReady', 'ingestion.autoDraftStatus', 'ingestion.vault', 'ingestion.folder', 'ingestion.chooseFolder', 'ingestion.addTarget', 'ingestion.targets', 'ingestion.removeTarget', 'ingestion.emptyTargets', 'ingestion.targetRequired', 'ingestion.maxTargets', 'ingestion.duplicateTarget', 'ingestion.time', 'ingestion.save', 'ingestion.run', 'ingestion.never', 'ingestion.running', 'ingestion.lastRun', 'ingestion.failed', 'ingestion.retryScheduled', 'ingestion.saved', 'ingestion.disabled', 'ingestion.scanDone', 'ingestion.empty', 'ingestion.limited', 'ingestion.trigger.manual', 'ingestion.trigger.schedule', 'ingestion.makeLocalDraft', 'ingestion.localDraftNeedsModel', 'ingestion.localDraftUnverified', 'ingestion.memoryType', 'ingestion.reviewDraft', 'ingestion.destination', 'ingestion.chooseDestination', 'ingestion.noDestination', 'ingestion.saveProposal', 'ingestion.discardDraft', 'ingestion.confirmDiscardDraft', 'ingestion.confirmSaveProposal', 'ingestion.proposalSaved', 'ingestion.proposalUnverified', 'ingestion.proposalNeedsReview']) assert.ok(catalog[key], `${locale} ${key}`);
+    assert.ok(catalog['ingestion.startupEnable'], `${locale} direct background-start button`);
+    for (const key of ['ingestion.title', 'ingestion.hint', 'ingestion.enabled', 'ingestion.startupWarning', 'ingestion.startupLink', 'ingestion.startupEnable', 'ingestion.mode', 'ingestion.modeDaily', 'ingestion.modeWatch', 'ingestion.interval', 'ingestion.autoDrafts', 'ingestion.autoDraftsHint', 'ingestion.modelSetup', 'ingestion.modelSetupLink', 'ingestion.autoFile', 'ingestion.autoFileHint', 'ingestion.scanFiled', 'ingestion.pendingDrafts', 'ingestion.noPendingDrafts', 'ingestion.localDraftReady', 'ingestion.autoDraftStatus', 'ingestion.vault', 'ingestion.folder', 'ingestion.chooseFolder', 'ingestion.addTarget', 'ingestion.targets', 'ingestion.removeTarget', 'ingestion.emptyTargets', 'ingestion.targetRequired', 'ingestion.maxTargets', 'ingestion.duplicateTarget', 'ingestion.time', 'ingestion.save', 'ingestion.run', 'ingestion.never', 'ingestion.backgroundDaily', 'ingestion.backgroundWatch', 'ingestion.running', 'ingestion.lastRun', 'ingestion.failed', 'ingestion.retryScheduled', 'ingestion.saved', 'ingestion.disabled', 'ingestion.scanDone', 'ingestion.empty', 'ingestion.unsupportedSummary', 'ingestion.unsupportedTypes', 'ingestion.noExtension', 'ingestion.limited', 'ingestion.trigger.manual', 'ingestion.trigger.schedule', 'ingestion.trigger.watch', 'ingestion.makeLocalDraft', 'ingestion.localDraftNeedsModel', 'ingestion.localDraftUnverified', 'ingestion.memoryType', 'ingestion.reviewDraft', 'ingestion.destination', 'ingestion.chooseDestination', 'ingestion.noDestination', 'ingestion.saveProposal', 'ingestion.retryProposal', 'ingestion.partialFiling', 'ingestion.dismissUnselectedEntities', 'ingestion.entitiesRemain', 'ingestion.entitySaved', 'ingestion.entityDismissed', 'ingestion.discardDraft', 'ingestion.confirmDiscardDraft', 'ingestion.confirmRetryProposal', 'ingestion.proposalSaved', 'ingestion.proposalUnverified', 'ingestion.proposalNeedsReview']) assert.ok(catalog[key], `${locale} ${key}`);
+    assert.match(catalog['ingestion.hint'], /HTML\/HTM/iu, `${locale} describes supported HTML files`);
+    assert.doesNotMatch(catalog['ingestion.hint'], /scanned PDFs? (and )?other formats (are )?(skipped|ignored)/iu, `${locale} does not claim scanned PDFs are skipped`);
+    if (locale === 'en') assert.match(catalog['ingestion.hint'], /PDFs up to 100 pages.*scanned pages with local OCR/iu);
   }
 });

@@ -64,7 +64,7 @@ async function readBoundedJson(response, maxBytes) {
 
 /** Fetch and verify the fixed BrainLink release manifest. No package is downloaded or installed. */
 export async function checkForUpdate({ publicKey, currentVersion, platform = process.platform, arch = process.arch, channel = 'stable', fetchImpl = fetch, now = Date.now() }) {
-  if (!publicKey) return { status: 'unavailable', reason: 'publisher_key_not_configured', current_version: currentVersion };
+  if (!publicKey || Array.isArray(publicKey) && publicKey.length === 0) return { status: 'unavailable', reason: 'publisher_key_not_configured', current_version: currentVersion };
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), TIMEOUT_MS);
   timer.unref?.();

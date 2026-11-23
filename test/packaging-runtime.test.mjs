@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { cp, mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
+import { access, cp, mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { spawnSync } from 'node:child_process';
@@ -21,24 +21,69 @@ test('every native installer bundles all production dependencies and portable Br
   for (const [label, file] of builders) {
     const source = await read(file);
     assert.match(source, /skills/, `${label} must ship the versioned SKILL.md files`);
-    assert.match(source, /yaml/, `${label} must bundle the YAML runtime dependency`);
+    assert.match(source, /stage-runtime-dependencies/, `${label} must stage every locked runtime dependency`);
+    assert.match(source, /stage:canvas-platforms/, `${label} must stage native PDF rendering binaries for its target platform`);
+    assert.match(source, /stage-ocr-data/, `${label} must stage offline OCR language files`);
     assert.match(source, /brainlink-store/, `${label} must bundle the local store dependency`);
     assert.match(source, /ui[\\/]app[\\/]test/, `${label} must exclude development UI tests from the package`);
   }
   const windowsPreview = await read('packaging/windows/build-portable-zip.sh');
   assert.match(windowsPreview, /skills/, 'Windows portable preview must ship versioned BrainLink skills');
   assert.match(windowsPreview, /ui[\\/]app[\\/]test/, 'Windows portable preview must exclude development UI tests');
+  assert.doesNotMatch(windowsPreview, /"\$ROOT\/docs"/, 'Windows portable preview must not copy internal and private docs wholesale');
+  for (const doc of ['PRODUCT-SPEC.md', 'GRAPH-KNOWLEDGE-MODEL.md', 'SESSION-INDEX.md', 'RELEASE-READINESS.md', 'STORE-RECOVERY.md']) {
+    assert.ok(windowsPreview.includes(doc), `Windows portable preview must include its documented public README reference: ${doc}`);
+  }
   assert.ok(pkg.dependencies.yaml, 'YAML connector dependency must remain a production dependency');
+  assert.ok(pkg.dependencies.fflate, 'local XLSX and PPTX archive extraction must remain a production dependency');
+  assert.ok(pkg.dependencies.parse5, 'local HTML text extraction must remain a production dependency');
+  assert.ok(pkg.optionalDependencies['pdfjs-dist'], 'local PDF text extraction is decoupled as an optional dependency');
+  assert.ok(pkg.optionalDependencies['@napi-rs/canvas'], 'scanned PDF rendering is decoupled as an optional dependency');
+  assert.ok(pkg.optionalDependencies.mammoth, 'local DOCX text extraction is decoupled as an optional dependency');
+  assert.ok(pkg.optionalDependencies['tesseract.js'], 'offline local OCR is decoupled as an optional dependency');
+  for (const lang of ['eng', 'por', 'chi_tra']) assert.ok(pkg.optionalDependencies[`@tesseract.js-data/${lang}`], `${lang} OCR data is version locked in optionalDependencies`);
+  for (const heavy of ['@napi-rs/canvas', 'tesseract.js', 'pdfjs-dist', 'mammoth']) {
+    assert.equal(pkg.dependencies[heavy], undefined, `${heavy} must not be a mandatory core dependency`);
+  }
+  assert.match(await read('packaging/windows/build-portable-zip.sh'), /npm install/, 'Windows source preview installs its declared production dependencies');
 
   const linuxBuilder = await read('packaging/linux/build-linux.sh');
   assert.match(linuxBuilder, /NODE_VERSION="\$\(tr -d '\\r\\n' < "\$ROOT\/vendor\/node\/VERSION"\)"/, 'Linux builds must accept the Windows CRLF version file');
   assert.match(linuxBuilder, /Invalid pinned Node\.js version/, 'Linux build must reject malformed pinned runtime versions before making download URLs');
 
+  const macZipBuilder = await read('packaging/macos/build-zip.sh');
+  const macPkgBuilder = await read('packaging/macos/build-pkg.sh');
+  for (const [label, builder] of [['macOS zip', macZipBuilder], ['macOS pkg', macPkgBuilder]]) {
+    assert.match(builder, /NODE_VERSION="22\.23\.3"/, `${label} must use the macOS-compatible pinned Node runtime`);
+    assert.match(builder, /for arch in arm64 x64/, `${label} must package both supported Mac architectures`);
+  }
+  assert.match(macPkgBuilder, /BRAINLINK_MAC_NODE_RT/, 'the macOS installer must keep its Node 22 runtime cache separate from the Node 24 Windows/Linux cache');
+  assert.match(macZipBuilder, /BRAINLINK_MAC_NODE_RT/, 'the macOS ZIP must reuse the macOS installer runtime cache override');
+  assert.match(macZipBuilder, /vendor\/node-macos/, 'the macOS ZIP must use a repository-local default runtime cache');
+  assert.match(macZipBuilder, /curl -fsS "\$NODE_DIST\/SHASUMS256\.txt"/, 'the macOS ZIP must fetch the pinned runtime checksum list when missing');
+  assert.match(macZipBuilder, /curl -fLsS --retry 2 "\$NODE_DIST\/\$\(basename "\$archive"\)"/, 'the macOS ZIP must fetch missing runtime archives before validating them');
+  assert.match(macPkgBuilder, /os-version min="11\.0"/, 'the macOS installer target must match its advertised minimum OS');
+
   const windowsBuilder = await read('packaging/windows/build-windows.ps1');
   assert.match(windowsBuilder, /LOCALAPPDATA.*Inno Setup 6\\ISCC\.exe/, 'Windows builder must find a per-user Inno Setup installation');
   assert.match(windowsBuilder, /Inno Setup compiler failed with exit code/, 'Windows builder must report compiler failures');
+  assert.match(windowsBuilder, /Preserve build\/windows\/qa/, 'Windows installer rebuild must preserve the upgrade-smoke baseline');
+  assert.doesNotMatch(windowsBuilder, /Remove-Item -Recurse -Force "\$Root\\build\\windows"/, 'Windows installer rebuild must not delete the QA fixtures');
+  assert.match(windowsBuilder, /BRAINLINK_OUTPUT_NAME/, 'Windows installer builder must permit a distinct output filename when the default is open');
+  assert.match(windowsBuilder, /Get-FileHash "\$Root\\dist\\\$OutputName\.exe"/, 'Windows installer checksum must match the selected output filename');
   const windowsInstaller = await read('packaging/windows/BrainLink.iss');
   const installedWindowsSmoke = await read('scripts/smoke-installed-windows.ps1');
+  const upgradeWindowsSmoke = await read('scripts/smoke-upgrade-windows.ps1');
+  const stageFreshnessCheck = await read('scripts/assert-windows-stage-current.ps1');
+  const installedOcrSmoke = await read('scripts/smoke-installed-ocr.mjs');
+  const installedHtmlSmoke = await read('scripts/smoke-installed-html.mjs');
+  assert.match(installedWindowsSmoke, /smoke-installed-ocr\.mjs/);
+  assert.match(installedOcrSmoke, /BRAINLINK OCR TEST 123/);
+  assert.match(installedOcrSmoke, /installed PDF OCR should recognize text inside a scanned page/);
+  assert.match(installedHtmlSmoke, /HTML_SCRIPT_CANARY/);
+  assert.match(installedHtmlSmoke, /HTML_HIDDEN_CANARY/);
+  assert.match(installedWindowsSmoke, /smoke-installed-html\.mjs/);
+  assert.match(installedWindowsSmoke, /OCR runtime could not read its local image fixture/);
   const windowsLauncher = await read('packaging/windows/BrainLink.vbs');
   assert.match(pkg.scripts['smoke:installed:win'], /smoke-installed-windows\.ps1/, 'Windows installed-app acceptance must have a repeatable command');
   assert.match(windowsInstaller, /BRAINLINK_SMOKE_TEST/, 'the test build must use an isolated Inno Setup identity');
@@ -46,6 +91,11 @@ test('every native installer bundles all production dependencies and portable Br
   assert.match(windowsInstaller, /^#define ProductStartupLauncher "BrainLink Background\.vbs"$/m, 'the production uninstaller must target the real startup launcher name');
   assert.match(windowsInstaller, /^#define ProductStartupLauncher "BrainLink QA Smoke Background\.vbs"$/m, 'the smoke installer must use its own startup launcher name');
   assert.match(installedWindowsSmoke, /TcpListener/, 'the installed-app smoke must use a port separate from a running BrainLink');
+  assert.match(installedWindowsSmoke, /assert-windows-stage-current\.ps1/, 'Windows install smoke must verify its complete staged source');
+  assert.match(upgradeWindowsSmoke, /assert-windows-stage-current\.ps1/, 'Windows upgrade smoke must verify its complete staged source');
+  assert.match(stageFreshnessCheck, /foreach \(\$Tree in @\('bin', 'src', 'ui', 'samples', 'skills'\)\)/, 'package freshness must cover every bundled source tree');
+  assert.match(stageFreshnessCheck, /Get-FileHash -LiteralPath \$SourceFile\.FullName/, 'package freshness must compare source and staged file hashes');
+  assert.match(stageFreshnessCheck, /The Windows package stage is stale/, 'a stale stage must fail before building an installer');
   assert.match(installedWindowsSmoke, /Join-Path \$TestRoot "BrainLink-QA-Smoke-Setup-\$Version\.exe"/, 'the smoke installer must live in its unique temporary directory');
   assert.match(installedWindowsSmoke, /if \(\$SkipCompile\) \{ \$ReusableInstaller \} else/, 'skip-compile mode must reuse the existing QA artifact');
   assert.match(installedWindowsSmoke, /Join-Path \$Root "dist\\BrainLink-QA-Smoke-Setup-\$Version\.exe"/, 'the reusable installer must keep the existing QA artifact path');
@@ -82,10 +132,23 @@ test('every native installer bundles all production dependencies and portable Br
   assert.match(nsisInstaller, /Delete "\$DESKTOP\\BrainLink\.lnk"/, 'NSIS uninstall must remove the shortcut it created');
 
   const macZipTest = await read('packaging/macos/test-zip.sh');
+  for (const fragment of [
+    'ui/destinations/find/ask.html', 'ui/destinations/review/proposals.html',
+    'ui/destinations/home/handoffs.html', 'src/setup-page.mjs',
+    'src/setup/routes/find.mjs', 'src/setup/routes/review.mjs', 'src/setup/routes/handoffs.mjs',
+  ]) assert.ok(macZipTest.includes(fragment), `macOS package smoke test must check the destination module ${fragment}`);
   assert.match(await read('packaging/macos/resources/welcome.html'), /<h2[^>]*>BrainLink<\/h2>/, 'macOS installer should use the customer-facing product name');
   assert.match(await read('packaging/macos/resources/license.txt'), /^BrainLink — Pre-release Use Notice/, 'macOS license page should match the customer-facing product name');
   assert.match(macZipTest, /app\/src\/update-manifest\.mjs/, 'the macOS zip package must include the update verifier');
   assert.match(macZipTest, /app\/node_modules\/yaml\/dist\/index\.js/, 'the macOS package smoke test must check a loadable YAML runtime');
+  assert.match(macZipTest, /app\/node_modules\/pdfjs-dist\/legacy\/build\/pdf\.mjs/, 'the macOS package smoke test must check the PDF parser');
+  assert.match(macZipTest, /app\/node_modules\/mammoth\/package\.json/, 'the macOS package smoke test must check the DOCX parser');
+  assert.match(macZipTest, /app\/src\/ingestion\/docx-worker\.mjs/, 'the macOS package smoke test must check the isolated DOCX worker');
+  assert.match(macZipTest, /app\/src\/ingestion\/office-worker\.mjs/, 'the macOS package smoke test must check the isolated Office worker');
+  assert.match(macZipTest, /app\/src\/ingestion\/html-worker\.mjs/, 'the macOS package smoke test must check the isolated HTML worker');
+  assert.match(macZipTest, /app\/node_modules\/parse5\/package\.json/, 'the macOS package smoke test must check the HTML parser');
+  assert.match(macZipTest, /app\/node_modules\/fflate\/package\.json/, 'the macOS package smoke test must check the Office ZIP dependency');
+  assert.match(macZipTest, /app\/src\/ingestion\/tessdata\/chi_tra\.traineddata\.gz/, 'the macOS package smoke test must check offline Traditional Chinese OCR data');
   assert.match(macZipTest, /app\/skills\/brainlink-session-closeout\/SKILL\.md/, 'the macOS package smoke test must check a shipped skill');
   assert.match(macZipTest, /app\/skills\/brainlink-graph-curation\/SKILL\.md/, 'the macOS package smoke test must check the graph-curation skill');
   assert.match(macZipTest, /app\/ui\/app\/test/, 'the macOS package smoke test must reject development UI tests');
@@ -127,6 +190,41 @@ test('every native installer bundles all production dependencies and portable Br
   assert.match(workflow, /test ! -e \/opt\/brainlink\/app\/ui\/app\/test/, 'Linux package smoke test must reject development UI tests');
   assert.match(workflow, /test ! -e "\$bundle\/app\/ui\/app\/test"/, 'Linux tarball smoke test must reject development UI tests');
   assert.match(workflow, /test ! -e "\$XDG_DATA_HOME\/brainlink"/, 'Linux CI must verify tarball uninstall removes the application only');
+});
+
+test('runtime dependency staging copies locked Office/OCR engines without bundling full language packages', async () => {
+  const stage = await mkdtemp(path.join(tmpdir(), 'brainlink-runtime-deps-'));
+  try {
+    const app = path.join(stage, 'app');
+    const modules = path.join(app, 'node_modules');
+    await mkdir(app, { recursive: true });
+    const child = spawnSync(process.execPath, ['scripts/stage-runtime-dependencies.mjs', modules], { cwd: ROOT, encoding: 'utf8', timeout: 20_000 });
+    assert.equal(child.status, 0, child.stderr || child.stdout || child.error);
+    for (const name of ['mammoth', 'jszip', 'fflate', 'pdfjs-dist', 'tesseract.js', 'tesseract.js-core', 'yaml']) await access(path.join(modules, name, 'package.json'));
+    await access(path.join(modules, 'parse5', 'package.json'));
+    await assert.rejects(access(path.join(modules, '@tesseract.js-data', 'eng', 'package.json')));
+    const importCheck = spawnSync(process.execPath, ['--input-type=module', '-e', "const mammoth = await import('mammoth'); const pdf = await import('pdfjs-dist/legacy/build/pdf.mjs'); const zip = await import('fflate'); const ocr = await import('tesseract.js'); const canvas = await import('@napi-rs/canvas'); if (typeof mammoth.default.extractRawText !== 'function' || typeof pdf.getDocument !== 'function' || typeof zip.unzipSync !== 'function' || typeof ocr.createWorker !== 'function' || typeof canvas.createCanvas !== 'function') process.exit(2); canvas.createCanvas(2,2);"], {
+      cwd: app, encoding: 'utf8', timeout: 20_000,
+    });
+    assert.equal(importCheck.status, 0, importCheck.stderr || importCheck.stdout || importCheck.error);
+    const ingestion = path.join(app, 'src', 'ingestion');
+    await mkdir(ingestion, { recursive: true });
+    await cp(path.join(ROOT, 'src', 'app-home.mjs'), path.join(app, 'src', 'app-home.mjs'));
+    await cp(path.join(ROOT, 'src', 'ingestion', 'image-ocr.mjs'), path.join(ingestion, 'image-ocr.mjs'));
+    await cp(path.join(ROOT, 'src', 'ingestion', 'pdf-worker.mjs'), path.join(ingestion, 'pdf-worker.mjs'));
+    const data = path.join(ingestion, 'tessdata');
+    const stagedData = spawnSync(process.execPath, ['scripts/stage-ocr-data.mjs', data], { cwd: ROOT, encoding: 'utf8', timeout: 20_000 });
+    assert.equal(stagedData.status, 0, stagedData.stderr || stagedData.stdout || stagedData.error);
+    for (const lang of ['eng', 'por', 'chi_tra']) {
+      const bytes = await readFile(path.join(data, `${lang}.traineddata.gz`));
+      assert.ok(bytes.length > 100_000 && bytes.length < 4_000_000, `${lang} OCR language data stays size-bounded`);
+    }
+    const ocrCheck = spawnSync(process.execPath, ['scripts/smoke-installed-ocr.mjs', app,
+      ...['ocr-sample.png', 'ocr-portuguese.png', 'ocr-traditional-chinese.png'].map((file) => path.join(ROOT, 'test', 'fixtures', file))], {
+      cwd: ROOT, encoding: 'utf8', timeout: 60_000,
+    });
+    assert.equal(ocrCheck.status, 0, ocrCheck.stderr || ocrCheck.stdout || ocrCheck.error);
+  } finally { await rm(stage, { recursive: true, force: true }); }
 });
 
 test('the staged connector loads with the bundled YAML package outside the checkout', async () => {

@@ -21,6 +21,8 @@ const tmp = (p) => mkdtemp(path.join(tmpdir(), `brainlink-${p}-`));
 async function mcpWithHome(extraEnv = {}) {
   const home = await tmp('sess-mcp');
   const env = { BRAINLINK_HOME: home, HOME: home, BRAINLINK_AI_PLATFORM: 'Claude', BRAINLINK_SEMANTIC: '0', ...extraEnv };
+  // These fixtures exercise sharing after a deliberate local import opt-in.
+  if (extraEnv.HOME) await saveConfig({ version: CONFIG_SCHEMA_VERSION, vaults: [], sessions: { importHistory: true } }, path.join(home, 'config.json'));
   const ctx = createContext(normalize({}), { env });
   return { mcp: createMcp(ctx), ctx, env };
 }
@@ -121,6 +123,7 @@ test('Setup session imports stay inside its explicit home when HOME is not set',
   ].join('\n'));
   t.after(() => rm(home, { recursive: true, force: true }));
 
+  await saveConfig({ version: CONFIG_SCHEMA_VERSION, vaults: [], sessions: { importHistory: true } }, path.join(appHome, 'config.json'));
   const service = sessionsService({ BRAINLINK_HOME: appHome }, home);
   const result = await service.list({ include_private: true });
   assert.equal(result.sessions.length, 1);

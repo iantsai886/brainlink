@@ -1,0 +1,34 @@
+#!/bin/bash
+set -euo pipefail
+
+if [ "$#" -ne 2 ]; then
+  echo "Usage: install-cli-link <BrainLink command> <command link>" >&2
+  exit 2
+fi
+
+SOURCE="$1"
+LINK="$2"
+if [ ! -f "$SOURCE" ] || [ ! -x "$SOURCE" ]; then
+  echo "BrainLink command is missing or not executable: $SOURCE" >&2
+  exit 2
+fi
+if [ ! -d "$(dirname "$LINK")" ]; then
+  echo "Command link folder does not exist: $(dirname "$LINK")" >&2
+  exit 2
+fi
+
+if [ -L "$LINK" ]; then
+  if [ "$(readlink "$LINK")" = "$SOURCE" ]; then
+    exit 0
+  fi
+  echo "Refusing to replace an existing command link: $LINK" >&2
+  exit 1
+fi
+if [ -e "$LINK" ]; then
+  echo "Refusing to replace an existing file: $LINK" >&2
+  exit 1
+fi
+
+# ln without -f is intentional: it will fail safely if another process creates LINK after the
+# checks above.
+ln -s "$SOURCE" "$LINK"

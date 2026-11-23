@@ -1,45 +1,89 @@
-// 3D notes graph (Ian's RB7 feature 2): nodes/edges across every enabled, non-private vault, and
-// one note's detail (Markdown body, tags, backlinks, outlinks) for the side panel. Excluded
-// folders never reach the index at all (loadVault walks past .brainlinkignore, see src/core.mjs);
-// this module adds the one rule loadVault doesn't already enforce: private vaults and
-// frontmatter-flagged private notes are dropped before a single node is built.
+// 3D notes graph for the local Setup UI. Private vaults can be selected one at a time in this
+// local view, but are never combined with public vaults. Frontmatter-private notes and excluded
+// folders stay hidden in every view.
 import { createHash } from 'node:crypto';
-import { loadVault, summarize } from './core.mjs';
-import { linkGraph } from './graph.mjs';
-import { deriveTypedRelations, typedEntityMetadataMap, deriveProposedTypedRelations, deriveRejectedTypedRelations, discoverTypedRelationshipCandidates, discoverTypedRelationshipCandidatesForSources } from './typed-graph.mjs';
+import path from 'node:path';
+import { loadVaultGraph, summarize } from './core.mjs';
+import { deriveTypedRelations, typedEntityMetadataMap, typedEntityFields, deriveProposedTypedRelations, deriveRejectedTypedRelations, deriveWithdrawnTypedRelations, discoverTypedRelationshipCandidatesForSources } from './typed-graph.mjs';
+
+const GRAPH3D_LINK_LIMIT = 10_000;
 
 // n.private is already computed once, at index-build time, by core.mjs's isPrivateMeta — reusing
 // it here (rather than re-deriving private-ness from n.meta.private with a second, independent
 // regex) is what keeps this module in lockstep with every other private check in the codebase.
 const isPrivateNote = (n) => n.private;
 
-// Every enabled vault that isn't private, each with its own loaded index.
-async function visibleVaults(ctx, only) {
-  const names = (only ? [only] : ctx.enabled).filter((name) => ctx.enabled.includes(name) && !ctx.byName.get(name)?.private);
+// Public vaults can be combined. A private vault is visible only when the local caller explicitly
+// selects that one vault; it never joins the combined graph.
+async function visibleVaults(ctx, only, { includePrivateVault = false } = {}) {
+  const names = (only ? [only] : ctx.enabled).filter((name) => ctx.enabled.includes(name)
+    && (!ctx.byName.get(name)?.private || (includePrivateVault && only === name)));
   const out = [];
-  for (const name of names) out.push({ name, index: await loadVault(ctx, name) });
+  for (const name of names) out.push({ name, index: await loadVaultGraph(ctx, name) });
   return out;
 }
 
-export async function listGraphVaults(ctx) {
-  const vaults = await visibleVaults(ctx);
-  return { vaults: vaults.map(({ name, index }) => ({ name, notes: index.notes.filter((note) => !note.generated && !isPrivateNote(note)).length })) };
+export async function listGraphVaults(ctx, { includePrivateVaults = false } = {}) {
+  const names = ctx.enabled.filter((name) => includePrivateVaults || !ctx.byName.get(name)?.private);
+  const vaults = [];
+  for (const name of names) {
+    const isPrivateVault = Boolean(ctx.byName.get(name)?.private);
+    // Listing the picker must not read/index a private vault before the user selects it.
+    if (isPrivateVault) { vaults.push({ name, private: true, notes: null }); continue; }
+    // The picker needs vault names and privacy labels only. Counting notes here forced a full
+    // graph/index scan before the map request and made large or cloud-synced vaults time out.
+    // The loaded graph reports the visible note count after its privacy checks complete.
+    vaults.push({ name, private: false, notes: null });
+  }
+  // Opaque configuration revision lets the local UI reuse a public graph across vault
+  // switches while ensuring a changed role, grant, vault path, or private flag drops that cache.
+  const revisionData = {
+    vaults: names.map((name) => {
+      const vault = ctx.byName.get(name);
+      return { name, path: path.resolve(vault.path), private: Boolean(vault.private), read_first: vault.read_first || [] };
+    }),
+    agents: (ctx.agents || []).filter((agent) => names.includes(agent.vault)).map((agent) => ({
+      name: agent.name, vault: agent.vault, connect_notes: agent.connect_notes || [],
+      tail_notes: agent.tail_notes || [], close_target: agent.close_target || null,
+    })),
+    handoff: ctx.cfg?.handoff || null,
+    twinScope: ctx.twinScope || { mode: 'legacy' },
+  };
+  const revision = createHash('sha256').update(JSON.stringify(revisionData)).digest('hex');
+  return { vaults, revision };
 }
 
 // { nodes: [{id, title, vault, group, tags, degree}], links: [{source, target}], shown, total }
-export async function buildGraph3D(ctx, vaultName, { limit = 2000 } = {}) {
-  const vaults = await visibleVaults(ctx, vaultName);
+export async function buildGraph3D(ctx, vaultName, { limit = 2000, includePrivateVault = false } = {}) {
+  const vaults = await visibleVaults(ctx, vaultName, { includePrivateVault: includePrivateVault && Boolean(vaultName) });
   const nodes = [], keep = [], graphByVault = new Map();
+  let linkCount = 0, unlinked = 0;
   for (const { name, index } of vaults) {
     // Build every graph-derived structure from the caller-visible note set. Private and generated
     // notes must not affect entity-ID uniqueness, edge counts, ranking, or graph output.
-    const visible = index.notes.filter((note) => !note.generated && !isPrivateNote(note));
-    const plainEdges = linkGraph(visible).edges.map(([source, target]) => ({ source, target, kind: 'note_link' }));
-    const typedEdges = deriveTypedRelations(visible).map((edge) => ({ ...edge, kind: 'typed' }));
+    const visible = [], visibleIndex = new Map();
+    index.notes.forEach((note, originalIndex) => {
+      if (note.generated || isPrivateNote(note)) return;
+      visibleIndex.set(originalIndex, visible.length);
+      visible.push(note);
+    });
+    // loadVault() already builds and caches these graph structures. Rebuilding the resolver and
+    // reparsing every note here duplicated large amounts of work and memory on real vaults.
+    const plainEdges = (index.noteEdges || []).flatMap(([source, target]) => {
+      const from = visibleIndex.get(source), to = visibleIndex.get(target);
+      return from === undefined || to === undefined ? [] : [{ source: from, target: to, kind: 'note_link' }];
+    });
+    const typedRelations = index.typedRelations || (index.typedRelations = deriveTypedRelations(index.notes));
+    const typedEdges = typedRelations.flatMap((edge) => {
+      const source = visibleIndex.get(edge.source), target = visibleIndex.get(edge.target);
+      return source === undefined || target === undefined ? [] : [{ ...edge, source, target, kind: 'typed' }];
+    });
     const edges = [...plainEdges, ...typedEdges];
+    linkCount += new Set(edges.map((edge) => `${edge.source}>${edge.target}`)).size;
     const degree = new Array(visible.length).fill(0);
     for (const edge of edges) { degree[edge.source]++; degree[edge.target]++; }
-    const entityMetadata = typedEntityMetadataMap(visible);
+    unlinked += degree.filter((value) => value === 0).length;
+    const entityMetadata = index.entityMetadata || (index.entityMetadata = typedEntityMetadataMap(visible));
     graphByVault.set(name, { visible, edges, degree, entityMetadata });
     for (let i = 0; i < visible.length; i++) keep.push({ name, visibleIndex: i, note: visible[i], degree: degree[i], entityMetadata });
   }
@@ -51,7 +95,7 @@ export async function buildGraph3D(ctx, vaultName, { limit = 2000 } = {}) {
   shown.forEach((k, pIdx) => pos.set(`${k.name}::${k.visibleIndex}`, pIdx));
   for (const k of shown) {
     const n = k.note;
-    nodes.push({ id: pos.get(`${k.name}::${k.visibleIndex}`), title: n.title, path: n.rel, vault: k.name, group: n.rel.includes('/') ? n.rel.split('/')[0] : '', tags: [...n.tags], degree: k.degree, ...(k.entityMetadata.get(n) || {}) });
+    nodes.push({ id: pos.get(`${k.name}::${k.visibleIndex}`), title: n.title, path: n.rel, vault: k.name, group: n.rel.includes('/') ? n.rel.split('/')[0] : '', modified: n.mtime || 0, tags: [...n.tags], degree: k.degree, ...(k.entityMetadata.get(n) || {}) });
   }
   const links = [];
   const includedPairs = new Map();
@@ -68,11 +112,18 @@ export async function buildGraph3D(ctx, vaultName, { limit = 2000 } = {}) {
   for (const group of includedPairs.values()) {
     group.forEach((edge, parallelIndex) => links.push({ ...edge, parallel_index: parallelIndex, parallel_count: group.length }));
   }
-  return { vault: vaultName || null, nodes, links, shown: nodes.length, total };
+  // The force layout becomes unresponsive when a large vault sends every edge between the top
+  // 2,000 nodes to WebGL. Keep the most useful/high-degree links, including typed relations first.
+  if (links.length > GRAPH3D_LINK_LIMIT) {
+    const degreeById = new Map(nodes.map((node) => [node.id, node.degree]));
+    links.sort((a, b) => Number(b.kind === 'typed') - Number(a.kind === 'typed') ||
+      Math.max(degreeById.get(b.source) || 0, degreeById.get(b.target) || 0) - Math.max(degreeById.get(a.source) || 0, degreeById.get(a.target) || 0));
+    links.length = GRAPH3D_LINK_LIMIT;
+  }
+  return { vault: vaultName || null, nodes, links, shown: nodes.length, total, linkCount, unlinked };
 }
 
-// A bounded, review-only queue for the local Setup UI. visibleVaults() applies the same enabled
-// vault and whole-private-vault boundary as the graph before any proposal is counted or returned.
+// A bounded, review-only queue for public vaults in the local Setup UI.
 export async function listProposedTypedRelations(ctx, { limit = 100, vault, offset = 0 } = {}) {
   const vaults = (await visibleVaults(ctx, vault)).sort((a, b) => a.name.localeCompare(b.name));
   const max = Math.max(1, Math.min(500, Number(limit) || 100));
@@ -108,8 +159,11 @@ export async function discoverVaultRelationshipCandidates(ctx, { vault, offset =
       rows.push({ vault: name, path: note.rel, title: note.title, source, index });
     }
   }
+  // Filesystem enumeration order differs across platforms and can change between reads.
+  // Sort before paging and fingerprinting so a scan has stable, predictable pages.
+  rows.sort((a, b) => a.vault.localeCompare(b.vault, 'en') || a.path.localeCompare(b.path, 'en'));
   const fingerprint = createHash('sha256');
-  for (const row of rows) fingerprint.update(`${row.vault}\0${row.path}\0${row.index.notes[row.source].mtime}\0${row.index.notes[row.source].raw.length}\n`);
+  for (const row of rows) fingerprint.update(`${row.vault}\0${row.path}\0${createHash('sha256').update(row.index.notes[row.source].raw).digest('hex')}\n`);
   const currentScanId = fingerprint.digest('hex');
   if (offset > 0 && (typeof scanId !== 'string' || scanId !== currentScanId)) throw new Error('A vault changed during this scan. Start the scan again.');
   const page = rows.slice(offset, offset + pageSize);
@@ -136,34 +190,53 @@ export async function discoverVaultRelationshipCandidates(ctx, { vault, offset =
 
 // One note's panel data: rendered-ready Markdown body, tags, backlinks and outlinks (titles +
 // ids matching the same vault's buildGraph3D() so a backlink click can focus that node).
-export async function noteDetail3D(ctx, vaultName, rel) {
+export async function noteDetail3D(ctx, vaultName, rel, { includePrivateVault = false } = {}) {
   const v = ctx.byName.get(vaultName);
   if (!v || !ctx.enabled.includes(vaultName)) throw new Error(`Unknown vault "${vaultName}".`);
-  if (v.private) throw new Error('This note is in a private vault and cannot be shown in the graph.');
-  const index = await loadVault(ctx, vaultName);
+  if (v.private && !includePrivateVault) throw new Error('This note is in a private vault and can only be shown in its local vault-only graph.');
+  // The 3D view uses this lightweight graph index already. Rebuilding the full search
+  // index here used to parse/chunk every note just to open one note from the graph.
+  const index = await loadVaultGraph(ctx, vaultName);
   const i = index.byRel.get(rel);
   if (i === undefined) throw new Error(`Note not found: ${rel}`);
   const n = index.notes[i];
   if (isPrivateNote(n)) throw new Error('This note is private and cannot be shown in the graph.');
   const visible = (j) => !index.notes[j].generated && !isPrivateNote(index.notes[j]);
-  const relationships = index.typedRelations.flatMap((edge) => {
-    if (edge.source === i && visible(edge.target)) return [{ direction: 'outgoing', relation_index: edge.relation_index, predicate: edge.predicate, evidence: edge.evidence, confidence: edge.confidence, note: summarize(index, edge.target) }];
-    if (edge.target === i && visible(edge.source)) return [{ direction: 'incoming', predicate: edge.predicate, evidence: edge.evidence, confidence: edge.confidence, note: summarize(index, edge.source) }];
+  const nodes = index.notes;
+  const typedRelations = index.typedRelations || (index.typedRelations = deriveTypedRelations(nodes));
+  const metadata = index.entityMetadata || (index.entityMetadata = typedEntityMetadataMap(nodes));
+  const summarizeNode = (j) => ({ title: nodes[j].title, path: nodes[j].rel, ...(metadata.get(nodes[j]) || {}) });
+  const relationships = typedRelations.flatMap((edge) => {
+    if (edge.source === i && visible(edge.target)) return [{ direction: 'outgoing', relation_index: edge.relation_index, target_id: index.notes[edge.target].meta.id, predicate: edge.predicate, evidence: edge.evidence, confidence: edge.confidence, note: summarizeNode(edge.target) }];
+    if (edge.target === i && visible(edge.source)) return [{ direction: 'incoming', predicate: edge.predicate, evidence: edge.evidence, confidence: edge.confidence, note: summarizeNode(edge.source) }];
     return [];
   });
-  const proposedRelationships = deriveProposedTypedRelations(index.notes).flatMap((edge) => {
-    if (edge.source !== i || !visible(edge.target)) return [];
-    return [{ relation_index: edge.relation_index, predicate: edge.predicate, evidence: edge.evidence, confidence: edge.confidence, note: summarize(index, edge.target) }];
+  const reviewRelations = index.reviewRelations || (index.reviewRelations = {
+    proposed: deriveProposedTypedRelations(nodes),
+    rejected: deriveRejectedTypedRelations(nodes),
+    withdrawn: deriveWithdrawnTypedRelations(nodes),
   });
-  const rejectedRelationships = deriveRejectedTypedRelations(index.notes).flatMap((edge) => {
+  const proposedRelationships = reviewRelations.proposed.filter((edge) => edge.source === i).flatMap((edge) => {
     if (edge.source !== i || !visible(edge.target)) return [];
-    return [{ relation_index: edge.relation_index, predicate: edge.predicate, evidence: edge.evidence, confidence: edge.confidence, note: summarize(index, edge.target) }];
+    return [{ relation_index: edge.relation_index, target_id: index.notes[edge.target].meta.id, predicate: edge.predicate, evidence: edge.evidence, confidence: edge.confidence, note: summarizeNode(edge.target) }];
   });
-  const discoveredRelationships = discoverTypedRelationshipCandidates(index.notes, i).map(({ target_index, ...candidate }) => ({ ...candidate, note: summarize(index, target_index) }));
+  const rejectedRelationships = reviewRelations.rejected.filter((edge) => edge.source === i).flatMap((edge) => {
+    if (edge.source !== i || !visible(edge.target)) return [];
+    return [{ relation_index: edge.relation_index, target_id: index.notes[edge.target].meta.id, predicate: edge.predicate, evidence: edge.evidence, confidence: edge.confidence, note: summarizeNode(edge.target) }];
+  });
+  const withdrawnRelationships = reviewRelations.withdrawn.filter((edge) => edge.source === i).flatMap((edge) => {
+    if (edge.source !== i || !visible(edge.target)) return [];
+    return [{ relation_index: edge.relation_index, target_id: index.notes[edge.target].meta.id, predicate: edge.predicate, evidence: edge.evidence, confidence: edge.confidence, note: summarizeNode(edge.target) }];
+  });
+  const discoveredRelationships = metadata.has(n) ? (index.discoveryCandidates ||= new Map()).get(i)
+    || discoverTypedRelationshipCandidatesForSources(nodes, [i]).get(i) || [] : [];
+  if (metadata.has(n) && !(index.discoveryCandidates instanceof Map)) index.discoveryCandidates = new Map();
+  if (metadata.has(n)) index.discoveryCandidates.set(i, discoveredRelationships);
+  const discoveredWithNotes = discoveredRelationships.map(({ target_index, ...candidate }) => ({ ...candidate, note: summarizeNode(target_index) }));
   return {
-    vault: vaultName, path: n.rel, title: n.title, body: n.body, tags: [...n.tags],
-    backlinks: [...index.backlinks[i]].filter(visible).map((j) => summarize(index, j)),
-    outlinks: [...index.outlinks[i]].filter(visible).map((j) => summarize(index, j)),
-    relationships, proposed_relationships: proposedRelationships, rejected_relationships: rejectedRelationships, discovered_relationships: discoveredRelationships,
+    vault: vaultName, path: n.rel, title: n.title, body: n.body, tags: [...n.tags], graph_record: typedEntityFields(n.raw),
+    backlinks: (index.noteEdges || []).filter(([, target]) => target === i).map(([source]) => source).filter(visible).map(summarizeNode),
+    outlinks: (index.noteEdges || []).filter(([source]) => source === i).map(([, target]) => target).filter(visible).map(summarizeNode),
+    relationships, proposed_relationships: proposedRelationships, rejected_relationships: rejectedRelationships, withdrawn_relationships: withdrawnRelationships, discovered_relationships: discoveredWithNotes,
   };
 }

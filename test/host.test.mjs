@@ -58,6 +58,7 @@ test('createFolderHost: services.sessions.list/read/setPrivate round-trip a logg
 test('explicit session refresh imports a newly ended Codex session without restarting BrainLink', async () => {
   const { dir, configFile, vaultDir } = scratch();
   const env = { BRAINLINK_HOME: path.join(dir, 'brainlink-data'), HOME: dir };
+  writeFileSync(configFile, JSON.stringify({ version: 2, vaults: [], sessions: { importHistory: true } }));
   const host = await createFolderHost({ name: 'Demo', folder: vaultDir, configFile, env, home: dir });
   assert.deepEqual((await host.services.sessions.list({ include_private: true })).sessions, []);
   const transcript = path.join(dir, '.codex', 'sessions', '2026', '10', '26', 'rollout-new-session.jsonl');

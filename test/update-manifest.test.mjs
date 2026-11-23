@@ -50,6 +50,22 @@ test('rejects a changed payload, wrong pinned key, or mismatched key ID', () => 
   assert.throws(() => verifyUpdateManifest(wrongId, publicPem, { currentVersion: '1.2.8', platform: 'win32', arch: 'x64', now: NOW }), /key ID/);
 });
 
+test('pinned keyring supports an overlap rotation and rejects unpinned or duplicate keys', () => {
+  const nextPair = generateKeyPairSync('ed25519');
+  const nextPrivate = nextPair.privateKey;
+  const nextPublicPem = nextPair.publicKey.export({ type: 'spki', format: 'pem' });
+  const nextKeyId = createHash('sha256').update(nextPair.publicKey.export({ type: 'spki', format: 'der' })).digest('hex').slice(0, 16);
+  const oldEnvelope = envelopeFor(payload());
+  const bytes = Buffer.from(JSON.stringify(payload()));
+  const nextEnvelope = { schema: 1, key_id: nextKeyId, payload: bytes.toString('base64url'), signature: sign(null, bytes, nextPrivate).toString('base64url') };
+  const options = { currentVersion: '1.2.8', platform: 'win32', arch: 'x64', now: NOW };
+  assert.equal(verifyUpdateManifest(oldEnvelope, [publicPem, nextPublicPem], options).version, '1.2.9');
+  assert.equal(verifyUpdateManifest(nextEnvelope, [publicPem, nextPublicPem], options).version, '1.2.9');
+  assert.throws(() => verifyUpdateManifest(nextEnvelope, [publicPem], options), /not in the pinned keyring/);
+  assert.throws(() => verifyUpdateManifest(nextEnvelope, [nextPublicPem, nextPublicPem], options), /duplicate/);
+  assert.throws(() => verifyUpdateManifest(nextEnvelope, Array(5).fill(nextPublicPem), options), /1 to 4/);
+});
+
 test('rejects downgrade, wrong channel, future publication time, and a missing platform package', () => {
   assert.throws(() => verify(payload({ version: '1.2.8' })), /not newer/);
   assert.throws(() => verify(payload({ channel: 'beta' })), /channel/);

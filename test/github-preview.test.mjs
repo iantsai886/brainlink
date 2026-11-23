@@ -334,8 +334,9 @@ test('failed local commit restores selected files and leaves the index clean', a
   git(f.repo, 'config', 'user.email', 'brainlink-test@example.invalid');
   git(f.repo, 'commit', '--allow-empty', '-m', 'fixture baseline');
   git(f.repo, 'config', 'user.useConfigOnly', 'true');
-  git(f.repo, 'config', '--unset', 'user.name');
-  git(f.repo, 'config', '--unset', 'user.email');
+  // Override any global Git identity, so this failure injection is host-independent.
+  git(f.repo, 'config', 'user.name', '');
+  git(f.repo, 'config', 'user.email', '');
   await assert.rejects(commitGitHubSelectedNotes({ ctx: f.ctx, repoPath: f.repo, vaultName: 'Company', paths: ['Public.md'] }), /Git could not complete/);
   assert.equal(await readFile(path.join(f.repo, 'BrainLink', 'notes', 'Public.md'), 'utf8').then(() => true, () => false), false);
   assert.equal(git(f.repo, 'status', '--porcelain'), '');
