@@ -97,7 +97,10 @@ test('Technical Reviewer privacy probe: every adversarial row passes', async (t)
   for (const tname of ['vault_recent', 'open_loops', 'brain_brief', 'vault_health', 'brainlink_guide']) {
     const r = await call(tname, { vault: 'Brain' });
     const txt = JSON.stringify(r);
-    rec(`S1-extra MCP ${tname}`, leaks(txt).length === 0 && !PRIVPATH.test(txt), `isError=${r.isError} leaks=[${leaks(txt)}] privatePathsNamed=${[...new Set(txt.match(/Secret\w*\.md|00 Home\/[^"\\]*/g) || [])].join(',') || 'none'}`);
+    // brainlink_guide intentionally lists owner-configured excluded_folders (e.g. "00 Home/") so clients can explain
+    // why excluded notes are unavailable, while still forbidding any private/excluded note path or content.
+    const pathPattern = tname === 'brainlink_guide' ? /Secret\w*\.md|00 Home\/[^"\\]+/ : PRIVPATH;
+    rec(`S1-extra MCP ${tname}`, leaks(txt).length === 0 && !pathPattern.test(txt), `isError=${r.isError} leaks=[${leaks(txt)}] privatePathsNamed=${[...new Set(txt.match(/Secret\w*\.md|00 Home\/[^"\\]*/g) || [])].join(',') || 'none'}`);
   }
 
   // Setup HTTP API
