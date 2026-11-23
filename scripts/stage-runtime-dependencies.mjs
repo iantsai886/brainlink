@@ -28,6 +28,13 @@ function findPackage(name, from) {
 const pending = Object.keys(packages['']?.dependencies || {})
   .filter((name) => !packages[`node_modules/${name}`]?.link)
   .map((name) => `node_modules/${name}`);
+for (const name of Object.keys(packages['']?.optionalDependencies || {})) {
+  const relative = `node_modules/${name}`;
+  if (packages[relative]?.link || !packages[relative]) continue;
+  try { await access(path.join(root, relative, 'package.json')); }
+  catch { continue; } // Optional Office/OCR dependencies may be omitted in minimal installs.
+  pending.push(relative);
+}
 const visited = new Set();
 while (pending.length) {
   const relative = pending.pop();

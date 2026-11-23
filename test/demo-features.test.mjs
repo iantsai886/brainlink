@@ -140,6 +140,7 @@ test('/api/ask and /api/note: no vault configured yet returns a clear error, not
 test('/api/client-health: names the BrainLink roles this AI can call and gives clear full-restart steps', async () => {
   const { home, env, s, api } = await withSampleVault('health', { agentName: 'Anna' });
   try {
+    await api('/api/mcp/profile', { tool_profile: 'core', enabled_groups: ['agents'] });
     const r = await (await api('/api/client-health', { client: 'cursor' })).json();
     assert.equal(r.ok, true, JSON.stringify(r));
     assert.equal(r.tool, 'brainlink_guide');
