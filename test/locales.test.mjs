@@ -1,12 +1,14 @@
 // Locale files (ui/locales/*.json): plain JSON, no i18n dependency. Every key BrainLink ships
 // must exist in every supported locale, or a user who picks zh-TW or pt ends up with blank UI text.
 import test from 'node:test';
+import { readSetupHtml } from './helpers/setup-html.mjs';
 import assert from 'node:assert/strict';
 import { readFile } from 'node:fs/promises';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 import { LOCALES } from '../src/config.mjs';
+import { presetGrantActions, presetActionAllowed } from '../ui/permissions.js';
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const LOCALES_DIR = path.join(ROOT, 'ui', 'locales');
@@ -32,7 +34,7 @@ test('every supported locale ships a JSON file with the exact same keys as Engli
 });
 
 test('Twin read-and-propose preset affects only chosen agents and vaults and does not save', async () => {
-  const html = await readFile(path.join(ROOT, 'ui', 'index.html'), 'utf8');
+  const html = await readSetupHtml();
   assert.match(html, /id="twin-read-propose-preset"/);
   const start = html.indexOf("$('twin-read-propose-preset').addEventListener");
   const end = html.indexOf("$('twin-create').onclick", start);
@@ -46,16 +48,60 @@ test('Twin read-and-propose preset affects only chosen agents and vaults and doe
   assert.doesNotMatch(handler, /api\(|\.click\(\)|connect/);
 });
 
-test('connection dialog offers read-and-propose only when the Twin grants it', async () => {
-  const html = await readFile(path.join(ROOT, 'ui', 'index.html'), 'utf8');
-  assert.match(html, /const canPropose = grant\.access === 'propose' && profile\.memory_policy\?\.semantic === true/);
-  assert.match(html, /data-preset-read-propose="\$\{esc\(grant\.name\)\}"/);
-  const start = html.indexOf("$('preset-vault-list').addEventListener('click'");
-  const end = html.indexOf("$('preset-vault-list').onchange", start);
-  assert.ok(start >= 0 && end > start, 'per-vault connection preset handler is present');
-  const handler = html.slice(start, end);
-  assert.match(handler, /\['search', 'read_note', 'propose_note'\]/);
-  assert.doesNotMatch(handler, /api\(|pendingPresetClient/);
+test('connection grant controls keep read, propose and write capabilities separate', async () => {
+  const catalogs = Object.fromEntries(await Promise.all(LOCALES.map(async (id) => [id, await loadLocale(id)])));
+  for (const id of LOCALES) {
+    assert.ok(catalogs[id]['connect.readNote'], `${id} explains read access`);
+    assert.ok(catalogs[id]['twinProfiles.operation.propose_note'], `${id} explains proposal access`);
+    assert.ok(catalogs[id]['twinProfiles.operation.write_note'], `${id} explains write access`);
+  }
+  assert.deepEqual(presetGrantActions({ name: 'Shared', access: 'propose' }), ['search', 'read_note', 'read_session', 'propose_note']);
+  assert.equal(presetActionAllowed({ action: 'write_note', access: 'propose', memoryPolicy: { semantic: true }, selectedMemory: { semantic: true } }), false);
+  assert.equal(presetActionAllowed({ action: 'write_note', access: 'write', memoryPolicy: { semantic: true }, selectedMemory: { semantic: true } }), true);
+});
+test('replay-miss teaching offers a preview-before-save flow in every locale', async () => {
+  const catalogs = Object.fromEntries(await Promise.all(LOCALES.map(async (id) => [id, await loadLocale(id)])));
+  const keys = ['replay.teach', 'replay.teachHeading', 'replay.teachAnswer', 'replay.teachFolderHint', 'replay.teachPreview', 'replay.teachConfirm', 'replay.teachFound'];
+  for (const id of LOCALES) for (const key of keys) assert.ok(catalogs[id][key], `${id} defines ${key}`);
+  const html = await readSetupHtml();
+  assert.match(html, /data-teach-miss=/, 'each unanswered miss can open Teach it');
+  assert.match(html, /POST', '\/api\/replay-misses\/teach'/, 'saving uses the reviewed local Setup endpoint');
+  assert.match(html, /replay-teach-preview-button/);
+  assert.match(html, /replay-teach-confirm/);
+});
+
+test('decision review actions are localized and show append/new-note previews before confirmation', async () => {
+  const catalogs = Object.fromEntries(await Promise.all(LOCALES.map(async (id) => [id, await loadLocale(id)])));
+  const keys = ['decisionReviews.title', 'decisionReviews.hint', 'decisionReviews.empty', 'decisionReviews.stands', 'decisionReviews.changed', 'decisionReviews.retire', 'decisionReviews.confirm'];
+  for (const id of LOCALES) for (const key of keys) assert.ok(catalogs[id][key], `${id} defines ${key}`);
+  const html = await readSetupHtml();
+  assert.match(html, /id="decision-reviews-panel"/);
+  assert.match(html, /decision-reviews\/preview/);
+  assert.match(html, /decision-reviews\/confirm/);
+  assert.match(html, /data-decision-preview/);
+});
+
+test('conflict review is localized and queues supersession for owner approval', async () => {
+  const catalogs = Object.fromEntries(await Promise.all(LOCALES.map(async (id) => [id, await loadLocale(id)])));
+  const keys = ['conflicts.title', 'conflicts.hint', 'conflicts.aStands', 'conflicts.bStands', 'conflicts.both', 'conflicts.dismiss', 'conflicts.confirm', 'conflicts.loadMore'];
+  for (const id of LOCALES) for (const key of keys) assert.ok(catalogs[id][key], `${id} defines ${key}`);
+  const html = await readSetupHtml();
+  assert.match(html, /id="conflicts-panel"/);
+  assert.match(html, /conflicts\/preview/);
+  assert.match(html, /conflicts\/confirm/);
+  assert.match(html, /data-conflicts-more/);
+});
+
+test('on-demand tidy review is localized and previews append-only changes before confirmation', async () => {
+  const catalogs = Object.fromEntries(await Promise.all(LOCALES.map(async (id) => [id, await loadLocale(id)])));
+  const keys = ['tidy.title', 'tidy.hint', 'tidy.generate', 'tidy.previewApply', 'tidy.previewDismiss', 'tidy.confirm', 'tidy.loadMore'];
+  for (const id of LOCALES) for (const key of keys) assert.ok(catalogs[id][key], `${id} defines ${key}`);
+  const html = await readSetupHtml();
+  assert.match(html, /id="tidy-panel"/);
+  assert.match(html, /tidy\/apply-preview/);
+  assert.match(html, /tidy\/apply-confirm/);
+  assert.match(html, /tidy\/dismiss-preview/);
+  assert.match(html, /data-tidy-select/);
 });
 
 test('connection wording distinguishes configured settings from an AI app that loaded them', async () => {

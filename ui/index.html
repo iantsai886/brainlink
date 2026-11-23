@@ -100,6 +100,8 @@ ol.todo li { padding-left: 4px; }
 .day-label:first-child { margin-top: 0; }
 .answer-card { display: grid; gap: 10px; }
 .answer-text { font-size: 15px; line-height: 1.6; margin: 0; }
+.ask-sources { list-style: none; margin: 0; padding: 0; display: grid; gap: 6px; font-size: 13px; }
+.pill.ask-old { background: var(--warn-soft); color: var(--warn); border-color: transparent; }
 .error-box { background: var(--bad); color: #fff; border-radius: 8px; padding: 10px 12px; font-size: 14px; }
 .skeleton { color: var(--muted); font-size: 14px; }
 .modal-overlay { position: fixed; inset: 0; background: rgba(0,0,0,.45); display: grid; place-items: center; z-index: 80; padding: 24px; }
@@ -112,6 +114,29 @@ ol.todo li { padding-left: 4px; }
 #main-nav { position: sticky; top: 0; z-index: 40; max-width: var(--content-width); margin: 0 auto; padding: 8px 20px; display: flex; gap: 6px; overflow-x: auto; background: var(--bg); border-bottom: 1px solid var(--line); scrollbar-width: none; }
 #main-nav::-webkit-scrollbar { display: none; }
 #main-nav[hidden] { display: none; }
+#main-nav a[aria-current="page"] { color: var(--accent); border-color: var(--line); background: var(--panel); font-weight: 600; }
+/* Five destinations: once setup is done, only the chosen group's sections are shown. */
+body[data-nav-group="home"] [data-nav-group]:not([data-nav-group="home"]),
+body[data-nav-group="find"] [data-nav-group]:not([data-nav-group="find"]),
+body[data-nav-group="review"] [data-nav-group]:not([data-nav-group="review"]),
+body[data-nav-group="access"] [data-nav-group]:not([data-nav-group="access"]),
+body[data-nav-group="system"] [data-nav-group]:not([data-nav-group="system"]),
+body[data-nav-group="home"] #settings, body[data-nav-group="find"] #settings { display: none !important; }
+body[data-nav-group] #settings > summary { display: none; }
+/* Progressive 3-step Simple mode (default): hide advanced tabs and power panels until opted in. */
+body[data-ui-mode="simple"] [data-advanced-panel="true"],
+body[data-ui-mode="simple"] #main-nav a[data-nav-group-link="review"],
+body[data-ui-mode="simple"] #main-nav a[data-nav-group-link="system"] { display: none !important; }
+#advanced-mode-toggle { margin-left: auto; flex: none; font-size: 12px; padding: 4px 10px; border-radius: 999px; border: 1px solid var(--line); background: var(--panel); color: var(--muted); cursor: pointer; white-space: nowrap; }
+#advanced-mode-toggle[aria-pressed="true"] { color: var(--accent); border-color: var(--accent); font-weight: 600; }
+/* Inside a destination, settings sections fold to their title and one-line hint. */
+body[data-nav-group] section[data-collapsed] > h2 { cursor: pointer; }
+body[data-nav-group] section[data-collapsed] > h2::after { content: "▾"; margin-left: auto; color: var(--muted); font-size: 13px; }
+body[data-nav-group] section[data-collapsed="true"] > h2::after { content: "▸"; }
+body[data-nav-group] section[data-collapsed] > h2:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; border-radius: 4px; }
+body[data-nav-group] section[data-collapsed="true"] > :not(h2):not(.hint) { display: none !important; }
+body[data-nav-group="review"] #proposal-review-panel { order: -1; }
+@media (max-width: 420px) { #main-nav { padding: 8px 10px; gap: 2px; } #main-nav a { padding: 5px 8px; } }
 #rsi-panel, #agents-panel, #memory-review-panel, #proposal-review-panel, #brain-panel, #sessions-panel, #handoffs-panel { display: block; }
 #rsi-panel[hidden], #agents-panel[hidden], #memory-review-panel[hidden], #proposal-review-panel[hidden], #brain-panel[hidden], #sessions-panel[hidden], #handoffs-panel[hidden] { display: none; }
 #main-nav a { flex: none; border: 1px solid transparent; border-radius: 999px; padding: 5px 11px; color: var(--muted); font-size: 13px; text-decoration: none; white-space: nowrap; }
@@ -133,17 +158,12 @@ main #ready, main #ask-panel, main #brain-panel, main #sessions-panel, main #s-c
 <body>
 <header><h1>BrainLink</h1><span id="app-version" class="pill" aria-label="BrainLink version"></span><select id="lang" aria-label="Language" style="margin-left:auto"></select><button class="link" id="done" data-i18n="header.done"></button></header>
 <nav id="main-nav" aria-label="BrainLink sections" hidden>
-  <a href="#ready" data-main-nav="ready" data-i18n="nav.home"></a>
-  <a href="#ask-panel" data-main-nav="ask-panel" data-i18n="nav.ask"></a>
-  <a href="#brain-panel" data-main-nav="brain-panel" data-i18n="nav.notes"></a>
-  <a href="#memory-review-panel" data-main-nav="memory-review-panel" data-i18n="memoryReview.title"></a>
-  <a href="#proposal-review-panel" data-main-nav="proposal-review-panel" data-i18n="proposals.title"></a>
-  <a href="#sessions-panel" data-main-nav="sessions-panel" data-i18n="nav.sessions"></a>
-  <a href="#s-ingestion" data-main-nav="s-ingestion" data-i18n="nav.sources"></a>
-  <a href="#s-connect" data-main-nav="s-connect" data-i18n="nav.connect"></a>
-  <a href="#s-backup" data-main-nav="s-backup" data-i18n="nav.backup"></a>
-  <a href="#rsi-panel" data-main-nav="rsi-panel" data-i18n="nav.improve"></a>
-  <a href="#help-panel" data-main-nav="help-panel" data-i18n="nav.help"></a>
+  <a href="#ready" data-nav-group-link="home" data-i18n="nav.home"></a>
+  <a href="#ask-panel" data-nav-group-link="find" data-i18n="nav.find"></a>
+  <a href="#proposal-review-panel" data-nav-group-link="review" data-i18n="nav.review"></a>
+  <a href="#s-connect" data-nav-group-link="access" data-i18n="nav.access"></a>
+  <a href="#s-backup" data-nav-group-link="system" data-i18n="nav.system"></a>
+  <button type="button" id="advanced-mode-toggle" aria-pressed="false" data-i18n="nav.advancedOff"></button>
 </nav>
 <div id="boot-loading" role="status" data-i18n="boot.loading"></div>
 <div id="boot-error" hidden role="alert"><b data-i18n="boot.errorTitle"></b> <span id="boot-error-msg"></span> <button id="boot-retry" data-i18n="boot.retry"></button></div>
@@ -186,12 +206,7 @@ main #ready, main #ask-panel, main #brain-panel, main #sessions-panel, main #s-c
     </div>
   </section>
 
-  <section id="ask-panel" hidden>
-    <h2 data-i18n="ask.title"></h2>
-    <p class="hint" data-i18n="ask.hint"></p>
-    <div class="row"><input id="ask-q" data-i18n-placeholder="ask.placeholder" style="flex:1;min-width:240px"><button class="primary" id="ask-go" data-i18n="ask.go"></button></div>
-    <div id="ask-out" style="margin-top:14px"></div>
-  </section>
+  <!-- brainlink-include:find/ask.html -->
 
   <section class="big" id="ready" hidden>
     <h2 id="ready-title"></h2>
@@ -201,46 +216,60 @@ main #ready, main #ask-panel, main #brain-panel, main #sessions-panel, main #s-c
       <li><span data-i18n="ready.sayConnectIntro"></span> <span class="say" id="say-connect">Connect to my brain</span></li>
       <li><span data-i18n="ready.sayCloseIntro"></span> <span class="say" id="say-close">Close loop</span> <span data-i18n="ready.sayCloseSuffix"></span></li>
     </ol>
+    <div id="ready-roles" hidden style="margin-top:14px"><p class="muted" data-i18n="ready.otherRoles" style="margin:0 0 4px"></p><ul id="ready-roles-list" class="ask-sources"></ul></div>
     <div class="row" style="margin-top:18px" id="more-apps"></div>
     <table style="margin-top:18px"><thead><tr><th data-i18n="ready.colWhen"></th><th data-i18n="ready.colAI"></th><th data-i18n="ready.colTool"></th><th data-i18n="ready.colResult"></th></tr></thead><tbody id="activity"></tbody></table>
-  </section>
-
-  <details class="card" id="brain-panel" hidden>
-    <summary data-i18n="brain.title"></summary>
-    <p class="hint" data-i18n="brain.hint"></p>
-    <div class="brain">
-      <div><div id="notes3d-root" aria-label="Map of notes and links"></div></div>
-      <div>
-        <div class="stats"><div class="stat"><b id="st-notes">–</b><span data-i18n="brain.notes"></span></div><div class="stat"><b id="st-links">–</b><span data-i18n="brain.links"></span></div><div class="stat"><b id="st-orphans">–</b><span data-i18n="brain.orphans"></span></div></div>
-        <div class="phrases"><b style="font-size:13px;color:var(--muted)" data-i18n="brain.phrasesTitle"></b>
-          <span data-i18n="brain.phrase1"></span>
-          <span data-i18n="brain.phrase2"></span>
-          <span data-i18n="brain.phrase3"></span>
-          <span data-i18n="brain.phrase4"></span>
-          <span data-i18n="brain.phrase5"></span>
+    <div class="card" id="selftest-card" style="margin-top:18px">
+      <b data-i18n="selftest.title"></b>
+      <p class="muted" data-i18n="selftest.hint"></p>
+      <div class="row"><button type="button" id="selftest-run" data-i18n="selftest.run"></button><span id="selftest-summary" class="muted" role="status" aria-live="polite"></span></div>
+      <ul id="selftest-out" class="ask-sources" style="margin-top:10px"></ul>
+    </div>
+    <div class="card" id="retrieval-use-card" style="margin-top:10px">
+      <b data-i18n="retrievalUse.title"></b>
+      <p class="muted" data-i18n="retrievalUse.hint"></p>
+      <div class="row"><button type="button" id="retrieval-use-run" data-i18n="retrievalUse.run"></button><span id="retrieval-use-summary" class="muted" role="status" aria-live="polite"></span></div>
+      <ul id="retrieval-use-out" class="ask-sources" style="margin-top:10px"></ul>
+    </div>
+    <div class="card" id="replay-card">
+      <b data-i18n="replay.title"></b>
+      <p class="muted" data-i18n="replay.hint"></p>
+      <label class="muted" style="display:flex;gap:8px;align-items:center;justify-content:flex-start"><input type="checkbox" id="replay-enabled" style="width:auto;flex:none"><span data-i18n="replay.enable"></span></label>
+      <div class="row"><button type="button" id="replay-run" data-i18n="replay.run"></button><button type="button" class="link" id="replay-clear" data-i18n="replay.clear"></button><span id="replay-summary" class="muted" role="status" aria-live="polite"></span></div>
+      <ul id="replay-out" class="ask-sources" style="margin-top:10px"></ul>
+      <div id="replay-teach" class="card" hidden style="margin-top:12px">
+        <b data-i18n="replay.teachHeading"></b>
+        <p id="replay-teach-question" class="muted"></p>
+        <label><span data-i18n="replay.teachTitle"></span><input id="replay-teach-title" maxlength="120"></label>
+        <label><span data-i18n="replay.teachAnswer"></span><textarea id="replay-teach-answer" rows="6" maxlength="24000"></textarea></label>
+        <label><span data-i18n="replay.teachFolder"></span><input id="replay-teach-folder" autocomplete="off"></label>
+        <p class="muted" data-i18n="replay.teachFolderHint"></p>
+        <div id="replay-teach-preview" hidden>
+          <p><b data-i18n="replay.teachDestination"></b> <span id="replay-teach-destination"></span></p>
+          <p id="replay-teach-links" class="muted"></p>
+          <pre id="replay-teach-markdown" style="white-space:pre-wrap;max-height:300px;overflow:auto"></pre>
         </div>
-        <p class="smart muted" id="smart"></p>
+        <div class="row">
+          <button type="button" id="replay-teach-preview-button" data-i18n="replay.teachPreview"></button>
+          <button type="button" id="replay-teach-confirm" data-i18n="replay.teachConfirm" hidden></button>
+          <button type="button" class="link" id="replay-teach-cancel" data-i18n="replay.teachCancel"></button>
+          <span id="replay-teach-status" class="muted" role="status" aria-live="polite"></span>
+        </div>
       </div>
     </div>
-  </details>
+  </section>
 
-  <details class="card" id="memory-review-panel" hidden>
-    <summary data-i18n="memoryReview.title"></summary>
-    <p class="hint" data-i18n="memoryReview.hint"></p>
-    <label><span data-i18n="memoryReview.vault"></span><select id="memory-review-vault"></select></label>
-    <div class="row"><button id="memory-review-open" type="button" data-i18n="memoryReview.open"></button></div>
-    <div id="memory-review-editor" hidden>
-      <p class="muted" data-i18n="memoryReview.format"></p>
-      <label><span data-i18n="memoryReview.note"></span><textarea id="memory-review-text" rows="12" style="width:100%;font-family:var(--mono)"></textarea></label>
-      <div class="row"><button id="memory-review-save" type="button" data-i18n="memoryReview.save"></button><span id="memory-review-status" role="status"></span></div>
-    </div>
-  </details>
+  <!-- brainlink-include:find/brain.html -->
 
-  <details class="card" id="proposal-review-panel" hidden>
-    <summary data-i18n="proposals.title"></summary>
-    <p class="hint" data-i18n="proposals.hint"></p>
-    <div id="proposal-review-list" class="cards"></div>
-  </details>
+  <!-- brainlink-include:review/memory.html -->
+
+  <!-- brainlink-include:review/proposals.html -->
+
+  <!-- brainlink-include:review/decisions.html -->
+
+  <!-- brainlink-include:review/conflicts.html -->
+
+  <!-- brainlink-include:review/tidy.html -->
 
   <details class="card" id="twin-profiles-panel" style="margin-top:12px" hidden>
     <summary data-i18n="twinProfiles.title"></summary>
@@ -276,57 +305,9 @@ main #ready, main #ask-panel, main #brain-panel, main #sessions-panel, main #s-c
     <div id="agents-root"></div>
   </details>
 
-  <details class="card" id="sessions-panel" hidden>
-    <summary data-i18n="sessions.title"></summary>
-    <p class="hint" id="sessions-hint"></p>
-    <div class="notice" id="sessions-private-notice" hidden style="margin-bottom:10px">
-      <span data-i18n="sessions.privateNotice"></span>
-      <button class="link" id="sessions-private-notice-btn" data-i18n="sessions.privateNoticeBtn"></button>
-    </div>
-    <div class="card" style="margin-bottom:10px">
-      <b data-i18n="sessions.shareTitle"></b>
-      <label class="muted" style="display:flex;flex-direction:row;gap:6px;align-items:center;margin-top:6px"><input type="checkbox" id="sess-import-history" style="width:auto"><span data-i18n="sessions.importHistoryLabel"></span></label>
-      <label class="muted" style="display:flex;flex-direction:row;gap:6px;align-items:center;margin-top:6px"><input type="checkbox" id="sess-share-summaries" style="width:auto"><span data-i18n="sessions.shareSummariesLabel"></span></label>
-      <label class="muted" style="display:flex;flex-direction:row;gap:6px;align-items:center;margin-top:6px"><input type="checkbox" id="sess-share-full" style="width:auto"><span data-i18n="sessions.shareFullTextLabel"></span></label>
-    </div>
-    <div class="card" style="margin-bottom:10px">
-      <b data-i18n="sessions.hermesProfileTitle"></b>
-      <p class="muted" data-i18n="sessions.hermesProfileHint"></p>
-      <p class="mono muted" id="sessions-hermes-profile-path"></p>
-      <div class="row"><button class="secondary" id="sessions-hermes-profile-choose" data-i18n="sessions.hermesProfileChoose"></button><button class="link" id="sessions-hermes-profile-default" data-i18n="sessions.hermesProfileDefault"></button></div>
-      <p class="muted" data-i18n="sessions.hermesProfileHistoryNote"></p>
-    </div>
-    <div class="card" style="margin-bottom:10px">
-      <b data-i18n="sessions.localSummaryTitle"></b>
-      <p class="muted" data-i18n="sessions.localSummaryHint"></p>
-      <label class="muted" style="display:flex;flex-direction:row;gap:6px;align-items:center;margin-top:6px"><input type="checkbox" id="sess-local-summary-enabled" style="width:auto"><span data-i18n="sessions.localSummaryEnable"></span></label>
-      <label class="muted" style="display:flex;flex-direction:row;gap:6px;align-items:center;margin-top:6px"><input type="checkbox" id="sess-local-summary-auto" style="width:auto"><span data-i18n="sessions.localSummaryAuto"></span></label>
-      <label class="muted" style="display:flex;flex-direction:row;gap:6px;align-items:center;margin-top:6px"><input type="checkbox" id="sess-local-summary-auto-file" style="width:auto"><span data-i18n="sessions.localSummaryAutoFile"></span></label>
-      <p class="muted" data-i18n="sessions.localSummaryAutoFileHint"></p>
-      <p class="muted" data-i18n="sessions.localSummarySetupGuide"></p>
-      <div class="row" style="margin-top:6px"><label><span data-i18n="sessions.localSummaryModel"></span><input id="sess-local-summary-model" list="sess-local-summary-model-options" maxlength="160" placeholder="qwen2.5:3b"><datalist id="sess-local-summary-model-options"></datalist></label><button class="secondary" id="sess-local-summary-find" data-i18n="sessions.localSummaryFind"></button><button class="secondary" id="sess-local-summary-check-vision" data-i18n="sessions.localSummaryCheckVision"></button><button class="secondary" id="sess-local-summary-save" data-i18n="sessions.localSummarySave"></button></div>
-      <p id="sess-local-summary-connection-status" class="muted" role="status" aria-live="polite"></p>
-      <p><a href="https://ollama.com/download" target="_blank" rel="noopener noreferrer" data-i18n="sessions.localSummaryDownload"></a></p>
-      <p id="sess-local-summary-vision-status" class="muted" role="status" aria-live="polite"></p>
-    </div>
-    <div class="row" style="margin-bottom:10px"><label class="muted" style="display:flex;flex-direction:row;gap:6px;align-items:center"><input type="checkbox" id="sess-private" style="width:auto"><span data-i18n="sessions.showPrivate"></span></label></div>
-    <div id="session-hook-settings" class="cards"></div>
-    <div id="session-end-cues" class="cards" aria-live="polite"></div>
-    <details class="card" style="margin-bottom:10px"><summary data-i18n="sessions.findFiled"></summary>
-      <p class="muted" data-i18n="sessions.findFiledHint"></p>
-      <div class="row"><label><span data-i18n="sessions.destination"></span><select id="filed-summary-vault"></select></label><button class="secondary" data-filed-list="1" data-i18n="sessions.searchFiled"></button></div>
-      <div id="filed-summaries-list" class="cards" aria-live="polite"></div>
-    </details>
-    <div id="filed-summary-editor" class="cards" style="margin-bottom:10px"></div>
-    <div id="sessions-list" class="cards"></div>
-    <div id="session-detail" style="margin-top:12px"></div>
-  </details>
+  <!-- brainlink-include:review/sessions.html -->
 
-  <details class="card" id="handoffs-panel" hidden>
-    <summary data-i18n="handoffs.title"></summary>
-    <p class="hint" data-i18n="handoffs.hint"></p>
-    <div id="handoffs-list" class="cards"></div>
-  </details>
+  <!-- brainlink-include:home/handoffs.html -->
 
   <section class="card" id="help-panel" aria-labelledby="help-title">
     <h2 id="help-title" data-i18n="help.title"></h2>
@@ -446,6 +427,17 @@ main #ready, main #ask-panel, main #brain-panel, main #sessions-panel, main #s-c
           <label><span data-i18n="vault.folderLabel"></span><input id="v-path" class="mono"></label>
           <label><span data-i18n="vault.nameLabel"></span><input id="v-name"></label>
         </div>
+        <div class="row" style="margin-top:8px"><button type="button" id="v-inspect" data-i18n="vault.inspectExisting"></button><span id="v-inspect-status" class="muted" role="status"></span></div>
+        <div id="v-adopt-options" class="card" hidden>
+          <p class="hint" data-i18n="vault.adoptHint"></p>
+          <div class="grid2"><label><span data-i18n="vault.intakeFolder"></span><select id="v-intake-folder"></select><small data-i18n="vault.intakeFolderHint"></small></label><label><span data-i18n="vault.mailboxFolder"></span><select id="v-mailbox-folder"></select><small data-i18n="vault.mailboxFolderHint"></small></label></div>
+          <label><span data-i18n="vault.ruleNotes"></span><select id="v-read-first" multiple size="5"></select></label>
+          <label><span data-i18n="vault.roleNotes"></span><select id="v-role-notes" multiple size="5"></select></label>
+          <label><span data-i18n="vault.closeTarget"></span><select id="v-close-target"></select></label>
+          <label id="v-move-mailbox-wrap" class="muted"><input type="checkbox" id="v-move-mailbox" style="width:auto"> <span data-i18n="vault.moveMailbox"></span></label>
+          <div class="row"><button type="button" id="v-preview-config" data-i18n="vault.previewConfig"></button><span id="v-adopt-warning" class="warning" role="alert" hidden></span></div>
+          <pre id="v-adopt-preview" class="mono" hidden style="white-space:pre-wrap;max-height:320px;overflow:auto"></pre>
+        </div>
         <div class="grid2" style="margin-top:10px">
           <label><span data-i18n="vault.driveFolderId"></span><input id="v-drive-id" class="mono" data-i18n-placeholder="vault.driveFolderIdPlaceholder"></label>
           <label><span data-i18n="vault.driveParentId"></span><input id="v-drive-parent-id" class="mono" data-i18n-placeholder="vault.driveParentIdPlaceholder"></label>
@@ -488,6 +480,20 @@ main #ready, main #ask-panel, main #brain-panel, main #sessions-panel, main #s-c
       <div class="row"><button id="http-token" data-i18n="connect.createToken"></button></div>
       <div id="http-out" class="mono" style="margin-top:8px"></div>
     </details>
+  </section>
+
+  <section id="s-mcp-profile">
+    <h2 data-i18n="mcpProfile.title"></h2>
+    <p class="hint" data-i18n="mcpProfile.hint"></p>
+    <div class="row" style="gap:14px;flex-wrap:wrap;margin-top:8px">
+      <label class="muted" style="display:flex;flex-direction:row;gap:6px;align-items:center"><input type="radio" name="mcp-tool-profile" id="mcp-profile-core" value="core" style="width:auto"><span data-i18n="mcpProfile.coreLabel"></span></label>
+      <label class="muted" style="display:flex;flex-direction:row;gap:6px;align-items:center"><input type="radio" name="mcp-tool-profile" id="mcp-profile-full" value="full" style="width:auto"><span data-i18n="mcpProfile.fullLabel"></span></label>
+    </div>
+    <div id="mcp-groups-row" style="margin-top:10px">
+      <p class="muted" style="font-size:13px;margin:0 0 6px" data-i18n="mcpProfile.groupsHint"></p>
+      <div id="mcp-groups-list" class="row" style="gap:10px;flex-wrap:wrap"></div>
+    </div>
+    <div class="row" style="margin-top:10px"><button type="button" id="mcp-profile-save" data-i18n="mcpProfile.save"></button><span id="mcp-profile-status" class="muted" role="status"></span></div>
   </section>
 
   <section id="s-test">
@@ -573,34 +579,7 @@ main #ready, main #ask-panel, main #brain-panel, main #sessions-panel, main #s-c
     </details>
   </section>
 
-  <section id="s-ingestion">
-    <h2 data-i18n="ingestion.title"></h2>
-    <p class="hint" data-i18n="ingestion.hint"></p>
-    <p id="ingestion-startup-warning" class="notice" role="status" hidden><span data-i18n="ingestion.startupWarning"></span> <button type="button" id="ingestion-enable-startup" data-i18n="ingestion.startupEnable"></button> <a href="#s-background" data-main-nav="s-background" data-i18n="ingestion.startupLink"></a></p>
-    <label class="muted" style="display:flex;flex-direction:row;gap:6px;align-items:center"><input type="checkbox" id="ingestion-enabled" style="width:auto"><span data-i18n="ingestion.enabled"></span></label>
-    <label class="muted" style="display:flex;flex-direction:row;gap:6px;align-items:center;margin-top:6px"><input type="checkbox" id="ingestion-auto-drafts" style="width:auto"><span data-i18n="ingestion.autoDrafts"></span></label>
-    <p class="muted" data-i18n="ingestion.autoDraftsHint"></p>
-    <p id="ingestion-model-setup" class="muted" role="status" hidden><span data-i18n="ingestion.modelSetup"></span> <a href="#sessions-panel" data-main-nav="sessions-panel" data-i18n="ingestion.modelSetupLink"></a></p>
-    <label class="muted" style="display:flex;flex-direction:row;gap:6px;align-items:center;margin-top:6px"><input type="checkbox" id="ingestion-auto-file" style="width:auto"><span data-i18n="ingestion.autoFile"></span></label>
-    <p class="muted" data-i18n="ingestion.autoFileHint"></p>
-    <div class="grid2" style="margin-top:10px">
-      <label><span data-i18n="ingestion.vault"></span><select id="ingestion-vault"></select></label>
-      <label><span data-i18n="ingestion.folder"></span><select id="ingestion-folder"></select></label>
-      <label><span data-i18n="ingestion.mode"></span><select id="ingestion-mode"><option value="daily" data-i18n="ingestion.modeDaily"></option><option value="watch" data-i18n="ingestion.modeWatch"></option></select></label>
-      <label id="ingestion-time-wrap"><span data-i18n="ingestion.time"></span><input id="ingestion-time" type="time" value="02:00"></label>
-      <label id="ingestion-interval-wrap" hidden><span data-i18n="ingestion.interval"></span><select id="ingestion-interval"><option value="1">1</option><option value="5">5</option><option value="15">15</option><option value="30">30</option><option value="60">60</option></select></label>
-    </div>
-    <div class="row" style="margin-top:8px"><button type="button" id="ingestion-add" data-i18n="ingestion.addTarget"></button></div>
-    <h3 data-i18n="ingestion.targets"></h3>
-    <div id="ingestion-target-list" class="cards"></div>
-    <div class="row" style="margin-top:12px"><button class="primary" id="ingestion-save" data-i18n="ingestion.save"></button><button id="ingestion-run" data-i18n="ingestion.run"></button></div>
-    <p id="ingestion-status" class="muted" role="status"></p>
-    <p id="ingestion-schedule-status" class="muted" role="status"></p>
-    <p id="ingestion-draft-status" class="muted" role="status"></p>
-    <div id="ingestion-queue" class="cards" aria-live="polite"></div>
-    <h3 data-i18n="ingestion.pendingDrafts"></h3>
-    <div id="ingestion-draft-list" class="cards" aria-live="polite"></div>
-  </section>
+  <!-- brainlink-include:review/ingestion.html -->
 
   <section id="s-brief">
     <h2 data-i18n="brief.title"></h2>
@@ -682,6 +661,10 @@ main #ready, main #ask-panel, main #brain-panel, main #sessions-panel, main #s-c
   </div>
 </div>
 <div id="toast" role="status" aria-live="polite"></div>
+<div id="app-error" class="error-box" role="alert" aria-live="assertive" hidden style="position:sticky;top:0;z-index:1000"><span id="app-error-message"></span> <button type="button" id="app-error-dismiss" class="link">Dismiss</button></div>
+<button type="button" id="cancel-requests" hidden data-i18n="system.cancelRequests" style="position:fixed;right:18px;bottom:18px;z-index:999">Cancel current requests</button>
+<dialog id="confirm-dialog" aria-labelledby="confirm-dialog-message"><p id="confirm-dialog-message" style="white-space:pre-wrap"></p><div class="row"><button type="button" id="confirm-dialog-cancel" data-i18n="system.cancel"></button><button type="button" id="confirm-dialog-accept" class="primary" data-i18n="system.confirm"></button></div></dialog>
+<script src="permissions.js"></script>
 <script>
 const T = new URLSearchParams(location.search).get('t') || '';
 const latestVaultNoteCounts = new Map();
@@ -697,11 +680,7 @@ vaultEvents.addEventListener('vault-counts-updated', (event) => {
     if (vault) {
       vault.notes = result.status === 'ready' ? result.notes : null;
       vault.notes_status = result.status;
-      if ($('ready-sub') && S.vaults.at(-1)?.name === vault.name) {
-        const apps = Object.values(S.clients).filter((c) => c.connected).map((c) => c.title);
-        const count = vault.notes == null ? t('vault.counting') : `${vault.notes} ${t('brain.notes')}`;
-        $('ready-sub').textContent = `${vault.name} · ${count}${apps.length ? ' · ' + apps.join(', ') : ''}`;
-      }
+      if ($('ready-sub')) $('ready-sub').textContent = readySubText();
     }
   } catch {}
 });
@@ -721,11 +700,38 @@ const clientLabel = (id) => CLIENT_LABEL[id] || (id ? id[0].toUpperCase() + id.s
 const CLIENT_COLOR_VARS = ['c1', 'c2', 'c3', 'c4', 'c5', 'c6', 'c7', 'c8'];
 function clientColor(id) { let h = 0; for (const c of String(id)) h = (h * 31 + c.charCodeAt(0)) >>> 0; return `var(--${CLIENT_COLOR_VARS[h % CLIENT_COLOR_VARS.length]})`; }
 
-async function api(method, url, body) {
-  const r = await fetch(url, { method, headers: { 'Content-Type': 'application/json', 'X-BrainLink-Token': T }, body: body ? JSON.stringify(body) : undefined });
-  const j = await r.json().catch(() => ({}));
-  if (!r.ok) throw new Error(j.error || r.statusText);
-  return j;
+const activeApiRequests = new Set();
+async function api(method, url, body, { signal, timeoutMs = 60_000 } = {}) {
+  const controller = new AbortController(); activeApiRequests.add(controller);
+  const cancel = $('cancel-requests'); if (cancel) cancel.hidden = false;
+  const timer = setTimeout(() => controller.abort(new DOMException('Request timed out.', 'TimeoutError')), timeoutMs);
+  const abortFromCaller = () => controller.abort(signal.reason || new DOMException('Request cancelled.', 'AbortError'));
+  if (signal?.aborted) abortFromCaller(); else signal?.addEventListener('abort', abortFromCaller, { once: true });
+  try {
+    const r = await fetch(url, { method, headers: { 'Content-Type': 'application/json', 'X-BrainLink-Token': T }, body: body ? JSON.stringify(body) : undefined, signal: controller.signal });
+    const j = await r.json().catch(() => ({}));
+    if (!r.ok) throw new Error(j.error || r.statusText);
+    return j;
+  } catch (error) {
+    if (controller.signal.aborted) throw new Error(controller.signal.reason?.name === 'TimeoutError' ? 'The request timed out. Try again.' : 'The request was cancelled.');
+    throw error;
+  } finally {
+    clearTimeout(timer); signal?.removeEventListener('abort', abortFromCaller); activeApiRequests.delete(controller);
+    if (cancel) cancel.hidden = activeApiRequests.size === 0;
+  }
+}
+$('cancel-requests')?.addEventListener('click', () => { for (const controller of activeApiRequests) controller.abort(new DOMException('Request cancelled.', 'AbortError')); });
+$('app-error-dismiss')?.addEventListener('click', () => { $('app-error').hidden = true; $('app-error-message').textContent = ''; });
+function confirmInPage(message) {
+  const dialog = $('confirm-dialog'), prompt = $('confirm-dialog-message');
+  prompt.textContent = String(message || '');
+  return new Promise(resolve => {
+    const finish = (value) => { dialog.close(); resolve(value); };
+    $('confirm-dialog-cancel').onclick = () => finish(false);
+    $('confirm-dialog-accept').onclick = () => finish(true);
+    dialog.oncancel = (event) => { event.preventDefault(); finish(false); };
+    dialog.showModal(); $('confirm-dialog-cancel').focus();
+  });
 }
 document.getElementById('updates-check')?.addEventListener('click', async (event) => {
   const button = event.currentTarget;
@@ -792,7 +798,7 @@ document.addEventListener('click', async (event) => {
     $('updates-result').append(document.createTextNode(` ${t('updates.openFailed')}`));
   }
 });
-function toast(msg, bad) { const t = $('toast'); t.textContent = msg; t.className = 'show' + (bad ? ' bad' : ''); clearTimeout(t._h); t._h = setTimeout(() => (t.className = ''), bad ? 6000 : 3500); }
+function toast(msg, bad) { const t = $('toast'); t.textContent = msg; t.className = 'show' + (bad ? ' bad' : ''); if (bad && $('app-error')) { $('app-error-message').textContent = msg; $('app-error').hidden = false; } clearTimeout(t._h); t._h = setTimeout(() => (t.className = ''), bad ? 6000 : 3500); }
 async function act(fn) { try { await fn(); await load(); } catch (e) { toast(e.message, true); } }
 $('reranker-form').addEventListener('submit', (event) => {
   event.preventDefault();
@@ -950,14 +956,319 @@ async function ensureLocale(saved) {
   await setLocale(SUPPORTED_LOCALES.includes(saved) ? saved : detectLocale(), { persist: !saved });
   resolveLocaleBooted();
 }
+// Five top-level destinations. Every section belongs to exactly one group; choosing a group
+// shows only its sections, so the page is no longer one long scroll. Groups apply only while
+// the main navigation is visible, so onboarding screens are never filtered.
+const NAV_GROUPS = {"home":["ready","handoffs-panel"],"find":["ask-panel","brain-panel"],"review":["proposal-review-panel","memory-review-panel","decision-reviews-panel","conflicts-panel","tidy-panel","sessions-panel","s-ingestion"],"access":["s-connect","s-mcp-profile","s-vault","s-agents","agents-panel","twin-profiles-panel","s-test"],"system":["s-backup","s-sync","s-background","s-brief","s-updates","s-reranker","s-share","rsi-panel","help-panel"]};
+const ADVANCED_PANEL_IDS = ["handoffs-panel","brain-panel","s-agents","agents-panel","twin-profiles-panel","s-test",...NAV_GROUPS.review,...NAV_GROUPS.system];
+const navGroupOf = (id) => Object.keys(NAV_GROUPS).find((group) => NAV_GROUPS[group].includes(id)) || null;
+for (const [group, ids] of Object.entries(NAV_GROUPS)) for (const id of ids) $(id)?.setAttribute('data-nav-group', group);
+for (const id of ADVANCED_PANEL_IDS) $(id)?.setAttribute('data-advanced-panel', 'true');
+let uiMode = 'simple';
+try { if (localStorage.getItem('brainlink-ui-mode') === 'advanced') uiMode = 'advanced'; } catch { /* storage unavailable */ }
+function applyUiMode() {
+  document.body.dataset.uiMode = uiMode;
+  const toggle = $('advanced-mode-toggle');
+  if (toggle) {
+    const isAdv = uiMode === 'advanced';
+    toggle.setAttribute('aria-pressed', isAdv ? 'true' : 'false');
+    toggle.setAttribute('data-i18n', isAdv ? 'nav.advancedOn' : 'nav.advancedOff');
+    toggle.textContent = t(isAdv ? 'nav.advancedOn' : 'nav.advancedOff');
+  }
+  if (uiMode === 'simple' && (navGroup === 'review' || navGroup === 'system')) {
+    navGroup = 'home';
+  }
+  if (uiMode === 'simple') {
+    for (const id of ['s-connect', 's-mcp-profile', 's-vault']) {
+      const el = $(id);
+      if (el?.dataset.collapsed) setFolded(el, false);
+    }
+  }
+}
+$('advanced-mode-toggle')?.addEventListener('click', () => {
+  uiMode = uiMode === 'advanced' ? 'simple' : 'advanced';
+  try { localStorage.setItem('brainlink-ui-mode', uiMode); } catch { /* storage unavailable */ }
+  applyUiMode();
+  applyNavGroup();
+});
+const MCP_GROUP_IDS = ['insights', 'sessions', 'agents', 'handoffs', 'ingestion', 'connectors'];
+function renderMcpProfile(mcp = S?.mcp) {
+  const profile = mcp?.tool_profile === 'full' ? 'full' : 'core';
+  const groups = new Set(Array.isArray(mcp?.enabled_groups) ? mcp.enabled_groups : []);
+  if ($('mcp-profile-core')) $('mcp-profile-core').checked = profile === 'core';
+  if ($('mcp-profile-full')) $('mcp-profile-full').checked = profile === 'full';
+  const row = $('mcp-groups-row');
+  if (row) row.hidden = profile === 'full';
+  const list = $('mcp-groups-list');
+  if (list) {
+    list.innerHTML = MCP_GROUP_IDS.map((id) => `<label class="muted" style="display:flex;flex-direction:row;gap:5px;align-items:center"><input type="checkbox" data-mcp-group="${id}" ${groups.has(id) ? 'checked' : ''} style="width:auto"><span>${esc(id)}</span></label>`).join('');
+  }
+}
+$('mcp-profile-core')?.addEventListener('change', () => { if ($('mcp-groups-row')) $('mcp-groups-row').hidden = false; });
+$('mcp-profile-full')?.addEventListener('change', () => { if ($('mcp-groups-row')) $('mcp-groups-row').hidden = true; });
+$('mcp-profile-save')?.addEventListener('click', async () => {
+  const status = $('mcp-profile-status');
+  const tool_profile = $('mcp-profile-full')?.checked ? 'full' : 'core';
+  const enabled_groups = [...document.querySelectorAll('input[data-mcp-group]:checked')].map((el) => el.dataset.mcpGroup);
+  if (status) status.textContent = t('mcpProfile.saving');
+  try {
+    const res = await api('POST', '/api/mcp/profile', { tool_profile, enabled_groups });
+    S.mcp = { tool_profile: res.tool_profile, enabled_groups: res.enabled_groups };
+    renderMcpProfile(S.mcp);
+    if (status) status.textContent = t('mcpProfile.saved');
+  } catch (err) {
+    if (status) status.textContent = err.message || String(err);
+  }
+});
+let navGroup = 'home';
+function applyNavGroup() {
+  const active = !$('main-nav').hidden;
+  if (active) document.body.dataset.navGroup = navGroup; else delete document.body.dataset.navGroup;
+  for (const link of document.querySelectorAll('[data-nav-group-link]')) {
+    if (link.dataset.navGroupLink === navGroup) link.setAttribute('aria-current', 'page'); else link.removeAttribute('aria-current');
+  }
+  if (active && NAV_GROUPS[navGroup].some((id) => id.startsWith('s-'))) $('settings').open = true;
+}
+// Settings sections inside a destination start folded to a title and hint, so the destination
+// reads as a short list; the owner opens the one they need.
+const NAV_FOLDABLE = [...NAV_GROUPS.access, ...NAV_GROUPS.system].filter((id) => id.startsWith('s-') || id === 'help-panel');
+function setFolded(section, folded) {
+  section.dataset.collapsed = folded ? 'true' : 'false';
+  section.querySelector(':scope > h2')?.setAttribute('aria-expanded', folded ? 'false' : 'true');
+}
+for (const id of NAV_FOLDABLE) {
+  const section = $(id), heading = section?.querySelector(':scope > h2');
+  if (!heading) continue;
+  heading.tabIndex = 0;
+  heading.setAttribute('role', 'button');
+  setFolded(section, true);
+  const toggle = () => { if (document.body.dataset.navGroup) setFolded(section, section.dataset.collapsed !== 'true'); };
+  heading.addEventListener('click', (event) => { if (!event.target.closest('button, a, input, select')) toggle(); });
+  heading.addEventListener('keydown', (event) => { if (event.key === 'Enter' || event.key === ' ') { event.preventDefault(); toggle(); } });
+}
+function showNavGroup(group) {
+  if (!NAV_GROUPS[group]) return;
+  navGroup = group;
+  try { sessionStorage.setItem('brainlink-nav-group', group); } catch { /* storage unavailable */ }
+  applyNavGroup();
+}
+try { const saved = sessionStorage.getItem('brainlink-nav-group'); if (NAV_GROUPS[saved]) navGroup = saved; } catch { /* storage unavailable */ }
+if (navGroupOf(location.hash.slice(1))) navGroup = navGroupOf(location.hash.slice(1));
+new MutationObserver(applyNavGroup).observe($('main-nav'), { attributes: true, attributeFilter: ['hidden'] });
 document.addEventListener('click', (event) => {
+  const groupLink = event.target.closest('a[data-nav-group-link]');
+  if (groupLink) {
+    event.preventDefault();
+    showNavGroup(groupLink.dataset.navGroupLink);
+    const first = $(groupLink.getAttribute('href').slice(1));
+    if (first?.tagName === 'DETAILS' && !first.hidden) first.open = true;
+    window.scrollTo(0, 0);
+    return;
+  }
   const link = event.target.closest('a[data-main-nav]');
   if (!link) return;
   const target = $(link.dataset.mainNav);
   if (!target || target.hidden) { event.preventDefault(); return; }
+  if (navGroupOf(target.id)) showNavGroup(navGroupOf(target.id));
+  if (target.dataset.collapsed) setFolded(target, false);
   if (target.tagName === 'DETAILS') target.open = true;
   const settings = target.closest('details.settings');
   if (settings) settings.open = true;
+});
+
+let activeTidyBatch = null, activeTidyPreview = null;
+async function loadTidy() {
+  const panel = $('tidy-panel'); panel.hidden = !S.vaults?.length;
+  if (panel.hidden) return;
+  const select = $('tidy-vault'), selected = select.value;
+  select.innerHTML = (S.vaults || []).map((vault) => `<option value="${esc(vault.name)}">${esc(vault.name)}</option>`).join('');
+  if ((S.vaults || []).some((vault) => vault.name === selected)) select.value = selected;
+}
+$('tidy-vault')?.addEventListener('change', () => { activeTidyBatch = null; activeTidyPreview = null; $('tidy-list').innerHTML = ''; $('tidy-preview').hidden = true; $('tidy-confirm').hidden = true; });
+
+function renderTidyBatch(batch) {
+  activeTidyBatch = batch;
+  $('tidy-list').innerHTML = (batch.items || []).length ? batch.items.map((item) => `<article class="card" data-tidy-item="${esc(item.id)}">
+    ${item.kind === 'conflict' ? `<b>${esc(t('tidy.conflict'))}</b><p>${esc(item.a.title)} · ${esc(item.a.path)} ↔ ${esc(item.b.title)} · ${esc(item.b.path)}</p><p class="muted">${esc(item.reason)}</p><button type="button" data-tidy-open-conflicts>${esc(t('tidy.openConflicts'))}</button>` : `<label class="row"><input type="checkbox" data-tidy-select><span><b>${esc(item.kind === 'broken' ? t('tidy.broken') : t('tidy.link'))}</b> ${esc(item.source.title)} · <span class="mono">${esc(item.source.path)}</span> → ${esc(item.target.title)} · <span class="mono">${esc(item.target.path)}</span></span></label><p class="muted">${esc(item.reason)}</p><button type="button" data-tidy-dismiss="${esc(item.id)}">${esc(t('tidy.dismiss'))}</button>`}
+  </article>`).join('') : `<p class="muted">${esc(t('tidy.empty'))}</p>`;
+  $('tidy-status').textContent = `${t('tidy.shown', { count: batch.items?.length || 0 })}${batch.more ? ` · ${t('tidy.more', { count: batch.more })}` : ''} · ${t('tidy.archiveOmitted')}`;
+  $('tidy-more').hidden = !batch.more || batch.next_offset === batch.offset;
+}
+
+async function generateTidy(offset = 0) {
+  $('tidy-generate').disabled = true; $('tidy-more').disabled = true;
+  try { renderTidyBatch(await api('POST', '/api/tidy/generate', { vault: $('tidy-vault').value, offset })); }
+  catch (error) { $('tidy-status').textContent = error.message; }
+  finally { $('tidy-generate').disabled = false; $('tidy-more').disabled = false; }
+}
+$('tidy-generate')?.addEventListener('click', () => act(() => generateTidy(0)));
+$('tidy-more')?.addEventListener('click', () => act(() => generateTidy(activeTidyBatch?.next_offset || 0)));
+
+async function previewTidy(action, itemIds) {
+  if (!activeTidyBatch || !itemIds.length) throw new Error(t('tidy.choose'));
+  const preview = await api('POST', action === 'apply' ? '/api/tidy/apply-preview' : '/api/tidy/dismiss-preview', { batch_id: activeTidyBatch.batch_id, item_ids: itemIds });
+  activeTidyPreview = { ...preview, action };
+  $('tidy-preview').textContent = action === 'apply' ? preview.files.map((file) => `--- ${file.path} ---\n${file.append}`).join('\n') : preview.message;
+  $('tidy-preview').hidden = false; $('tidy-confirm').hidden = false;
+  $('tidy-status').textContent = t('tidy.reviewFirst');
+}
+$('tidy-preview-apply')?.addEventListener('click', () => act(async () => {
+  try { await previewTidy('apply', [...$('tidy-list').querySelectorAll('[data-tidy-select]:checked')].map((box) => box.closest('[data-tidy-item]').dataset.tidyItem)); }
+  catch (error) { $('tidy-status').textContent = error.message; }
+}));
+$('tidy-preview-dismiss')?.addEventListener('click', () => act(async () => {
+  try { await previewTidy('dismiss', [...$('tidy-list').querySelectorAll('[data-tidy-select]:checked')].map((box) => box.closest('[data-tidy-item]').dataset.tidyItem)); }
+  catch (error) { $('tidy-status').textContent = error.message; }
+}));
+$('tidy-confirm')?.addEventListener('click', () => act(async () => {
+  $('tidy-confirm').disabled = true;
+  try {
+    const route = activeTidyPreview.action === 'apply' ? '/api/tidy/apply-confirm' : '/api/tidy/dismiss-confirm';
+    const result = await api('POST', route, { id: activeTidyPreview.id, confirm: true });
+    $('tidy-status').textContent = activeTidyPreview.action === 'apply' ? t('tidy.saved', { count: result.items_applied }) : t('tidy.dismissed', { count: result.dismissed });
+    $('tidy-preview').hidden = true; $('tidy-confirm').hidden = true; activeTidyPreview = null;
+    await generateTidy(0);
+  } catch (error) { $('tidy-status').textContent = error.message; }
+  finally { $('tidy-confirm').disabled = false; }
+}));
+
+document.addEventListener('click', (event) => {
+  const openConflicts = event.target.closest('[data-tidy-open-conflicts]');
+  if (openConflicts) { $('conflicts-panel').open = true; $('conflicts-panel').scrollIntoView({ behavior: 'smooth', block: 'start' }); return; }
+  const dismiss = event.target.closest('[data-tidy-dismiss]');
+  if (!dismiss) return;
+  const card = dismiss.closest('[data-tidy-item]');
+  const checkbox = card.querySelector('[data-tidy-select]');
+  if (checkbox) { checkbox.checked = true; act(async () => { try { await previewTidy('dismiss', [dismiss.dataset.tidyDismiss]); } catch (error) { $('tidy-status').textContent = error.message; } }); }
+});
+
+async function loadDecisionReviews() {
+  const panel = $('decision-reviews-panel');
+  panel.hidden = !S.vaults?.length;
+  if (panel.hidden) return;
+  const select = $('decision-reviews-vault');
+  const selected = select.value;
+  select.innerHTML = (S.vaults || []).map((vault) => `<option value="${esc(vault.name)}">${esc(vault.name)}</option>`).join('');
+  if ((S.vaults || []).some((vault) => vault.name === selected)) select.value = selected;
+  await renderDecisionReviews();
+}
+
+let conflictsOffset = 0;
+async function loadConflicts() {
+  const panel = $('conflicts-panel');
+  panel.hidden = !S.vaults?.length;
+  if (panel.hidden) return;
+  const select = $('conflicts-vault'), selected = select.value;
+  select.innerHTML = (S.vaults || []).map((vault) => `<option value="${esc(vault.name)}">${esc(vault.name)}</option>`).join('');
+  if ((S.vaults || []).some((vault) => vault.name === selected)) select.value = selected;
+  conflictsOffset = 0;
+  await renderConflicts();
+}
+
+async function renderConflicts(append = false) {
+  const target = $('conflicts-list');
+  try {
+    const result = await api('POST', '/api/conflicts/list', { vault: $('conflicts-vault').value, offset: conflictsOffset });
+    const candidates = result.candidates || [];
+    if (!candidates.length && !append) { target.innerHTML = `<p class="muted">${esc(t('conflicts.empty'))}</p>`; return; }
+    const markup = candidates.map((candidate) => `<article class="card" data-conflict-id="${esc(candidate.id)}">
+      <div class="grid2"><div><b>A · ${esc(candidate.a.title)}</b><p class="mono">${esc(candidate.a.path)}</p></div><div><b>B · ${esc(candidate.b.title)}</b><p class="mono">${esc(candidate.b.path)}</p></div></div>
+      <p class="muted">${esc(candidate.reasons.join(' · '))}</p>
+      <div class="row"><button type="button" data-conflict-choice="a_stands">${esc(t('conflicts.aStands'))}</button><button type="button" data-conflict-choice="b_stands">${esc(t('conflicts.bStands'))}</button><button type="button" data-conflict-choice="both_valid">${esc(t('conflicts.both'))}</button><button type="button" data-conflict-choice="not_conflict">${esc(t('conflicts.dismiss'))}</button></div>
+      <pre data-conflict-preview hidden class="mono" style="white-space:pre-wrap"></pre><button hidden class="primary" type="button" data-conflict-confirm>${esc(t('conflicts.confirm'))}</button><span role="status" data-conflict-status></span>
+    </article>`).join('');
+    if (append) { target.querySelector('[data-conflicts-more]')?.parentElement.remove(); target.insertAdjacentHTML('beforeend', markup); }
+    else target.innerHTML = markup;
+    if (result.more) target.insertAdjacentHTML('beforeend', `<div class="row"><span class="muted">${esc(t('conflicts.more', { count: result.more }))}</span><button type="button" data-conflicts-more>${esc(t('conflicts.loadMore'))}</button></div>`);
+  } catch (error) { target.innerHTML = `<p class="error-box">${esc(error.message)}</p>`; }
+}
+
+$('conflicts-vault')?.addEventListener('change', () => { conflictsOffset = 0; renderConflicts(); });
+document.addEventListener('click', (event) => {
+  const more = event.target.closest('[data-conflicts-more]');
+  if (!more) return;
+  conflictsOffset += 50;
+  act(() => renderConflicts(true));
+});
+document.addEventListener('click', (event) => {
+  const choose = event.target.closest('[data-conflict-choice]'), confirmButton = event.target.closest('[data-conflict-confirm]');
+  if (!choose && !confirmButton) return;
+  const card = event.target.closest('[data-conflict-id]');
+  act(async () => {
+    const status = card.querySelector('[data-conflict-status]'); status.textContent = '';
+    if (choose) {
+      choose.disabled = true;
+      try {
+        const preview = await api('POST', '/api/conflicts/preview', { vault: $('conflicts-vault').value, candidate_id: card.dataset.conflictId, choice: choose.dataset.conflictChoice });
+        card.dataset.conflictPreviewId = preview.id;
+        const box = card.querySelector('[data-conflict-preview]');
+        box.textContent = preview.proposal_preview || t('conflicts.dismissPreview'); box.hidden = false;
+        card.querySelector('[data-conflict-confirm]').hidden = false;
+        status.textContent = t('conflicts.reviewFirst');
+      } catch (error) { status.textContent = error.message; choose.disabled = false; }
+    } else {
+      confirmButton.disabled = true;
+      try {
+        const result = await api('POST', '/api/conflicts/confirm', { id: card.dataset.conflictPreviewId, confirm: true });
+        status.textContent = result.proposal_id ? t('conflicts.proposed', { id: result.proposal_id }) : t('conflicts.dismissed');
+        conflictsOffset = 0; await renderConflicts();
+      } catch (error) { status.textContent = error.message; confirmButton.disabled = false; }
+    }
+  });
+});
+
+async function renderDecisionReviews() {
+  const target = $('decision-reviews-list');
+  try {
+    const { reviews = [] } = await api('POST', '/api/decision-reviews/list', { vault: $('decision-reviews-vault').value });
+    if (!reviews.length) { target.innerHTML = `<p class="muted">${esc(t('decisionReviews.empty'))}</p>`; return; }
+    target.innerHTML = reviews.map((review) => `<article class="card" data-decision-review="${esc(review.path)}" data-decision-vault="${esc(review.vault)}">
+      <b>${esc(review.title)}</b><div class="muted">${esc(review.path)} · ${esc(t('decisionReviews.due', { date: review.review_date }))}</div>
+      ${review.happened_since?.length ? `<p>${esc(t('decisionReviews.since'))}: ${review.happened_since.map((item) => esc(`${item.title} (${item.path})`)).join(' · ')}</p>` : ''}
+      <label><span>${esc(t('decisionReviews.nextDate'))}</span><input type="date" data-decision-next-date></label>
+      <div class="row"><button type="button" data-decision-action="still_stands">${esc(t('decisionReviews.stands'))}</button><button type="button" data-decision-action="retire">${esc(t('decisionReviews.retire'))}</button></div>
+      <label><span>${esc(t('decisionReviews.newTitle'))}</span><input maxlength="120" data-decision-new-title></label>
+      <label><span>${esc(t('decisionReviews.newBody'))}</span><textarea rows="4" data-decision-new-body></textarea></label>
+      <button type="button" data-decision-action="changed">${esc(t('decisionReviews.changed'))}</button>
+      <pre class="mono" data-decision-preview hidden style="white-space:pre-wrap;max-height:360px;overflow:auto"></pre>
+      <button class="primary" type="button" data-decision-confirm hidden>${esc(t('decisionReviews.confirm'))}</button>
+      <span role="status" data-decision-status></span>
+    </article>`).join('');
+  } catch (error) { target.innerHTML = `<p class="error-box">${esc(error.message)}</p>`; }
+}
+
+$('decision-reviews-vault')?.addEventListener('change', () => renderDecisionReviews());
+document.addEventListener('click', (event) => {
+  const actionButton = event.target.closest('[data-decision-action]');
+  const confirmButton = event.target.closest('[data-decision-confirm]');
+  if (!actionButton && !confirmButton) return;
+  const card = event.target.closest('[data-decision-review]');
+  act(async () => {
+    const status = card.querySelector('[data-decision-status]');
+    status.textContent = '';
+    if (actionButton) {
+      actionButton.disabled = true;
+      try {
+        const action = actionButton.dataset.decisionAction;
+        const preview = await api('POST', '/api/decision-reviews/preview', { vault: card.dataset.decisionVault, path: card.dataset.decisionReview, action,
+          review_date: card.querySelector('[data-decision-next-date]').value,
+          new_title: card.querySelector('[data-decision-new-title]').value, body: card.querySelector('[data-decision-new-body]').value });
+        card.dataset.decisionPreviewId = preview.id;
+        const box = card.querySelector('[data-decision-preview]');
+        box.textContent = preview.append_preview + (preview.new_note_preview ? `\n--- New decision note preview: ${preview.new_note_path} ---\n${preview.new_note_preview}` : '');
+        box.hidden = false;
+        card.querySelector('[data-decision-confirm]').hidden = false;
+        status.textContent = t('decisionReviews.reviewFirst');
+      } catch (error) { status.textContent = error.message; actionButton.disabled = false; }
+    } else {
+      confirmButton.disabled = true;
+      try {
+        const result = await api('POST', '/api/decision-reviews/confirm', { id: card.dataset.decisionPreviewId, confirm: true });
+        status.textContent = t('decisionReviews.saved', { path: result.new_note_path || result.path });
+        await renderDecisionReviews();
+      } catch (error) { status.textContent = error.message; confirmButton.disabled = false; }
+    }
+  });
 });
 $('lang').onchange = () => act(() => setLocale($('lang').value));
 
@@ -972,7 +1283,7 @@ $('memory-review-vault').onchange = () => {
   $('memory-review-save').disabled = !memoryReview?.writable || $('memory-review-vault').value !== memoryReview.vault;
 };
 $('memory-review-open').onclick = async () => {
-  if (memoryReview && $('memory-review-text').value !== memoryReview.text && !confirm(t('memoryReview.discard'))) return;
+  if (memoryReview && $('memory-review-text').value !== memoryReview.text && !await confirmInPage(t('memoryReview.discard'))) return;
   const vault = $('memory-review-vault').value;
   if (!vault) return;
   try {
@@ -1044,14 +1355,22 @@ document.addEventListener('click', (event) => {
   button.disabled = true;
   api('POST', '/api/connect', { client: button.dataset.firstConnect }).then(() => load()).catch((error) => { toast(error.message, true); button.disabled = false; });
 });
+// Home summarises every vault and every role, not only the one added last.
+function readySubText() {
+  const apps = Object.values(S.clients).filter((c) => c.connected).map((c) => c.title);
+  const vaults = S.vaults.map((v) => `${v.name} · ${v.notes == null ? t('vault.counting') : `${v.notes} ${t('brain.notes')}`}`).join('   |   ');
+  return `${vaults}${apps.length ? '   |   ' + apps.join(', ') : ''}`;
+}
 function renderReady(r) {
-  const v = S.vaults[S.vaults.length - 1];
+  const v = S.vaults[0];
   const agent = S.agents.find((a) => a.vault === v.name) || S.agents[0];
   const apps = Object.values(S.clients).filter((c) => c.connected).map((c) => c.title);
   const fresh = r?.connected?.length ? r.connected : apps;
   $('ready-title').textContent = apps.length ? t('ready.set') : t('ready.almost');
-  const count = v.notes == null ? t('vault.counting') : `${v.notes} ${t('brain.notes')}`;
-  $('ready-sub').textContent = `${v.name} · ${count}${apps.length ? ' · ' + apps.join(', ') : ''}`;
+  $('ready-sub').textContent = readySubText();
+  const otherRoles = S.agents.filter((a) => a !== agent);
+  $('ready-roles').hidden = !otherRoles.length;
+  $('ready-roles-list').innerHTML = otherRoles.map((a) => `<li><b>${esc(a.activation[0])}</b> <span class="muted">${esc(a.vault)}</span></li>`).join('');
   const missing = Object.values(S.clients).filter((c) => c.present && !c.connected);
   $('todo-restart').innerHTML = fresh.length ? t('ready.restartQuit', { apps: `<b>${esc(fresh.join(', '))}</b>` })
     : missing.length && S.twin_profiles?.profiles?.length ? t('ready.assignAccess')
@@ -1157,10 +1476,49 @@ async function loadHandoffs() {
   $('handoffs-list').innerHTML = `<p class="skeleton">${esc(t('handoffs.loading'))}</p>`;
   try {
     const r = await api('POST', '/api/handoffs', {});
-    $('handoffs-panel').hidden = !r.enabled;
+    $('handoffs-panel').hidden = !(S?.vaults || []).some((vault) => vault.exists);
     if (r.enabled) renderHandoffs(r.receipts);
+    else $('handoffs-list').innerHTML = `<p class="muted">${esc(t('handoffs.noMailbox'))}</p>`;
+    if (!$('handoffs-panel').hidden) await loadMailboxSettings();
   } catch (e) { $('handoffs-list').innerHTML = `<p class="error-box">${esc(t('handoffs.loadError', { msg: e.message }))}</p>`; }
 }
+
+let handoffMailboxPreview = null;
+async function loadMailboxSettings() {
+  const select = $('handoff-mailbox-vault'), old = select.value || S.handoff?.vault || '';
+  select.innerHTML = (S.vaults || []).filter((vault) => vault.exists).map((vault) => `<option value="${esc(vault.name)}">${esc(vault.name)}${vault.private ? ` (${esc(t('vault.private'))})` : ''}</option>`).join('');
+  if ([...select.options].some((option) => option.value === old)) select.value = old;
+  await loadMailboxFolders();
+}
+async function loadMailboxFolders() {
+  handoffMailboxPreview = null; $('handoff-mailbox-preview').hidden = true; $('handoff-mailbox-confirm').hidden = true;
+  const vault = (S.vaults || []).find((item) => item.name === $('handoff-mailbox-vault').value);
+  if (!vault) { $('handoff-mailbox-folder').innerHTML = ''; return; }
+  const structure = await api('POST', '/api/vault/inspect', { path: vault.path });
+  const folders = structure.folders || [];
+  $('handoff-mailbox-folder').innerHTML = folders.map((folder) => `<option value="${esc(folder)}">${esc(folder)}</option>`).join('');
+  const current = S.handoff?.vault === vault.name ? S.handoff.folder : '';
+  if (current && folders.includes(current)) $('handoff-mailbox-folder').value = current;
+  if (!folders.length) $('handoff-mailbox-status').textContent = t('handoffs.mailboxNoFolders');
+}
+$('handoff-mailbox-vault')?.addEventListener('change', () => act(loadMailboxFolders));
+$('handoff-mailbox-folder')?.addEventListener('change', () => { handoffMailboxPreview = null; $('handoff-mailbox-preview').hidden = true; $('handoff-mailbox-confirm').hidden = true; });
+$('handoff-mailbox-preview-button')?.addEventListener('click', () => act(async () => {
+  const preview = await api('POST', '/api/handoff-mailbox/preview', { vault: $('handoff-mailbox-vault').value, folder: $('handoff-mailbox-folder').value });
+  handoffMailboxPreview = preview;
+  const display = { from: preview.from, to: preview.to, ...(preview.private_vault ? { warning: t('handoffs.mailboxPrivateWarning') } : {}), note: t('handoffs.mailboxFilesStay') };
+  $('handoff-mailbox-preview').textContent = JSON.stringify(display, null, 2); $('handoff-mailbox-preview').hidden = false; $('handoff-mailbox-confirm').hidden = false;
+  $('handoff-mailbox-status').textContent = t('handoffs.mailboxReviewFirst');
+}));
+$('handoff-mailbox-confirm')?.addEventListener('click', () => act(async () => {
+  if (!handoffMailboxPreview) throw new Error(t('handoffs.mailboxPreviewRequired'));
+  $('handoff-mailbox-confirm').disabled = true;
+  try {
+    await api('POST', '/api/handoff-mailbox/confirm', { id: handoffMailboxPreview.id, confirm: true });
+    handoffMailboxPreview = null; $('handoff-mailbox-preview').hidden = true; $('handoff-mailbox-confirm').hidden = true;
+    $('handoff-mailbox-status').textContent = t('handoffs.mailboxSaved'); await load();
+  } finally { $('handoff-mailbox-confirm').disabled = false; }
+}));
 
 async function loadProposals() {
   $('proposal-review-list').innerHTML = `<p class="skeleton">${esc(t('proposals.loading'))}</p>`;
@@ -1178,11 +1536,33 @@ function renderProposals(proposals) {
     <div class="row" style="justify-content:space-between"><b>${esc(proposal.path)}</b><span class="pill">${esc(proposal.vault)}</span></div>
     <div class="muted" style="font-size:13px">${esc(t(proposal.agent_verified ? 'proposals.fromVerified' : 'proposals.fromUnverified', { agent: proposal.agent || t('proposals.unknownAgent'), tool: proposal.tool, when: new Date(proposal.created_at).toLocaleString(LOCALE) }))}</div>
     <pre class="mono" style="white-space:pre-wrap;max-height:360px;overflow:auto">${esc(proposal.content)}</pre>
+    <details><summary>${esc(t('proposals.edit'))}</summary><label>${esc(t('proposals.destination'))}<input data-proposal-path value="${esc(proposal.path)}"></label><label>${esc(t('proposals.draft'))}<textarea data-proposal-content rows="8">${esc(proposal.content)}</textarea></label><div class="row"><button type="button" data-proposal-edit-preview>${esc(t('proposals.previewEdit'))}</button><span class="muted">${esc(t('proposals.reason', { agent: proposal.agent || t('proposals.unknownAgent'), tool: proposal.tool }))}</span></div><div data-proposal-edit-result class="muted"></div><button type="button" class="primary" data-proposal-edit-confirm data-token="${esc(proposal.edit_token)}" hidden>${esc(t('proposals.saveDraft'))}</button></details>
     <div class="row"><button class="primary" type="button" data-proposal-approve="${esc(proposal.id)}">${esc(t('proposals.approve'))}</button><button type="button" data-proposal-reject="${esc(proposal.id)}">${esc(t('proposals.reject'))}</button></div>
   </article>`).join('');
 }
 
 document.addEventListener('click', (event) => {
+  const editPreview = event.target.closest('[data-proposal-edit-preview]');
+  const editConfirm = event.target.closest('[data-proposal-edit-confirm]');
+  if (editPreview || editConfirm) {
+    const card = event.target.closest('[data-owner-proposal]');
+    act(async () => {
+      const path = card.querySelector('[data-proposal-path]').value;
+      const content = card.querySelector('[data-proposal-content]').value;
+      const button = editPreview || editConfirm; button.disabled = true;
+      try {
+        const payload = { id: card.dataset.ownerProposal, path, content, edit_token: card.querySelector('[data-proposal-edit-confirm]').dataset.token };
+        if (editConfirm) payload.confirm = true;
+        const result = await api('POST', '/api/proposals/edit-preview', payload);
+        if (editConfirm) { await loadProposals(); toast(t('proposals.draftSaved')); return; }
+        const preview = result.preview;
+        card.querySelector('[data-proposal-edit-result]').innerHTML = `<p>${esc(t('proposals.previewDestination', { vault: preview.vault, path: preview.path }))}</p><p>${esc(preview.reason)}</p><p>${esc(t('proposals.similar'))}: ${preview.similar.length ? preview.similar.map(item => `${esc(item.path)} (${esc(item.status || '')})`).join(', ') : esc(t('proposals.noSimilar'))}</p><pre class="mono" style="white-space:pre-wrap;max-height:240px;overflow:auto">${esc(preview.content)}</pre>`;
+        card.querySelector('[data-proposal-edit-confirm]').hidden = false;
+      } catch (error) { card.querySelector('[data-proposal-edit-result]').textContent = error.message; }
+      finally { button.disabled = false; }
+    });
+    return;
+  }
   const approve = event.target.closest('[data-proposal-approve]');
   const reject = event.target.closest('[data-proposal-reject]');
   const button = approve || reject;
@@ -1231,7 +1611,7 @@ $('rsi-idea-form').addEventListener('submit', (e) => act(async () => {
   const sources = sourceUrl ? [{ url: sourceUrl, title: String(data.get('source_title') || ''), published_at: String(data.get('source_published') || ''), accessed_at: new Date().toISOString(), claim: String(data.get('source_claim') || ''), confidence: String(data.get('source_confidence') || ''), limitations: String(data.get('source_limitations') || '') }] : [];
   const proposal = { title: String(data.get('title')), user_problem: String(data.get('user_problem')), hypothesis: String(data.get('hypothesis') || ''), memory_types: [...form.querySelector('[name="memory_types"]').selectedOptions].map(x => x.value), sources };
   const { similar } = await api('POST', '/api/rsi/ideas/check', proposal);
-  if (similar.length && !window.confirm(t('rsi.duplicates') + '\n\n' + similar.map(x => x.title + ' (' + x.score + '%)').join('\n'))) return;
+  if (similar.length && !await confirmInPage(t('rsi.duplicates') + '\n\n' + similar.map(x => x.title + ' (' + x.score + '%)').join('\n'))) return;
   await api('POST', '/api/rsi/ideas', proposal);
   form.reset(); await loadRsi(); toast(t('rsi.saved'));
 }));
@@ -1242,7 +1622,7 @@ document.addEventListener('click', (e) => {
       const card = rollbackButton.closest('[data-rsi-id]');
       const invalid = [...card.querySelectorAll('[data-rsi-rollback]')].find(input => !input.checkValidity());
       if (invalid) { invalid.reportValidity(); return; }
-      if (!window.confirm(t('rsi.rollback.confirm'))) return;
+      if (!await confirmInPage(t('rsi.rollback.confirm'))) return;
       const rollback = Object.fromEntries([...card.querySelectorAll('[data-rsi-rollback]')].map(input => [input.dataset.rsiRollback, input.value.trim()]));
       await api('POST', '/api/rsi/ideas/rollback', { id: card.dataset.rsiId, expected_revision: Number(card.dataset.rsiRevision), rollback });
       await loadRsi(); toast(t('rsi.rollback.saved'));
@@ -1605,26 +1985,189 @@ async function drawGraph() {
 // ---- Ask your brain: cited instant answer ----
 function renderAskEmpty() { $('ask-out').innerHTML = `<p class="muted">${esc(t('ask.empty'))}</p>`; }
 function renderAskError(msg) { $('ask-out').innerHTML = `<p class="error-box">${esc(msg)}</p>`; }
-function renderAsk(r) {
-  if (r.status === 'not_in_brain') {
-    $('ask-out').innerHTML = `<div class="card"><span class="pill">${esc(t('ask.notInBrain'))}</span><p class="muted" style="margin:8px 0 0">${esc(t('ask.notInBrainBody', { vault: r.vault }))}</p></div>`;
-    return;
+// One card per searched vault: vaults are searched separately and never merged, so each keeps
+// its own verdict. Each source shows the note's own date, status and confidence, and flags
+// older or superseded notes, so the owner can judge trust before opening it.
+function askSourceMeta(x) { return [x.date, x.status, x.confidence].filter(Boolean).join(' · '); }
+function renderAskGroup(g, showVault) {
+  const vaultLabel = showVault ? `<b>${esc(g.private ? t('ask.privateVault', { vault: g.vault }) : g.vault)}</b>` : '';
+  if (g.status === 'not_in_brain') {
+    return `<div class="card">${vaultLabel}<span class="pill">${esc(t('ask.notInBrain'))}</span><p class="muted" style="margin:8px 0 0">${esc(t('ask.notInBrainBody', { vault: g.vault }))}</p></div>`;
   }
-  const badge = r.status === 'weak' ? `<span class="pill">${esc(t('ask.partial'))}</span>` : `<span class="pill on">${esc(t('ask.answered'))}</span>`;
-  const chip = (x) => `<button class="chip" data-open-note="${esc(x.vault)}::${esc(x.path)}" title="${esc(x.path)}"><b>${esc(x.title)}</b>${x.heading ? `<small>› ${esc(x.heading)}</small>` : ''}</button>`;
-  $('ask-out').innerHTML = `<div class="answer-card card">${badge}
-    <p class="answer-text">${esc(r.answer || t('ask.noSnippet'))}</p>
-    ${r.note ? `<p class="muted" style="font-size:13px;margin:0">${esc(r.note)}</p>` : ''}
-    <div class="row">${r.sources.map(chip).join('')}</div>
+  const badge = g.status === 'weak' ? `<span class="pill">${esc(t('ask.partial'))}</span>` : `<span class="pill on">${esc(t('ask.answered'))}</span>`;
+  const source = (x) => {
+    const meta = askSourceMeta(x);
+    return `<li><button class="chip" data-open-note="${esc(x.vault)}::${esc(x.path)}" title="${esc(x.path)}"><b>${esc(x.title)}</b>${x.heading ? `<small>› ${esc(x.heading)}</small>` : ''}</button>${meta ? ` <span class="muted">${esc(meta)}</span>` : ''}${x.historical ? ` <span class="pill ask-old">${esc(t('ask.historical'))}</span>` : ''}</li>`;
+  };
+  return `<div class="answer-card card">${vaultLabel}${badge}
+    <p class="answer-text">${esc(g.answer || t('ask.noSnippet'))}</p>
+    ${g.note ? `<p class="muted" style="font-size:13px;margin:0">${esc(g.note)}</p>` : ''}
+    <ul class="ask-sources">${(g.sources || []).map(source).join('')}</ul>
   </div>`;
+}
+function renderAsk(r) {
+  const groups = Array.isArray(r.groups) && r.groups.length ? r.groups : [r];
+  const skipped = Array.isArray(r.vaults_skipped_private) ? r.vaults_skipped_private : [];
+  const footer = [
+    r.search_mode ? t(r.search_mode === 'meaning' ? 'ask.modeMeaning' : 'ask.modeKeyword') : '',
+    skipped.length ? t('ask.privateSkipped', { vaults: skipped.join(', ') }) : '',
+  ].filter(Boolean).join(' ');
+  $('ask-out').innerHTML = groups.map((g) => renderAskGroup(g, groups.length > 1 || skipped.length > 0)).join('')
+    + (footer ? `<p class="muted" style="font-size:13px;margin:8px 0 0">${esc(footer)}</p>` : '');
 }
 async function ask() {
   const query = $('ask-q').value.trim();
   if (!query) return;
   $('ask-out').innerHTML = `<p class="skeleton">${esc(t('ask.searching'))}</p>`;
-  try { renderAsk(await api('POST', '/api/ask', { query })); }
+  try { renderAsk(await api('POST', '/api/ask', { query, vault: $('ask-vault').value || '*' })); }
   catch (e) { renderAskError(e.message); }
 }
+// Setup self-test and replayable misses. Both only read; the self-test changes nothing, and
+// the miss list is stored on this computer only after the owner turns it on.
+const SELFTEST_PILL = { pass: 'pill on', warn: 'pill ask-old', fail: 'pill ask-old' };
+const replayCache = new Map();
+let teachPreviewId = '';
+$('selftest-run').onclick = async () => {
+  const button = $('selftest-run');
+  button.disabled = true;
+  $('selftest-summary').textContent = t('selftest.running');
+  try {
+    const r = await api('POST', '/api/self-test', {});
+    const shown = r.checks.filter((check) => check.status !== 'pass');
+    $('selftest-summary').textContent = t('selftest.summary', { pass: r.summary.pass, warn: r.summary.warn, fail: r.summary.fail });
+    $('selftest-out').innerHTML = shown.length
+      ? shown.map((check) => `<li><span class="${SELFTEST_PILL[check.status] || 'pill'}">${esc(t(`selftest.${check.status}`))}</span> ${esc(check.message)}</li>`).join('')
+      : `<li class="muted">${esc(t('selftest.allGood'))}</li>`;
+  } catch (error) { $('selftest-summary').textContent = error.message; }
+  finally { button.disabled = false; }
+};
+async function loadRetrievalUse() {
+  const button = $('retrieval-use-run'); button.disabled = true;
+  try {
+    const report = await api('POST', '/api/retrieval-use', { days: 60 });
+    $('retrieval-use-summary').textContent = t('retrievalUse.summary', { total: report.visible_notes, used: report.retrieved_notes, unused: report.never_retrieved });
+    $('retrieval-use-out').innerHTML = report.folders.map(row => `<li><b>${esc(row.folder)}</b> · ${esc(t('retrievalUse.folder', { unused: row.never_retrieved, total: row.visible_notes }))}${row.examples.length ? ` <span class="muted">${row.examples.map(esc).join(', ')}</span>` : ''}</li>`).join('') || `<li class="muted">${esc(t('retrievalUse.empty'))}</li>`;
+  } catch (error) { $('retrieval-use-summary').textContent = error.message; }
+  finally { button.disabled = false; }
+}
+$('retrieval-use-run').addEventListener('click', loadRetrievalUse);
+async function loadReplay() {
+  try {
+    const r = await api('GET', '/api/replay-misses');
+    replayCache.clear();
+    for (const item of r.items) replayCache.set(item.id, item);
+    $('replay-enabled').checked = r.enabled;
+    $('replay-summary').textContent = t('replay.count', { n: r.count });
+    $('replay-run').disabled = !r.count;
+    $('replay-clear').hidden = !r.count;
+    renderReplay(r.items);
+  } catch (error) { $('replay-summary').textContent = error.message; }
+}
+function renderReplay(items) {
+  $('replay-out').innerHTML = items.map((item) => {
+    const state = item.now === 'hits' ? 'replay.nowFound' : item.now === 'weak' ? 'replay.nowWeak' : item.now === 'not_in_brain' ? 'replay.nowMissing' : 'replay.needsAnswer';
+    const result = item.fixed_by
+      ? `<span class="muted">${esc(t('replay.teachFixedBy', { path: item.fixed_by }))}</span>`
+      : `<button type="button" class="link" data-teach-miss="${esc(item.id)}">${esc(t('replay.teach'))}</button>`;
+    const pin = item.now === 'hits' && item.top && !item.expected_path ? ` <button type="button" class="link" data-pin-miss="${esc(item.id)}">${esc(t('replay.pin'))}</button>` : '';
+    const pinned = item.expected_path ? ` <span class="muted">${esc(t('replay.pinned', { path: item.expected_path }))}</span>` : '';
+    return `<li><span class="${item.now === 'hits' ? 'pill on' : 'pill ask-old'}">${esc(t(state))}</span> ${esc(item.query)} <span class="muted">${esc(item.vault)}${item.top ? ` › ${esc(item.top.title)}` : ''}</span> ${result}${pin}${pinned}</li>`;
+  }).join('');
+}
+function closeTeach() {
+  teachPreviewId = '';
+  $('replay-teach').hidden = true;
+  $('replay-teach-preview').hidden = true;
+  $('replay-teach-confirm').hidden = true;
+  $('replay-teach-status').textContent = '';
+}
+$('replay-out').addEventListener('click', (event) => {
+  const pin = event.target.closest('[data-pin-miss]');
+  if (pin) act(async () => {
+    pin.disabled = true;
+    try { await api('POST', '/api/replay-misses/pin', { id: pin.dataset.pinMiss }); await loadReplay(); }
+    catch (error) { $('replay-summary').textContent = error.message; pin.disabled = false; }
+  });
+  const button = event.target.closest('[data-teach-miss]');
+  if (!button) return;
+  const item = replayCache.get(button.dataset.teachMiss);
+  if (!item) return;
+  closeTeach();
+  $('replay-teach').hidden = false;
+  $('replay-teach-question').textContent = item.query;
+  $('replay-teach-title').value = item.query.slice(0, 120);
+  $('replay-teach-answer').value = '';
+  $('replay-teach-folder').value = '';
+  $('replay-teach').dataset.missId = item.id;
+});
+$('replay-teach-cancel').onclick = closeTeach;
+$('replay-teach-preview-button').onclick = async () => {
+  const button = $('replay-teach-preview-button');
+  button.disabled = true;
+  $('replay-teach-status').textContent = t('replay.teachPreparing');
+  try {
+    const draft = await api('POST', '/api/replay-misses/teach', {
+      miss_id: $('replay-teach').dataset.missId,
+      title: $('replay-teach-title').value,
+      answer: $('replay-teach-answer').value,
+      folder: $('replay-teach-folder').value,
+    });
+    teachPreviewId = draft.preview_id;
+    $('replay-teach-destination').textContent = draft.destination;
+    $('replay-teach-links').textContent = draft.linked_to?.length ? `${t('replay.teachLinks')}: ${draft.linked_to.join(', ')}` : t('replay.teachNoLinks');
+    $('replay-teach-markdown').textContent = draft.preview;
+    $('replay-teach-preview').hidden = false;
+    $('replay-teach-confirm').hidden = false;
+    $('replay-teach-status').textContent = t('replay.teachReviewFirst');
+  } catch (error) { $('replay-teach-status').textContent = error.message; }
+  finally { button.disabled = false; }
+};
+$('replay-teach-confirm').onclick = async () => {
+  if (!teachPreviewId) return;
+  const button = $('replay-teach-confirm');
+  button.disabled = true;
+  try {
+    const result = await api('POST', '/api/replay-misses/teach', {
+      miss_id: $('replay-teach').dataset.missId,
+      title: $('replay-teach-title').value,
+      answer: $('replay-teach-answer').value,
+      folder: $('replay-teach-folder').value,
+      preview_id: teachPreviewId,
+      confirm: true,
+    });
+    closeTeach();
+    await loadReplay();
+    const replayState = result.replay.status === 'hits' ? t('replay.nowFound') : result.replay.status === 'weak' ? t('replay.nowWeak') : t('replay.nowMissing');
+    $('replay-summary').textContent = result.fixed_by
+      ? t('replay.teachFound', { path: result.path })
+      : t('replay.teachSavedUnconfirmed', { path: result.path, status: replayState, top: result.replay.top?.title || t('replay.teachNoTop') });
+  } catch (error) { $('replay-teach-status').textContent = error.message; }
+  finally { button.disabled = false; }
+};
+$('replay-enabled').onchange = async () => {
+  try { await api('POST', '/api/replay-misses/settings', { enabled: $('replay-enabled').checked }); }
+  catch (error) { toast(error.message, true); }
+  await loadReplay();
+};
+$('replay-run').onclick = async () => {
+  const button = $('replay-run');
+  button.disabled = true;
+  $('replay-summary').textContent = t('replay.running');
+  try {
+    const r = await api('POST', '/api/replay-misses/run', {});
+    $('replay-summary').textContent = t('replay.result', { fixed: r.fixed, weak: r.still_weak, missing: r.still_missing, total: r.total }) + (r.regression_count ? ` · ${t('replay.regressions', { n: r.regression_count })}` : '');
+    replayCache.clear();
+    for (const item of r.results) replayCache.set(item.id, item);
+    renderReplay(r.results);
+  } catch (error) { $('replay-summary').textContent = error.message; }
+  finally { button.disabled = false; }
+};
+$('replay-clear').onclick = async () => {
+  if (!await confirmInPage(t('replay.clearConfirm'))) return;
+  try { await api('POST', '/api/replay-misses/clear', {}); replayCache.clear(); closeTeach(); $('replay-out').innerHTML = ''; }
+  catch (error) { toast(error.message, true); }
+  await loadReplay();
+};
 $('ask-go').onclick = ask;
 $('ask-q').onkeydown = (e) => { if (e.key === 'Enter') ask(); };
 
@@ -1747,7 +2290,7 @@ async function quick(getBody) {
   try {
     const body = await getBody();
     if (!body) return;
-    if (!window.confirm(t('firstRun.createConfirm'))) return;
+    if (!await confirmInPage(t('firstRun.createConfirm'))) return;
     const r = await api('POST', '/api/quick/prepare', body);
     if (!r.ok && r.nested) { renderStart(r.nested); return; }
     if (!r.ok) throw new Error(r.error);
@@ -1757,7 +2300,7 @@ async function quick(getBody) {
     await load();
   } catch (e) { toast(e.message, true); } finally { box.classList.remove('working'); }
 }
-document.addEventListener('click', (e) => {
+document.addEventListener('click', async (e) => {
   const b = e.target.closest('[data-quick],[data-quick-new]');
   if (!b) return;
   if (b.dataset.quickNew) quick(async () => ({ mode: 'new' })); else quick(async () => ({ mode: 'folder', path: b.dataset.quick }));
@@ -1779,6 +2322,8 @@ async function load() {
   const guidedFirstRun = hasVault && ['2', '3'].includes(firstRunStage);
   const onboardingSync = hasVault && pendingSyncOnboarding;
   $('main-nav').hidden = !hasVault || onboardingSync || guidedFirstRun;
+  applyUiMode();
+  renderMcpProfile(S.mcp);
   $('start').hidden = hasVault;
   $('first-run-progress').hidden = !guidedFirstRun && hasVault;
   $('first-run').hidden = !guidedFirstRun;
@@ -1788,6 +2333,12 @@ async function load() {
   $('brain-panel').hidden = !hasVault || onboardingSync;
   $('memory-review-panel').hidden = !hasVault || onboardingSync;
   $('proposal-review-panel').hidden = !hasVault || onboardingSync;
+  loadReplay();
+  const askVaults = S.vaults.filter((v) => v.exists);
+  const askChoice = $('ask-vault').value || '*';
+  $('ask-vault').innerHTML = `<option value="*">${esc(t('ask.allVaults'))}</option>` + askVaults.map((v) => `<option value="${esc(v.name)}">${esc(v.private ? t('ask.privateVault', { vault: v.name }) : v.name)}</option>`).join('');
+  $('ask-vault').value = [...$('ask-vault').options].some((option) => option.value === askChoice) ? askChoice : '*';
+  $('ask-vault-row').hidden = askVaults.length < 2;
   const memoryChoice = $('memory-review-vault').value;
   $('memory-review-vault').innerHTML = S.vaults.filter((v) => v.exists).map((v) => `<option value="${esc(v.name)}">${esc(v.name)}</option>`).join('');
   if ([...$('memory-review-vault').options].some((option) => option.value === memoryChoice)) $('memory-review-vault').value = memoryChoice;
@@ -1824,13 +2375,16 @@ async function load() {
   $('handoffs-panel').hidden = !hasVault || onboardingSync;
   if (hasVault && !onboardingSync) loadHandoffs().catch(() => {});
   if (hasVault && !onboardingSync) loadProposals().catch(() => {});
+  if (hasVault && !onboardingSync) loadDecisionReviews().catch(() => {});
+  if (hasVault && !onboardingSync) loadConflicts().catch(() => {});
+  if (hasVault && !onboardingSync) loadTidy().catch(() => {});
   $('rsi-panel').hidden = !hasVault || onboardingSync;
   if (hasVault && !onboardingSync) loadRsi().catch(e => { $('rsi-ideas').innerHTML = '<p class="error-box">' + esc(e.message) + '</p>'; });
   if (hasVault && !onboardingSync) loadWeeklyBenchmark().catch(e => { $('rsi-weekly-status').textContent = e.message; });
   if (hasVault && !onboardingSync) loadDiscovery().catch(e => { $('rsi-discovery-status').textContent = e.message; });
   if (hasVault && !onboardingSync) loadObservations().catch(e => { $('rsi-observe-status').textContent = e.message; });
   if (guidedFirstRun) {
-    for (const id of ['ready','brain-panel','memory-review-panel','proposal-review-panel','twin-profiles-panel','ask-panel','sessions-panel','handoffs-panel','rsi-panel','sync-onboarding']) $(id).hidden = true;
+    for (const id of ['ready','brain-panel','memory-review-panel','proposal-review-panel','decision-reviews-panel','conflicts-panel','tidy-panel','twin-profiles-panel','ask-panel','sessions-panel','handoffs-panel','rsi-panel','sync-onboarding']) $(id).hidden = true;
   }
   $('cfgpath').textContent = S.config_path;
   $('n1').className = 'step' + (S.vaults.length ? ' done' : '');
@@ -1921,7 +2475,7 @@ async function load() {
   $('n4').className = 'step' + (observedClientCall(S.activity) ? ' done' : '');
   $('activity').innerHTML = activityRows(S.activity);
   renderObservedClientCalls(S.activity);
-  $('packs').innerHTML = S.packs.map((p) => `<label class="pack ${p.id === pack ? 'sel' : ''}"><span><input type="radio" name="pack" value="${p.id}" ${p.id === pack ? 'checked' : ''}><b>${esc(p.title)}</b></span><small>${esc(p.description)}</small></label>`).join('');
+  $('packs').innerHTML = S.packs.map((p) => { const title = p.id === 'personal-os' ? t('packs.personal.title') : p.title, description = p.id === 'personal-os' ? t('packs.personal.description') : p.description; return `<label class="pack ${p.id === pack ? 'sel' : ''}"><span><input type="radio" name="pack" value="${p.id}" ${p.id === pack ? 'checked' : ''}><b>${esc(title)}</b></span><small>${esc(description)}</small></label>`; }).join('');
   const SY = S.sync;
   $('sync-provider').innerHTML = SY.providers.map((p) => `<option value="${esc(p)}" ${p === SY.provider ? 'selected' : ''}>${esc(t('sync.provider.' + p))}</option>`).join('');
   const syncVaults = S.vaults.filter((v) => !v.private && v.exists);
@@ -2032,6 +2586,9 @@ function renderBackupSchedule() {
 }
 $('backup-schedule-mode').onchange = renderBackupSchedule;
 
+let adoptedVault = null, adoptReviewed = false;
+function selectedOptions(id) { return [...$(id).selectedOptions].map((option) => option.value).filter(Boolean); }
+function invalidateAdoptPreview() { adoptReviewed = false; $('v-adopt-preview').hidden = true; }
 function openForm(p) {
   $('vault-form').hidden = false;
   $('v-path').value = p;
@@ -2040,20 +2597,63 @@ function openForm(p) {
   $('v-excluded').value = (S.default_excluded_folders || []).join('\n');
   $('v-drive-id').value = '';
   $('v-drive-parent-id').value = '';
+  adoptedVault = null; adoptReviewed = false;
+  $('v-adopt-options').hidden = true; $('v-inspect-status').textContent = '';
+  $('v-inspect').hidden = false; $('v-scaffold').checked = true;
   $('v-excluded-hint').textContent = t('vault.excludedHint', { list: (S.suggested_excluded_folders || []).join(', ') });
 }
+$('v-inspect').onclick = () => act(async () => {
+  const path = $('v-path').value.trim();
+  if (!path) throw new Error(t('vault.inspectPathRequired'));
+  const result = await api('POST', '/api/vault/inspect', { path });
+  $('v-inspect-status').textContent = t('vault.inspectComplete', { notes: result.note_count, folders: result.folder_count });
+  if (!result.existing) { adoptedVault = null; $('v-adopt-options').hidden = true; return; }
+  adoptedVault = result; adoptReviewed = false; $('v-adopt-options').hidden = false; $('v-scaffold').checked = false;
+  const folderOptions = [`<option value="">${esc(t('vault.rootFolder'))}</option>`, ...(result.folders || []).map((folder) => `<option value="${esc(folder)}">${esc(folder)}</option>`) ].join('');
+  $('v-intake-folder').innerHTML = folderOptions;
+  $('v-mailbox-folder').innerHTML = `<option value="">${esc(t('vault.noMailbox'))}</option>` + (result.folders || []).map((folder) => `<option value="${esc(folder)}">${esc(folder)}</option>`).join('');
+  const noteOptions = (result.notes || []).map((note) => `<option value="${esc(note.path)}">${esc(note.title)} · ${esc(note.path)}</option>`).join('');
+  $('v-read-first').innerHTML = noteOptions; $('v-role-notes').innerHTML = noteOptions;
+  $('v-close-target').innerHTML = `<option value="">${esc(t('vault.noCaptureTarget'))}</option>` + noteOptions;
+  $('v-move-mailbox-wrap').hidden = !S.handoff; $('v-move-mailbox').checked = false;
+});
+$('vault-form').addEventListener('change', () => { if (adoptedVault) invalidateAdoptPreview(); });
+$('vault-form').addEventListener('input', () => { if (adoptedVault) invalidateAdoptPreview(); });
+$('v-preview-config').onclick = () => {
+  if (!adoptedVault) return;
+  const mailboxFolder = $('v-mailbox-folder').value;
+  if (S.handoff && mailboxFolder && (S.handoff.vault !== $('v-name').value.trim() || S.handoff.folder !== mailboxFolder) && !$('v-move-mailbox').checked) {
+    $('v-adopt-warning').hidden = false; $('v-adopt-warning').textContent = t('vault.moveMailboxRequired'); return;
+  }
+  const privateMailboxWarning = mailboxFolder && $('v-private').checked;
+  $('v-adopt-warning').hidden = !privateMailboxWarning;
+  $('v-adopt-warning').textContent = privateMailboxWarning ? t('vault.privateMailboxWarning') : '';
+  const preview = {
+    vault: $('v-name').value.trim(), path: adoptedVault.path, private: $('v-private').checked,
+    intake_folder: $('v-intake-folder').value || '(vault root)', read_first: selectedOptions('v-read-first'),
+    role_notes: selectedOptions('v-role-notes'), close_target: $('v-close-target').value || '(new capture in intake folder)',
+    handoff_mailbox: mailboxFolder ? `${$('v-name').value.trim()}/${mailboxFolder}` : (S.handoff ? `${S.handoff.vault}/${S.handoff.folder}` : null),
+    existing_visible_notes: adoptedVault.note_count, create_starter_files: $('v-scaffold').checked,
+    ...(privateMailboxWarning ? { warning: t('vault.privateMailboxWarning') } : {}),
+  };
+  $('v-adopt-preview').textContent = JSON.stringify(preview, null, 2); $('v-adopt-preview').hidden = false; adoptReviewed = true;
+};
 $('pick').onclick = () => act(async () => { const r = await api('POST', '/api/pick-folder'); const p = r.path || (r.unavailable ? await window.promptForFolder() : ''); if (p) openForm(p); });
 $('sample').onclick = () => act(async () => { const r = await api('POST', '/api/sample'); openForm(r.path); $('v-name').value = 'Acme Studio'; $('v-agent').value = 'Chief of Staff'; pack = 'founder-os'; });
 $('cancel-vault').onclick = () => ($('vault-form').hidden = true);
-$('packs').onchange = (e) => { if (e.target.name === 'pack') { pack = e.target.value; document.querySelectorAll('.pack').forEach((el) => el.classList.toggle('sel', el.querySelector('input').checked)); } };
+$('packs').onchange = (e) => { if (e.target.name === 'pack') { pack = e.target.value; if (['private-journal','personal-os'].includes(pack)) $('v-private').checked = true; document.querySelectorAll('.pack').forEach((el) => el.classList.toggle('sel', el.querySelector('input').checked)); } };
 $('save-vault').onclick = () => act(async () => {
+  if (adoptedVault && !adoptReviewed) throw new Error(t('vault.previewRequired'));
   const excludedFolders = $('v-excluded').value.split('\n').map((s) => s.trim()).filter(Boolean);
   const drive = $('v-drive-id').value.trim() || $('v-drive-parent-id').value.trim() ? { remote: 'brainlink-gdrive', root_folder_id: $('v-drive-id').value.trim(), parent_folder_id: $('v-drive-parent-id').value.trim(), folder_name: $('v-name').value.trim() } : null;
-  const r = await api('POST', '/api/vault', { path: $('v-path').value, name: $('v-name').value, pack, agentName: $('v-agent').value, scaffold: $('v-scaffold').checked, private: $('v-private').checked, excludedFolders, drive });
+  const body = { path: $('v-path').value, name: $('v-name').value, pack, agentName: $('v-agent').value, scaffold: $('v-scaffold').checked, private: $('v-private').checked, drive };
+  if (adoptedVault) Object.assign(body, { adoptExisting: true, reviewed: adoptReviewed, intakeFolder: $('v-intake-folder').value, readFirst: selectedOptions('v-read-first'), roleNotes: selectedOptions('v-role-notes'), closeTarget: $('v-close-target').value, mailboxFolder: $('v-mailbox-folder').value, moveHandoff: $('v-move-mailbox').checked });
+  else body.excludedFolders = excludedFolders;
+  const r = await api('POST', '/api/vault', body);
   $('vault-form').hidden = true;
-  toast(t('vault.addedToast', { vault: r.vault, extra: r.created.length ? t('vault.createdExtra', { n: r.created.length }) : '' }));
+  toast(t('vault.addedToast', { vault: r.vault, extra: r.created.length ? t('vault.createdExtra', { n: r.created.length }) : '' }) + (r.handoff_kept && r.handoff_mailbox ? ' ' + t('vault.handoffKept', { vault: r.handoff_mailbox.vault, folder: r.handoff_mailbox.folder }) : ''));
 });
-document.addEventListener('click', (e) => {
+document.addEventListener('click', async (e) => {
   const d = e.target.dataset;
   if (e.target.id === 'role-agent-add') act(async () => {
     const name = $('role-agent-name').value.trim();
@@ -2064,7 +2664,7 @@ document.addEventListener('click', (e) => {
     await load();
   });
   if (d.removeRoleAgent) act(async () => {
-    if (!confirm(t('rolePack.removeConfirm', { name: d.removeRoleAgent }))) return;
+    if (!await confirmInPage(t('rolePack.removeConfirm', { name: d.removeRoleAgent }))) return;
     await api('POST', '/api/agent/remove', { name: d.removeRoleAgent });
     toast(t('rolePack.removedToast', { name: d.removeRoleAgent }));
     await load();
@@ -2075,7 +2675,7 @@ document.addEventListener('click', (e) => {
     toast(t('skills.installedToast', { count: changed, unchanged: result.unchanged.length }));
     await load();
   });
-  if (d.skillRemove && confirm(t('skills.confirmRemove'))) act(async () => {
+  if (d.skillRemove && await confirmInPage(t('skills.confirmRemove'))) act(async () => {
     const result = await api('POST', '/api/skills/remove', { client: d.skillRemove });
     toast(result.changed.length ? t('skills.removedChangedToast', { removed: result.removed.length, names: result.changed.join(', ') }) : t('skills.removedToast', { count: result.removed.length }));
     await load();
@@ -2090,7 +2690,7 @@ document.addEventListener('click', (e) => {
   if (d.connectScope) openPresetConnect(d.connectScope);
   if (d.disconnect) act(async () => { await api('POST', '/api/disconnect', { client: d.disconnect }); delete healthByClient[d.disconnect]; toast(t('connect.disconnectedToast')); });
   if (d.health) act(async () => { const r = await api('POST', '/api/client-health', { client: d.health }); healthByClient[d.health] = r; toast(r.message, !r.ok); });
-  if (d.remove && confirm(t('vault.removeConfirm', { name: d.remove }))) act(() => api('POST', '/api/vault/remove', { name: d.remove }));
+  if (d.remove && await confirmInPage(t('vault.removeConfirm', { name: d.remove }))) act(() => api('POST', '/api/vault/remove', { name: d.remove }));
   if (d.vaultPrivate !== undefined) act(async () => {
     const v = S.vaults[+d.vaultPrivate];
     await api('POST', '/api/vault/private', { name: v.name, private: e.target.checked });
@@ -2108,7 +2708,7 @@ document.addEventListener('click', (e) => {
     toast(t('rolePack.savedToast', { name: a.name }));
   });
   if (d.hookClient) act(async () => {
-    if (d.hookClient === 'hermes' && d.hookEnable === '1' && !confirm(t('sessions.hookHermesConfirm'))) return;
+    if (d.hookClient === 'hermes' && d.hookEnable === '1' && !await confirmInPage(t('sessions.hookHermesConfirm'))) return;
     await api('POST', '/api/sessions/hooks/set', { client: d.hookClient, enabled: d.hookEnable === '1' });
     await loadSessionHookSettings();
   });
@@ -2229,7 +2829,7 @@ document.addEventListener('click', (e) => {
   });
   if (d.filedWithdraw) act(async () => {
     if (!activeFiledSummary?.etag) throw new Error('Reload the filed summary before withdrawing it.');
-    if (!confirm(t('sessions.withdrawConfirm'))) return;
+    if (!await confirmInPage(t('sessions.withdrawConfirm'))) return;
     const result = await api('POST', '/api/sessions/filed-summary', { ...activeFiledSummary, action: 'withdraw' });
     activeFiledSummary = { ...activeFiledSummary, etag: result.etag, status: result.status };
     document.querySelector('[data-filed-edit]').hidden = true;
@@ -2240,7 +2840,7 @@ document.addEventListener('click', (e) => {
     const select = [...document.querySelectorAll('[data-sess-profile]')].find((item) => item.dataset.sessProfile === d.sessAssign);
     const profile = (S.twin_profiles?.profiles || []).find((item) => item.id === select?.value);
     if (!profile) { toast(t('sessions.invalidTwinChoice')); return; }
-    if (!confirm(t('sessions.assignTwinWarning', { profile: profile.name }))) return;
+    if (!await confirmInPage(t('sessions.assignTwinWarning', { profile: profile.name }))) return;
     await api('POST', '/api/sessions/assign-twin', { id: d.sessAssign, profile_id: profile.id });
     toast(t('sessions.assignedTwin', { profile: profile.name }));
     await loadSessions();
@@ -2259,7 +2859,8 @@ function renderPresetConnectOptions() {
     const vaults = (profile.vaults || []).filter((grant) => S.vaults.some((vault) => vault.name === grant.name && vault.exists));
     return `<section class="card" data-preset-profile="${esc(profile.id)}"><label style="display:flex;align-items:center;gap:8px"><input type="checkbox" data-preset-profile-check value="${esc(profile.id)}" ${assigned ? 'checked' : ''} style="width:auto"><b>${esc(profile.name)} · ${esc(t('twinProfiles.mode.' + profile.mode))}</b></label><div class="preset-profile-permissions" ${assigned ? '' : 'hidden'}><p class="muted" style="margin-top:10px">${esc(t('connect.memoryHint'))}</p><div class="grid2">${['working','semantic','procedural','episodic'].map((key) => `<label class="card" style="display:flex;flex-direction:row;align-items:center;gap:6px;margin:0"><input type="checkbox" data-preset-memory="${key}" ${defaultMemory[key] ? 'checked' : ''} ${profile.memory_policy?.[key] === true ? '' : 'disabled'} style="width:auto">${esc(t('twinProfiles.memory.' + key))}</label>`).join('')}</div><div class="cards" style="margin-top:10px">${vaults.map((grant) => {
     const isPrivate = S.vaults.some((vault) => vault.name === grant.name && vault.private);
-    const available = labels.filter(([action]) => !['handoff_read','write_handoff'].includes(action) || S.handoff?.vault === grant.name);
+    const allowedActions = new Set(BrainLinkPermissions.presetGrantActions(grant, { mailboxVault: S.handoff?.vault }));
+    const available = labels.filter(([action]) => allowedActions.has(action));
     return `<div class="card"><b>${esc(grant.name)}${isPrivate ? ` (${esc(t('twinProfiles.privateVault'))})` : ''}</b><div class="row" style="margin-top:7px">${available.map(([action,key]) => {
       const memory = { search:'semantic', read_note:'semantic', write_note:'semantic', read_session:'episodic', log_session:'episodic', propose_note:'semantic', handoff_read:'working', write_handoff:'working' }[action];
       const assignedActions = assigned?.vaults?.find((item) => item.name === grant.name)?.operations || [];
@@ -2277,10 +2878,9 @@ function updatePresetPermissionControls() {
     const section = input.closest('[data-preset-profile]');
     const profile = S?.twin_profiles?.profiles?.find((item) => item.id === section.dataset.presetProfile);
     const selectedMemory = Object.fromEntries([...section.querySelectorAll('[data-preset-memory]')].map((memory) => [memory.dataset.presetMemory, memory.checked]));
-    const required = input.dataset.memory;
     const vaultAccess = profile?.vaults?.find((grant) => grant.name === input.dataset.presetVault)?.access;
-    const vaultAllowed = input.value === 'write_note' ? vaultAccess === 'write' : input.value === 'propose_note' ? ['propose', 'write'].includes(vaultAccess) : true;
-    input.disabled = !required || profile?.memory_policy?.[required] !== true || selectedMemory[required] !== true || !vaultAllowed;
+    const required = input.dataset.memory;
+    input.disabled = !required || !BrainLinkPermissions.presetActionAllowed({ action: input.value, access: vaultAccess, memoryPolicy: profile?.memory_policy, selectedMemory, selected: section.querySelector('[data-preset-profile-check]').checked });
     if (input.disabled) input.checked = false;
   });
   const actionKeys = { search: 'connect.search', read_note: 'connect.readNote', write_note: 'twinProfiles.operation.write_note', read_session: 'connect.readSession', log_session: 'twinProfiles.operation.log_session', propose_note: 'twinProfiles.operation.propose_note', handoff_read: 'connect.readHandoffs', write_handoff: 'connect.sendHandoffs' };
@@ -2293,9 +2893,9 @@ function updatePresetPermissionControls() {
     grant.actions.push(t(actionKeys[input.value]));
     return items;
     }, []);
-    return `${S.twin_profiles.profiles.find((profile) => profile.id === check.value)?.name}: ${vaults.map((grant) => `${grant.name} (${grant.actions.join(', ')})`).join('; ')}`;
+    return { profile: S.twin_profiles.profiles.find((profile) => profile.id === check.value)?.name || '', vaults };
   });
-  $('preset-connect-review').textContent = grants.length ? grants.join(' · ') : t('connect.reviewEmpty');
+  $('preset-connect-review').textContent = BrainLinkPermissions.formatPresetPermissionSummary(grants) || t('connect.reviewEmpty');
   $('preset-connect-submit').disabled = !grants.length || !document.querySelector('[data-preset-vault]:checked');
 }
 function openPresetConnect(clientId) {
@@ -2530,7 +3130,7 @@ $('github-clone').onclick = async () => {
   const profile_id = githubProfileId();
   const vault = $('github-vault').value;
   if (!profile_id || !vault) { $('github-clone-status').textContent = t('github.cloneChooseProfile'); return; }
-  if (!confirm(t('github.cloneConfirm', { remote }))) return;
+  if (!await confirmInPage(t('github.cloneConfirm', { remote }))) return;
   $('github-clone').disabled = true;
   $('github-clone-status').textContent = t('github.cloneRunning');
   try {
@@ -2556,13 +3156,13 @@ $('github-repository-pick').onclick = () => act(async () => {
 $('github-assign-confirm').onclick = () => act(async () => {
   if (!githubInspected) return;
   const scope = githubInspected.whole_vault ? t('github.wholeVault') : githubInspected.folders.join(', ');
-  if (!confirm(t('github.assignConfirmPrompt', { remote: githubInspected.remote, profile: githubInspected.profile_name, vault: githubInspected.vault, scope }))) return;
+  if (!await confirmInPage(t('github.assignConfirmPrompt', { remote: githubInspected.remote, profile: githubInspected.profile_name, vault: githubInspected.vault, scope }))) return;
   await api('POST', '/api/github/assignment/set', { ...githubAssignInput(), confirm_remote: githubInspected.remote });
   githubResetState(); $('github-repository').value = ''; $('github-assign-folders').value = '';
   toast(t('github.assignSaved'));
 });
 $('github-assign-clear').onclick = () => act(async () => {
-  if (!confirm(t('github.assignClearPrompt'))) return;
+  if (!await confirmInPage(t('github.assignClearPrompt'))) return;
   await api('POST', '/api/github/assignment/clear', { profile_id: githubProfileId() });
   githubResetState();
   toast(t('github.assignCleared'));
@@ -2587,7 +3187,7 @@ $('github-preview').onclick = async () => {
 };
 $('github-commit').onclick = async () => {
   const paths = githubSelection();
-  if (!paths.length || !confirm(t('github.confirmCommit', { count: paths.length, paths: paths.join('\n') }))) return;
+  if (!paths.length || !await confirmInPage(t('github.confirmCommit', { count: paths.length, paths: paths.join('\n') }))) return;
   $('github-status').textContent = t('github.committing'); $('github-commit').disabled = true;
   try {
     const r = await api('POST', '/api/github/commit-selected', { vault: $('github-vault').value, repository: githubRepoValue(), profile_id: githubProfileId(), paths });
@@ -2601,7 +3201,7 @@ $('github-push').onclick = async () => {
   if (!githubPendingPush) return;
   if (githubPendingPush.profile !== githubProfileId()) { githubPendingPush = null; $('github-push').hidden = true; return; }
   const paths = githubPendingPush.paths;
-  if (!confirm(t('github.confirmPush', { count: paths.length, paths: paths.join('\n') }))) return;
+  if (!await confirmInPage(t('github.confirmPush', { count: paths.length, paths: paths.join('\n') }))) return;
   $('github-status').textContent = t('github.pushing'); $('github-push').disabled = true;
   try {
     const r = await api('POST', '/api/github/push-selected', { vault: $('github-vault').value, repository: githubRepoValue(), profile_id: githubProfileId(), paths, commit: githubPendingPush.commit });
@@ -2613,7 +3213,7 @@ $('github-auto-save').onclick = async () => {
   const assignment = githubAssignment()?.assignment;
   const enabled = $('github-auto-enabled').checked;
   if (!assignment) return;
-  if (enabled && !window.confirm(t('github.autoConfirm', { name: githubAssignment().name, remote: assignment.remote }))) {
+  if (enabled && !await confirmInPage(t('github.autoConfirm', { name: githubAssignment().name, remote: assignment.remote }))) {
     $('github-auto-enabled').checked = false;
     return;
   }
@@ -2645,7 +3245,7 @@ $('github-pull-check').onclick = async () => {
 };
 $('github-pull-import').onclick = async () => {
   const paths = githubPullSelection('add,update');
-  if (!paths.length || !confirm(t('github.confirmImport', { count: paths.length, paths: paths.join('\n') }))) return;
+  if (!paths.length || !await confirmInPage(t('github.confirmImport', { count: paths.length, paths: paths.join('\n') }))) return;
   $('github-status').textContent = t('github.importing'); $('github-pull-import').disabled = true;
   try {
     const r = await api('POST', '/api/github/import-selected', { vault: $('github-vault').value, repository: githubRepoValue(), profile_id: githubProfileId(), paths });
@@ -2655,7 +3255,7 @@ $('github-pull-import').onclick = async () => {
 };
 $('github-pull-conflict-copy').onclick = async () => {
   const paths = githubPullSelection('conflict');
-  if (!paths.length || !confirm(t('github.confirmConflictCopy', { count: paths.length, paths: paths.join('\n') }))) return;
+  if (!paths.length || !await confirmInPage(t('github.confirmConflictCopy', { count: paths.length, paths: paths.join('\n') }))) return;
   $('github-status').textContent = t('github.savingConflictCopy'); $('github-pull-conflict-copy').disabled = true;
   try {
     const r = await api('POST', '/api/github/save-conflict-copies', { vault: $('github-vault').value, repository: githubRepoValue(), profile_id: githubProfileId(), paths });
@@ -2716,7 +3316,7 @@ document.addEventListener('click', async (event) => {
     const draftId = saveDraft.dataset.ingestionSaveDraft;
     const selector = document.querySelector(`[data-ingestion-destination="${CSS.escape(draftId)}"]`);
     if (!selector?.value) { toast(t('ingestion.chooseDestination'), true); return; }
-  if (!window.confirm(t(saveDraft.dataset.ingestionRetry === 'true' ? 'ingestion.confirmRetryProposal' : 'ingestion.confirmSaveProposal'))) return;
+  if (!await confirmInPage(t(saveDraft.dataset.ingestionRetry === 'true' ? 'ingestion.confirmRetryProposal' : 'ingestion.confirmSaveProposal'))) return;
     try {
       saveDraft.disabled = true;
       const related_note_paths = [...document.querySelectorAll(`[data-ingestion-related="${CSS.escape(draftId)}"]:checked`)].map((item) => item.value);
@@ -2742,7 +3342,7 @@ document.addEventListener('click', async (event) => {
   }
   const discardDraft = event.target.closest('[data-ingestion-discard-draft]');
   if (discardDraft) {
-    if (!window.confirm(t('ingestion.confirmDiscardDraft'))) return;
+    if (!await confirmInPage(t('ingestion.confirmDiscardDraft'))) return;
     try {
       discardDraft.disabled = true;
       await api('POST', '/api/ingestion/discard-draft', { draft_id: discardDraft.dataset.ingestionDiscardDraft, confirm: true });
@@ -2760,8 +3360,7 @@ document.addEventListener('click', async (event) => {
 });
 $('twin-edit-cancel').onclick = async () => { editingTwinId = null; await load(); };
 function twinActionMemoryAllowed(action, policy) {
-  const required = { search: 'semantic', read_note: 'semantic', write_note: 'semantic', read_session: 'episodic', log_session: 'episodic', propose_note: 'semantic', handoff_read: 'working', write_handoff: 'working' };
-  return policy?.[required[action]] === true;
+  return BrainLinkPermissions.twinActionAllowed({ action, access: 'write', memoryPolicy: policy });
 }
 function updateTwinPermissionControls() {
   const enabled = Object.fromEntries([...document.querySelectorAll('[data-twin-memory]')].map((input) => [input.dataset.twinMemory, input.checked]));
@@ -2780,9 +3379,7 @@ function updateTwinPermissionControls() {
     const vaultSelected = document.querySelector(`[data-twin-agent-vault="${CSS.escape(input.dataset.twinOperation)}"][data-vault-name="${CSS.escape(vaultName)}"]`)?.checked;
     const profileVaultSelected = document.querySelector(`[data-twin-vault="${CSS.escape(vaultName)}"]`)?.checked;
     const access = document.querySelector(`[data-twin-vault-access="${CSS.escape(vaultName)}"]`)?.value;
-    const vaultAllows = input.value === 'write_note' ? access === 'write' : input.value === 'propose_note' ? ['propose', 'write'].includes(access) : true;
-    const memoryAllowed = twinActionMemoryAllowed(input.value, agentMemory.get(input.dataset.twinOperation));
-    const allowed = vaultSelected && profileVaultSelected && vaultAllows && memoryAllowed;
+    const allowed = BrainLinkPermissions.twinActionAllowed({ action: input.value, access, memoryPolicy: agentMemory.get(input.dataset.twinOperation), selected: vaultSelected, profileVaultSelected });
     input.disabled = !allowed;
     if (!memoryAllowed) input.checked = false;
   });
@@ -2879,7 +3476,7 @@ $('twin-create').onclick = async () => {
   const editingProfile = editingTwinId && S.twin_profiles?.profiles?.find((profile) => profile.id === editingTwinId);
   const firstProfileWithConnections = !editingProfile && !S.twin_profiles?.profiles?.length && (Object.values(S.clients || {}).some((client) => client.connected) || (S.ai_agents || []).some((agent) => agent.connected && !agent.revoked));
   const confirmText = editingProfile ? t('twinProfiles.confirmUpdate', { name, vaults: vaultNames, agents: agentNames, memory: selectedMemories }) : t('twinProfiles.confirmCreate', { name, vaults: vaultNames, agents: agentNames, memory: selectedMemories });
-  if (!confirm(confirmText + (firstProfileWithConnections ? `\n\n${t('twinProfiles.firstProfileWarning')}` : ''))) return;
+  if (!await confirmInPage(confirmText + (firstProfileWithConnections ? `\n\n${t('twinProfiles.firstProfileWarning')}` : ''))) return;
   $('twin-create').disabled = true;
   $('twin-create-status').textContent = t('twinProfiles.creating');
   try {
@@ -3017,8 +3614,8 @@ $('backup-run').onclick = () => act(async () => {
   const r = await api('POST', '/api/backup/run');
   toast(t('backup.lastVerified', { count: r.file_count, folder: r.folder }));
 });
-$('backup-restore').onclick = () => {
-  if (!confirm(t('backup.restoreConfirm'))) return;
+$('backup-restore').onclick = async () => {
+  if (!await confirmInPage(t('backup.restoreConfirm'))) return;
   act(async () => {
     const r = await api('POST', '/api/backup/restore', { backupFolder: $('backup-restore-source').value,
       destination: $('backup-restore-destination').value, confirm: true, recoveryKey: $('backup-restore-key').value || undefined });

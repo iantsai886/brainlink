@@ -240,6 +240,19 @@ async function walk(root, dir = root, out = [], inherited = []) {
   return out;
 }
 
+async function visibleFolderPaths(root, dir = root, out = [], inherited = []) {
+  const rules = inherited.concat(await ignoreRules(dir));
+  if (rules.some((re) => re.test('*') || re.source === '^.*$')) return out;
+  for (const entry of await readdir(dir, { withFileTypes: true })) {
+    if (entry.name.startsWith('.') || SKIP_DIRS.has(entry.name)) continue;
+    if (rules.some((re) => re.test(entry.name)) || !entry.isDirectory()) continue;
+    const full = path.join(dir, entry.name), rel = path.relative(root, full).split(path.sep).join('/');
+    out.push(rel);
+    await visibleFolderPaths(root, full, out, rules);
+  }
+  return out;
+}
+
 // Same accumulated-rule logic as walk(), for a single already-known relative path (readNote()):
 // true if any ancestor folder, or the file itself, is excluded at any depth.
 export async function isExcludedPath(root, rel) {
@@ -298,6 +311,27 @@ async function readIndexableHeader(full, size) {
   return inspectIndexableHeader(buffer.subarray(0, bytesRead).toString('utf8'), size, bytesRead);
 }
 
+// Owner-only Setup helper for adopting an existing Markdown folder. Returns paths, not note
+// bodies, and omits private, excluded, hidden and malformed-frontmatter notes.
+export async function inspectVaultStructure(vaultPath, { limit = 1000 } = {}) {
+  const root = await realpath(path.resolve(String(vaultPath || '')));
+  if (!(await stat(root)).isDirectory()) throw new Error('Choose an existing folder.');
+  const files = await walk(root), notes = [], folders = new Set(await visibleFolderPaths(root));
+  for (const full of files) {
+    const rel = path.relative(root, full).split(path.sep).join('/');
+    const info = await stat(full);
+    const header = await readIndexableHeader(full, Number(info.size));
+    if (!header.indexable) continue;
+    notes.push({ path: rel, title: path.posix.basename(rel).replace(/\.md$/i, '') });
+    let folder = path.posix.dirname(rel);
+    while (folder && folder !== '.') { folders.add(folder); folder = path.posix.dirname(folder); }
+  }
+  notes.sort((a, b) => a.path.localeCompare(b.path));
+  const sortedFolders = [...folders].sort((a, b) => a.localeCompare(b));
+  const cap = Math.max(1, Math.min(2000, Number.isSafeInteger(limit) ? limit : 1000));
+  return { path: root, existing: files.length > 0 || (await readdir(root)).length > 0, note_count: notes.length, folder_count: sortedFolders.length, notes: notes.slice(0, cap), folders: sortedFolders.slice(0, cap), truncated: notes.length > cap || sortedFolders.length > cap };
+}
+
 // Setup needs a useful note count, but building the full search index just to display that
 // number reads every public Markdown body and can consume large amounts of memory on synced
 // vaults. Count from bounded frontmatter reads only; search still builds its normal index lazily.
@@ -335,47 +369,51 @@ async function loadVaultFresh(ctx, name) {
   const state = ctx.cache.get(name) || { files: new Map(), index: null };
   const seen = new Set();
   let changed = !state.index;
-  for (const full of await walk(root)) {
-    const rel = path.relative(root, full).split(path.sep).join('/');
+  const files = await walk(root);
+  const statBatchSize = 96, readBatchSize = 32;
+  const fileStates = [];
+  // Drive-backed vaults pay substantial latency per metadata lookup. Check a bounded batch in
+  // parallel rather than awaiting stat() once per note; the batch cap avoids unbounded I/O.
+  for (let start = 0; start < files.length; start += statBatchSize) {
+    fileStates.push(...await Promise.all(files.slice(start, start + statBatchSize).map(async (full) => {
+      const rel = path.relative(root, full).split(path.sep).join('/');
+      const stNow = await stat(full, { bigint: true });
+      return { full, rel, mtime: Number(stNow.mtimeNs) / 1e6, bytes: Number(stNow.size), ctime: String(stNow.ctimeNs) };
+    })));
+  }
+  const processFile = async ({ full, rel, mtime, bytes, ctime }) => {
     seen.add(rel);
     const prev = state.files.get(rel);
-    // Use ctime at nanosecond precision as well as size/mtime. Sync tools can preserve
-    // mtime while replacing a note; without this check a cached public copy could survive
-    // a change to `private: true` and still appear in search until restart.
-    const stNow = await stat(full, { bigint: true });
-    const mtime = Number(stNow.mtimeNs) / 1e6;
-    const bytes = Number(stNow.size);
-    const ctime = String(stNow.ctimeNs);
     // Configured paths such as the handoff mailbox and capture log have known types;
     // exclude them before even opening their Markdown body.
     if (!twinNoteMemoryAllowed(ctx, name, rel)) {
       if (prev?.note) changed = true;
       state.files.set(rel, { hash: null, mtime, bytes, ctime, note: null });
-      continue;
+      return;
     }
     let header = null;
     if (prev?.note && prev.mtime === mtime && prev.bytes === bytes && prev.ctime === ctime) {
       // Scoped agents must not reuse a cached note based only on stat metadata: a sync tool or
       // filesystem can preserve those values while changing the memory-type frontmatter.
       // Check the bounded header before retaining the cached body for ranking or excerpts.
-      if (ctx.twinScope?.mode !== 'scoped') continue;
+      if (ctx.twinScope?.mode !== 'scoped') return;
       header = await readIndexableHeader(full, bytes);
       if (!header.indexable || !twinNoteMemoryAllowed(ctx, name, rel, header.meta)) {
         changed = true;
         state.files.set(rel, { hash: null, mtime, bytes, ctime, note: null });
-        continue;
+        return;
       }
-      if (JSON.stringify(header.meta) === JSON.stringify(prev.note.meta)) continue;
+      if (JSON.stringify(header.meta) === JSON.stringify(prev.note.meta)) return;
     }
     header ||= await readIndexableHeader(full, bytes);
     if (!header.indexable || !twinNoteMemoryAllowed(ctx, name, rel, header.meta)) {
       if (prev?.note) changed = true;
       state.files.set(rel, { hash: null, mtime, bytes, ctime, note: null });
-      continue;
+      return;
     }
     const raw = await readFile(full, 'utf8');
     const hash = createHash('sha1').update(raw).digest('hex');
-    if (prev?.hash === hash) { prev.mtime = mtime; prev.bytes = bytes; prev.ctime = ctime; continue; }
+    if (prev?.hash === hash) { prev.mtime = mtime; prev.bytes = bytes; prev.ctime = ctime; return; }
     changed = true;
     const { meta, body, frontmatter } = parseFrontmatter(raw);
     const title = path.posix.basename(rel).replace(/\.md$/i, '');
@@ -385,9 +423,12 @@ async function loadVaultFresh(ctx, name) {
     // Recheck after the full read in case the file changed between the header and body reads.
     if (isPrivateMeta(meta) || fmSaysPrivate(frontmatter) || !twinNoteMemoryAllowed(ctx, name, rel, meta)) {
       state.files.set(rel, { hash: null, mtime, bytes, ctime, note: null });
-      continue;
+      return;
     }
     state.files.set(rel, { hash, mtime, bytes, ctime, note: { rel, title, aliases, raw, meta, body, chunks, mtime, minor: isMinor(rel, title), date: noteDate(rel, meta, mtime), tags: extractTags(body, meta), generated: meta.generated_by === 'brainlink' || /^BrainLink\/Commands\//i.test(rel), historical: isHistorical(rel, meta), private: false } });
+  };
+  for (let start = 0; start < fileStates.length; start += readBatchSize) {
+    await Promise.all(fileStates.slice(start, start + readBatchSize).map(processFile));
   }
   for (const rel of [...state.files.keys()]) if (!seen.has(rel)) { state.files.delete(rel); changed = true; }
   if (changed) state.index = buildIndex([...state.files.values()].map((f) => f.note).filter(Boolean).sort((a, b) => a.rel.localeCompare(b.rel)));
@@ -401,6 +442,10 @@ async function loadVaultFresh(ctx, name) {
 // Setup creates a short-lived request context for each local API call. Keep the lightweight
 // graph index across those contexts, keyed by vault path and the exact Twin visibility policy.
 const graphVaultCache = new Map();
+const GRAPH_STAT_BATCH_SIZE = 96;
+const GRAPH_READ_BATCH_SIZE = 32;
+const GRAPH_CACHE_MAX_ENTRIES = 4;
+const GRAPH_CACHE_TTL_MS = 60_000;
 function graphVaultCacheKey(ctx, name) {
   const scope = ctx.twinScope || { mode: 'legacy' };
   const grants = (scope.grants || []).filter((grant) => grant.name === name)
@@ -412,48 +457,69 @@ function graphVaultCacheKey(ctx, name) {
   }));
   const vault = ctx.byName.get(name);
   const handoffFolder = ctx.cfg?.handoff?.vault === name ? ctx.cfg.handoff.folder : null;
-  return `${path.resolve(vaultRoot(ctx, name))}\0${JSON.stringify({ mode: scope.mode, grants, rolePaths, read_first: vault?.read_first || [], handoffFolder })}`;
+  return `${path.resolve(vaultRoot(ctx, name))}\0${JSON.stringify({ private: Boolean(vault?.private), mode: scope.mode, grants, rolePaths, read_first: vault?.read_first || [], handoffFolder })}`;
 }
 export async function loadVaultGraph(ctx, name) {
+  const root = path.resolve(vaultRoot(ctx, name));
+  const isPrivateVault = Boolean(ctx.byName.get(name)?.private);
+  // Do not retain note bodies from a private vault in the process-wide graph cache. Also purge
+  // any formerly-public entry for this path if its privacy setting has changed.
+  if (isPrivateVault) {
+    for (const [entryKey, entry] of graphVaultCache) if (entry.root === root || entryKey.startsWith(`${root}\0`)) graphVaultCache.delete(entryKey);
+    return buildVaultGraph(ctx, name);
+  }
+
+  const now = Date.now();
+  for (const [entryKey, entry] of graphVaultCache) {
+    if (!entry.pending && entry.expiresAt <= now) graphVaultCache.delete(entryKey);
+  }
   const key = graphVaultCacheKey(ctx, name);
   const cached = graphVaultCache.get(key);
   if (cached?.pending) return cached.pending;
+  if (cached) { graphVaultCache.delete(key); graphVaultCache.set(key, cached); }
   const pending = (async () => {
-    const root = vaultRoot(ctx, name), notes = [], files = await walk(root);
-    // Check the current eligible paths and metadata on each request. A time-only cache could
-    // continue showing a note immediately after it was made private or its folder excluded.
-    const states = [];
-    for (let start = 0; start < files.length; start += 32) states.push(...await Promise.all(files.slice(start, start + 32).map(async (full) => {
-      const st = await stat(full, { bigint: true });
-      return { full, rel: path.relative(root, full).split(path.sep).join('/'), mtime: Number(st.mtimeNs) / 1e6, bytes: Number(st.size),
-        signature: `${st.size}:${st.mtimeNs}:${st.ctimeNs}` };
-    })));
-    const signatures = new Map(states.map((item) => [item.rel, item.signature]));
-    if (cached?.value && cached.signatures?.size === signatures.size && [...signatures].every(([rel, value]) => cached.signatures.get(rel) === value)) {
-      graphVaultCache.set(key, { value: cached.value, signatures });
-      return cached.value;
-    }
-    for (let start = 0; start < files.length; start += 32) {
-      const batch = await Promise.all(states.slice(start, start + 32).map(async ({ full, rel, mtime, bytes }) => {
-        if (!twinNoteMemoryAllowed(ctx, name, rel)) return null;
-        const header = await readIndexableHeader(full, bytes);
-        if (!header.indexable || !twinNoteMemoryAllowed(ctx, name, rel, header.meta)) return null;
-        const raw = await readFile(full, 'utf8');
-        const { meta, body, frontmatter } = parseFrontmatter(raw);
-        if (isPrivateMeta(meta) || fmSaysPrivate(frontmatter) || !twinNoteMemoryAllowed(ctx, name, rel, meta)) return null;
-        return { rel, title: path.posix.basename(rel).replace(/\.md$/i, ''), aliases: listValue(meta.aliases), raw, meta, body, mtime,
-          tags: extractTags(raw, meta), generated: meta.generated_by === 'brainlink' || /^BrainLink\/Commands\//i.test(rel), private: false };
-      }));
-      notes.push(...batch.filter(Boolean));
-    }
-    notes.sort((a, b) => a.rel.localeCompare(b.rel));
-    const value = { notes, noteEdges: linkGraph(notes).edges, byRel: new Map(notes.map((note, index) => [note.rel, index])) };
-    graphVaultCache.set(key, { value, signatures });
-    return value;
+    const value = await buildVaultGraph(ctx, name, cached);
+    const signatures = value.signatures;
+    graphVaultCache.set(key, { value: value.graph, signatures, root, expiresAt: Date.now() + GRAPH_CACHE_TTL_MS });
+    while (graphVaultCache.size > GRAPH_CACHE_MAX_ENTRIES) graphVaultCache.delete(graphVaultCache.keys().next().value);
+    return value.graph;
   })();
-  graphVaultCache.set(key, { pending });
+  graphVaultCache.set(key, { pending, root, expiresAt: Number.POSITIVE_INFINITY });
+  while (graphVaultCache.size > GRAPH_CACHE_MAX_ENTRIES) graphVaultCache.delete(graphVaultCache.keys().next().value);
   try { return await pending; }
   catch (error) { if (graphVaultCache.get(key)?.pending === pending) graphVaultCache.delete(key); throw error; }
+}
+
+async function buildVaultGraph(ctx, name, cached = null) {
+  const root = vaultRoot(ctx, name), notes = [], files = await walk(root);
+  // Check the current eligible paths and metadata on each request. A time-only cache could
+  // continue showing a note immediately after it was made private or its folder excluded.
+  const states = [];
+  for (let start = 0; start < files.length; start += GRAPH_STAT_BATCH_SIZE) states.push(...await Promise.all(files.slice(start, start + GRAPH_STAT_BATCH_SIZE).map(async (full) => {
+    const st = await stat(full, { bigint: true });
+    return { full, rel: path.relative(root, full).split(path.sep).join('/'), mtime: Number(st.mtimeNs) / 1e6, bytes: Number(st.size),
+      signature: `${st.size}:${st.mtimeNs}:${st.ctimeNs}` };
+  })));
+  const signatures = new Map(states.map((item) => [item.rel, item.signature]));
+  if (cached?.value && cached.signatures?.size === signatures.size && [...signatures].every(([rel, value]) => cached.signatures.get(rel) === value)) {
+    return { graph: cached.value, signatures };
+  }
+  for (let start = 0; start < files.length; start += GRAPH_READ_BATCH_SIZE) {
+    const batch = await Promise.all(states.slice(start, start + GRAPH_READ_BATCH_SIZE).map(async ({ full, rel, mtime, bytes }) => {
+      if (!twinNoteMemoryAllowed(ctx, name, rel)) return null;
+      const header = await readIndexableHeader(full, bytes);
+      if (!header.indexable || !twinNoteMemoryAllowed(ctx, name, rel, header.meta)) return null;
+      const raw = await readFile(full, 'utf8');
+      const { meta, body, frontmatter } = parseFrontmatter(raw);
+      if (isPrivateMeta(meta) || fmSaysPrivate(frontmatter) || !twinNoteMemoryAllowed(ctx, name, rel, meta)) return null;
+      return { rel, title: path.posix.basename(rel).replace(/\.md$/i, ''), aliases: listValue(meta.aliases), raw, meta, body, mtime,
+        tags: extractTags(raw, meta), generated: meta.generated_by === 'brainlink' || /^BrainLink\/Commands\//i.test(rel), private: false };
+    }));
+    notes.push(...batch.filter(Boolean));
+  }
+  notes.sort((a, b) => a.rel.localeCompare(b.rel));
+  const value = { notes, noteEdges: linkGraph(notes).edges, byRel: new Map(notes.map((note, index) => [note.rel, index])) };
+  return { graph: value, signatures };
 }
 
 export function buildIndex(notes) {
@@ -616,7 +682,9 @@ export function searchIndex(index, query, opts = {}) {
     if (note.generated) x.s *= 0.2;
     if (note.minor) x.s *= 0.35;
   }
-  top.sort((a, b) => b.s - a.s);
+  top.sort((a, b) => b.s - a.s
+    || compareReviewTrust(index.notes[a.c.noteIdx], index.notes[b.c.noteIdx])
+    || index.notes[a.c.noteIdx].rel.localeCompare(index.notes[b.c.noteIdx].rel));
   // One result per note (its best section), so five results are five different notes.
   const seenNote = new Set();
   const maxScore = top[0]?.s || 1;
@@ -628,6 +696,17 @@ export function searchIndex(index, query, opts = {}) {
     if (results.length >= limit) break;
   }
   return results;
+}
+
+export function compareReviewTrust(a, b) {
+  const tier = (note) => {
+    const status = String(note.meta?.status || '').toLowerCase();
+    const confidence = String(note.meta?.confidence || '').toLowerCase();
+    if (confidence === 'verified' || ['verified', 'active', 'final'].includes(status)) return 2;
+    if (['proposed', 'draft'].includes(status)) return 0;
+    return 1;
+  };
+  return tier(b) - tier(a);
 }
 
 // How much of the query's term weight (idf) note i contains, 0..1.

@@ -119,12 +119,12 @@ try {
   $token = (Get-Content -LiteralPath (Join-Path $BrainLinkHome 'setup-token') -Raw).Trim()
   $page = Invoke-WebRequest "http://127.0.0.1:$($instance.port)/?t=$token" -Headers @{ 'X-BrainLink-Token' = $token } -TimeoutSec 5
   if ($page.StatusCode -ne 200 -or $page.Content -notmatch 'BrainLink Setup') { throw 'Installed Setup UI did not load with its local session token.' }
-  if ($page.Content -notmatch 'href="#s-ingestion" data-main-nav="s-ingestion" data-i18n="nav.sources"') { throw 'Installed Setup is missing direct Sources navigation to folder scanning.' }
+  if (-not $page.Content.Contains('href="#proposal-review-panel" data-nav-group-link="review"') -or -not $page.Content.Contains('"review":["proposal-review-panel","memory-review-panel","decision-reviews-panel","conflicts-panel","tidy-panel","sessions-panel","s-ingestion"]')) { throw 'Installed Setup is missing Review navigation to folder scanning.' }
   if ($page.Content -notmatch 'id="ingestion-model-setup"' -or $page.Content -notmatch 'href="#sessions-panel" data-main-nav="sessions-panel" data-i18n="ingestion.modelSetupLink"') { throw 'Installed Setup is missing the local-model setup link for automatic source analysis.' }
   if ($page.Content -notmatch 'id="ingestion-enabled"' -or $page.Content -notmatch 'id="ingestion-auto-file"' -or $page.Content -notmatch 'id="ingestion-run"' -or $page.Content -notmatch 'id="ingestion-startup-warning"') { throw 'Installed Setup is missing the scheduled scan, auto-file, manual scan, or sign-in startup guidance control.' }
   $OcrFixtures = @('ocr-sample.png', 'ocr-portuguese.png', 'ocr-traditional-chinese.png') | ForEach-Object { Join-Path $Root "test\fixtures\$_" }
   & $InstalledNode $OcrSmoke $InstalledApp @OcrFixtures | Out-Host
-  if ($LASTEXITCODE -ne 0) { throw 'The installed OCR runtime could not read its local image fixture.' }
+  if ($LASTEXITCODE -ne 0) { throw "The installed OCR runtime could not read its local image fixture (exit code $LASTEXITCODE)." }
   & $InstalledNode $HtmlSmoke $InstalledApp | Out-Host
   if ($LASTEXITCODE -ne 0) { throw 'The installed HTML parser could not safely extract its fictional fixture.' }
   $englishLocale = Invoke-RestMethod "http://127.0.0.1:$($instance.port)/locales/en.json" -TimeoutSec 5

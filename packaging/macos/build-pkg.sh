@@ -98,7 +98,8 @@ codesign --verify --strict "$APP"
 
 # 4. Installer: component package (not relocatable) wrapped in a product archive.
 pkgbuild --analyze --root "$WORK/root" "$WORK/component.plist" >/dev/null
-/usr/libexec/PlistBuddy -c "Add :0:BundleIsRelocatable bool false" "$WORK/component.plist"
+/usr/libexec/PlistBuddy -c "Set :0:BundleIsRelocatable false" "$WORK/component.plist" 2>/dev/null \
+  || /usr/libexec/PlistBuddy -c "Add :0:BundleIsRelocatable bool false" "$WORK/component.plist"
 pkgbuild --root "$WORK/root" --component-plist "$WORK/component.plist" --scripts "$HERE/scripts" --identifier "$BUNDLE_ID.pkg" --version "$VERSION" --install-location / "$WORK/BrainLink-component.pkg" >/dev/null
 cp "$ROOT/LICENSE.txt" "$HERE/resources/license.txt"
 cat > "$WORK/distribution.xml" <<XML

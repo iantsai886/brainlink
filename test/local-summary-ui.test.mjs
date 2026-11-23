@@ -1,8 +1,9 @@
 import test from 'node:test';
+import { readSetupHtml } from './helpers/setup-html.mjs';
 import assert from 'node:assert/strict';
 import { readFile } from 'node:fs/promises';
 
-const html = await readFile(new URL('../ui/index.html', import.meta.url), 'utf8');
+const html = await readSetupHtml();
 
 test('local summary UI explains opt-in, local processing, and review requirements', () => {
   assert.match(html, /id="sess-local-summary-enabled"/);

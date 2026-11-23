@@ -1,4 +1,5 @@
 import test from 'node:test';
+import { readSetupHtml } from './helpers/setup-html.mjs';
 import assert from 'node:assert/strict';
 import { mkdtemp, writeFile } from 'node:fs/promises';
 import os from 'node:os';
@@ -84,7 +85,7 @@ test('search filters private notes before sending candidates to the local rerank
 test('reranker settings and connection controls are present in all user locales', async () => {
   const { readFile } = await import('node:fs/promises');
   const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
-  const html = await readFile(path.join(root, 'ui', 'index.html'), 'utf8');
+  const html = await readSetupHtml();
   assert.match(html, /id="reranker-form"/);
   assert.match(html, /api\('POST', '\/api\/reranker\/settings'/);
   assert.match(html, /api\('POST', '\/api\/reranker\/test'/);

@@ -64,7 +64,9 @@ function extractPdfText(bytes) {
           ? 'This PDF has no readable text. If it is scanned, its pages may be blank, too faint, or outside the OCR page limit.'
           : result?.reason === 'page_limit'
             ? 'This PDF is over the 100-page extraction limit.'
-            : 'This PDF could not be safely extracted.';
+            : result?.reason === 'missing_dependency'
+              ? `Optional PDF package "${result.package || 'pdfjs-dist'}" is not installed. Install BrainLink optional ingestion packages to extract PDFs.`
+              : 'This PDF could not be safely extracted.';
         finish(reject, new Error(reason));
       }
     });
@@ -147,7 +149,11 @@ function extractDocxText(bytes) {
     worker.once('message', (result) => {
       if (result?.ok && typeof result.text === 'string') finish(resolve, result);
       else {
-        const reason = result?.reason === 'no_text' ? 'This DOCX has no readable text.' : 'This DOCX could not be safely extracted.';
+        const reason = result?.reason === 'no_text'
+          ? 'This DOCX has no readable text.'
+          : result?.reason === 'missing_dependency'
+            ? `Optional DOCX package "${result.package || 'mammoth'}" is not installed. Install BrainLink optional ingestion packages to extract DOCX files.`
+            : 'This DOCX could not be safely extracted.';
         finish(reject, new Error(reason));
       }
     });

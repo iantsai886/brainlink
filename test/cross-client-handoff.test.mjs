@@ -17,6 +17,17 @@ async function call(mcp, name, args = {}) {
   return { isError: result.isError, value };
 }
 
+async function activate(mcp, name) {
+  const listed = await mcp.handle({ jsonrpc: '2.0', id: 1, method: 'tools/list' });
+  const slug = name.toLowerCase().replace(/[^a-z0-9]+/g, '_').replace(/^_|_$/g, '');
+  const tool = listed.result.tools.find((item) => item.name === `agent_connect_${slug}`)
+    || listed.result.tools.find((item) => item.name === 'agent_connect');
+  assert.ok(tool, `activation tool exists for ${name}`);
+  const args = tool.name === 'agent_connect' ? { agent: name } : {};
+  const response = await mcp.handle({ jsonrpc: '2.0', id: 1, method: 'tools/call', params: { name: tool.name, arguments: args } });
+  assert.equal(response.result?.isError, false, JSON.stringify(response));
+}
+
 test('fictional Claude-to-Codex handoff previews, filters private sources, continues, and acknowledges', async () => {
   const root = await mkdtemp(path.join(tmpdir(), 'brainlink-cross-client-'));
   const companyVault = path.join(root, 'company-vault');
@@ -35,6 +46,11 @@ test('fictional Claude-to-Codex handoff previews, filters private sources, conti
       { name: 'Shared Handoff Mailbox', path: mailboxVault },
     ],
     handoff: { vault: 'Shared Handoff Mailbox', folder: 'Handoffs' },
+    agents: [
+      { name: 'Fictional Claude Role', vault: 'Fictional Company', role: 'Company task role.', activation: ['Connect to Fictional Claude Role'], close: [], connect_notes: [], tail_notes: [], close_target: { mode: 'proposal-only', path: 'BrainLink/Review.md' } },
+      { name: 'Fictional Codex Role', vault: 'Fictional Company', role: 'Company task role.', activation: ['Connect to Fictional Codex Role'], close: [], connect_notes: [], tail_notes: [], close_target: { mode: 'proposal-only', path: 'BrainLink/Review.md' } },
+      { name: 'Fictional Personal Role', vault: 'Fictional Personal', role: 'Personal task role.', activation: ['Connect to Fictional Personal Role'], close: [], connect_notes: [], tail_notes: [], close_target: { mode: 'proposal-only', path: 'BrainLink/Review.md' } },
+    ],
     ai_agents: [
       { id: 'claude_code', name: 'Fictional Claude Code', tokenHash: hashToken('fictional-claude-token') },
       { id: 'codex', name: 'Fictional Codex', tokenHash: hashToken('fictional-codex-token') },
@@ -81,6 +97,9 @@ test('fictional Claude-to-Codex handoff previews, filters private sources, conti
   const codex = makeClient('Codex', 'fictional-codex-token');
   const personal = makeClient('Personal AI', 'fictional-personal-token');
   const unassigned = makeClient('Unassigned Agent', 'fictional-unassigned-token');
+  await activate(claude, 'Fictional Claude Role');
+  await activate(codex, 'Fictional Codex Role');
+  await activate(personal, 'Fictional Personal Role');
   const taskId = 'fictional-cross-client-task-01';
   const payload = {
     to: 'Codex', subject: 'Continue fictional local demo', goal: 'Finish the isolated demo UI',

@@ -1,4 +1,5 @@
 import test from 'node:test';
+import { readSetupHtml } from './helpers/setup-html.mjs';
 import assert from 'node:assert/strict';
 import path from 'node:path';
 import { mkdtemp, mkdir, writeFile, readFile, readdir } from 'node:fs/promises';
@@ -83,7 +84,7 @@ test('Setup schedules local briefs for explicitly selected public or private vau
 });
 
 test('daily brief UI has manual and scheduled controls with translations in every locale', async () => {
-  const html = await readFile(new URL('../ui/index.html', import.meta.url), 'utf8');
+  const html = await readSetupHtml();
   for (const id of ['brief-enabled', 'brief-vault', 'brief-time', 'brief-save', 'brief-run', 'brief-status', 'brief-output']) {
     assert.equal((html.match(new RegExp(`id="${id}"`, 'g')) || []).length, 1, id);
   }

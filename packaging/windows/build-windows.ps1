@@ -9,7 +9,8 @@ $NodeVersion = (Get-Content "$Root\vendor\node\VERSION").Trim()
 $NodeDist = "https://nodejs.org/dist/v$NodeVersion"
 $NodeArchivePrefix = "node-v$NodeVersion"
 $Stage = "$Root\build\windows\stage"
-Remove-Item -Recurse -Force "$Root\build\windows" -ErrorAction SilentlyContinue
+# Preserve build/windows/qa: the upgrade smoke uses its retained baseline installer.
+Remove-Item -Recurse -Force $Stage, "$Root\build\windows\node-unzip" -ErrorAction SilentlyContinue
 New-Item -ItemType Directory -Force "$Stage\node", "$Stage\app", "$Root\vendor\node" | Out-Null
 
 # 1. Official Node runtime, checksum-verified.
@@ -42,6 +43,8 @@ if ($LASTEXITCODE -ne 0) { throw "Failed to stage offline OCR language data (exi
 
 # 3. Installer.
 $env:BRAINLINK_VERSION = $Version
+$OutputName = if ($env:BRAINLINK_OUTPUT_NAME) { $env:BRAINLINK_OUTPUT_NAME } else { "BrainLink-Setup-$Version" }
+if ($OutputName -notmatch '^BrainLink-Setup-[A-Za-z0-9._-]+$') { throw 'BRAINLINK_OUTPUT_NAME must be a safe BrainLink-Setup filename without an extension.' }
 $IsccCommand = Get-Command iscc.exe -ErrorAction SilentlyContinue
 $IsccCandidates = @()
 if ($IsccCommand) { $IsccCandidates += $IsccCommand.Source }
@@ -52,8 +55,8 @@ $IsccCandidates += @(
 )
 $Iscc = $IsccCandidates | Where-Object { $_ -and (Test-Path -LiteralPath $_ -PathType Leaf) } | Select-Object -First 1
 if (-not $Iscc) { throw 'Inno Setup 6 compiler not found. Install it per-user or system-wide, or add ISCC.exe to PATH.' }
-$IsccArgs = @("$Here\BrainLink.iss")
+$IsccArgs = @("/F$OutputName", "$Here\BrainLink.iss")
 if ($env:BRAINLINK_SIGN -eq "1") { $IsccArgs = @("/DSIGN") + $IsccArgs }
 & $Iscc @IsccArgs
 if ($LASTEXITCODE -ne 0) { throw "Inno Setup compiler failed with exit code $LASTEXITCODE" }
-Get-FileHash "$Root\dist\BrainLink-Setup-$Version.exe" -Algorithm SHA256 | Format-List
+Get-FileHash "$Root\dist\$OutputName.exe" -Algorithm SHA256 | Format-List

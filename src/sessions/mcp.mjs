@@ -69,7 +69,7 @@ export async function sessionList(store, a = {}) {
     ...(a.profile_ids ? { profile_ids: a.profile_ids, include_unowned: a.allow_imported_private === true } : {}),
     limit: Math.min(limit * (a.profile_ids?.length > 1 ? 20 : 4), 400) });
   const visible = fetched.filter((s) => {
-    if (s.profile_id && !allowedProfileIds.has(s.profile_id)) return false;
+    if (s.profile_id && !allowedProfileIds.has(s.profile_id) && !a.include_private) return false;
     const profilePrivate = Boolean(a.allow_profile_private && allowedProfileIds.has(s.profile_id));
     const allowed = !s.private || a.include_private || profilePrivate || (a.allow_imported_private && isRelaxableImport(s));
     return allowed && (!a.project || s.project.includes(a.project));

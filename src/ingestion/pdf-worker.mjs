@@ -1,5 +1,4 @@
 import { parentPort, workerData } from 'node:worker_threads';
-import { getDocument } from 'pdfjs-dist/legacy/build/pdf.mjs';
 import { extractImageTexts } from './image-ocr.mjs';
 
 const MAX_PAGES = 100;
@@ -26,6 +25,13 @@ function pageTextFrom(items, remaining) {
 }
 
 try {
+  let getDocument;
+  try {
+    ({ getDocument } = await import('pdfjs-dist/legacy/build/pdf.mjs'));
+  } catch {
+    parentPort.postMessage({ ok: false, reason: 'missing_dependency', package: 'pdfjs-dist' });
+    process.exit(0);
+  }
   const task = getDocument({
     data: new Uint8Array(workerData),
     isEvalSupported: false,

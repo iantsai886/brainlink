@@ -1,6 +1,7 @@
 // RB2 demo features: cited instant answer (/api/ask, /api/note), connect + live health check
 // (/api/connect's health field, /api/client-health), and the `brainlink sync` session-count fix.
 import test from 'node:test';
+import { readSetupHtml } from './helpers/setup-html.mjs';
 import assert from 'node:assert/strict';
 import { mkdtemp, mkdir, cp, readFile, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
@@ -45,6 +46,22 @@ test('/api/ask: answers from the vault with clickable source chips; /api/note op
   } finally { s.server.close(); }
 });
 
+test('/api/ask reuses its local search index across requests and detects note edits', async () => {
+  const { s, api, vaultPath } = await withSampleVault('ask-index-reuse');
+  try {
+    const notePath = path.join(vaultPath, 'Iango Goal.md');
+    await writeFile(notePath, '# Iango Goal\n\nIango goal is to establish the first customer workflow.\n');
+    const first = await (await api('/api/ask', { query: 'what is iango goal' })).json();
+    assert.equal(first.status, 'hits');
+    assert.ok(first.sources.some((source) => source.path === 'Iango Goal.md'));
+
+    await writeFile(notePath, '# Iango Goal\n\nUpdated goal marker: lavender comet 78421.\n');
+    const refreshed = await (await api('/api/ask', { query: 'lavender comet 78421' })).json();
+    assert.equal(refreshed.status, 'hits');
+    assert.ok(refreshed.sources.some((source) => source.path === 'Iango Goal.md'), JSON.stringify(refreshed.sources));
+  } finally { await new Promise((resolve) => s.server.close(resolve)); }
+});
+
 test('S1: /api/ask never answers from or cites a private note', async () => {
   const { s, api, vaultPath } = await withSampleVault('ask-private');
   try {
@@ -86,6 +103,25 @@ test('/api/ask: a question with nothing in the vault says so instead of guessing
   } finally { s.server.close(); }
 });
 
+test('/api/ask: sources carry trust metadata, an unknown vault is refused, and "*" searches each shared vault separately', async () => {
+  const { s, api } = await withSampleVault('ask-trust');
+  try {
+    const r = await (await api('/api/ask', { query: 'What is the price of the Brand Sprint?', vault: '*' })).json();
+    assert.equal(r.status, 'hits');
+    assert.ok(Array.isArray(r.groups) && r.groups.length === r.vaults_searched.length, 'one result group per searched vault');
+    assert.equal(r.groups[0].vault, r.vault, 'top-level fields mirror the best group for older callers');
+    assert.ok(['keyword', 'meaning'].includes(r.search_mode));
+    for (const source of r.groups.flatMap((group) => group.sources)) {
+      for (const key of ['date', 'status', 'confidence', 'match', 'snippet']) assert.equal(typeof source[key], 'string', `source.${key}`);
+      assert.equal(typeof source.historical, 'boolean');
+      assert.ok(r.vaults_searched.includes(source.vault), 'a source never comes from a vault that was not searched');
+    }
+    const unknown = await api('/api/ask', { query: 'anything', vault: 'No Such Vault' });
+    assert.equal(unknown.status, 400, 'an unknown vault must not silently fall back to another vault');
+    assert.match((await unknown.json()).error, /Unknown vault/);
+  } finally { s.server.close(); }
+});
+
 test('/api/ask and /api/note: no vault configured yet returns a clear error, not a crash', async () => {
   const home = await tmp('ask-empty-home');
   const env = { BRAINLINK_HOME: path.join(home, 'app'), BRAINLINK_SEMANTIC: '0' };
@@ -104,6 +140,7 @@ test('/api/ask and /api/note: no vault configured yet returns a clear error, not
 test('/api/client-health: names the BrainLink roles this AI can call and gives clear full-restart steps', async () => {
   const { home, env, s, api } = await withSampleVault('health', { agentName: 'Anna' });
   try {
+    await api('/api/mcp/profile', { tool_profile: 'core', enabled_groups: ['agents'] });
     const r = await (await api('/api/client-health', { client: 'cursor' })).json();
     assert.equal(r.ok, true, JSON.stringify(r));
     assert.equal(r.tool, 'brainlink_guide');
@@ -187,7 +224,7 @@ test('/api/connect: one-click connect returns a local BrainLink check, not an ex
 // `.modal-overlay[hidden] { display: none }` is required so the always-present #note-modal
 // (ui/index.html) does not cover the whole page and swallow clicks from first load.
 test('ui/index.html: #note-modal starts hidden (author CSS cannot override the hidden attribute) and Close/Esc wire up', async () => {
-  const html = await readFile(path.join(ROOT, 'ui', 'index.html'), 'utf8');
+  const html = await readSetupHtml();
   assert.match(html, /<div id="note-modal" class="modal-overlay" hidden>/, 'the modal must start with the hidden attribute in markup');
   assert.match(html, /\.modal-overlay\[hidden\]\s*\{\s*display:\s*none;?\s*\}/, 'an explicit [hidden] override is required because .modal-overlay also sets `display`');
   assert.match(html, /\$\('note-close'\)\.onclick\s*=\s*closeNote/, 'Close must hide the modal');
@@ -195,7 +232,7 @@ test('ui/index.html: #note-modal starts hidden (author CSS cannot override the h
 });
 
 test('ui/index.html: shared desktop content width grows while the graph still stacks on narrow screens', async () => {
-  const html = await readFile(path.join(ROOT, 'ui', 'index.html'), 'utf8');
+  const html = await readSetupHtml();
   const css = html.match(/<style>([\s\S]*?)<\/style>/)?.[1] || '';
   assert.match(css, /--content-width:\s*1180px/, 'desktop content should use the wider shared layout size');
   for (const selector of ['header', 'main', '#boot-loading, #boot-error', '#main-nav']) {

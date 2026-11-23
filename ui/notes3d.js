@@ -9,7 +9,10 @@
   async function api(path, body) {
     const isGraphRead = path === '/api/graph3d' || path === '/api/graph3d/vaults';
     const controller = isGraphRead ? new AbortController() : null;
-    const timer = controller ? setTimeout(() => controller.abort(), 90000) : null;
+    // Large vaults on cloud-backed folders can take longer than a minute to build the
+    // privacy-checked graph on a cold start. Give that read more time; the picker itself stays
+    // fast because it no longer indexes vaults just to show their names.
+    const timer = controller ? setTimeout(() => controller.abort(), 300000) : null;
     try {
       const r = await fetch(path, { method: 'POST', headers: { 'Content-Type': 'application/json', 'X-BrainLink-Token': T }, body: JSON.stringify(body || {}), ...(controller ? { signal: controller.signal } : {}) });
       const j = await r.json().catch(() => ({}));
@@ -116,6 +119,7 @@
       <summary data-i18n="notes3d.discoverVault"></summary>
       <p class="muted" data-i18n="notes3d.discoverHint"></p>
       <button type="button" class="chip" id="notes3d-discover-run" data-i18n="notes3d.discoverRun"></button>
+      <button type="button" class="chip" id="notes3d-discover-all" data-i18n="notes3d.discoverAll"></button>
       <p id="notes3d-discover-status" class="muted" role="status" aria-live="polite"></p>
       <div id="notes3d-discover-list"></div>
     </details>`);
@@ -133,6 +137,20 @@
     const root = document.getElementById('notes3d-root');
     if (!brainPanel || !root) return;
     let graphInstance = null, nodesById = [], byTitle = new Map(), loaded = false, loadedOk = false, selectedId = null, currentDetail = null, currentDetailComplete = false, currentNode = null, pendingVaultRefresh = false, vaultFilter = null, graphVaultOptions = [], graphDataAll = { nodes: [], links: [] }, legendGroups = [], activeGroup = null;
+    const graphClientCache = new Map();
+    const GRAPH_CLIENT_CACHE_LIMIT = 2;
+    function clearGraphClientCache() { graphClientCache.clear(); }
+    function graphClientCacheKey(revision) {
+      const selected = vaultFilter && vaultFilter !== '*' ? graphVaultOptions.find((vault) => vault.name === vaultFilter) : null;
+      if (selected?.private) return null;
+      return `${revision}\0${vaultFilter || '*'}`;
+    }
+    function rememberPublicGraph(key, graph) {
+      if (!key) return;
+      graphClientCache.delete(key);
+      graphClientCache.set(key, JSON.stringify(graph));
+      while (graphClientCache.size > GRAPH_CLIENT_CACHE_LIMIT) graphClientCache.delete(graphClientCache.keys().next().value);
+    }
     const relationTargets = { owned_by: ['team','person'], runs: ['workflow'], consumes: ['dataset','artifact'], produces: ['dataset','artifact'], depends_on: ['workflow','dataset','project'], part_of: ['team','project'], assigned_to: ['person','team'], informed_by: ['artifact','dataset','concept'], communicates_with: ['person','team'] };
 
     function stat(id, v) { const el = document.getElementById(id); if (el) el.textContent = v; }
@@ -189,7 +207,7 @@
     function renderVaultOptions() {
       const select = document.getElementById('notes3d-vault-select');
       if (!select) return;
-      select.innerHTML = `<option value="*">${esc(tr('notes3d.allVaults'))}</option>${graphVaultOptions.map((vault) => `<option value="${esc(vault.name)}">${esc(vault.name)}${vault.private ? ` · ${esc(tr('notes3d.privateLocal'))}` : ` · ${esc(vault.notes)}`}</option>`).join('')}`;
+      select.innerHTML = `<option value="*">${esc(tr('notes3d.allVaults'))}</option>${graphVaultOptions.map((vault) => `<option value="${esc(vault.name)}">${esc(vault.name)}${vault.private ? ` · ${esc(tr('notes3d.privateLocal'))}` : (Number.isSafeInteger(vault.notes) ? ` · ${esc(vault.notes)}` : '')}</option>`).join('')}`;
       select.value = vaultFilter === null ? '*' : vaultFilter;
     }
 
@@ -339,19 +357,31 @@
       }
     }
 
-    async function runDiscovery({ append = false } = {}) {
+    async function runDiscovery({ append = false, all = false } = {}) {
       const list = document.getElementById('notes3d-discover-list');
       const status = document.getElementById('notes3d-discover-status');
       const button = document.getElementById('notes3d-discover-run');
-      if (!list || !status || !button) return;
-      button.disabled = true;
+      const allButton = document.getElementById('notes3d-discover-all');
+      if (!list || !status || !button || !allButton) return;
+      button.disabled = true; allButton.disabled = true;
       try {
-        const offset = append ? (list._nextOffset || 0) : 0;
-        const result = await api('/api/graph3d/discover', { offset, vault: vaultFilter && vaultFilter !== '*' ? vaultFilter : undefined, scan_id: append ? list._scanId : undefined });
-        const items = append ? [...(list._candidates || []), ...result.candidates] : result.candidates;
+        let offset = append ? (list._nextOffset || 0) : 0;
+        let scanId = append ? list._scanId : undefined;
+        let items = append ? [...(list._candidates || [])] : [];
+        let result;
+        do {
+          result = await api('/api/graph3d/discover', { offset, limit: all ? 50 : 20, vault: vaultFilter && vaultFilter !== '*' ? vaultFilter : undefined, scan_id: scanId });
+          items = [...items, ...result.candidates];
+          scanId = result.scan_id;
+          offset = result.next_offset;
+          list._candidates = items; list._scanId = scanId; list._nextOffset = offset;
+          status.textContent = all && !result.done
+            ? tr('notes3d.discoverProgress', { count: items.length, scanned: offset, total: result.total_sources })
+            : (result.done ? tr('notes3d.discoverDone', { count: items.length, scanned: offset, total: result.total_sources })
+              : tr('notes3d.discoverProgress', { count: items.length, scanned: offset, total: result.total_sources }));
+          if (all && !result.done) await new Promise((resolve) => setTimeout(resolve, 0));
+        } while (all && !result.done);
         list._candidates = items;
-        list._scanId = result.scan_id;
-        list._nextOffset = result.next_offset;
         list._done = result.done;
         list.innerHTML = items.map((item, i) => `<article class="card notes3d-review-item">
           <b>${esc(item.title)}</b><span class="mono muted">${esc(item.vault)} · ${esc(item.path)}</span>
@@ -366,7 +396,7 @@
           status.textContent = tr('notes3d.discoverChanged');
           list._nextOffset = 0; list._done = true; list._candidates = []; list._scanId = null; list.innerHTML = ''; button.textContent = tr('notes3d.discoverRun');
         } else status.textContent = tr('notes3d.discoverFailed', { error: error.message });
-      } finally { button.disabled = false; }
+      } finally { button.disabled = false; allButton.disabled = false; }
     }
 
     function updateManualTargetOptions(form) {
@@ -400,7 +430,7 @@
     });
 
     root.addEventListener('click', (e) => {
-      if (e.target.closest('[data-notes3d-retry]')) { loadGraph(); return; }
+      if (e.target.closest('[data-notes3d-retry]')) { loadGraph({ force: true }); return; }
       if (e.target.closest('[data-review-load-more]')) { loadReviewQueue({ append: true }); return; }
       const graphNote = e.target.closest('[data-graph-note-id]');
       if (graphNote) { openById(graphNote.dataset.graphNoteId); return; }
@@ -411,7 +441,7 @@
         if (fields.type === 'workflow') for (const field of document.getElementById('notes3d-links').querySelectorAll('[data-graph-workflow-field]')) fields[field.getAttribute('data-graph-workflow-field')] = field.value.split(/\r?\n/).map((item) => item.trim()).filter(Boolean);
         saveGraphRecord.disabled = true;
         api('/api/graph3d/entity/save', { vault: currentDetail.vault, path: currentDetail.path, etag: currentDetail.etag, graph_record: fields })
-          .then(async (result) => { toast(tr('notes3d.graphRecordSaved')); await loadGraph(); const updated = nodesById.find((node) => node.vault === currentDetail?.vault && node.path === currentDetail?.path); if (updated) openById(updated.id); })
+          .then(async (result) => { toast(tr('notes3d.graphRecordSaved')); await loadGraph({ force: true }); const updated = nodesById.find((node) => node.vault === currentDetail?.vault && node.path === currentDetail?.path); if (updated) openById(updated.id); })
           .catch((err) => { toast(err.message, true); saveGraphRecord.disabled = false; });
         return;
       }
@@ -444,11 +474,12 @@
           document.getElementById('notes3d-body').hidden = false;
           pendingVaultRefresh = false;
           toast('Note saved.');
-          return loadGraph();
+          return loadGraph({ force: true });
         }).catch((err) => { document.getElementById('notes3d-save-status').textContent = err.message; }).finally(() => { button.disabled = false; });
         return;
       }
       if (e.target.id === 'notes3d-discover-run') { runDiscovery({ append: Boolean(document.getElementById('notes3d-discover-list')._nextOffset && !document.getElementById('notes3d-discover-list')._done) }); return; }
+      if (e.target.id === 'notes3d-discover-all') { runDiscovery({ all: true }); return; }
       const review = e.target.closest('[data-review-relation]');
       if (review) {
         if (!currentDetail || !window.confirm(tr('notes3d.approveConfirm'))) return;
@@ -589,8 +620,9 @@
     });
     document.getElementById('notes3d-reset-view')?.addEventListener('click', resetGraphView);
     let graphLoadSequence = 0;
-    async function loadGraph() {
+    async function loadGraph({ force = false } = {}) {
       const sequence = ++graphLoadSequence;
+      if (force) clearGraphClientCache();
       const canvas = document.getElementById('notes3d-canvas');
       const resetView = document.getElementById('notes3d-reset-view');
       if (resetView) resetView.disabled = true;
@@ -602,7 +634,17 @@
         if (vaultFilter === null && optionData.vaults.length) vaultFilter = optionData.vaults[0].name;
         if (vaultFilter && vaultFilter !== '*' && !optionData.vaults.some((vault) => vault.name === vaultFilter)) vaultFilter = optionData.vaults[0]?.name || '*';
         renderVaultOptions();
-        g = await api('/api/graph3d', { vault: vaultFilter && vaultFilter !== '*' ? vaultFilter : undefined });
+        const revision = optionData.revision || JSON.stringify(optionData.vaults.map(({ name, private: isPrivate }) => [name, Boolean(isPrivate)]));
+        const cacheKey = graphClientCacheKey(revision);
+        const cachedGraph = !force && cacheKey ? graphClientCache.get(cacheKey) : null;
+        if (cachedGraph) {
+          graphClientCache.delete(cacheKey);
+          graphClientCache.set(cacheKey, cachedGraph);
+          g = JSON.parse(cachedGraph);
+        } else {
+          g = await api('/api/graph3d', { vault: vaultFilter && vaultFilter !== '*' ? vaultFilter : undefined });
+          rememberPublicGraph(cacheKey, g);
+        }
       }
       catch (e) {
         if (sequence !== graphLoadSequence) return;
@@ -688,13 +730,14 @@
       if (editor && !editor.hidden) { pendingVaultRefresh = true; return; }
       const selected = currentNode && { vault: currentNode.vault, path: currentNode.path };
       selectedId = null;
-      await loadGraph();
+      await loadGraph({ force: true });
       if (!selected) return;
       const updated = nodesById.find((node) => node.vault === selected.vault && node.path === selected.path);
       if (updated) openById(updated.id);
       else document.getElementById('notes3d-panel-detail').close();
     }
-    window.addEventListener('brainlink:vault-changed', () => { pendingVaultRefresh = false; refreshGraph(); });
+    window.addEventListener('brainlink:state-updated', clearGraphClientCache);
+    window.addEventListener('brainlink:vault-changed', () => { clearGraphClientCache(); pendingVaultRefresh = false; refreshGraph(); });
 
     // canvas.clientWidth/clientHeight can read 0 (or a stale pre-layout value) the instant
     // #brain-panel stops being hidden, so this is called once right after the graph is created,

@@ -16,8 +16,10 @@ Running BrainLink MCP connections re-read saved access settings before subsequen
 ## Command line
 
 ```
-brainlink setup | init | connect <client|all> | disconnect <client> | clients | status | sync | ui | demo | serve [--http]
+brainlink setup | init | connect <client|all> | disconnect <client> | clients | status | selftest [--json] | sync | ui | demo | serve [--http]
 ```
+
+`selftest` checks, without changing anything, that connected AIs can reach the rule notes, role notes and mailbox the configuration points at, and lists excluded folders that hold notes; it exits non-zero when a check fails. `brainlink miss replay` re-runs the questions kept by the opt-in "Questions your notes could not answer" list (off by default; question text stays in the BrainLink data folder on this computer and private vaults are never recorded).
 
 `connect` also accepts `--all`. `sync` runs one sync pass (local-only by default; choose Drive, iCloud or Dropbox in Setup).
 

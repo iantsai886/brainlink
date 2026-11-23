@@ -1,5 +1,6 @@
 // RB7 item 2: the 3D notes graph API. Excluded folders and private notes/vaults must never
 // appear in the graph, the side panel, or backlinks/outlinks — same promise as search/answers.
+import { readSetupHtml } from './helpers/setup-html.mjs';
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { mkdtemp, mkdir, writeFile } from 'node:fs/promises';
@@ -8,7 +9,7 @@ import path from 'node:path';
 
 import { normalize } from '../src/config.mjs';
 import { createContext } from '../src/core.mjs';
-import { buildGraph3D, noteDetail3D } from '../src/graph3d.mjs';
+import { buildGraph3D, listGraphVaults, noteDetail3D } from '../src/graph3d.mjs';
 import { startSetup } from '../src/setup.mjs';
 
 const tmp = (p) => mkdtemp(path.join(tmpdir(), `brainlink-${p}-`));
@@ -27,6 +28,24 @@ async function ctxFor(vaultPath, extraVaults = []) {
   const cfg = normalize({ vaults: [{ name: 'Main', path: vaultPath }, ...extraVaults] });
   return createContext(cfg, { env: { BRAINLINK_SEMANTIC: '0' } });
 }
+
+test('graph vault picker returns names without scanning vault files and fingerprints access configuration', async () => {
+  const firstPath = path.join(await tmp('graph3d-picker-first'), 'not-mounted');
+  const secondPath = path.join(await tmp('graph3d-picker-second'), 'not-mounted');
+  const makeContext = (root) => createContext(normalize({ vaults: [
+    { name: 'Main', path: root }, { name: 'Diary', path: path.join(root, 'private'), private: true },
+  ] }), { env: { BRAINLINK_SEMANTIC: '0' } });
+  const first = makeContext(firstPath);
+  const second = makeContext(secondPath);
+  const picker = await listGraphVaults(first, { includePrivateVaults: true });
+  const refreshed = await listGraphVaults(second, { includePrivateVaults: true });
+  assert.deepEqual(picker.vaults, [
+    { name: 'Main', private: false, notes: null },
+    { name: 'Diary', private: true, notes: null },
+  ]);
+  assert.match(picker.revision, /^[a-f0-9]{64}$/);
+  assert.notEqual(picker.revision, refreshed.revision, 'changing the configured vault path invalidates a cached graph');
+});
 
 test('buildGraph3D: excluded-folder notes never appear as nodes or edges', async () => {
   const dir = await buildVault(await tmp('graph3d-excl'));
@@ -206,7 +225,7 @@ test('/api/graph3d and /api/graph3d/note: same exclusion guarantee over HTTP', a
     assert.ok(titles.includes('External') && !titles.includes('External Private'), JSON.stringify(titles));
     const available = await api('/api/graph3d/vaults', {});
     assert.deepEqual(available.vaults.map((v) => v.name), ['Main']);
-    assert.ok(available.vaults[0].notes >= titles.length);
+    assert.equal(available.vaults[0].notes, null, 'the picker avoids scanning vault files before the graph is requested');
     const filtered = await api('/api/graph3d', { vault: 'Main' });
     assert.deepEqual(filtered.nodes.map((n) => n.title), titles);
     assert.equal(filtered.total, g.total);
@@ -616,17 +635,27 @@ test('ui/notes3d.js: clicking a node opens its note via the same path as a wikil
 
 test('active Setup UI reloads the graph on vault events and keeps an open editor intact', async () => {
   const { readFile } = await import('node:fs/promises');
-  const page = await readFile(new URL('../ui/index.html', import.meta.url), 'utf8');
+  const page = await readSetupHtml();
   const graph = await readFile(new URL('../ui/notes3d.js', import.meta.url), 'utf8');
+  const core = await readFile(new URL('../src/core.mjs', import.meta.url), 'utf8');
   assert.match(page, /new EventSource\('\/api\/events\?t=' \+ encodeURIComponent\(T\)\)/);
   assert.match(page, /dispatchEvent\(new Event\('brainlink:vault-changed'\)\)/);
   assert.match(graph, /addEventListener\('brainlink:vault-changed',[\s\S]*?refreshGraph\(\)/);
+  assert.match(graph, /addEventListener\('brainlink:vault-changed',[\s\S]*?clearGraphClientCache\(\)/, 'vault mutations invalidate cached public graphs before refresh');
+  assert.match(graph, /addEventListener\('brainlink:state-updated', clearGraphClientCache\)/, 'config changes invalidate cached graphs');
+  assert.match(graph, /selected\?\.private\) return null/, 'private vault graphs are never cached in the browser');
+  assert.match(graph, /GRAPH_CLIENT_CACHE_LIMIT = 2/, 'the in-memory cache stays bounded');
+  assert.match(graph, /revision = optionData\.revision/, 'cached graphs are keyed to current access configuration');
+  assert.match(core, /if \(isPrivateVault\) \{[\s\S]*?return buildVaultGraph\(ctx, name\);/, 'server graph cache does not retain private-vault note bodies');
+  assert.match(core, /GRAPH_CACHE_MAX_ENTRIES = 4/, 'server graph cache has a fixed entry limit');
+  assert.match(core, /GRAPH_CACHE_TTL_MS = 60_000/, 'server graph cache entries expire after one minute');
+  assert.match(core, /private: Boolean\(vault\?\.private\)/, 'changing vault privacy changes the server cache key');
   assert.match(graph, /if \(editor && !editor\.hidden\) \{ pendingVaultRefresh = true; return; \}/);
 });
 
 test('installed Setup graph panel exposes structured record fields and saves only its selected note', async () => {
   const { readFile } = await import('node:fs/promises');
-  const page = await readFile(new URL('../ui/index.html', import.meta.url), 'utf8');
+  const page = await readSetupHtml();
   const graph = await readFile(new URL('../ui/notes3d.js', import.meta.url), 'utf8');
   assert.match(page, /notes3d\.js/, 'the installed Setup page loads this graph panel');
   for (const field of ['type','scope','status']) assert.ok(graph.includes(`graphChoices('${field}',`), `form includes ${field}`);
@@ -722,12 +751,14 @@ test('3D graph has a searchable, keyboard-accessible note list in every supporte
   assert.match(src, /if \(graphNote\) \{ openById\(graphNote\.dataset\.graphNoteId\); return; \}/, 'keyboard activation of a note button must open the same detail panel as a graph click');
   assert.match(src, /brainlink:locale-changed/);
   assert.match(src, /api\('\/api\/graph3d\/discover'/, 'vault-wide discovery must call its authenticated local API');
+  assert.match(src, /id="notes3d-discover-all"[^>]*data-i18n="notes3d\.discoverAll"/, 'vault-wide discovery offers a one-click full scan');
+  assert.match(src, /while \(all && !result\.done\)/, 'full scan walks every bounded page until all notes are checked');
   assert.match(src, /data-discover-save/, 'each discovered link must be saved through the review flow');
   assert.match(src, /id="notes3d-vault-select"/, 'graph must let the user focus on one vault');
   assert.match(src, /api\('\/api\/graph3d\/vaults'/, 'vault choices must come from the privacy-filtered API');
   assert.match(src, /brainlink:locale-changed[\s\S]*?renderVaultOptions\(\);/, 'vault filter choices must update when the app language changes');
   assert.match(css, /\.notes3d-node:focus-visible/);
-  const keys = ['notes3d.browseNotes', 'notes3d.browseSearch', 'notes3d.browsePlaceholder', 'notes3d.browseEmpty', 'notes3d.browseCount', 'notes3d.browseMore', 'notes3d.vaultFilter', 'notes3d.allVaults', 'notes3d.resetView', 'notes3d.discoverVault', 'notes3d.discoverHint', 'notes3d.discoverRun', 'notes3d.discoverMore', 'notes3d.discoverDone', 'notes3d.discoverProgress', 'notes3d.discoverFailed', 'notes3d.discoverChanged', 'notes3d.discoverReadOnly'];
+  const keys = ['notes3d.browseNotes', 'notes3d.browseSearch', 'notes3d.browsePlaceholder', 'notes3d.browseEmpty', 'notes3d.browseCount', 'notes3d.browseMore', 'notes3d.vaultFilter', 'notes3d.allVaults', 'notes3d.resetView', 'notes3d.discoverVault', 'notes3d.discoverHint', 'notes3d.discoverRun', 'notes3d.discoverAll', 'notes3d.discoverMore', 'notes3d.discoverDone', 'notes3d.discoverProgress', 'notes3d.discoverFailed', 'notes3d.discoverChanged', 'notes3d.discoverReadOnly'];
   for (const locale of ['en', 'zh-TW', 'pt']) {
     const localeText = await readFile(new URL(`../ui/locales/${locale}.json`, import.meta.url), 'utf8');
     const catalog = JSON.parse(localeText);

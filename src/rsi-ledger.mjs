@@ -340,6 +340,31 @@ export function createRsiLedger({ home, now = () => new Date(), verifyCommit = (
       }
       return { created, duplicates };
     }),
+    // Daily local self-tests may create one review proposal per distinct, opaque failure.
+    // The key is a hash of check identity and scope; no note body, question, or path is stored.
+    appendSelfTestFailures: (failures) => locked(async () => {
+      if (!Array.isArray(failures) || failures.length > 200) throw new Error('Self-test failures are invalid.');
+      const rows = project(await readEvents(file)), created = [], duplicates = [];
+      for (const failure of failures) {
+        if (!failure || typeof failure.key !== 'string' || !/^[a-f0-9]{64}$/.test(failure.key)
+          || typeof failure.check !== 'string' || !/^[a-z][a-z0-9-]{0,63}$/.test(failure.check)) continue;
+        const existing = rows.find(row => row.origin === 'self_test' && row.observation?.failure_key === failure.key);
+        if (existing) { duplicates.push(existing.id); continue; }
+        const fields = validatePayload({
+          title: `Review BrainLink self-test failure: ${failure.check}`,
+          user_problem: `A daily local BrainLink self-test found check "${failure.check}" failing. Inspect the current Setup self-test output to identify the cause; the RSI entry contains no vault path, note content, or question.`,
+          hypothesis: 'Fix the underlying configuration or code issue and add a fictional regression case; keep permission and privacy boundaries unchanged.',
+          memory_types: [], sources: [], metrics: ['Self-test check passes after the reviewed fix', 'No privacy or permission regressions'],
+          guardrails: ['No automatic configuration, code, or vault changes', 'No note content, question text, or paths in this proposal'],
+          privacy_scope: 'Opaque hash of a local self-test check and scope; no content or paths.',
+        });
+        const observation = { schema: 1, category: 'self_test', check: failure.check, failure_key: failure.key };
+        const id = newId(), at = now().toISOString();
+        await append({ kind: 'created', idea_id: id, at, origin: 'self_test', observation, fields });
+        rows.push({ id, status: 'discovered', origin: 'self_test', observation, fields }); created.push(id);
+      }
+      return { created, duplicates };
+    }),
     update: ({ id, expected_revision, fields: changes, status, note }) => locked(async () => {
       if (typeof id !== 'string' || !/^BL-RSI-\d{8}-[a-f0-9-]{8,36}$/.test(id)) throw new Error('Invalid RSI idea id.');
       const rows = project(await readEvents(file)); const row = rows.find(x => x.id === id);

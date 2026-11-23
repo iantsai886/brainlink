@@ -38,9 +38,18 @@ function makeContext(root, vault, repo, canRead = true) {
   });
   const ctx = createContext(cfg, { env: { ...process.env, HOME: root, BRAINLINK_HOME: path.join(root, 'brainlink-data') } });
   ctx.enabled = ['Fictional Organisation'];
+  const grant = {
+    profile_id: 'fictional-org', profile_name: 'Fictional Organisation', profile_mode: 'organisation',
+    owner: 'Fictional owner', source_policy: { private_default: true, provenance_required: true, session_capture: 'summary-proposal' },
+    memory_policy: { working: true, semantic: true, procedural: true, episodic: true },
+    name: 'Fictional Organisation', access: 'read', operations: [...(canRead ? ['read_note'] : []), 'handoff_read'],
+  };
   ctx.twinScope = {
-    mode: 'scoped', profile_id: 'fictional-org',
-    grants: [{ name: 'Fictional Organisation', access: 'read', operations: [...(canRead ? ['read_note'] : []), 'handoff_read'] }],
+    mode: 'scoped', profile_id: 'fictional-org', profiles: [{
+      profile_id: 'fictional-org', profile_name: 'Fictional Organisation', profile_mode: 'organisation',
+      owner: 'Fictional owner', source_policy: grant.source_policy, memory_policy: grant.memory_policy,
+      grants: [grant],
+    }], grants: [grant],
   };
   return ctx;
 }

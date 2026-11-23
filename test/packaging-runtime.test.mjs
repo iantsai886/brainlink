@@ -35,13 +35,16 @@ test('every native installer bundles all production dependencies and portable Br
     assert.ok(windowsPreview.includes(doc), `Windows portable preview must include its documented public README reference: ${doc}`);
   }
   assert.ok(pkg.dependencies.yaml, 'YAML connector dependency must remain a production dependency');
-  assert.ok(pkg.dependencies['pdfjs-dist'], 'local PDF text extraction must remain a production dependency');
-  assert.ok(pkg.dependencies['@napi-rs/canvas'], 'scanned PDF rendering must use the pinned local canvas runtime');
-  assert.ok(pkg.dependencies.mammoth, 'local DOCX text extraction must remain a production dependency');
   assert.ok(pkg.dependencies.fflate, 'local XLSX and PPTX archive extraction must remain a production dependency');
-  assert.ok(pkg.dependencies['tesseract.js'], 'offline local OCR must remain a production dependency');
   assert.ok(pkg.dependencies.parse5, 'local HTML text extraction must remain a production dependency');
-  for (const lang of ['eng', 'por', 'chi_tra']) assert.ok(pkg.dependencies[`@tesseract.js-data/${lang}`], `${lang} OCR data must remain version locked`);
+  assert.ok(pkg.optionalDependencies['pdfjs-dist'], 'local PDF text extraction is decoupled as an optional dependency');
+  assert.ok(pkg.optionalDependencies['@napi-rs/canvas'], 'scanned PDF rendering is decoupled as an optional dependency');
+  assert.ok(pkg.optionalDependencies.mammoth, 'local DOCX text extraction is decoupled as an optional dependency');
+  assert.ok(pkg.optionalDependencies['tesseract.js'], 'offline local OCR is decoupled as an optional dependency');
+  for (const lang of ['eng', 'por', 'chi_tra']) assert.ok(pkg.optionalDependencies[`@tesseract.js-data/${lang}`], `${lang} OCR data is version locked in optionalDependencies`);
+  for (const heavy of ['@napi-rs/canvas', 'tesseract.js', 'pdfjs-dist', 'mammoth']) {
+    assert.equal(pkg.dependencies[heavy], undefined, `${heavy} must not be a mandatory core dependency`);
+  }
   assert.match(await read('packaging/windows/build-portable-zip.sh'), /npm install/, 'Windows source preview installs its declared production dependencies');
 
   const linuxBuilder = await read('packaging/linux/build-linux.sh');
@@ -64,6 +67,10 @@ test('every native installer bundles all production dependencies and portable Br
   const windowsBuilder = await read('packaging/windows/build-windows.ps1');
   assert.match(windowsBuilder, /LOCALAPPDATA.*Inno Setup 6\\ISCC\.exe/, 'Windows builder must find a per-user Inno Setup installation');
   assert.match(windowsBuilder, /Inno Setup compiler failed with exit code/, 'Windows builder must report compiler failures');
+  assert.match(windowsBuilder, /Preserve build\/windows\/qa/, 'Windows installer rebuild must preserve the upgrade-smoke baseline');
+  assert.doesNotMatch(windowsBuilder, /Remove-Item -Recurse -Force "\$Root\\build\\windows"/, 'Windows installer rebuild must not delete the QA fixtures');
+  assert.match(windowsBuilder, /BRAINLINK_OUTPUT_NAME/, 'Windows installer builder must permit a distinct output filename when the default is open');
+  assert.match(windowsBuilder, /Get-FileHash "\$Root\\dist\\\$OutputName\.exe"/, 'Windows installer checksum must match the selected output filename');
   const windowsInstaller = await read('packaging/windows/BrainLink.iss');
   const installedWindowsSmoke = await read('scripts/smoke-installed-windows.ps1');
   const upgradeWindowsSmoke = await read('scripts/smoke-upgrade-windows.ps1');
@@ -125,6 +132,11 @@ test('every native installer bundles all production dependencies and portable Br
   assert.match(nsisInstaller, /Delete "\$DESKTOP\\BrainLink\.lnk"/, 'NSIS uninstall must remove the shortcut it created');
 
   const macZipTest = await read('packaging/macos/test-zip.sh');
+  for (const fragment of [
+    'ui/destinations/find/ask.html', 'ui/destinations/review/proposals.html',
+    'ui/destinations/home/handoffs.html', 'src/setup-page.mjs',
+    'src/setup/routes/find.mjs', 'src/setup/routes/review.mjs', 'src/setup/routes/handoffs.mjs',
+  ]) assert.ok(macZipTest.includes(fragment), `macOS package smoke test must check the destination module ${fragment}`);
   assert.match(await read('packaging/macos/resources/welcome.html'), /<h2[^>]*>BrainLink<\/h2>/, 'macOS installer should use the customer-facing product name');
   assert.match(await read('packaging/macos/resources/license.txt'), /^BrainLink — Pre-release Use Notice/, 'macOS license page should match the customer-facing product name');
   assert.match(macZipTest, /app\/src\/update-manifest\.mjs/, 'the macOS zip package must include the update verifier');

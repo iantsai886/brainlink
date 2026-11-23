@@ -1,4 +1,5 @@
 import test from 'node:test';
+import { readSetupHtml } from './helpers/setup-html.mjs';
 import assert from 'node:assert/strict';
 import path from 'node:path';
 import { mkdtemp, mkdir, writeFile, readFile } from 'node:fs/promises';
@@ -196,7 +197,7 @@ test('Setup offers authenticated manual scans and runs an enabled daily scan in 
 });
 
 test('ingestion scan UI has manual, scheduled and startup guidance controls in every locale', async () => {
-  const html = await readFile(new URL('../ui/index.html', import.meta.url), 'utf8');
+  const html = await readSetupHtml();
   assert.equal((html.match(/id="ingestion-startup-warning"/g) || []).length, 1, 'scheduled scans explain that the app must resume at sign-in');
   assert.match(html, /id="ingestion-startup-warning"[\s\S]*?data-main-nav="s-background"/, 'the warning links directly to the background startup setting');
   assert.match(html, /id="ingestion-enable-startup" data-i18n="ingestion\.startupEnable"/, 'the warning offers a one-click way to keep scans running after sign-in');
@@ -225,7 +226,7 @@ test('ingestion scan UI has manual, scheduled and startup guidance controls in e
   assert.match(html, /api\('POST', '\/api\/ingestion\/discard-draft'/, 'stale or unwanted local drafts can be removed');
   assert.match(html, /autoDrafts: \$\('ingestion-auto-drafts'\)\.checked/, 'scheduled local draft processing is a separate opt-in');
   assert.match(html, /autoFile: \$\('ingestion-auto-file'\)\.checked/, 'saving proposed notes is a separate opt-in');
-  assert.match(html, /window\.confirm\(t\(saveDraft\.dataset\.ingestionRetry === 'true' \? 'ingestion\.confirmRetryProposal' : 'ingestion\.confirmSaveProposal'\)\)/);
+  assert.match(html, /await confirmInPage\(t\(saveDraft\.dataset\.ingestionRetry === 'true' \? 'ingestion\.confirmRetryProposal' : 'ingestion\.confirmSaveProposal'\)\)/);
   assert.match(html, /data-ingestion-retry=.*ingestion\.retryProposal/, 'a partial filing shows a retry action and its saved destination');
   assert.match(html, /ingestion\.confirmRetryProposal/, 'retry asks for confirmation using a clear retry message');
   assert.match(html, /ingestion\.partialFiling/, 'the local draft view explains when a main note was saved but suggestions remain');

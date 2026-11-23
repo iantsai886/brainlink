@@ -11,6 +11,17 @@ import { startSetup } from '../src/setup.mjs';
 import { proposeNote } from '../src/writes.mjs';
 import { loadVault, readNote } from '../src/core.mjs';
 
+async function activate(mcp, name) {
+  const listed = await mcp.handle({ jsonrpc: '2.0', id: 1, method: 'tools/list' });
+  const slug = name.toLowerCase().replace(/[^a-z0-9]+/g, '_').replace(/^_|_$/g, '');
+  const tool = listed.result.tools.find((item) => item.name === `agent_connect_${slug}`)
+    || listed.result.tools.find((item) => item.name === 'agent_connect');
+  assert.ok(tool, `activation tool exists for ${name}`);
+  const args = tool.name === 'agent_connect' ? { agent: name } : {};
+  const result = await mcp.handle({ jsonrpc: '2.0', id: 2, method: 'tools/call', params: { name: tool.name, arguments: args } });
+  assert.equal(result.result?.isError, false, JSON.stringify(result));
+}
+
 test('an explicitly assigned Twin can read a private vault but cannot write to it', async (t) => {
   const root = await mkdtemp(path.join(tmpdir(), 'brainlink-private-twin-'));
   const vault = path.join(root, 'vault');
@@ -21,6 +32,7 @@ test('an explicitly assigned Twin can read a private vault but cannot write to i
   const configFile = path.join(env.BRAINLINK_HOME, 'config.json');
   const token = 'fictional-private-scope-token';
   const cfg = normalize({ vaults: [{ name: 'Private Vault', path: vault, private: true, writes: 'on' }],
+    agents: [{ name: 'Fictional Operations', vault: 'Private Vault', role: 'Authorized test role.', activation: ['Connect to Fictional Operations'], close: [], connect_notes: [], tail_notes: [], close_target: { mode: 'proposal-only', path: 'BrainLink/Review.md' } }],
     ai_agents: [{ id: 'private_agent', name: 'Fictional agent', kind: 'local', tokenHash: hashToken(token) }] });
   await saveConfig(cfg, configFile);
   const app = await startSetup({ env, home: root, os: process.platform, port: 0, useCli: false });
@@ -35,6 +47,7 @@ test('an explicitly assigned Twin can read a private vault but cannot write to i
   const ctx = createContext(saved, { env: { ...env, BRAINLINK_AGENT_TOKEN: token, BRAINLINK_AI_PLATFORM: 'Fictional' } });
   const mcp = createMcp(ctx);
   const call = async (name, args) => (await mcp.handle({ jsonrpc: '2.0', id: 1, method: 'tools/call', params: { name, arguments: args } })).result;
+  await activate(mcp, 'Fictional Operations');
   const read = await call('vault_read_note', { vault: 'Private Vault', path: 'Public within vault.md' });
   assert.match(JSON.stringify(read), /Fictional launch plan/);
   const found = await call('vault_search', { vault: 'Private Vault', query: 'fictional launch plan' });
@@ -86,7 +99,7 @@ test('a preset client receives private vault access only when it is explicitly s
   await writeFile(path.join(vault, 'Note.md'), '# Fictional\n\nExplicitly selected private vault.\n');
   const env = { HOME: root, BRAINLINK_HOME: path.join(root, 'app'), BRAINLINK_SEMANTIC: '0' };
   const configFile = path.join(env.BRAINLINK_HOME, 'config.json');
-  const cfg = normalize({ vaults: [{ name: 'Private Vault', path: vault, private: true, writes: 'on' }], twin_profiles: [{
+  const cfg = normalize({ vaults: [{ name: 'Private Vault', path: vault, private: true, writes: 'on' }], agents: [{ name: 'Fictional Private Role', vault: 'Private Vault', role: 'Authorized test role.', activation: ['Connect to Fictional Private Role'], close: [], connect_notes: [], tail_notes: [], close_target: { mode: 'proposal-only', path: 'BrainLink/Review.md' } }], twin_profiles: [{
     id: 'fictional_private', name: 'Fictional', owner: 'fictional owner', mode: 'personal',
     vaults: [{ name: 'Private Vault', access: 'propose' }], memory_policy: { working: false, semantic: true, procedural: false, episodic: false },
     source_policy: { private_default: true, provenance_required: true, session_capture: 'metadata-only' }, allowed_actions: [], agent_access: [],
@@ -103,6 +116,7 @@ test('a preset client receives private vault access only when it is explicitly s
   const ctx = createContext(saved, { env: { ...env, BRAINLINK_AGENT_TOKEN: cursor.mcpServers.brainlink.env.BRAINLINK_AGENT_TOKEN } });
   assert.deepEqual(ctx.enabled, ['Private Vault']);
   const mcp = createMcp(ctx);
+  await activate(mcp, 'Fictional Private Role');
   const reply = await mcp.handle({ jsonrpc: '2.0', id: 1, method: 'tools/call', params: { name: 'vault_read_note', arguments: { vault: 'Private Vault', path: 'Note.md' } } });
   assert.match(JSON.stringify(reply), /Explicitly selected private vault/);
 });

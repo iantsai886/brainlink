@@ -1,8 +1,10 @@
 # BrainLink implementation and release status
 
-Status checked: 2026-11-03 (Asia/Taipei)
+Status checked: 2026-11-17 (Asia/Taipei)
 Repository: `iantsai886/brainlink`  
-Current working branch: `feat/complete-raw-wiki-folder-flow` (based on `origin/main`)
+Current working branch: `codex/complete-review-work-order` (18 commits ahead of `feat/complete-raw-wiki-folder-flow` at `8664b74`)
+
+**Current development snapshot:** BrainLink 1.3.8 is still unreleased. On Windows/Node.js 24.22.1, the exact branch passed `npm test` (704/714; 10 platform/privilege skips) and `npm run test:ui` (48/48). The unsigned Windows installer was built and installed locally; its isolated install smoke passed. GitHub Actions did not start because of an account billing/spending-limit restriction, and the native macOS `.pkg` has not been built or run. P1-5 and F1/F3/F5/F6 choices reserved for Ian remain open. See [current implementation status](CURRENT-IMPLEMENTATION-STATUS.md) for the evidence, package hash, owner decisions, and [Mac build handoff](MACOS-BUILD-HANDOFF.md).
 
 **Latest auto-file entity review behavior (exact source commit `828cd63`, 2026-11-03):** entity suggestions are no longer lost when auto-file saves the main note. The source remains pending until a person assigns each desired entity's scope or explicitly dismisses unchecked candidates. A pending source has no filed receipt, and the scan status distinguishes `waiting_review` from `filed`. On Windows/Node.js 24.22.1, `npm test` passed: core 660 total (650 passed, 0 failed, 10 platform/privilege skips); `npm run test:ui` passed 48/48; focused folder/API tests passed 18/18. The rebuilt exact-source Windows installer smoke passed, including retry after a proposed entity name conflict, OCR, PDF, HTML, launcher and isolated uninstall checks. These are local synthetic checks, not customer data or acceptance.
 

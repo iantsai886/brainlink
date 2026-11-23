@@ -1,4 +1,5 @@
 import test from 'node:test';
+import { readSetupHtml } from './helpers/setup-html.mjs';
 import assert from 'node:assert/strict';
 import { mkdtemp, writeFile, readFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
@@ -109,7 +110,7 @@ test('Setup weekly benchmark is authenticated, uses only the built-in fictional 
     assert.equal(saved.run.case_count, 20);
     assert.equal(saved.run.first_try_correct.total, 20);
     assert.equal(saved.run.privacy_violations, 0);
-    assert.equal(saved.run.software_version, '1.2.8');
+    assert.equal(saved.run.software_version, JSON.parse(await readFile(path.join(ROOT, 'package.json'), 'utf8')).version);
     assert.match(saved.run.source_commit_sha, /^[a-f0-9]{40}$/);
     assert.equal(saved.run.source_commit_sha_after, 'a'.repeat(40));
     assert.equal(saved.run.source_tree_clean, true);
@@ -138,7 +139,7 @@ test('Setup weekly benchmark is authenticated, uses only the built-in fictional 
 });
 
 test('Setup exposes localized weekly benchmark controls and labels their evidence limits', async () => {
-  const html = await readFile(path.join(ROOT, 'ui', 'index.html'), 'utf8');
+  const html = await readSetupHtml();
   assert.match(html, /id="rsi-weekly-run"/);
   assert.match(html, /id="rsi-weekly-schedule-form"/);
   assert.match(html, /POST', '\/api\/rsi\/weekly-benchmark\/settings/);

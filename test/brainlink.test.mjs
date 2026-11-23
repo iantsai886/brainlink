@@ -782,6 +782,24 @@ test('read-only connection refuses writes', async () => {
   assert.match((await proposeNote(ctx, { title: 'T', body: 'b', source: 's', decision: 'ADOPT' })).errors.join(), /read-only/);
 });
 
+test('mergePack keeps the existing inter-AI mailbox when a second mailbox-bearing vault is added', () => {
+  const company = buildPack('founder-os', { vaultName: 'Company', vaultPath: '/fictional/company', agentName: 'Chief of Staff' });
+  const second = buildPack('founder-os', { vaultName: 'Second', vaultPath: '/fictional/second', agentName: 'Advisor' });
+  const first = mergePack(normalize({}), company);
+  assert.deepEqual(first.handoff, { vault: 'Company', folder: 'Chief of Staff Office/Handoffs' });
+
+  const both = mergePack(first, second);
+  assert.deepEqual(both.handoff, first.handoff, 'adding a vault must not silently re-route the mailbox');
+  assert.ok(!('Advisor Office/Handoffs' in both.vaults.find((v) => v.name === 'Second').folders), 'the new vault must not describe a folder as the mailbox when it is not');
+  assert.ok('Advisor Office/Handoffs' in second.vault.folders, 'the built pack itself is not mutated');
+  assert.deepEqual(validate(normalize(both)), []);
+
+  assert.deepEqual(mergePack(first, second, { moveHandoff: true }).handoff, { vault: 'Second', folder: 'Advisor Office/Handoffs' }, 'an explicit move is still possible');
+  assert.deepEqual(mergePack(first, company).handoff, first.handoff, 're-applying a pack to the mailbox vault keeps it');
+  const orphaned = { ...first, vaults: [], handoff: { vault: 'Gone', folder: 'X' } };
+  assert.deepEqual(mergePack(orphaned, second).handoff, second.handoff, 'a mailbox whose vault no longer exists does not block a new one');
+});
+
 test('handoffs: send to a mailbox and filter by recipient', async () => {
   const { cfg } = await fixture();
   const ctx = ctxOf(cfg);
@@ -956,10 +974,12 @@ test('agent_connect applies each Twin memory-type switch to its mixed connection
 
   for (const disabled of ['working', 'semantic', 'episodic']) {
     const ctx = ctxOf(cfg, { BRAINLINK_VAULTS: 'Acme Studio' });
+    const memoryPolicy = { working: true, semantic: true, procedural: true, episodic: true, [disabled]: false };
+    const grant = { name: 'Acme Studio', operations: ['read_note', 'search'], memory_policy: memoryPolicy };
+    const profile = { profile_id: 'fictional-twin', profile_name: 'Fictional Twin', source_policy: { private_default: true, provenance_required: true, session_capture: 'metadata-only' }, memory_policy: memoryPolicy, grants: [grant] };
     ctx.twinScope = {
-      mode: 'scoped', profile_id: 'fictional-twin',
-      memory_policy: { working: true, semantic: true, procedural: true, episodic: true, [disabled]: false },
-      grants: [{ name: 'Acme Studio', operations: ['read_note', 'search'] }],
+      mode: 'scoped', profile_id: 'fictional-twin', profile_name: 'Fictional Twin',
+      memory_policy: memoryPolicy, profiles: [profile], grants: [grant],
     };
     const mcp = createMcp(ctx);
     const listed = await mcp.handle({ jsonrpc: '2.0', id: 2, method: 'tools/list' });
@@ -1068,7 +1088,8 @@ test('published rule resources and guide omit private and excluded notes', async
   assert.match(JSON.stringify(resources), /AGENTS/);
   assert.doesNotMatch(JSON.stringify(resources), /Private%20Rule|Excluded%20Rules/);
   const guide = await call('tools/call', { name: 'brainlink_guide', arguments: {} });
-  assert.doesNotMatch(JSON.stringify(guide), /Private Rule|Excluded Rules/);
+  assert.match(JSON.stringify(guide), /Excluded Rules\//, 'the guide names the owner-excluded folder so clients can explain why its notes are unavailable');
+  assert.doesNotMatch(JSON.stringify(guide), /Private Rule|Hidden\.md|PRIVATE_RULE_CANARY|EXCLUDED_RULE_CANARY/);
   for (const file of ['Private Rule.md', 'Excluded Rules/Hidden.md']) {
     const reply = await call('resources/read', { uri: `brainlink://vault/${encodeURIComponent('Acme Studio')}/${encodeURIComponent(file)}` });
     assert.ok(reply.error);
@@ -1152,6 +1173,7 @@ test('close loop: new-note and append-task modes', async () => {
 
 test('MCP: initialize, tools, prompts, resources, errors', async () => {
   const { cfg } = await fixture();
+  cfg.mcp = { tool_profile: 'full', enabled_groups: [] };
   const mcp = createMcp(ctxOf(cfg));
   const call = (method, params, id = 1) => mcp.handle({ jsonrpc: '2.0', id, method, params });
   const init = await call('initialize', { protocolVersion: '2025-03-26' });
@@ -1205,12 +1227,16 @@ test('MCP: initialize, tools, prompts, resources, errors', async () => {
 });
 
 test('named agent activation tools keep the same Twin procedural and vault gates', async () => {
-  const { cfg } = await fixture();
+  const { cfg, company } = await fixture();
+  cfg.mcp = { tool_profile: 'full', enabled_groups: [] };
+  await writeFile(path.join(company, 'Role Canary.md'), '# Role Canary\n\nPROCEDURAL_ROLE_CANARY must stay hidden when procedural memory is off.');
+  cfg.agents[0].connect_notes = ['Role Canary.md'];
   const ctx = ctxOf(cfg, { BRAINLINK_VAULTS: 'Acme Studio' });
+  const grant = { name: 'Acme Studio', operations: ['read_note'], memory_policy: { working: false, semantic: true, procedural: true, episodic: false } };
+  const profile = { profile_id: 'fictional-org', profile_name: 'Fictional Organisation Twin', source_policy: { session_capture: 'metadata-only' }, memory_policy: { ...grant.memory_policy }, grants: [grant] };
   ctx.twinScope = {
     mode: 'scoped', profile_id: 'fictional-org', profile_name: 'Fictional Organisation Twin',
-    memory_policy: { working: false, semantic: true, procedural: true, episodic: false },
-    grants: [{ name: 'Acme Studio', operations: ['read_note'] }],
+    memory_policy: { ...grant.memory_policy }, profiles: [profile], grants: [grant],
   };
   const mcp = createMcp(ctx);
   const list = () => mcp.handle({ jsonrpc: '2.0', id: 1, method: 'tools/list' });
@@ -1220,13 +1246,63 @@ test('named agent activation tools keep the same Twin procedural and vault gates
   const allowed = await mcp.handle({ jsonrpc: '2.0', id: 2, method: 'tools/call', params: { name: directName, arguments: {} } });
   assert.equal(allowed.result.isError, false, JSON.stringify(allowed));
   assert.equal(allowed.result.structuredContent.agent.name, 'Chief of Staff');
+  assert.match(JSON.stringify(allowed), /PROCEDURAL_ROLE_CANARY/);
 
   ctx.twinScope.memory_policy.procedural = false;
-  listed = await list();
-  assert.ok(!listed.result.tools.some((tool) => tool.name === directName));
-  const denied = await mcp.handle({ jsonrpc: '2.0', id: 3, method: 'tools/call', params: { name: directName, arguments: {} } });
+  ctx.twinScope.profiles[0].memory_policy.procedural = false;
+  ctx.twinScope.profiles[0].grants[0].memory_policy.procedural = false;
+  ctx.twinScope.grants[0].memory_policy.procedural = false;
+  const noProceduralMcp = createMcp(ctx);
+  const noProceduralList = () => noProceduralMcp.handle({ jsonrpc: '2.0', id: 1, method: 'tools/list' });
+  listed = await noProceduralList();
+  assert.ok(listed.result.tools.some((tool) => tool.name === directName), 'role activation remains available without procedural-note access');
+  const restricted = await noProceduralMcp.handle({ jsonrpc: '2.0', id: 3, method: 'tools/call', params: { name: directName, arguments: {} } });
+  assert.equal(restricted.result.isError, false);
+  assert.doesNotMatch(JSON.stringify(restricted), /PROCEDURAL_ROLE_CANARY/, 'disabling procedural memory removes role-note bodies');
+});
+
+test('a role-less single-profile connection stays inside its explicit vault grants', async () => {
+  const { cfg, company } = await fixture();
+  const canary = 'SINGLE_PROFILE_GRANTED_VAULT_CANARY';
+  await writeFile(path.join(company, 'Granted Scope.md'), `# Granted scope\n\n${canary}\n`);
+  const ctx = ctxOf(cfg);
+  ctx.agents = [];
+  const memoryPolicy = { working: true, semantic: true, procedural: true, episodic: true };
+  const grant = { name: 'Acme Studio', operations: ['search', 'read_note'], memory_policy: memoryPolicy };
+  const profile = { profile_id: 'fictional-single-profile', profile_name: 'Fictional single profile', profile_mode: 'organisation',
+    source_policy: { private_default: true, provenance_required: false, session_capture: 'metadata-only' }, memory_policy: memoryPolicy, grants: [grant] };
+  ctx.twinScope = { mode: 'scoped', profile_id: profile.profile_id, profile_name: profile.profile_name, profiles: [profile],
+    grants: [grant, { name: 'Journal', operations: ['search', 'read_note'], memory_policy: memoryPolicy }], memory_policy: memoryPolicy };
+  const mcp = createMcp(ctx);
+  const granted = await mcp.handle({ jsonrpc: '2.0', id: 1, method: 'tools/call', params: { name: 'vault_search', arguments: { vault: 'Acme Studio', query: canary } } });
+  assert.equal(granted.result.isError, false, JSON.stringify(granted));
+  assert.match(JSON.stringify(granted.result.structuredContent), new RegExp(canary));
+  const privateDenied = await mcp.handle({ jsonrpc: '2.0', id: 2, method: 'tools/call', params: { name: 'vault_search', arguments: { vault: 'Journal', query: 'private diary' } } });
+  assert.equal(privateDenied.result.isError, true, 'the single-profile shortcut does not extend to an ungranted private vault');
+  assert.doesNotMatch(JSON.stringify(privateDenied), /private diary|diary about pricing/);
+});
+
+test('a multi-profile connection without an active role remains denied', async () => {
+  const { cfg } = await fixture();
+  const ctx = ctxOf(cfg);
+  ctx.agents = [];
+  const memoryPolicy = { working: true, semantic: true, procedural: true, episodic: true };
+  const profile = (id, name, mode) => {
+    const grant = { name, access: 'read', operations: ['search', 'read_note'], profile_id: id, memory_policy: { ...memoryPolicy },
+      source_policy: { private_default: true, provenance_required: false, session_capture: 'metadata-only' } };
+    return { profile_id: id, profile_name: id, profile_mode: mode, owner: 'fictional owner',
+      source_policy: grant.source_policy, memory_policy: { ...memoryPolicy }, grants: [grant] };
+  };
+  const company = profile('fictional-company', 'Acme Studio', 'organisation');
+  const personal = profile('fictional-personal', 'Journal', 'personal');
+  ctx.enabled = ['Acme Studio', 'Journal'];
+  ctx.twinScope = { mode: 'scoped', profile_id: null, profile_ids: [company.profile_id, personal.profile_id], profiles: [company, personal],
+    grants: [...company.grants, ...personal.grants], memory_policy: memoryPolicy };
+  const mcp = createMcp(ctx);
+  const denied = await mcp.handle({ jsonrpc: '2.0', id: 1, method: 'tools/call', params: { name: 'vault_search', arguments: { vault: 'Acme Studio', query: 'Agent Memory' } } });
   assert.equal(denied.result.isError, true);
-  assert.match(denied.result.content[0].text, /procedural memory access/);
+  assert.match(denied.result.content[0].text, /Activate a configured BrainLink role first/);
+  assert.doesNotMatch(JSON.stringify(denied), /Hybrid retrieval|private diary/);
 });
 
 test('connector search/fetch exclude private vaults', async () => {
@@ -1309,10 +1385,16 @@ test('packs: scaffold never overwrites; merge replaces same-named vault', async 
   assert.equal(await readFile(path.join(dir, 'AGENTS.md'), 'utf8'), 'mine');
   assert.ok(created.includes('Max Office/Session Captures.md'));
   assert.deepEqual(await scaffold(dir, b.scaffold), []);
-  const merged = mergePack(mergePack(normalize({}), b), b);
+  const first = mergePack(normalize({}), b);
+  const extraRole = { name: 'Advisor', vault: 'V', role: 'Review role', activation: ['Connect Advisor'], close: ['Advisor close loop'], connect_notes: ['Advisor Role.md'], close_target: { mode: 'append-section', path: 'Advisor Log.md' } };
+  const merged = mergePack({ ...first, agents: [...first.agents, extraRole] }, b);
   assert.equal(merged.vaults.length, 1);
-  assert.equal(merged.agents.length, 1);
+  assert.deepEqual(merged.agents.map((a) => a.name).sort(), ['Advisor', 'Max']);
   assert.deepEqual(validate(normalize(merged)), []);
+  assert.throws(() => mergePack({ ...first, agents: [...first.agents, { ...extraRole, name: 'Max', vault: 'Other' }] }, b), /Role name already belongs to another vault/);
+  const personal = buildPack('personal-os', { vaultName: 'Home', vaultPath: dir });
+  assert.equal(personal.vault.private, true);
+  assert.doesNotMatch(JSON.stringify(personal), /Company knowledge|No personal, family or finance data in the company vault/);
   assert.throws(() => buildPack('nope', {}), /Unknown rule pack/);
 });
 
@@ -1459,7 +1541,7 @@ test('CLI: `brainlink serve` speaks MCP over stdio and logs content-free activit
   child.stdout.on('data', (d) => { buf += d; let i; while ((i = buf.indexOf('\n')) !== -1) { lines.push(JSON.parse(buf.slice(0, i))); buf = buf.slice(i + 1); } });
   child.stdin.write(JSON.stringify({ jsonrpc: '2.0', id: 1, method: 'initialize', params: {} }) + '\n');
   child.stdin.write(JSON.stringify({ jsonrpc: '2.0', id: 2, method: 'tools/call', params: { name: 'brainlink_guide', arguments: {} } }) + '\n');
-  child.stdin.write(JSON.stringify({ jsonrpc: '2.0', id: 3, method: 'tools/call', params: { name: 'vault_search', arguments: { vault: 'Acme Studio', query: 'secret pricing words' } } }) + '\n');
+  child.stdin.write(JSON.stringify({ jsonrpc: '2.0', id: 3, method: 'tools/call', params: { name: 'vault_search', arguments: { vault: 'Acme Studio', query: 'hybrid retrieval reranking agent memory' } } }) + '\n');
   for (let i = 0; i < 300 && lines.length < 3 && child.exitCode === null; i++) await new Promise((r) => setTimeout(r, 50));
   assert.equal(lines.length, 3, `expected three MCP responses before timeout; received ${lines.length}, child exit=${child.exitCode}`);
   for (let i = 0; i < 40; i++) { if (await readFile(path.join(home, 'activity.log'), 'utf8').then((t) => t.includes('vault_search'), () => false)) break; await new Promise((r) => setTimeout(r, 50)); }
@@ -1472,6 +1554,8 @@ test('CLI: `brainlink serve` speaks MCP over stdio and logs content-free activit
   assert.match(log, /"platform":"Cursor"/);
   const searchActivity = log.trim().split(/\r?\n/).map(JSON.parse).find((entry) => entry.tool === 'vault_search');
   assert.ok(Number.isSafeInteger(searchActivity.result_token_estimate) && searchActivity.result_token_estimate > 0);
+  assert.ok(searchActivity.retrieved_notes?.some((rel) => rel.startsWith('Acme Studio/')), 'successful search activity records visible note paths for local use counts');
+  assert.doesNotMatch(JSON.stringify(searchActivity), /hybrid retrieval reranking agent memory/);
   const guideActivity = log.trim().split(/\r?\n/).map(JSON.parse).find((entry) => entry.tool === 'brainlink_guide');
   assert.ok(Number.isSafeInteger(guideActivity.result_token_estimate) && guideActivity.result_token_estimate > 0);
   assert.doesNotMatch(log, /secret pricing/);
@@ -1535,7 +1619,8 @@ test('one-click setup: new brain, every found AI app connected; multi-vault fold
     assert.equal(r.phrase, 'Connect to Brain');
     assert.deepEqual(r.connected.sort(), ['Claude Desktop', 'Cursor', 'Gemini CLI']);
     assert.match(await readFile(path.join(r.path, 'BrainLink', 'Brain Role.md'), 'utf8'), /Brain/);
-    assert.match(await readFile(path.join(r.path, 'BrainLink', 'Home.md'), 'utf8'), /generated_by: brainlink[\s\S]*\[\[Welcome\]\]/, 'Home map created at setup');
+    const homeMap = await readFile(path.join(r.path, 'BrainLink', 'Home.md'), 'utf8');
+    assert.match(homeMap, /generated_by: brainlink[\s\S]*\[\[Brain Role\]\]/, 'Home map links the created role note');
     const st = await api('/api/state');
     assert.equal(st.agents[0].name, 'Brain');
     // The brain works straight away in a connected AI: no licence, no trial, nothing to unlock.
@@ -1734,7 +1819,9 @@ test('remember, daily note, open loops, recent, health and brief', async () => {
   assert.ok(loops.next_actions.some((x) => /booking vendor/.test(x.action)), JSON.stringify(loops));
   const rec = await recentNotes(ctx, 'Acme Studio', { days: 1 });
   assert.ok(rec.some((x) => x.title === 'Lonely'));
-  const h = await vaultHealth(ctx, 'Acme Studio');
+  const hDefault = await vaultHealth(ctx, 'Acme Studio');
+  assert.ok(hDefault.orphans.length <= 5 && hDefault.broken_links.length <= 5 && hDefault.duplicate_titles.length <= 5 && hDefault.stale_active_notes.length <= 5);
+  const h = await vaultHealth(ctx, 'Acme Studio', { limit: 30 });
   assert.ok(h.orphans.some((o) => o.title === 'Lonely'));
   assert.ok(h.broken_links.some((b) => b.target === 'Missing Note'));
   const b = await brief(ctx, 'Acme Studio');
@@ -1755,6 +1842,7 @@ test('close-loop captures link the notes they are about', async () => {
 
 test('shared commands from BrainLink/Commands appear as prompts in every AI', async () => {
   const { cfg } = await fixture();
+  cfg.mcp = { tool_profile: 'full', enabled_groups: [] };
   const mcp = createMcp(ctxOf(cfg));
   const list = (await mcp.handle({ jsonrpc: '2.0', id: 1, method: 'prompts/list' })).result.prompts.map((p) => p.name);
   for (const n of ['cmd-weekly-review', 'cmd-meeting-notes', 'cmd-link-my-notes', 'brief', 'remember']) assert.ok(list.includes(n), n);
@@ -1762,6 +1850,9 @@ test('shared commands from BrainLink/Commands appear as prompts in every AI', as
   assert.match(got.result.messages[0].content.text, /template "meeting"[\s\S]*Dana: launch moved to Nov 3/);
   const tools = (await mcp.handle({ jsonrpc: '2.0', id: 3, method: 'tools/list' })).result.tools.map((t) => t.name);
   for (const n of ['vault_recent', 'open_loops', 'brain_brief', 'vault_health', 'remember', 'append_daily']) assert.ok(tools.includes(n), n);
+  const healthSchema = (await mcp.handle({ jsonrpc: '2.0', id: 4, method: 'tools/list' })).result.tools.find((tool) => tool.name === 'vault_health').inputSchema;
+  assert.equal(healthSchema.properties.limit.default, 5);
+  assert.equal(healthSchema.properties.limit.maximum, 30);
 });
 
 // ---- Windows code paths (run here with os = 'win32') ----
@@ -1870,7 +1961,7 @@ test('P0-2: a root .brainlinkignore exclusion applies at any depth, not only to 
   assert.ok(existsSync(path.join(dest, 'BrainLink Shared', 'Acme Studio', 'sub', 'Visible.md')));
 });
 
-test('default .brainlinkignore: shipped on a fresh real vault, never overwrites one already there, folders stay out of search and answers', async () => {
+test('default .brainlinkignore: 00 Home is excluded by default in new vaults and existing user exclusions stay unchanged', async () => {
   const home = await tmp('excluded');
   const vaultDir = path.join(home, 'Notes');
   await mkdir(vaultDir, { recursive: true });
@@ -1885,7 +1976,7 @@ test('default .brainlinkignore: shipped on a fresh real vault, never overwrites 
   await cp(SAMPLE, company, { recursive: true });
   await ensureDefaultIgnore(company);
   await mkdir(path.join(company, '00 Home'));
-  await writeFile(path.join(company, '00 Home/Diary.md'), '# Diary\n\nzebracorn personal notes');
+  await writeFile(path.join(company, '00 Home/Diary.md'), '# Diary\n\nzebracorn entry notes');
   await mkdir(path.join(company, 'finance'));
   await writeFile(path.join(company, 'finance/Taxes.md'), '# Taxes\n\nzebracorn bank numbers');
   let cfg = normalize({ timezone: 'Asia/Taipei' });
@@ -1893,20 +1984,26 @@ test('default .brainlinkignore: shipped on a fresh real vault, never overwrites 
   await scaffold(company, built.scaffold);
   cfg = normalize(mergePack(cfg, built));
   const r = await search(ctxOf(cfg), 'Acme Studio', 'zebracorn');
-  assert.deepEqual(r.map((x) => x.path), ['finance/Taxes.md']); // "finance/" is a suggestion only (commented out) until the user opts in; "00 Home/" is excluded by default
+  assert.deepEqual(r.map((x) => x.path), ['finance/Taxes.md']); // 00 Home is excluded by default; finance remains an opt-in exclusion suggestion
+  await assert.rejects(readNote(ctxOf(cfg), 'Acme Studio', '00 Home/Diary.md'), /private/i, 'direct note reads respect the default 00 Home exclusion');
   const read = await readExcludedFolders(company);
   assert.deepEqual(read.active, DEFAULT_EXCLUDED_FOLDERS);
   assert.deepEqual(read.suggested, SUGGESTED_EXCLUDED_FOLDERS);
   await writeExcludedFolders(company, [...DEFAULT_EXCLUDED_FOLDERS, 'finance/']);
   const r2 = await search(ctxOf(cfg), 'Acme Studio', 'zebracorn');
-  assert.deepEqual(r2.map((x) => x.path), []); // still none: "00 Home" and now "finance" are both excluded
+  assert.deepEqual(r2.map((x) => x.path), []); // both the default private folder and owner-selected finance are excluded
+  await writeExcludedFolders(company, [...DEFAULT_EXCLUDED_FOLDERS.filter((folder) => folder !== '00 Home/'), 'finance/']);
+  const r3 = await search(ctxOf(cfg), 'Acme Studio', 'zebracorn');
+  assert.deepEqual(r3.map((x) => x.path), ['00 Home/Diary.md']); // the owner can explicitly opt 00 Home back in
 });
 
-test('setup UI: connecting a real vault ships default excluded folders; private flag and excluded folders are editable after connecting', async () => {
+test('setup UI: new vaults get privacy defaults, existing ignore files stay unchanged, and exclusions remain editable', async () => {
   const home = await tmp('setup-excluded');
   const env = { BRAINLINK_HOME: path.join(home, 'app'), BRAINLINK_SEMANTIC: '0' };
   const vaultDir = path.join(home, 'Notes');
   await cp(SAMPLE, vaultDir, { recursive: true });
+  const existingIgnore = 'OwnerPrivate/\n# finance/\n# personal/\n# home/\n';
+  await writeFile(path.join(vaultDir, '.brainlinkignore'), existingIgnore);
   const s = await startSetup({ env, home, os: 'darwin', port: 0, useCli: false });
   const base = `http://127.0.0.1:${s.port}`;
   const api = (method, p, body) => fetch(base + p, { method, headers: { 'X-BrainLink-Token': s.token, 'Content-Type': 'application/json' }, body: body && JSON.stringify(body) });
@@ -1917,10 +2014,10 @@ test('setup UI: connecting a real vault ships default excluded folders; private 
     const add = await (await api('POST', '/api/vault', { path: vaultDir, name: 'Acme', pack: 'founder-os', private: true })).json();
     assert.equal(add.ok, true);
     const shipped = await readFile(path.join(vaultDir, '.brainlinkignore'), 'utf8');
-    for (const f of DEFAULT_EXCLUDED_FOLDERS) assert.match(shipped, new RegExp(f.replace('/', '\\/')));
+    assert.equal(shipped, existingIgnore, 'connecting an existing vault does not rewrite its ignore file or expose 00 Home implicitly');
     const st = await (await api('GET', '/api/state')).json();
     assert.equal(st.vaults[0].private, true);
-    assert.deepEqual(st.vaults[0].excluded_folders, DEFAULT_EXCLUDED_FOLDERS);
+    assert.deepEqual(st.vaults[0].excluded_folders, ['OwnerPrivate/']);
     assert.deepEqual(st.vaults[0].excluded_suggestions, SUGGESTED_EXCLUDED_FOLDERS);
     // Editable afterwards, independent of the connect step.
     const priv = await (await api('POST', '/api/vault/private', { name: 'Acme', private: false })).json();
@@ -1930,5 +2027,14 @@ test('setup UI: connecting a real vault ships default excluded folders; private 
     const stAfter = await (await api('GET', '/api/state')).json();
     assert.equal(stAfter.vaults[0].private, false);
     assert.deepEqual(stAfter.vaults[0].excluded_folders, ['.obsidian/', 'finance/']);
+
+    const freshVault = path.join(home, 'Fresh Notes');
+    await cp(SAMPLE, freshVault, { recursive: true });
+    const freshAdd = await (await api('POST', '/api/vault', { path: freshVault, name: 'Fresh', pack: 'simple' })).json();
+    assert.equal(freshAdd.ok, true);
+    const freshIgnore = await readFile(path.join(freshVault, '.brainlinkignore'), 'utf8');
+    assert.match(freshIgnore, /^00 Home\/$/m, 'a newly generated ignore file excludes 00 Home');
+    const freshState = await (await api('GET', '/api/state')).json();
+    assert.deepEqual(freshState.vaults.find((vault) => vault.name === 'Fresh').excluded_folders, DEFAULT_EXCLUDED_FOLDERS);
   } finally { s.server.close(); }
 });

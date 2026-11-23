@@ -1,0 +1,28 @@
+<section id="s-ingestion">
+    <h2 data-i18n="ingestion.title"></h2>
+    <p class="hint" data-i18n="ingestion.hint"></p>
+    <p id="ingestion-startup-warning" class="notice" role="status" hidden><span data-i18n="ingestion.startupWarning"></span> <button type="button" id="ingestion-enable-startup" data-i18n="ingestion.startupEnable"></button> <a href="#s-background" data-main-nav="s-background" data-i18n="ingestion.startupLink"></a></p>
+    <label class="muted" style="display:flex;flex-direction:row;gap:6px;align-items:center"><input type="checkbox" id="ingestion-enabled" style="width:auto"><span data-i18n="ingestion.enabled"></span></label>
+    <label class="muted" style="display:flex;flex-direction:row;gap:6px;align-items:center;margin-top:6px"><input type="checkbox" id="ingestion-auto-drafts" style="width:auto"><span data-i18n="ingestion.autoDrafts"></span></label>
+    <p class="muted" data-i18n="ingestion.autoDraftsHint"></p>
+    <p id="ingestion-model-setup" class="muted" role="status" hidden><span data-i18n="ingestion.modelSetup"></span> <a href="#sessions-panel" data-main-nav="sessions-panel" data-i18n="ingestion.modelSetupLink"></a></p>
+    <label class="muted" style="display:flex;flex-direction:row;gap:6px;align-items:center;margin-top:6px"><input type="checkbox" id="ingestion-auto-file" style="width:auto"><span data-i18n="ingestion.autoFile"></span></label>
+    <p class="muted" data-i18n="ingestion.autoFileHint"></p>
+    <div class="grid2" style="margin-top:10px">
+      <label><span data-i18n="ingestion.vault"></span><select id="ingestion-vault"></select></label>
+      <label><span data-i18n="ingestion.folder"></span><select id="ingestion-folder"></select></label>
+      <label><span data-i18n="ingestion.mode"></span><select id="ingestion-mode"><option value="daily" data-i18n="ingestion.modeDaily"></option><option value="watch" data-i18n="ingestion.modeWatch"></option></select></label>
+      <label id="ingestion-time-wrap"><span data-i18n="ingestion.time"></span><input id="ingestion-time" type="time" value="02:00"></label>
+      <label id="ingestion-interval-wrap" hidden><span data-i18n="ingestion.interval"></span><select id="ingestion-interval"><option value="1">1</option><option value="5">5</option><option value="15">15</option><option value="30">30</option><option value="60">60</option></select></label>
+    </div>
+    <div class="row" style="margin-top:8px"><button type="button" id="ingestion-add" data-i18n="ingestion.addTarget"></button></div>
+    <h3 data-i18n="ingestion.targets"></h3>
+    <div id="ingestion-target-list" class="cards"></div>
+    <div class="row" style="margin-top:12px"><button class="primary" id="ingestion-save" data-i18n="ingestion.save"></button><button id="ingestion-run" data-i18n="ingestion.run"></button></div>
+    <p id="ingestion-status" class="muted" role="status"></p>
+    <p id="ingestion-schedule-status" class="muted" role="status"></p>
+    <p id="ingestion-draft-status" class="muted" role="status"></p>
+    <div id="ingestion-queue" class="cards" aria-live="polite"></div>
+    <h3 data-i18n="ingestion.pendingDrafts"></h3>
+    <div id="ingestion-draft-list" class="cards" aria-live="polite"></div>
+  </section>

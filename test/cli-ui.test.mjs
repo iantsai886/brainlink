@@ -1,6 +1,7 @@
 // `brainlink ui` / `brainlink demo` must serve the v1.1 Setup app (ui/index.html), not ui/app/,
 // on 127.0.0.1 with a per-launch token (RB1 merge).
 import test from 'node:test';
+import { readSetupHtml } from './helpers/setup-html.mjs';
 import assert from 'node:assert/strict';
 import { mkdtemp, readFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
@@ -105,7 +106,7 @@ test('P1e: "Done, close setup" never stops the background server', async () => {
     // still up afterwards — proven by a normal call still succeeding.
     assert.equal((await s.api('GET', '/api/state')).status, 200);
     // The page's own Done handler must not call any quit-like endpoint either.
-    const html = await readFile(path.join(ROOT, 'ui', 'index.html'), 'utf8');
+    const html = await readSetupHtml();
     const doneHandler = html.match(/\$\('done'\)\.onclick = .*?;(?=\r?\n)/s)[0];
     assert.doesNotMatch(doneHandler, /api\(['"]POST['"],\s*['"]\/api\/quit['"]/);
   } finally { s.stop(); }

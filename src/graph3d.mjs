@@ -2,6 +2,7 @@
 // local view, but are never combined with public vaults. Frontmatter-private notes and excluded
 // folders stay hidden in every view.
 import { createHash } from 'node:crypto';
+import path from 'node:path';
 import { loadVaultGraph, summarize } from './core.mjs';
 import { deriveTypedRelations, typedEntityMetadataMap, typedEntityFields, deriveProposedTypedRelations, deriveRejectedTypedRelations, deriveWithdrawnTypedRelations, discoverTypedRelationshipCandidatesForSources } from './typed-graph.mjs';
 
@@ -29,10 +30,27 @@ export async function listGraphVaults(ctx, { includePrivateVaults = false } = {}
     const isPrivateVault = Boolean(ctx.byName.get(name)?.private);
     // Listing the picker must not read/index a private vault before the user selects it.
     if (isPrivateVault) { vaults.push({ name, private: true, notes: null }); continue; }
-    const index = await loadVaultGraph(ctx, name);
-    vaults.push({ name, private: false, notes: index.notes.filter((note) => !note.generated && !isPrivateNote(note)).length });
+    // The picker needs vault names and privacy labels only. Counting notes here forced a full
+    // graph/index scan before the map request and made large or cloud-synced vaults time out.
+    // The loaded graph reports the visible note count after its privacy checks complete.
+    vaults.push({ name, private: false, notes: null });
   }
-  return { vaults };
+  // Opaque configuration revision lets the local UI reuse a public graph across vault
+  // switches while ensuring a changed role, grant, vault path, or private flag drops that cache.
+  const revisionData = {
+    vaults: names.map((name) => {
+      const vault = ctx.byName.get(name);
+      return { name, path: path.resolve(vault.path), private: Boolean(vault.private), read_first: vault.read_first || [] };
+    }),
+    agents: (ctx.agents || []).filter((agent) => names.includes(agent.vault)).map((agent) => ({
+      name: agent.name, vault: agent.vault, connect_notes: agent.connect_notes || [],
+      tail_notes: agent.tail_notes || [], close_target: agent.close_target || null,
+    })),
+    handoff: ctx.cfg?.handoff || null,
+    twinScope: ctx.twinScope || { mode: 'legacy' },
+  };
+  const revision = createHash('sha256').update(JSON.stringify(revisionData)).digest('hex');
+  return { vaults, revision };
 }
 
 // { nodes: [{id, title, vault, group, tags, degree}], links: [{source, target}], shown, total }

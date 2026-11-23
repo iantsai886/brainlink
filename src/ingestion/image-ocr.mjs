@@ -3,8 +3,19 @@ import { access, copyFile, mkdir, readFile, rename, rm, stat } from 'node:fs/pro
 import { randomUUID } from 'node:crypto';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { createWorker } from 'tesseract.js';
 import { appHome } from '../app-home.mjs';
+
+async function loadTesseractCreateWorker() {
+  try {
+    const mod = await import('tesseract.js');
+    if (typeof mod?.createWorker !== 'function') throw new Error('missing');
+    return mod.createWorker;
+  } catch {
+    const err = new Error('Optional OCR package "tesseract.js" is not installed. Install optional ingestion dependencies to enable local OCR.');
+    err.code = 'MISSING_OPTIONAL_DEPENDENCY';
+    throw err;
+  }
+}
 
 const require = createRequire(import.meta.url);
 const LANGUAGE_CODES = ['eng', 'por', 'chi_tra'];
@@ -93,6 +104,7 @@ export async function extractImageTexts(images) {
   let timedOut = false;
   let timer;
   try {
+    const createWorker = await loadTesseractCreateWorker();
     const languages = LANGUAGE_CODES.join('+');
     const operation = (async () => {
       worker = await createWorker(languages, 1, { langPath: await languageDirectory(), gzip: true, cacheMethod: 'none' });
