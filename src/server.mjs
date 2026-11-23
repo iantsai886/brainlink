@@ -11,7 +11,7 @@ import { buildAnswerReceipt } from './answer-receipt.mjs';
 import { buildContextPacket } from './context-packet.mjs';
 import { createSessionSeenStore, sessionSeenIdentity } from './since-last-session.mjs';
 import { listDecisionReviews } from './decision-reviews.mjs';
-import { search, searchWithVerdict, readNote, related, semanticStatus, readExcludedFolders } from './core.mjs';
+import { search, searchWithVerdict, readNote, related, semanticStatus } from './core.mjs';
 import { proposeNote, sendHandoff, listHandoffs, remember, appendDaily } from './writes.mjs';
 import { recentNotes, openLoops, vaultHealth, brief } from './insights.mjs';
 import { listCommands, fillCommand } from './commands.mjs';
@@ -291,7 +291,6 @@ export function createMcp(ctx, { onCall = () => {}, onProposal = null } = {}) {
     const value = guide();
     for (const name of ctx.enabled) {
       value.vaults[name].read_first = await visibleRules(name);
-      value.vaults[name].excluded_folders = (await readExcludedFolders(ctx.byName.get(name).path)).active;
     }
     value.mcp = {
       tool_profile: resolveMcpToolProfile(ctx),

@@ -260,7 +260,7 @@ test('independent retrieval CLI accepts an explicit fictional vault and emits an
   assert.equal(report.case_count, 30);
   assert.equal(report.environment.node, process.version);
   assert.equal(report.source_commit, execFileSync('git', ['rev-parse', 'HEAD'], { encoding: 'utf8' }).trim());
-  assert.equal(report.source_branch, execFileSync('git', ['branch', '--show-current'], { encoding: 'utf8' }).trim());
+  assert.equal(report.source_branch, execFileSync('git', ['branch', '--show-current'], { encoding: 'utf8' }).trim() || null);
 });
 
 function createHashForTest(value) {
