@@ -139,10 +139,54 @@ begin
   end;
 end;
 
+procedure StopRunningBrainLinkInInstallDir(InstallDir: String);
+var
+  StopScript, ScriptText, PowerShellExe, Parameters: String;
+  ResultCode: Integer;
+begin
+  if (InstallDir = '') or (not DirExists(InstallDir)) then exit;
+  StopScript := ExpandConstant('{tmp}\BrainLinkStopRunning-' + IntToStr(GetCurrentProcessId) + '.ps1');
+  ScriptText := '$ErrorActionPreference = ''SilentlyContinue''' + #13#10 +
+    '$prefix = $args[0].TrimEnd(''\'', ''/'') + ''\node\''' + #13#10 +
+    '$procs = @(Get-CimInstance Win32_Process | Where-Object { $_.ExecutablePath -and $_.ExecutablePath.StartsWith($prefix, [StringComparison]::OrdinalIgnoreCase) })' + #13#10 +
+    'foreach ($p in $procs) { & (Join-Path $env:WINDIR ''System32\taskkill.exe'') /PID ([int]$p.ProcessId) /T /F | Out-Null }' + #13#10 +
+    '$deadline = [DateTime]::UtcNow.AddSeconds(8)' + #13#10 +
+    'while ([DateTime]::UtcNow -lt $deadline) {' + #13#10 +
+    '  $left = @(Get-CimInstance Win32_Process | Where-Object { $_.ExecutablePath -and $_.ExecutablePath.StartsWith($prefix, [StringComparison]::OrdinalIgnoreCase) })' + #13#10 +
+    '  if ($left.Count -eq 0) { break }' + #13#10 +
+    '  Start-Sleep -Milliseconds 200' + #13#10 +
+    '}' + #13#10;
+  if SaveStringToFile(StopScript, ScriptText, False) then begin
+    PowerShellExe := ExpandConstant('{sys}\WindowsPowerShell\v1.0\powershell.exe');
+    Parameters := '-NoProfile -WindowStyle Hidden -ExecutionPolicy Bypass -File "' + StopScript + '" "' + InstallDir + '"';
+    if not Exec(PowerShellExe, Parameters, '', SW_HIDE, ewWaitUntilTerminated, ResultCode) then begin
+      Log('Could not stop running BrainLink processes before install/uninstall.');
+    end;
+    DeleteFile(StopScript);
+  end;
+end;
+
+procedure CurStepChanged(CurStep: TSetupStep);
+var
+  InstallDir: String;
+begin
+  if CurStep = ssInstall then begin
+    InstallDir := ExpandConstant('{app}');
+    if DirExists(InstallDir) then begin
+      StopRunningBrainLinkInInstallDir(InstallDir);
+      // Remove previous app and runtime trees so upgraded installs never keep stale files.
+      // User config and vaults live in %APPDATA%\BrainLink and are never touched.
+      DelTree(InstallDir + '\app', True, True, True);
+      DelTree(InstallDir + '\node', True, True, True);
+    end;
+  end;
+end;
+
 procedure CurUninstallStepChanged(CurUninstallStep: TUninstallStep);
 begin
   if CurUninstallStep = usUninstall then begin
     BrainLinkInstallBin := ExpandConstant('{app}\bin');
+    StopRunningBrainLinkInInstallDir(ExpandConstant('{app}'));
     RemoveBrainLinkFromUserPath;
   end;
   if CurUninstallStep = usPostUninstall then begin
