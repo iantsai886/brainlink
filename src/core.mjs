@@ -11,6 +11,7 @@ import { deriveTypedRelations } from './typed-graph.mjs';
 import { appHome } from './config.mjs';
 import { rerankResults } from './rerank.mjs';
 import { detectEmbedder, VectorStore, fillVectors, embedTexts, nearest, PREFERRED_EMBED_MODEL } from './embed.mjs';
+import { buildWikiLayer, queryWikiLayer } from './wiki-layer.mjs';
 import { findAgentByToken, publicAgent } from './mcp-agents.mjs';
 import { resolveTwinAgentScope, twinNoteMemoryAllowed } from './twin-profiles.mjs';
 
@@ -545,7 +546,8 @@ export function buildIndex(notes) {
   notes.forEach((n, i) => { for (const a of n.aliases || []) if (!byAlias.has(a.toLowerCase())) byAlias.set(a.toLowerCase(), i); });
   const byTag = new Map();
   notes.forEach((n, i) => { for (const t of n.tags) { if (!byTag.has(t)) byTag.set(t, []); byTag.get(t).push(i); } });
-  return { notes, chunks, df, avgLen, backlinks, outlinks, byRel, byTitle, byAlias, byTag, edges, noteEdges, broken, typedRelations, termSets: null };
+  const wiki = buildWikiLayer(notes, byRel, byTitle);
+  return { notes, chunks, df, avgLen, backlinks, outlinks, byRel, byTitle, byAlias, byTag, edges, noteEdges, broken, typedRelations, wiki, termSets: null };
 }
 
 // Note-level term sets and document frequencies, built lazily (used by related and linking).
@@ -646,6 +648,10 @@ export function searchIndex(index, query, opts = {}) {
     add(tl.filter((x) => x.i >= 0).sort((a, b) => b.v - a.v).slice(0, 20), 'title');
   }
   for (const sem of opts.semantic || []) add(sem.filter((x) => !guaranteed.has(index.chunks[x.chunkIdx].noteIdx) && keep(index.chunks[x.chunkIdx].noteIdx)).map((x) => ({ i: x.chunkIdx, v: x.sim })), 'sim');
+  if (opts.wiki !== false && index.wiki?.present) {
+    const wikiHit = queryWikiLayer(index, queries, (i) => !guaranteed.has(i) && keep(i));
+    if (wikiHit.chunkCandidates.length) add(wikiHit.chunkCandidates, 'wiki', 1.25);
+  }
   if (!fused.size) return results.slice(0, limit);
 
   const top = [...fused.entries()].map(([i, e]) => ({ c: index.chunks[i], ...e })).sort((a, b) => b.rrf - a.rrf).slice(0, 40);
@@ -677,6 +683,7 @@ export function searchIndex(index, query, opts = {}) {
       x.s *= 1 + 0.5 * qShare + (hit.length >= 2 ? 0.6 * qShare * (hit.length / titleTerms.size) : 0);
     }
     if (recent) x.s *= 1 + 0.3 * (x.recency || 0);
+    if (x.wiki) x.s *= 1 + Math.min(0.45, 0.35 * x.wiki);
     if (/(^|› )Changelog$/i.test(x.c.heading)) x.s *= 0.5;
     if (note.historical) x.s *= 0.3;
     if (note.generated) x.s *= 0.2;
@@ -786,10 +793,20 @@ export async function searchWithVerdict(ctx, name, query, opts = {}) {
     ? { available: true, model: emb.model, preferred_model: emb.preferred_model || PREFERRED_EMBED_MODEL }
     : { available: false, preferred_model: emb.preferred_model || PREFERRED_EMBED_MODEL, reason: emb.reason, ...(emb.setup_hint ? { setup_hint: emb.setup_hint } : {}) };
   const v = verdict(index, String(query || ''), results, opts.queries || []);
+  const wikiLayer = !index.wiki?.present
+    ? { present: false, consulted: false }
+    : opts.wiki === false
+      ? { present: true, consulted: false }
+      : (() => {
+          const strip = (q) => String(q || '').replace(/\[\[[^\]]*\]\]/g, ' ').replace(/(?:^|\s)#[\p{L}\p{N}_/-]+/gu, ' ');
+          const qs = [query, ...(opts.queries || [])].map(strip);
+          const hit = queryWikiLayer(index, qs, noteFilter(index, opts));
+          return { present: true, consulted: true, matched_folders: hit.matched_folders, matched_entries: hit.matched_entries };
+        })();
   const note = v.status === 'not_in_brain' ? 'This search did not find a sufficiently strong match. Do not infer that the information is absent from the vault; suggest a rephrasing or another permitted source rather than guessing.'
     : v.needs_translation ? 'Most notes here are not in the language of this question. Search again with an English (or the notes\' language) translation in queries before answering or saying it is not in the notes.'
     : v.status === 'weak' ? `Only partial matches${v.missing_words ? ` (these words were not found in the indexed notes: ${v.missing_words.join(', ')})` : ''}. Answer only if a snippet clearly answers; otherwise explain that this search did not find a reliable answer, and suggest another search.` : null;
-  return { status: v.status, coverage: v.coverage, semantic, ...(v.vault_words ? { vault_words: v.vault_words } : {}), ...(v.missing_words ? { missing_words: v.missing_words } : {}), ...(v.needs_translation ? { needs_translation: true } : {}), ...(note ? { note } : {}), results };
+  return { status: v.status, coverage: v.coverage, semantic, wiki_layer: wikiLayer, ...(v.vault_words ? { vault_words: v.vault_words } : {}), ...(v.missing_words ? { missing_words: v.missing_words } : {}), ...(v.needs_translation ? { needs_translation: true } : {}), ...(note ? { note } : {}), results };
 }
 
 // Semantic layer: detect a local embedder once per context; embed a slice of missing chunks
