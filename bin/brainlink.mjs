@@ -238,10 +238,10 @@ async function main() {
       if (!v) fail('no vault configured; run brainlink setup');
       const b = await brief(ctx, v, { days: Number(opt('days', 7)) });
       out(`${b.vault} · last ${b.period_days} days · ${b.health.notes} notes, ${b.health.links} links, ${b.health.not_linked} not linked`);
-      out(`\nChanged (${b.changed.length}):${b.changed.map((c) => `\n  ${c.changed}  ${c.title}`).join('') || ' none'}`);
+      out(`\nChanged (${b.changed.length}):${b.changed.map((c) => `\n  ${c.changed}  ${c.title} (${c.path})`).join('') || ' none'}`);
       const l = b.open_loops;
       out(`\nOpen: ${l.counts.tasks} tasks, ${l.counts.next_actions} next actions, ${l.counts.decisions_waiting} decisions waiting, ${l.counts.unresolved_questions} questions`);
-      for (const x of [...l.decisions_waiting.map((d) => `decision: ${d.decision}`), ...l.next_actions.map((n) => `next: ${n.action}`)].slice(0, 8)) out(`  · ${x}`);
+      for (const x of [...l.decisions_waiting.map((d) => `decision: ${d.decision}${d.path ? ` (${d.path})` : ''}`), ...l.next_actions.map((n) => `next: ${n.action}${n.path ? ` (${n.path})` : ''}`)].slice(0, 8)) out(`  · ${x}`);
       return;
     }
     case 'miss': {

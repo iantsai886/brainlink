@@ -492,11 +492,15 @@ export function createMcp(ctx, { onCall = () => {}, onProposal = null } = {}) {
     ] : []),
     // ChatGPT connector / deep-research compatibility: id = "vault::path".
     { name: 'search', title: 'Search (connector-compatible)', annotations: RO,
-      description: `Search ${connectorVaults().join(', ') || 'no public vaults'}. Returns {results:[{id,title,url}]}; pass an id to fetch. Private vaults are excluded unless BRAINLINK_CONNECTOR_PRIVATE=1.`,
+      description: `Search ${connectorVaults().join(', ') || 'no public vaults'}. Returns {results:[{id,vault,path,title,url,heading?}]}; pass an id to fetch. Private vaults are excluded unless BRAINLINK_CONNECTOR_PRIVATE=1.`,
       inputSchema: { type: 'object', properties: { query: { type: 'string' } }, required: ['query'] },
       run: async (a) => {
         const results = [];
-        for (const v of connectorVaults()) for (const r of await search(ctx, v, a.query, 5)) results.push({ id: `${v}::${r.path}`, title: `${r.title} (${v})`, url: obsidianUrl(v, r.path), _score: r.score });
+        for (const v of connectorVaults()) {
+          for (const r of await search(ctx, v, a.query, { limit: 5 })) {
+            results.push({ id: `${v}::${r.path}`, vault: v, path: r.path, title: `${r.title} (${v})`, ...(r.heading ? { heading: r.heading } : {}), url: obsidianUrl(v, r.path), _score: r.score });
+          }
+        }
         return { results: results.sort((x, y) => y._score - x._score).slice(0, 10).map(({ _score, ...r }) => r) };
       } },
     { name: 'fetch', title: 'Fetch (connector-compatible)', annotations: RO,
@@ -506,7 +510,7 @@ export function createMcp(ctx, { onCall = () => {}, onProposal = null } = {}) {
         const [v, p] = String(a.id).split('::');
         if (!connectorVaults().includes(v)) throw new Error(`fetch is limited to ${connectorVaults().join(', ')}; use vault_read_note`);
         const n = await readNote(ctx, v, p);
-        return { id: a.id, title: p.replace(/\.md$/, ''), text: n.body, url: obsidianUrl(v, p), metadata: n.meta };
+        return { id: a.id, vault: v, path: p, title: p.replace(/\.md$/, ''), text: n.body, url: obsidianUrl(v, p), metadata: n.meta };
       } },
   ].filter((t) => !(ctx.readOnly && t.annotations === WR));
 

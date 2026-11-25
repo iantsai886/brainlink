@@ -1,5 +1,7 @@
 // Read-only routes used by the Find destinations in the local setup app.
 // Dependencies are explicit so the HTTP route layer can be maintained by destination.
+import { buildAnswerReceipt } from '../../answer-receipt.mjs';
+
 export function createFindRoutes({
   file, env, normalize, loadConfig, localContext, searchWithVerdict,
   createReplayMisses, semanticStatus, plainText, readNote, loadVault,
@@ -27,6 +29,8 @@ export function createFindRoutes({
         const top = r.results.slice(0, 3).map((x, i) => ({ x, i })).sort((a, b) => lessTrusted(a.x) - lessTrusted(b.x) || a.i - b.i).map(({ x }) => x);
         groups.push({
           vault: v, private: Boolean(ctx.byName.get(v).private), status: r.status, coverage: r.coverage, note: r.note || null,
+          wiki_layer: r.wiki_layer || null,
+          receipt: buildAnswerReceipt(r, { vault: v, sources: top }),
           answer: r.status === 'not_in_brain' ? null : plainText(top[0]?.snippet) || null,
           sources: top.map((x) => ({
             vault: v, path: x.path, title: x.title, heading: x.heading || '', score: x.score,
@@ -41,6 +45,7 @@ export function createFindRoutes({
       const embedder = await semanticStatus(ctx).catch(() => null);
       return {
         vault: first.vault, query, status: first.status, coverage: first.coverage, note: first.note, answer: first.answer, sources: first.sources,
+        receipt: first.receipt, wiki_layer: first.wiki_layer,
         groups, vaults_searched: scope, vaults_skipped_private: skippedPrivate, search_mode: embedder?.available ? 'meaning' : 'keyword',
         ...(embedder ? { semantic: embedder } : {}),
       };

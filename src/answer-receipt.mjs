@@ -13,6 +13,7 @@ export function buildAnswerReceipt(result, { vault, sources = result?.results ||
     sources: rows.map((source) => ({
       path: source.path,
       title: source.title,
+      ...(source.heading ? { heading: source.heading } : {}),
       date: source.date || '',
       status: source.status || '',
       confidence: source.confidence || null,
