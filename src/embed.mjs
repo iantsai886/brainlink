@@ -29,7 +29,7 @@ export async function detectEmbedder(cfg = {}, env = process.env) {
   }
   const url = (env.BRAINLINK_EMBED_URL || sem.url || DEFAULT_URL).replace(/\/+$/, '');
   try {
-    const tags = await getJson(`${url}/api/tags`, null, 800);
+    const tags = await getJson(`${url}/api/tags`, null, 2500);
     const names = (tags.models || []).map((m) => m.name || m.model).filter(Boolean);
     const want = env.BRAINLINK_EMBED_MODEL || sem.model;
     const model = want ? names.find((n) => n === want || n.startsWith(want + ':')) : PREFERRED.map((p) => names.find((n) => n.startsWith(p))).find(Boolean) || names.find((n) => /embed/i.test(n));

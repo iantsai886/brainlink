@@ -209,10 +209,16 @@ test('S2: wiki layer never invents missing notes and reports absent when vault h
   assert.equal(plain.wiki_layer?.consulted, false);
 });
 
-test('S2: abstention gate — unanswerable queries still abstain when MAP/INDEX is present', async () => {
-  const { ctx } = await makeWikiVault();
-  const q1 = await searchWithVerdict(ctx, 'Brain', 'What is the shared WeiMa pilot folder current access password or credential?', { limit: 5, semantic: false });
-  assert.notEqual(q1.status, 'hits');
-  const q2 = await searchWithVerdict(ctx, 'Brain', 'What is the current account balance shown in John Personal Finance Workboard?', { limit: 5, semantic: false });
-  assert.notEqual(q2.status, 'hits');
+test('S2: abstention gate — unanswerable credential and account-balance queries still abstain even when adjacent topic notes exist', async () => {
+  const { dir, ctx } = await makeWikiVault();
+  // Add realistic adjacent topic notes with high word overlap (like a release audit or move log)
+  // that do NOT contain a password or account balance.
+  await writeFile(path.join(dir, '20 Iango', 'WeiMa Pilot Audit.md'), '# WeiMa Pilot Audit\n\nShared WeiMa pilot folder current access review completed. No credentials stored here.\n');
+  await writeFile(path.join(dir, '20 Iango', 'John Finance Move Pack.md'), '# John Finance Move Pack\n\nMoved John Personal Finance Workboard out of Brain. Account balances are out of scope.\n');
+  for (const wiki of [false, true]) {
+    const q1 = await searchWithVerdict(ctx, 'Brain', 'What is the shared WeiMa pilot folder current access password or credential?', { limit: 5, semantic: false, wiki });
+    assert.notEqual(q1.status, 'hits', `expected abstention for credential query (wiki=${wiki})`);
+    const q2 = await searchWithVerdict(ctx, 'Brain', 'What is the current account balance shown in John Personal Finance Workboard?', { limit: 5, semantic: false, wiki });
+    assert.notEqual(q2.status, 'hits', `expected abstention for account balance query (wiki=${wiki})`);
+  }
 });

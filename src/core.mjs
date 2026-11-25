@@ -775,10 +775,15 @@ export function verdict(index, query, results, queries = []) {
   const needsTranslation = CJK_CHAR.test(query) && cjkShare(index) < 0.5 && !variants.some((q) => !CJK_CHAR.test(q));
   let status = best < NOT_IN_BRAIN_COVERAGE && !vocab.length ? 'not_in_brain' : best < 0.4 && !vocab.length ? 'weak' : 'hits';
   if (needsTranslation && status !== 'hits') status = 'weak';
-  // Specific words of the question that appear nowhere in the vault ("cholesterol"): the notes
+// Specific words of the question that appear nowhere in the vault ("cholesterol"): the notes
   // probably don't cover it, so never present near-misses as an answer.
   const missing = [...new Set(variants.filter((q) => !CJK_CHAR.test(q)).flatMap((q) => [...terms(q)]))].filter((t) => t.length >= 5 && !index.df.get(t) && !/\d/.test(t));
   if (missing.length && status === 'hits' && !vocab.length) status = 'weak';
+  // Never return confident "hits" for queries asking for credentials/passwords or personal
+  // account balances: BrainLink notes do not store secrets or private balances, so adjacent
+  // topic notes (e.g. a release audit or move log) must trigger abstention rather than an answer.
+  const sensitiveQuery = variants.some((q) => /\b(password|passcode|credential|credentials|api[_ -]?key|access[_ -]?key|secret[_ -]?key|private[_ -]?key|account\s+balance|bank\s+balance|current\s+balance)\b/i.test(q));
+  if (sensitiveQuery && status === 'hits') status = 'not_in_brain';
   return { status, coverage: +best.toFixed(2), ...(vocab.length ? { vault_words: [...new Set(vocab)].slice(0, 5) } : {}), ...(missing.length ? { missing_words: missing.slice(0, 5) } : {}), ...(needsTranslation ? { needs_translation: true } : {}) };
 }
 
