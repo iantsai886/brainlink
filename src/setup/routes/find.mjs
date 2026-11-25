@@ -42,6 +42,7 @@ export function createFindRoutes({
       return {
         vault: first.vault, query, status: first.status, coverage: first.coverage, note: first.note, answer: first.answer, sources: first.sources,
         groups, vaults_searched: scope, vaults_skipped_private: skippedPrivate, search_mode: embedder?.available ? 'meaning' : 'keyword',
+        ...(embedder ? { semantic: embedder } : {}),
       };
     },
     // Opens a citation source read-only. Wikilink resolution is performed against the

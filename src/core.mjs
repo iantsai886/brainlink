@@ -10,7 +10,7 @@ import { termFrequencies, terms, linkGraph, collection, suggestRelated, extractT
 import { deriveTypedRelations } from './typed-graph.mjs';
 import { appHome } from './config.mjs';
 import { rerankResults } from './rerank.mjs';
-import { detectEmbedder, VectorStore, fillVectors, embedTexts, nearest } from './embed.mjs';
+import { detectEmbedder, VectorStore, fillVectors, embedTexts, nearest, PREFERRED_EMBED_MODEL } from './embed.mjs';
 import { findAgentByToken, publicAgent } from './mcp-agents.mjs';
 import { resolveTwinAgentScope, twinNoteMemoryAllowed } from './twin-profiles.mjs';
 
@@ -779,11 +779,17 @@ export function verdict(index, query, results, queries = []) {
 export async function searchWithVerdict(ctx, name, query, opts = {}) {
   const results = await search(ctx, name, query, opts);
   const index = await loadVault(ctx, name);
+  const emb = opts.semantic === false
+    ? { available: false, preferred_model: PREFERRED_EMBED_MODEL, reason: 'disabled for this search' }
+    : await semanticStatus(ctx);
+  const semantic = emb.available
+    ? { available: true, model: emb.model, preferred_model: emb.preferred_model || PREFERRED_EMBED_MODEL }
+    : { available: false, preferred_model: emb.preferred_model || PREFERRED_EMBED_MODEL, reason: emb.reason, ...(emb.setup_hint ? { setup_hint: emb.setup_hint } : {}) };
   const v = verdict(index, String(query || ''), results, opts.queries || []);
   const note = v.status === 'not_in_brain' ? 'This search did not find a sufficiently strong match. Do not infer that the information is absent from the vault; suggest a rephrasing or another permitted source rather than guessing.'
     : v.needs_translation ? 'Most notes here are not in the language of this question. Search again with an English (or the notes\' language) translation in queries before answering or saying it is not in the notes.'
     : v.status === 'weak' ? `Only partial matches${v.missing_words ? ` (these words were not found in the indexed notes: ${v.missing_words.join(', ')})` : ''}. Answer only if a snippet clearly answers; otherwise explain that this search did not find a reliable answer, and suggest another search.` : null;
-  return { status: v.status, coverage: v.coverage, ...(v.vault_words ? { vault_words: v.vault_words } : {}), ...(v.missing_words ? { missing_words: v.missing_words } : {}), ...(v.needs_translation ? { needs_translation: true } : {}), ...(note ? { note } : {}), results };
+  return { status: v.status, coverage: v.coverage, semantic, ...(v.vault_words ? { vault_words: v.vault_words } : {}), ...(v.missing_words ? { missing_words: v.missing_words } : {}), ...(v.needs_translation ? { needs_translation: true } : {}), ...(note ? { note } : {}), results };
 }
 
 // Semantic layer: detect a local embedder once per context; embed a slice of missing chunks

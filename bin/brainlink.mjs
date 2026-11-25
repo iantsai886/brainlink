@@ -13,7 +13,7 @@ import { createLiveMcp } from '../src/live-mcp.mjs';
 import { createProposalInbox } from '../src/proposal-inbox.mjs';
 import { openContext, launchSpec, logActivity, readActivity, refreshMap, ROOT } from '../src/runtime.mjs';
 import { readGitSourceState } from '../src/git-source-state.mjs';
-import { createContext, warmSemantic } from '../src/core.mjs';
+import { createContext, warmSemantic, semanticStatus } from '../src/core.mjs';
 import { brief } from '../src/insights.mjs';
 import { runSelfTest } from '../src/self-test.mjs';
 import { createReplayMisses } from '../src/replay-misses.mjs';
@@ -215,7 +215,8 @@ async function main() {
     }
     case 'status': {
       const { cfg, ctx } = await openContext(process.env, { trustedLocal: true });
-      out(`BrainLink ${VERSION}\nconfig: ${configPath()}\ndata:   ${appHome()}\ntimezone: ${ctx.tz}`);
+      const sem = await semanticStatus(ctx);
+      out(`BrainLink ${VERSION}\nconfig: ${configPath()}\ndata:   ${appHome()}\ntimezone: ${ctx.tz}\nsemantic: ${sem.available ? `ready (${sem.model})` : `unavailable — ${sem.reason}${sem.setup_hint ? ` (${sem.setup_hint})` : ''}`}`);
       for (const v of cfg.vaults) out(`vault  ${v.name}: ${v.path}${await stat(v.path).then(() => '', () => '  ← MISSING')}`);
       for (const a of ctx.agents) out(`agent  ${a.name} @ ${a.vault}: "${a.activation[0]}" / "${a.close[0]}"`);
       return;

@@ -312,7 +312,7 @@ export function createMcp(ctx, { onCall = () => {}, onProposal = null } = {}) {
   const tools = [
     { name: 'brainlink_guide', title: 'How to read and write this second brain', annotations: RO,
       description: 'Call first. Enabled vaults with purpose, read order, folders and rules; agents with activation and close phrases; identity and write rules.',
-      inputSchema: { type: 'object', properties: {} }, run: async () => { const sem = await semanticStatus(ctx); return { ...await safeGuide(), search: sem.available ? `keyword + meaning (local model ${sem.model})` : `keyword (meaning-based search off: ${sem.reason})` }; } },
+      inputSchema: { type: 'object', properties: {} }, run: async () => { const sem = await semanticStatus(ctx); return { ...await safeGuide(), search: sem.available ? `keyword + meaning (local model ${sem.model})` : `keyword (meaning-based search off: ${sem.reason})`, semantic: sem }; } },
     { name: 'vault_search', title: 'Search a vault', annotations: RO,
       description: 'Ranked search in one vault. Returns {status, results, receipt}: "hits", "weak" (partial matches), or "not_in_brain" (no confident match in this search; do not assume the information is absent or guess). The receipt names only selected visible results and reports basis, search mode and missing words. Compact citation/context is the default: every selected result keeps its path, title, date/status, match type, heading and full snippet, while internal ranking diagnostics are omitted. Set detail="full" to include those diagnostics. [[Note]] and #tag match exactly; superseded notes are demoted and flagged.',
     inputSchema: { type: 'object', properties: {
