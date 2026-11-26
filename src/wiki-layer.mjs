@@ -6,7 +6,8 @@ import { terms } from './graph.mjs';
 
 const RETIRED_STATUS = /^(archived|historical|superseded)$/i;
 const SAFE_STATUS_ENUM = new Set(['active', 'draft', 'proposed', 'verified', 'historical', 'archived']);
-const WIKI_INDEX_BASENAME_RE = /\b00\s+(?:MAP|INDEX)\b/i;
+const WIKI_INDEX_BASENAME_RE = /(?:^|[^A-Za-z0-9])00[\s_-]+(?:MAP|INDEX)(?:[^A-Za-z0-9]|$)/i;
+const WIKI_MAP_BASENAME_RE = /(?:^|[^A-Za-z0-9])00[\s_-]+MAP(?:[^A-Za-z0-9]|$)/i;
 const PROMOTED_MAP_RE = /^00 MAP\.md$/i;
 const PROMOTED_INDEX_RE = /^(?:.+\/)?00 INDEX\.md$/i;
 const STAGING_PATH_RE = /(?:^|\/)_staging\//i;
@@ -323,18 +324,24 @@ export function queryWikiLayer(index, queries, keep = () => true) {
   };
 }
 
+// Strict frontmatter allowlist for any 00 MAP / 00 INDEX note: only safe structural metadata.
+export function allowlistedWikiMeta(rel, rawMeta) {
+  const norm = normalizeWikiPath(rel);
+  const baseName = path.posix.basename(norm).replace(/\.md$/i, '');
+  const safeMeta = { title: baseName, type: 'index' };
+  const rawStatus = String(rawMeta?.status || '').trim().toLowerCase();
+  if (SAFE_STATUS_ENUM.has(rawStatus)) safeMeta.status = rawStatus;
+  return safeMeta;
+}
+
 // Regenerate an allowlist-only view of any 00 MAP / 00 INDEX note on explicit reads
 // (readNote, vault_read_note, connector fetch, POST /api/note). Never returns raw body prose,
 // code blocks, non-first table cells, or raw frontmatter keys (such as aliases/related).
 export function renderAllowlistedWikiIndex(rel, rawBody, rawMeta, index) {
   const norm = normalizeWikiPath(rel);
-  const baseName = path.posix.basename(norm).replace(/\.md$/i, '');
-  const isMap = /\b00\s+MAP\b/i.test(baseName);
-
-  // Strict frontmatter allowlist: only safe structural metadata.
-  const safeMeta = { title: baseName, type: 'index' };
-  const rawStatus = String(rawMeta?.status || '').trim().toLowerCase();
-  if (SAFE_STATUS_ENUM.has(rawStatus)) safeMeta.status = rawStatus;
+  const safeMeta = allowlistedWikiMeta(norm, rawMeta);
+  const baseName = safeMeta.title;
+  const isMap = WIKI_MAP_BASENAME_RE.test(baseName);
 
   const syntheticNote = { rel: norm, body: String(rawBody || '') };
   const parsedEntries = isMap ? parseMapNote(syntheticNote).rawEntries : parseIndexNote(syntheticNote);

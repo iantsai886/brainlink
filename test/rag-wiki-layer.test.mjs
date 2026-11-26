@@ -5,7 +5,7 @@ import { tmpdir } from 'node:os';
 import path from 'node:path';
 
 import { normalize, saveConfig } from '../src/config.mjs';
-import { createContext, DEFAULT_EXCLUDED_FOLDERS, loadVault, readNote, related, searchWithVerdict } from '../src/core.mjs';
+import { createContext, DEFAULT_EXCLUDED_FOLDERS, loadVault, readNote, related, relatedText, searchWithVerdict } from '../src/core.mjs';
 import { buildAnswerReceipt } from '../src/answer-receipt.mjs';
 import { buildContextPacket } from '../src/context-packet.mjs';
 import { createMcp } from '../src/server.mjs';
@@ -27,6 +27,8 @@ async function makeWikiVault() {
     'type: index',
     'status: active',
     'aliases: [FMALIASPRIVCANARY, Brain Map]',
+    'tags: [FM_TAG_PRIVCANARY]',
+    'superseded_by: FM_SUPERSEDED_PRIVCANARY',
     'related:',
     '  - "[[Secret Private Note]]"',
     '  - FMRELPRIVCANARY',
@@ -70,6 +72,10 @@ async function makeWikiVault() {
     '# DRAFT 00 INDEX - BrainLink',
     'Bare STAGINGIDXPRIVCANARY leak in draft index.',
   ].join('\n'));
+  await writeFile(path.join(dir, 'Grok', 'Claude 886', '_staging', '2026-11-20', 'Staging Secret Draft.md'), [
+    '# Staging Secret Draft',
+    'Non-index note inside _staging with STAGINGNOTEPRIVCANARY must never be walked or searchable even without _staging/ in .brainlinkignore.',
+  ].join('\n'));
   await writeFile(path.join(dir, 'PROMOTED 00 MAP.md'), [
     '---',
     'type: index',
@@ -77,6 +83,22 @@ async function makeWikiVault() {
     '---',
     '# PROMOTED 00 MAP',
     'Bare PROMOTEDPRIVCANARY leak in promoted map copy.',
+  ].join('\n'));
+  await writeFile(path.join(dir, '00-MAP.md'), [
+    '---',
+    'type: index',
+    'status: FM_STATUS_PRIVCANARY',
+    '---',
+    '# 00-MAP',
+    'Bare HYPHENMAPPRIVCANARY leak in hyphenated map variant.',
+  ].join('\n'));
+  await writeFile(path.join(dir, '20 Iango', '00_INDEX.md'), [
+    '---',
+    'type: index',
+    'status: FM_STATUS_PRIVCANARY',
+    '---',
+    '# 00_INDEX',
+    'Bare UNDERINDEXPRIVCANARY leak in underscored index variant.',
   ].join('\n'));
 
   await writeFile(path.join(dir, 'Vault Access Rule.md'), [
@@ -246,12 +268,27 @@ test('S2: privacy & exclusion gate — MAP and top-level/nested INDEX chunks nev
     'STAGINGPRIVCANARY',
     'STAGINGFMPRIVCANARY',
     'STAGINGIDXPRIVCANARY',
+    'STAGINGNOTEPRIVCANARY',
     'PROMOTEDPRIVCANARY',
     'PROMOTEDFMPRIVCANARY',
+    'HYPHENMAPPRIVCANARY',
+    'UNDERINDEXPRIVCANARY',
+    'FM_TAG_PRIVCANARY',
+    'FM_SUPERSEDED_PRIVCANARY',
+    'FM_STATUS_PRIVCANARY',
   ];
-  const anyWikiIndexRe = /\b00\s+(?:MAP|INDEX)\b/i;
+  const anyWikiIndexRe = /(?:^|[^A-Za-z0-9])00[\s_-]+(?:MAP|INDEX)(?:[^A-Za-z0-9]|$)/i;
 
   assert.ok(DEFAULT_EXCLUDED_FOLDERS.includes('_staging/'), 'DEFAULT_EXCLUDED_FOLDERS must include _staging/');
+  // Runtime _staging/ enforcement: even without _staging/ in .brainlinkignore, walk() must never index _staging/ notes.
+  for (const n of index.notes) {
+    assert.ok(!/(?:^|\/)_staging\//i.test(n.rel), `_staging note should never be walked/indexed: ${n.rel}`);
+  }
+  await assert.rejects(
+    readNote(ctx, 'Brain', 'Grok/Claude 886/_staging/2026-11-20/Staging Secret Draft.md'),
+    /private/i,
+    'readNote must reject _staging notes at runtime even when .brainlinkignore omits _staging/',
+  );
 
   // 1. No indexed chunk may come from any 00 MAP / 00 INDEX note (including DRAFT/PROMOTED/nested) or carry restricted titles/canaries.
   for (const chunk of index.chunks) {
@@ -276,7 +313,10 @@ test('S2: privacy & exclusion gate — MAP and top-level/nested INDEX chunks nev
       'BAREPRIVCANARY',
       'CODEBLOCKPRIVCANARY',
       'STAGINGPRIVCANARY',
+      'STAGINGNOTEPRIVCANARY',
       'PROMOTEDPRIVCANARY',
+      'HYPHENMAPPRIVCANARY',
+      'UNDERINDEXPRIVCANARY',
       'Secret Private Note',
       'Home Excluded Note',
     ]) {
@@ -325,7 +365,9 @@ test('S2: privacy & exclusion gate — MAP and top-level/nested INDEX chunks nev
     // ONLY an allowlist-regenerated listing + safe frontmatter keys (never raw body/frontmatter).
     for (const indexPath of [
       '00 MAP.md',
+      '00-MAP.md',
       '20 Iango/00 INDEX.md',
+      '20 Iango/00_INDEX.md',
       '20 Iango/Policies/00 INDEX.md',
       '20 Iango\\Policies\\00 INDEX.md',
       'PROMOTED 00 MAP.md',
@@ -357,15 +399,25 @@ test('S2: privacy & exclusion gate — MAP and top-level/nested INDEX chunks nev
     const sanitizedNested = await readNote(ctx, 'Brain', '20 Iango/Policies/00 INDEX.md');
     assert.match(sanitizedNested.body, /Governance Charter/);
 
-    // 3. related() must never return 00 MAP.md or any 00 INDEX.md path or title.
+    // 3. related() and relatedText() must never return 00 MAP / 00 INDEX paths/titles or raw injected frontmatter.
     for (const target of ['Vault Access Rule.md', '20 Iango/Policies/Governance Charter.md']) {
       const relInfo = await related(ctx, 'Brain', target);
       const allRelated = [...relInfo.links_to, ...relInfo.linked_from, ...relInfo.suggested];
       for (const item of allRelated) {
-        assert.ok(!anyWikiIndexRe.test(item.path), `related(${target}) surfaced wiki index path: ${item.path}`);
-        assert.ok(!/^00 (MAP|INDEX)\b/i.test(item.title), `related(${target}) surfaced wiki index title: ${item.title}`);
+        assert.ok(!anyWikiIndexRe.test(path.posix.basename(item.path)), `related(${target}) surfaced wiki index path: ${item.path}`);
+        assert.ok(!anyWikiIndexRe.test(item.title), `related(${target}) surfaced wiki index title: ${item.title}`);
       }
     }
+    for (const mapOrIndex of ['00 MAP.md', '00-MAP.md', '20 Iango/00_INDEX.md']) {
+      const relMap = await related(ctx, 'Brain', mapOrIndex);
+      const relMapJson = JSON.stringify(relMap);
+      for (const marker of forbidden) assert.ok(!relMapJson.includes(marker), `related(${mapOrIndex}) leaked ${marker}`);
+      const relTxt = await relatedText(ctx, 'Brain', 'Vault Access Rule attribution', { excludePath: mapOrIndex });
+      const relTxtJson = JSON.stringify(relTxt);
+      for (const marker of forbidden) assert.ok(!relTxtJson.includes(marker), `relatedText(${mapOrIndex}) leaked ${marker}`);
+    }
+    // Traversal guard with backslashes must still reject escapes.
+    await assert.rejects(readNote(ctx, 'Brain', '..\\outside.md'), /escapes the vault/i);
 
     // 4. Full body of every hit returned for a legitimate query never exposes restricted titles.
     const legit = await searchWithVerdict(ctx, 'Brain', 'Vault Access Rule attribution', { limit: 5, semantic: false });

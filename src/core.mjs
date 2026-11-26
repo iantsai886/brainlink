@@ -11,7 +11,7 @@ import { deriveTypedRelations } from './typed-graph.mjs';
 import { appHome } from './config.mjs';
 import { rerankResults } from './rerank.mjs';
 import { detectEmbedder, VectorStore, fillVectors, embedTexts, nearest, PREFERRED_EMBED_MODEL } from './embed.mjs';
-import { buildWikiLayer, queryWikiLayer, isWikiIndexPath, renderAllowlistedWikiIndex } from './wiki-layer.mjs';
+import { buildWikiLayer, queryWikiLayer, isWikiIndexPath, renderAllowlistedWikiIndex, allowlistedWikiMeta, normalizeWikiPath } from './wiki-layer.mjs';
 import { findAgentByToken, publicAgent } from './mcp-agents.mjs';
 import { resolveTwinAgentScope, twinNoteMemoryAllowed } from './twin-profiles.mjs';
 
@@ -163,7 +163,7 @@ export const listValue = (v) => String(v || '').replace(/^\[|\]$/g, '').split(',
 export const isMinor = (rel, title) => /^(_?README|00 INDEX|00 MAP|INDEX|MAP)$|^(DRAFT|PROMOTED|COPY)\b|^00 (INDEX|MAP)\b/.test(title) || /(^|\/)_staging\//.test(rel);
 
 export const ROUTING_NOTE = /^(_?README|00 INDEX|00 MAP|INDEX|Home)$|^00 Moved\b|\bpointer\b/i;
-const SKIP_DIRS = new Set(['node_modules', '.git', '.obsidian', '.trash', '.backups']);
+const SKIP_DIRS = new Set(['node_modules', '.git', '.obsidian', '.trash', '.backups', '_staging']);
 
 // A .brainlinkignore file in any folder lists names to skip there, one per line ("samples/",
 // "drafts", "*.tmp", or "*" for the whole folder). Lines starting with # are comments.
@@ -232,7 +232,7 @@ async function walk(root, dir = root, out = [], inherited = []) {
   const rules = inherited.concat(await ignoreRules(dir));
   if (rules.some((re) => re.test('*') || re.source === '^.*$')) return out;
   for (const f of await readdir(dir, { withFileTypes: true })) {
-    if (f.name.startsWith('.') || SKIP_DIRS.has(f.name)) continue;
+    if (f.name.startsWith('.') || SKIP_DIRS.has(f.name.toLowerCase())) continue;
     if (rules.some((re) => re.test(f.name))) continue;
     const full = path.join(dir, f.name);
     if (f.isDirectory()) await walk(root, full, out, rules);
@@ -245,7 +245,7 @@ async function visibleFolderPaths(root, dir = root, out = [], inherited = []) {
   const rules = inherited.concat(await ignoreRules(dir));
   if (rules.some((re) => re.test('*') || re.source === '^.*$')) return out;
   for (const entry of await readdir(dir, { withFileTypes: true })) {
-    if (entry.name.startsWith('.') || SKIP_DIRS.has(entry.name)) continue;
+    if (entry.name.startsWith('.') || SKIP_DIRS.has(entry.name.toLowerCase())) continue;
     if (rules.some((re) => re.test(entry.name)) || !entry.isDirectory()) continue;
     const full = path.join(dir, entry.name), rel = path.relative(root, full).split(path.sep).join('/');
     out.push(rel);
@@ -257,10 +257,10 @@ async function visibleFolderPaths(root, dir = root, out = [], inherited = []) {
 // Same accumulated-rule logic as walk(), for a single already-known relative path (readNote()):
 // true if any ancestor folder, or the file itself, is excluded at any depth.
 export async function isExcludedPath(root, rel) {
-  const parts = String(rel).split('/');
+  const parts = String(rel).replace(/\\/g, '/').split('/').filter(Boolean);
   let dir = root, rules = [];
   for (const name of parts) {
-    if (name.startsWith('.') || SKIP_DIRS.has(name)) return true;
+    if (name.startsWith('.') || SKIP_DIRS.has(name.toLowerCase())) return true;
     rules = rules.concat(await ignoreRules(dir));
     if (rules.some((re) => re.test('*') || re.source === '^.*$')) return true;
     if (rules.some((re) => re.test(name))) return true;
@@ -579,6 +579,10 @@ function bm25(index, qTerms, c, k1 = 1.2, b = 0.75) {
 
 export function summarize(index, i, extra = {}) {
   const n = index.notes[i];
+  if (isWikiIndexPath(n.rel)) {
+    const safeMeta = allowlistedWikiMeta(n.rel, n.meta);
+    return { path: n.rel, title: safeMeta.title, date: n.date, status: safeMeta.status || '', collection: collection(n.rel), historical: isHistorical(n.rel, safeMeta), ...extra };
+  }
   const confidence = ['verified', 'reported', 'inferred', 'unknown'].includes(String(n.meta.confidence || '').toLowerCase())
     ? String(n.meta.confidence).toLowerCase() : undefined;
   return { path: n.rel, title: n.title, date: n.date, status: n.meta.status || '', ...(confidence ? { confidence } : {}), collection: collection(n.rel), ...(n.tags.size ? { tags: [...n.tags] } : {}), historical: n.historical, ...(n.meta.superseded_by ? { superseded_by: n.meta.superseded_by } : {}), ...extra };
@@ -869,7 +873,8 @@ const PRIVATE_NOTE_ERROR = 'This note is private.';
 
 export async function readNote(ctx, name, rel, { readBody = readFile } = {}) {
   const root = vaultRoot(ctx, name);
-  const full = safeJoin(root, rel);
+  const relInput = String(rel || '').replace(/\\/g, '/');
+  const full = safeJoin(root, relInput);
   if (!full.toLowerCase().endsWith('.md')) throw new Error('Only Markdown notes can be read');
   const relNorm = path.relative(root, full).split(path.sep).join('/');
   if (await isExcludedPath(root, relNorm)) throw new Error(PRIVATE_NOTE_ERROR);
@@ -910,7 +915,8 @@ const eligibleFor = (index) => (j) => { const n = index.notes[j]; return !(n.his
 
 export async function related(ctx, name, rel) {
   const index = await loadVault(ctx, name);
-  const i = index.byRel.get(rel);
+  const relNorm = normalizeWikiPath(rel);
+  const i = index.byRel.get(relNorm);
   if (i === undefined || index.notes[i].private) throw new Error(`Note not found in ${name}: ${rel}`);
   const { termSets, df } = noteTerms(index);
   const exclude = new Set([i, ...index.outlinks[i], ...index.backlinks[i]]);
@@ -930,16 +936,17 @@ export async function relatedText(ctx, name, text, { excludePath = '' } = {}) {
   const index = await loadVault(ctx, name);
   const { termSets, df } = noteTerms(index);
   const exclude = new Set();
-  const sourceIndex = excludePath ? index.byRel.get(excludePath) : undefined;
+  const excludeNorm = excludePath ? normalizeWikiPath(excludePath) : '';
+  const sourceIndex = excludeNorm ? index.byRel.get(excludeNorm) : undefined;
   if (sourceIndex !== undefined) {
     if (index.notes[sourceIndex].private) throw new Error(`Note not found in ${name}: ${excludePath}`);
     exclude.add(sourceIndex);
     for (const j of index.outlinks[sourceIndex] || []) exclude.add(j);
     for (const j of index.backlinks[sourceIndex] || []) exclude.add(j);
   }
-  const notPrivate = (j) => !index.notes[j].private;
+  const visible = (j) => !index.notes[j].private && !isWikiIndexPath(index.notes[j].rel);
   return {
-    suggested: suggestRelated(terms(text), termSets, df, { exclude, eligible: (j) => eligibleFor(index)(j) && notPrivate(j) })
+    suggested: suggestRelated(terms(text), termSets, df, { exclude, eligible: (j) => eligibleFor(index)(j) && visible(j) })
       .map((s) => ({ ...summarize(index, s.j), score: +s.score.toFixed(3), shared_terms: s.shared })),
   };
 }
