@@ -6,6 +6,7 @@ import { terms } from './graph.mjs';
 
 const RETIRED_STATUS = /^(archived|historical|superseded)$/i;
 const INDEX_NOTE_RE = /^(?:00 MAP\.md|[^/]+\/00 INDEX\.md)$/i;
+export const isWikiIndexPath = (rel) => INDEX_NOTE_RE.test(String(rel || ''));
 
 function splitTableRow(line) {
   const trimmed = line.trim();

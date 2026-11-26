@@ -11,7 +11,7 @@ import { deriveTypedRelations } from './typed-graph.mjs';
 import { appHome } from './config.mjs';
 import { rerankResults } from './rerank.mjs';
 import { detectEmbedder, VectorStore, fillVectors, embedTexts, nearest, PREFERRED_EMBED_MODEL } from './embed.mjs';
-import { buildWikiLayer, queryWikiLayer } from './wiki-layer.mjs';
+import { buildWikiLayer, queryWikiLayer, isWikiIndexPath } from './wiki-layer.mjs';
 import { findAgentByToken, publicAgent } from './mcp-agents.mjs';
 import { resolveTwinAgentScope, twinNoteMemoryAllowed } from './twin-profiles.mjs';
 
@@ -535,7 +535,12 @@ export function buildIndex(notes) {
   }
   const backlinks = notes.map(() => new Set()), outlinks = notes.map(() => new Set());
   for (const [a, b] of edges) { backlinks[b].add(a); outlinks[a].add(b); }
-  const chunks = notes.flatMap((n, noteIdx) => n.chunks.map((c) => ({ ...c, noteIdx, len: [...c.tokens.values()].reduce((s, x) => s + x, 0) })));
+  // Addendum A 00 MAP.md and folder 00 INDEX.md notes are used strictly as the parsed,
+  // privacy-filtered wiki prior (buildWikiLayer), never as searchable/embeddable chunks,
+  // so stale index rows referencing private or excluded titles can never leak into hits.
+  const chunks = notes.flatMap((n, noteIdx) => (isWikiIndexPath(n.rel)
+    ? []
+    : n.chunks.map((c) => ({ ...c, noteIdx, len: [...c.tokens.values()].reduce((s, x) => s + x, 0) }))));
   const df = new Map();
   for (const c of chunks) for (const t of c.tokens.keys()) df.set(t, (df.get(t) || 0) + 1);
   const avgLen = chunks.reduce((s, c) => s + c.len, 0) / Math.max(1, chunks.length);
@@ -585,7 +590,7 @@ export function noteFilter(index, { folder, tag, since, until, exclude } = {}) {
   const t = tag ? String(tag).replace(/^#/, '').toLowerCase() : null;
   return (i) => {
     const n = index.notes[i];
-    if (n.private) return false; // frontmatter private: true — never surfaced outside readNote's own check
+    if (n.private || isWikiIndexPath(n.rel)) return false; // frontmatter private: true or wiki routing index — never surfaced as a search hit
     if (f && !n.rel.toLowerCase().startsWith(f)) return false;
     if (t && !n.tags.has(t)) return false;
     if (since && n.date < since) return false;

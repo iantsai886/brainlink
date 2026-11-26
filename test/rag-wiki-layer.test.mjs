@@ -4,10 +4,12 @@ import { mkdtemp, writeFile, mkdir } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 
-import { normalize } from '../src/config.mjs';
-import { createContext, searchWithVerdict } from '../src/core.mjs';
+import { normalize, saveConfig } from '../src/config.mjs';
+import { createContext, loadVault, readNote, searchWithVerdict } from '../src/core.mjs';
 import { buildAnswerReceipt } from '../src/answer-receipt.mjs';
 import { buildContextPacket } from '../src/context-packet.mjs';
+import { createMcp } from '../src/server.mjs';
+import { startSetup } from '../src/setup.mjs';
 
 const tmp = (p) => mkdtemp(path.join(tmpdir(), `brainlink-rag-s2-${p}-`));
 
@@ -27,6 +29,14 @@ async function makeWikiVault() {
     '---',
     '# 00 MAP — Brain',
     '',
+    '## Entry notes',
+    '',
+    '| Title | Drive id/URL | Summary | Status | Updated | Superseded by |',
+    '|---|---|---|---|---|---|',
+    '| [Secret Private Note](<Secret Private Note.md>) | — | Contains PRIVWIKICANARY confidential token. | active | 2026-11-20 | — |',
+    '| [Home Excluded Note](<00 Home/Home Excluded Note.md>) | — | Contains EXCLWIKICANARY personal diary. | active | 2026-11-20 | — |',
+    '| [Vault Access Rule](<Vault Access Rule.md>) | — | Canonical rule for AI vault attribution and Made by line. | active | 2026-11-20 | — |',
+    '',
     '## Folders',
     '',
     '| Folder | Index | Drive id/URL | Summary | Updated |',
@@ -34,14 +44,6 @@ async function makeWikiVault() {
     '| `20 Iango/` | [00 INDEX — 20 Iango](<20 Iango/00 INDEX.md>) | — | Company policies, reporting hierarchy, decision queue rules, and client projects. | 2026-11-20 |',
     '| `90 Noise/` | [00 INDEX — 90 Noise](<90 Noise/00 INDEX.md>) | — | Miscellaneous scratch drafts. | 2026-11-20 |',
     '| `00 Home/` | [00 INDEX — 00 Home](<00 Home/00 INDEX.md>) | — | Excluded personal home folder. | 2026-11-20 |',
-    '',
-    '## Entry notes',
-    '',
-    '| Title | Drive id/URL | Summary | Status | Updated | Superseded by |',
-    '|---|---|---|---|---|---|',
-    '| [Vault Access Rule](<Vault Access Rule.md>) | — | Canonical rule for AI vault attribution and Made by line. | active | 2026-11-20 | — |',
-    '| [Secret Private Note](<Secret Private Note.md>) | — | Contains PRIVWIKICANARY confidential token. | active | 2026-11-20 | — |',
-    '| [Home Excluded Note](<00 Home/Home Excluded Note.md>) | — | Contains EXCLWIKICANARY personal diary. | active | 2026-11-20 | — |',
   ].join('\n'));
 
   await writeFile(path.join(dir, 'Vault Access Rule.md'), [
@@ -149,9 +151,10 @@ async function makeWikiVault() {
     'Someone asked about the Chairman Decision Queue rule once in a meeting, plus random decision queue chatter and decision queue ideas.',
   ].join('\n'));
 
-  const cfg = normalize({ vaults: [{ name: 'Brain', path: dir }] });
-  const ctx = createContext(cfg, { env: { BRAINLINK_HOME: home, BRAINLINK_SEMANTIC: '0' }, trustedLocal: true });
-  return { dir, home, ctx };
+  const cfg = normalize({ vaults: [{ name: 'Brain', path: dir }], mcp: { tool_profile: 'full' } });
+  const env = { BRAINLINK_HOME: home, BRAINLINK_SEMANTIC: '0' };
+  const ctx = createContext(cfg, { env, trustedLocal: true });
+  return { dir, home, cfg, env, ctx };
 }
 
 test('S2: MAP/INDEX wiki stage boosts indexed target note over noisy draft and reports wiki_layer metadata', async () => {
@@ -178,17 +181,76 @@ test('S2: wiki layer follows superseded_by and prefers replacement over retired 
   assert.ok(!res.wiki_layer.matched_entries.includes('20 Iango/Policies/Old Release Rule.md'));
 });
 
-test('S2: privacy & exclusion gate — private or ignored notes listed in MAP/INDEX never appear in wiki_layer, results, or citations', async () => {
-  const { ctx } = await makeWikiVault();
-  for (const query of ['PRIVWIKICANARY confidential token', 'EXCLWIKICANARY personal diary']) {
-    const res = await searchWithVerdict(ctx, 'Brain', query, { limit: 5, semantic: false });
-    const receipt = buildAnswerReceipt(res, { vault: 'Brain' });
-    const packet = buildContextPacket(res, { vault: 'Brain' });
-    const serialized = JSON.stringify({ res, receipt, packet });
-    assert.ok(!serialized.includes('Secret Private Note.md'), 'private note leaked');
-    assert.ok(!serialized.includes('Home Excluded Note.md'), 'excluded folder note leaked');
-    assert.ok(!serialized.includes('PRIVWIKICANARY'), 'private canary leaked');
-    assert.ok(!serialized.includes('EXCLWIKICANARY'), 'excluded canary leaked');
+test('S2: privacy & exclusion gate — MAP/INDEX chunks never expose restricted titles or canaries on any surface (full content checked)', async () => {
+  const { home, cfg, env, ctx } = await makeWikiVault();
+  const index = await loadVault(ctx, 'Brain');
+  const forbidden = ['Secret Private Note', 'Home Excluded Note', 'PRIVWIKICANARY', 'EXCLWIKICANARY'];
+
+  // 1. No indexed chunk may come from 00 MAP.md / 00 INDEX.md or carry restricted titles/canaries.
+  for (const chunk of index.chunks) {
+    const note = index.notes[chunk.noteIdx];
+    assert.ok(!/^(?:00 MAP\.md|[^/]+\/00 INDEX\.md)$/i.test(note.rel), `MAP/INDEX chunk should not be indexed: ${note.rel}`);
+    for (const marker of forbidden) {
+      assert.ok(!chunk.text.includes(marker), `indexed chunk leaked ${marker} via ${note.rel}`);
+    }
+  }
+
+  const mcp = createMcp(ctx);
+  await mkdir(home, { recursive: true });
+  await saveConfig(cfg, path.join(home, 'config.json'));
+  const setup = await startSetup({ env, home: await tmp('s2-priv-userhome'), os: 'win32', port: 0, openUrl: null, useCli: false });
+  try {
+    for (const query of ['PRIVWIKICANARY confidential token', 'EXCLWIKICANARY personal diary', 'Secret Private Note', 'Home Excluded Note']) {
+      for (const wiki of [false, true]) {
+        const res = await searchWithVerdict(ctx, 'Brain', query, { limit: 5, semantic: false, wiki });
+        assert.equal(res.status, 'not_in_brain', `expected not_in_brain for "${query}" (wiki=${wiki}), got ${res.status}`);
+        assert.equal(res.results.length, 0, `expected 0 results for "${query}" (wiki=${wiki}), got ${JSON.stringify(res.results.map((r) => r.path))}`);
+        const receipt = buildAnswerReceipt(res, { vault: 'Brain' });
+        const packet = buildContextPacket(res, { vault: 'Brain' });
+        const serialized = JSON.stringify({ res, receipt, packet });
+        for (const marker of forbidden) assert.ok(!serialized.includes(marker), `leaked ${marker} in core search (${query})`);
+      }
+
+      for (const detail of ['compact', 'full']) {
+        const vs = await mcp.handle({ jsonrpc: '2.0', id: 1, method: 'tools/call', params: { name: 'vault_search', arguments: { vault: 'Brain', query, detail } } });
+        const payload = JSON.parse(vs.result.content[0].text);
+        assert.equal(payload.results.length, 0, `vault_search(${detail}) returned hits for "${query}"`);
+        for (const marker of forbidden) assert.ok(!vs.result.content[0].text.includes(marker), `vault_search(${detail}) leaked ${marker}`);
+      }
+
+      const cp = await mcp.handle({ jsonrpc: '2.0', id: 2, method: 'tools/call', params: { name: 'context_packet', arguments: { vault: 'Brain', query } } });
+      const cpPayload = JSON.parse(cp.result.content[0].text);
+      assert.equal(cpPayload.sources.length, 0, `context_packet returned sources for "${query}"`);
+      for (const marker of forbidden) assert.ok(!cp.result.content[0].text.includes(marker), `context_packet leaked ${marker}`);
+
+      const conn = await mcp.handle({ jsonrpc: '2.0', id: 3, method: 'tools/call', params: { name: 'search', arguments: { query } } });
+      const connPayload = JSON.parse(conn.result.content[0].text);
+      assert.equal(connPayload.results.length, 0, `connector search returned hits for "${query}"`);
+      for (const marker of forbidden) assert.ok(!conn.result.content[0].text.includes(marker), `connector search leaked ${marker}`);
+
+      const askRes = await fetch(`http://127.0.0.1:${setup.port}/api/ask`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'X-BrainLink-Token': setup.token },
+        body: JSON.stringify({ vault: 'Brain', query }),
+      });
+      assert.equal(askRes.status, 200);
+      const askBody = await askRes.json();
+      assert.equal(askBody.sources.length, 0, `POST /api/ask returned sources for "${query}"`);
+      const { query: _echoedQuery, ...askOutput } = askBody;
+      const askSerialized = JSON.stringify(askOutput);
+      for (const marker of forbidden) assert.ok(!askSerialized.includes(marker), `POST /api/ask leaked ${marker}`);
+    }
+
+    // Also verify full body of every hit returned for a legitimate query never exposes restricted titles.
+    const legit = await searchWithVerdict(ctx, 'Brain', 'Vault Access Rule attribution', { limit: 5, semantic: false });
+    assert.ok(legit.results.length >= 1);
+    for (const hit of legit.results) {
+      assert.ok(!/^(?:00 MAP\.md|[^/]+\/00 INDEX\.md)$/i.test(hit.path), `MAP/INDEX should not be returned as hit: ${hit.path}`);
+      const fullNote = await readNote(ctx, 'Brain', hit.path);
+      for (const marker of forbidden) assert.ok(!fullNote.body.includes(marker), `full body of ${hit.path} leaked ${marker}`);
+    }
+  } finally {
+    setup.server.close();
   }
 });
 
@@ -209,16 +271,30 @@ test('S2: wiki layer never invents missing notes and reports absent when vault h
   assert.equal(plain.wiki_layer?.consulted, false);
 });
 
-test('S2: abstention gate — unanswerable credential and account-balance queries still abstain even when adjacent topic notes exist', async () => {
+test('S2: abstention gate — reaches sensitiveQuery guard directly (no missing_words, coverage >= 0.4) and does not false-refuse answerable queries', async () => {
   const { dir, ctx } = await makeWikiVault();
-  // Add realistic adjacent topic notes with high word overlap (like a release audit or move log)
-  // that do NOT contain a password or account balance.
-  await writeFile(path.join(dir, '20 Iango', 'WeiMa Pilot Audit.md'), '# WeiMa Pilot Audit\n\nShared WeiMa pilot folder current access review completed. No credentials stored here.\n');
-  await writeFile(path.join(dir, '20 Iango', 'John Finance Move Pack.md'), '# John Finance Move Pack\n\nMoved John Personal Finance Workboard out of Brain. Account balances are out of scope.\n');
+  // Ensure every query word exists in the indexed vault so missing_words is empty and coverage >= 0.4,
+  // proving the sensitiveQuery guard itself (not missing_words) downgrades status from hits -> not_in_brain.
+  await writeFile(path.join(dir, '20 Iango', 'WeiMa Pilot Audit.md'), '# WeiMa Pilot Audit\n\nShared WeiMa pilot folder current access review completed. Password and credential storage is forbidden here.\n');
+  await writeFile(path.join(dir, '20 Iango', 'John Finance Move Pack.md'), '# John Finance Move Pack\n\nMoved John Personal Finance Workboard out of Brain. Current account balance numbers shown there are out of scope.\n');
   for (const wiki of [false, true]) {
     const q1 = await searchWithVerdict(ctx, 'Brain', 'What is the shared WeiMa pilot folder current access password or credential?', { limit: 5, semantic: false, wiki });
-    assert.notEqual(q1.status, 'hits', `expected abstention for credential query (wiki=${wiki})`);
+    assert.equal(q1.missing_words, undefined, `expected no missing_words so sensitiveQuery guard is exercised (wiki=${wiki})`);
+    assert.ok(q1.coverage >= 0.4, `expected coverage >= 0.4, got ${q1.coverage}`);
+    assert.equal(q1.status, 'not_in_brain', `expected sensitiveQuery guard to return not_in_brain (wiki=${wiki})`);
+
     const q2 = await searchWithVerdict(ctx, 'Brain', 'What is the current account balance shown in John Personal Finance Workboard?', { limit: 5, semantic: false, wiki });
-    assert.notEqual(q2.status, 'hits', `expected abstention for account balance query (wiki=${wiki})`);
+    assert.equal(q2.missing_words, undefined, `expected no missing_words so sensitiveQuery guard is exercised (wiki=${wiki})`);
+    assert.ok(q2.coverage >= 0.4, `expected coverage >= 0.4, got ${q2.coverage}`);
+    assert.equal(q2.status, 'not_in_brain', `expected sensitiveQuery guard to return not_in_brain (wiki=${wiki})`);
+
+    // False-refusal check: legitimate answerable queries on adjacent topics must still return hits.
+    const ok1 = await searchWithVerdict(ctx, 'Brain', 'What is the Vault Access Rule for attribution?', { limit: 5, semantic: false, wiki });
+    assert.equal(ok1.status, 'hits', `false refusal on answerable access rule query (wiki=${wiki})`);
+    assert.equal(ok1.results[0]?.path, 'Vault Access Rule.md');
+
+    const ok2 = await searchWithVerdict(ctx, 'Brain', 'Where did the move pack move John Personal Finance Workboard?', { limit: 5, semantic: false, wiki });
+    assert.equal(ok2.status, 'hits', `false refusal on answerable finance move pack query (wiki=${wiki})`);
+    assert.equal(ok2.results[0]?.path, '20 Iango/John Finance Move Pack.md');
   }
 });
