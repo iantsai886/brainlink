@@ -11,7 +11,7 @@ import { deriveTypedRelations } from './typed-graph.mjs';
 import { appHome } from './config.mjs';
 import { rerankResults } from './rerank.mjs';
 import { detectEmbedder, VectorStore, fillVectors, embedTexts, nearest, PREFERRED_EMBED_MODEL } from './embed.mjs';
-import { buildWikiLayer, queryWikiLayer, isWikiIndexPath } from './wiki-layer.mjs';
+import { buildWikiLayer, queryWikiLayer, isWikiIndexPath, sanitizeWikiIndexBody } from './wiki-layer.mjs';
 import { findAgentByToken, publicAgent } from './mcp-agents.mjs';
 import { resolveTwinAgentScope, twinNoteMemoryAllowed } from './twin-profiles.mjs';
 
@@ -895,14 +895,17 @@ export async function readNote(ctx, name, rel, { readBody = readFile } = {}) {
   const raw = await readBody(full, 'utf8');
   const { meta, body, frontmatter } = parseFrontmatter(raw);
   if (isPrivateMeta(meta) || fmSaysPrivate(frontmatter) || !twinNoteMemoryAllowed(ctx, name, relNorm, meta)) throw new Error(PRIVATE_NOTE_ERROR);
-  return { path: rel, meta, body, historical: isHistorical(rel, meta) };
+  const safeBody = isWikiIndexPath(relNorm)
+    ? sanitizeWikiIndexBody(relNorm, body, await loadVault(ctx, name))
+    : body;
+  return { path: rel, meta, body: safeBody, historical: isHistorical(rel, meta) };
 }
 
 // Fails closed on n.private: every caller (vault_related's own "suggested" list below, and
 // links.mjs's suggestLinks/buildHomeMap) must never surface a private note's title, whether as a
 // suggested link, an auto-linked [[mention]] in a newly written note, or an entry in the
 // generated Home map.
-const eligibleFor = (index) => (j) => { const n = index.notes[j]; return !(n.historical || n.generated || n.private || ROUTING_NOTE.test(n.title) || n.body.trim().length < 120); };
+const eligibleFor = (index) => (j) => { const n = index.notes[j]; return !(n.historical || n.generated || n.private || isWikiIndexPath(n.rel) || ROUTING_NOTE.test(n.title) || n.body.trim().length < 120); };
 
 export async function related(ctx, name, rel) {
   const index = await loadVault(ctx, name);
@@ -910,12 +913,12 @@ export async function related(ctx, name, rel) {
   if (i === undefined || index.notes[i].private) throw new Error(`Note not found in ${name}: ${rel}`);
   const { termSets, df } = noteTerms(index);
   const exclude = new Set([i, ...index.outlinks[i], ...index.backlinks[i]]);
-  const notPrivate = (j) => !index.notes[j].private;
+  const visible = (j) => !index.notes[j].private && !isWikiIndexPath(index.notes[j].rel);
   return {
     note: summarize(index, i),
-    links_to: [...index.outlinks[i]].filter(notPrivate).map((j) => summarize(index, j)),
-    linked_from: [...index.backlinks[i]].filter(notPrivate).map((j) => summarize(index, j)),
-    suggested: suggestRelated(termSets[i], termSets, df, { exclude, eligible: (j) => eligibleFor(index)(j) && notPrivate(j) }).map((s) => ({ ...summarize(index, s.j), score: +s.score.toFixed(3), shared_terms: s.shared })),
+    links_to: [...index.outlinks[i]].filter(visible).map((j) => summarize(index, j)),
+    linked_from: [...index.backlinks[i]].filter(visible).map((j) => summarize(index, j)),
+    suggested: suggestRelated(termSets[i], termSets, df, { exclude, eligible: (j) => eligibleFor(index)(j) && visible(j) }).map((s) => ({ ...summarize(index, s.j), score: +s.score.toFixed(3), shared_terms: s.shared })),
   };
 }
 

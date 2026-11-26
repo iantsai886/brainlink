@@ -5,7 +5,7 @@ import { tmpdir } from 'node:os';
 import path from 'node:path';
 
 import { normalize, saveConfig } from '../src/config.mjs';
-import { createContext, loadVault, readNote, searchWithVerdict } from '../src/core.mjs';
+import { createContext, loadVault, readNote, related, searchWithVerdict } from '../src/core.mjs';
 import { buildAnswerReceipt } from '../src/answer-receipt.mjs';
 import { buildContextPacket } from '../src/context-packet.mjs';
 import { createMcp } from '../src/server.mjs';
@@ -91,6 +91,20 @@ async function makeWikiVault() {
     '| [Old Release Rule](<Policies/Old Release Rule.md>) | — | Legacy deployment checklist for canary rollouts. | historical | 2026-10-01 | [Current Release Rule](<Policies/Current Release Rule.md>) |',
     '| [Current Release Rule](<Policies/Current Release Rule.md>) | — | Active deployment checklist for release rollouts. | active | 2026-11-19 | — |',
     '| [Ghost Note](<Policies/Ghost Note.md>) | — | Nonexistent note that must never be invented. | active | 2026-11-20 | — |',
+  ].join('\n'));
+
+  await writeFile(path.join(dir, '20 Iango', 'Policies', '00 INDEX.md'), [
+    '---',
+    'type: index',
+    'status: active',
+    '---',
+    '# 00 INDEX — Policies',
+    '',
+    '| Title | Drive id/URL | Summary | Status | Updated | Superseded by |',
+    '|---|---|---|---|---|---|',
+    '| [Secret Private Note](<../../Secret Private Note.md>) | — | Nested index row with NESTEDPRIVCANARY secret token. | active | 2026-11-20 | — |',
+    '| [Home Excluded Note](<../../00 Home/Home Excluded Note.md>) | — | Nested index row with NESTEDEXCLCANARY excluded diary. | active | 2026-11-20 | — |',
+    '| [Governance Charter](<Governance Charter.md>) | — | Nested index row for Chairman Decision Queue rule. | active | 2026-11-20 | — |',
   ].join('\n'));
 
   await writeFile(path.join(dir, '20 Iango', 'Policies', 'Governance Charter.md'), [
@@ -181,15 +195,23 @@ test('S2: wiki layer follows superseded_by and prefers replacement over retired 
   assert.ok(!res.wiki_layer.matched_entries.includes('20 Iango/Policies/Old Release Rule.md'));
 });
 
-test('S2: privacy & exclusion gate — MAP/INDEX chunks never expose restricted titles or canaries on any surface (full content checked)', async () => {
+test('S2: privacy & exclusion gate — MAP and top-level/nested INDEX chunks never expose restricted titles or canaries on any surface (full content checked)', async () => {
   const { home, cfg, env, ctx } = await makeWikiVault();
   const index = await loadVault(ctx, 'Brain');
-  const forbidden = ['Secret Private Note', 'Home Excluded Note', 'PRIVWIKICANARY', 'EXCLWIKICANARY'];
+  const forbidden = [
+    'Secret Private Note',
+    'Home Excluded Note',
+    'PRIVWIKICANARY',
+    'EXCLWIKICANARY',
+    'NESTEDPRIVCANARY',
+    'NESTEDEXCLCANARY',
+  ];
+  const anyWikiIndexRe = /^(?:00 MAP\.md|(?:.+\/)?00 INDEX\.md)$/i;
 
-  // 1. No indexed chunk may come from 00 MAP.md / 00 INDEX.md or carry restricted titles/canaries.
+  // 1. No indexed chunk may come from 00 MAP.md or any 00 INDEX.md (at any depth) or carry restricted titles/canaries.
   for (const chunk of index.chunks) {
     const note = index.notes[chunk.noteIdx];
-    assert.ok(!/^(?:00 MAP\.md|[^/]+\/00 INDEX\.md)$/i.test(note.rel), `MAP/INDEX chunk should not be indexed: ${note.rel}`);
+    assert.ok(!anyWikiIndexRe.test(note.rel), `MAP/INDEX chunk should not be indexed: ${note.rel}`);
     for (const marker of forbidden) {
       assert.ok(!chunk.text.includes(marker), `indexed chunk leaked ${marker} via ${note.rel}`);
     }
@@ -200,7 +222,14 @@ test('S2: privacy & exclusion gate — MAP/INDEX chunks never expose restricted 
   await saveConfig(cfg, path.join(home, 'config.json'));
   const setup = await startSetup({ env, home: await tmp('s2-priv-userhome'), os: 'win32', port: 0, openUrl: null, useCli: false });
   try {
-    for (const query of ['PRIVWIKICANARY confidential token', 'EXCLWIKICANARY personal diary', 'Secret Private Note', 'Home Excluded Note']) {
+    for (const query of [
+      'PRIVWIKICANARY confidential token',
+      'EXCLWIKICANARY personal diary',
+      'NESTEDPRIVCANARY secret token',
+      'NESTEDEXCLCANARY excluded diary',
+      'Secret Private Note',
+      'Home Excluded Note',
+    ]) {
       for (const wiki of [false, true]) {
         const res = await searchWithVerdict(ctx, 'Brain', query, { limit: 5, semantic: false, wiki });
         assert.equal(res.status, 'not_in_brain', `expected not_in_brain for "${query}" (wiki=${wiki}), got ${res.status}`);
@@ -241,11 +270,39 @@ test('S2: privacy & exclusion gate — MAP/INDEX chunks never expose restricted 
       for (const marker of forbidden) assert.ok(!askSerialized.includes(marker), `POST /api/ask leaked ${marker}`);
     }
 
-    // Also verify full body of every hit returned for a legitimate query never exposes restricted titles.
+    // 2. Explicit-path readNote, vault_read_note, and connector fetch on 00 MAP.md and any 00 INDEX.md
+    // must filter out restricted rows/links while preserving visible rows.
+    for (const indexPath of ['00 MAP.md', '20 Iango/00 INDEX.md', '20 Iango/Policies/00 INDEX.md']) {
+      const direct = await readNote(ctx, 'Brain', indexPath);
+      for (const marker of forbidden) assert.ok(!direct.body.includes(marker), `readNote(${indexPath}) leaked ${marker}`);
+      assert.ok(!direct.body.includes('00 Home/'), `readNote(${indexPath}) leaked excluded folder 00 Home/`);
+
+      const vr = await mcp.handle({ jsonrpc: '2.0', id: 4, method: 'tools/call', params: { name: 'vault_read_note', arguments: { vault: 'Brain', path: indexPath } } });
+      for (const marker of forbidden) assert.ok(!vr.result.content[0].text.includes(marker), `vault_read_note(${indexPath}) leaked ${marker}`);
+
+      const cf = await mcp.handle({ jsonrpc: '2.0', id: 5, method: 'tools/call', params: { name: 'fetch', arguments: { id: `Brain::${indexPath}` } } });
+      for (const marker of forbidden) assert.ok(!cf.result.content[0].text.includes(marker), `connector fetch(${indexPath}) leaked ${marker}`);
+    }
+    const sanitizedMap = await readNote(ctx, 'Brain', '00 MAP.md');
+    assert.match(sanitizedMap.body, /Vault Access Rule/);
+    const sanitizedNested = await readNote(ctx, 'Brain', '20 Iango/Policies/00 INDEX.md');
+    assert.match(sanitizedNested.body, /Governance Charter/);
+
+    // 3. related() must never return 00 MAP.md or any 00 INDEX.md path or title.
+    for (const target of ['Vault Access Rule.md', '20 Iango/Policies/Governance Charter.md']) {
+      const relInfo = await related(ctx, 'Brain', target);
+      const allRelated = [...relInfo.links_to, ...relInfo.linked_from, ...relInfo.suggested];
+      for (const item of allRelated) {
+        assert.ok(!anyWikiIndexRe.test(item.path), `related(${target}) surfaced wiki index path: ${item.path}`);
+        assert.ok(!/^00 (MAP|INDEX)\b/i.test(item.title), `related(${target}) surfaced wiki index title: ${item.title}`);
+      }
+    }
+
+    // 4. Full body of every hit returned for a legitimate query never exposes restricted titles.
     const legit = await searchWithVerdict(ctx, 'Brain', 'Vault Access Rule attribution', { limit: 5, semantic: false });
     assert.ok(legit.results.length >= 1);
     for (const hit of legit.results) {
-      assert.ok(!/^(?:00 MAP\.md|[^/]+\/00 INDEX\.md)$/i.test(hit.path), `MAP/INDEX should not be returned as hit: ${hit.path}`);
+      assert.ok(!anyWikiIndexRe.test(hit.path), `MAP/INDEX should not be returned as hit: ${hit.path}`);
       const fullNote = await readNote(ctx, 'Brain', hit.path);
       for (const marker of forbidden) assert.ok(!fullNote.body.includes(marker), `full body of ${hit.path} leaked ${marker}`);
     }

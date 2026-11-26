@@ -5,7 +5,7 @@ import path from 'node:path';
 import { terms } from './graph.mjs';
 
 const RETIRED_STATUS = /^(archived|historical|superseded)$/i;
-const INDEX_NOTE_RE = /^(?:00 MAP\.md|[^/]+\/00 INDEX\.md)$/i;
+const INDEX_NOTE_RE = /^(?:00 MAP\.md|(?:.+\/)?00 INDEX\.md)$/i;
 export const isWikiIndexPath = (rel) => INDEX_NOTE_RE.test(String(rel || ''));
 
 function splitTableRow(line) {
@@ -136,7 +136,7 @@ function parseIndexNote(note) {
 
 export function buildWikiLayer(notes, byRel, byTitle) {
   const mapNote = notes.find((n) => /^00 MAP\.md$/i.test(n.rel)) || null;
-  const indexNotes = notes.filter((n) => /^[^/]+\/00 INDEX\.md$/i.test(n.rel));
+  const indexNotes = notes.filter((n) => /^(?:.+\/)?00 INDEX\.md$/i.test(n.rel));
   if (!mapNote && !indexNotes.length) {
     return { present: false, mapPath: null, indexCount: 0, folders: [], entries: [] };
   }
@@ -280,4 +280,78 @@ export function queryWikiLayer(index, queries, keep = () => true) {
     matched_entries: rankedNotes.slice(0, 8).map(([, info]) => info.path),
     chunkCandidates,
   };
+}
+
+// Filter a 00 MAP.md or 00 INDEX.md body for explicit reads (readNote / vault_read_note / fetch)
+// so rows or links referencing private, excluded, ignored, or inaccessible notes/folders are
+// stripped before the body leaves BrainLink.
+export function sanitizeWikiIndexBody(rel, body, index) {
+  const baseDir = rel.includes('/') ? path.posix.dirname(rel) : '';
+  const visibleFolders = new Set(
+    (index?.notes || [])
+      .map((n) => (n.rel.includes('/') ? n.rel.split('/')[0] : ''))
+      .filter(Boolean),
+  );
+  const isVisibleNote = (targetRel) => {
+    if (!targetRel) return false;
+    const idx = index?.byRel?.get(targetRel);
+    return idx !== undefined && !index.notes[idx]?.private;
+  };
+  const isVisibleWikiTitle = (title) => {
+    const key = String(title || '').replace(/\.md$/i, '').trim();
+    if (!key) return false;
+    if (isVisibleNote(`${key}.md`)) return true;
+    const hits = index?.byTitle?.get(key);
+    return Boolean(hits?.length && hits.some((idx) => !index.notes[idx]?.private));
+  };
+
+  let section = '';
+  const kept = [];
+  for (const line of String(body || '').split(/\r?\n/)) {
+    const h = line.match(/^#{2,4}\s+(.+)$/);
+    if (h) {
+      section = h[1].trim();
+      kept.push(line);
+      continue;
+    }
+    const cells = splitTableRow(line);
+    if (cells && !/^(folder|title)$/i.test(cells[0])) {
+      if (/^folders$/i.test(section) || (cells.length === 5 && /00 INDEX\.md/i.test(cells[1] || ''))) {
+        const folder = cells[0].replace(/`/g, '').replace(/\/+$/, '').trim();
+        const topFolder = folder.split('/')[0];
+        if (folder && !visibleFolders.has(topFolder)) continue;
+        kept.push(line);
+        continue;
+      }
+      const primaryLink = extractLink(cells[0]);
+      if (primaryLink) {
+        const ok = primaryLink.wikilink
+          ? isVisibleWikiTitle(primaryLink.label)
+          : isVisibleNote(resolveRel(baseDir, primaryLink.target));
+        if (!ok) continue;
+      }
+      kept.push(line);
+      continue;
+    }
+    // Non-table lines containing a local Markdown note link or wikilink
+    let dropLine = false;
+    for (const m of line.matchAll(/\[[^\]]+\]\((?:<([^>]+)>|([^)\s]+))\)/g)) {
+      const target = (m[1] || m[2] || '').trim();
+      if (/^https?:\/\//i.test(target) || !target.toLowerCase().endsWith('.md')) continue;
+      if (!isVisibleNote(resolveRel(baseDir, target))) {
+        dropLine = true;
+        break;
+      }
+    }
+    if (!dropLine) {
+      for (const m of line.matchAll(/\[\[([^\]|#]+)(?:[|#][^\]]*)?\]\]/g)) {
+        if (!isVisibleWikiTitle(m[1])) {
+          dropLine = true;
+          break;
+        }
+      }
+    }
+    if (!dropLine) kept.push(line);
+  }
+  return kept.join('\n');
 }
