@@ -5,7 +5,7 @@ import { tmpdir } from 'node:os';
 import path from 'node:path';
 
 import { normalize, saveConfig } from '../src/config.mjs';
-import { createContext, loadVault, readNote, related, searchWithVerdict } from '../src/core.mjs';
+import { createContext, DEFAULT_EXCLUDED_FOLDERS, loadVault, readNote, related, searchWithVerdict } from '../src/core.mjs';
 import { buildAnswerReceipt } from '../src/answer-receipt.mjs';
 import { buildContextPacket } from '../src/context-packet.mjs';
 import { createMcp } from '../src/server.mjs';
@@ -26,8 +26,18 @@ async function makeWikiVault() {
     '---',
     'type: index',
     'status: active',
+    'aliases: [FMALIASPRIVCANARY, Brain Map]',
+    'related:',
+    '  - "[[Secret Private Note]]"',
+    '  - FMRELPRIVCANARY',
     '---',
     '# 00 MAP — Brain',
+    '',
+    'Bare mention of Secret Private Note and BAREPRIVCANARY with no link.',
+    '',
+    '```markdown',
+    'Secret Private Note CODEBLOCKPRIVCANARY inside fenced code block',
+    '```',
     '',
     '## Entry notes',
     '',
@@ -35,7 +45,7 @@ async function makeWikiVault() {
     '|---|---|---|---|---|---|',
     '| [Secret Private Note](<Secret Private Note.md>) | — | Contains PRIVWIKICANARY confidential token. | active | 2026-11-20 | — |',
     '| [Home Excluded Note](<00 Home/Home Excluded Note.md>) | — | Contains EXCLWIKICANARY personal diary. | active | 2026-11-20 | — |',
-    '| [Vault Access Rule](<Vault Access Rule.md>) | — | Canonical rule for AI vault attribution and Made by line. | active | 2026-11-20 | — |',
+    '| [Vault Access Rule](<Vault Access Rule.md>) | — | Canonical rule for AI vault attribution and Made by line. Also mentions [Secret Private Note CELL2PRIVCANARY](<Secret Private Note.md>). | active | 2026-11-20 | — |',
     '',
     '## Folders',
     '',
@@ -44,6 +54,29 @@ async function makeWikiVault() {
     '| `20 Iango/` | [00 INDEX — 20 Iango](<20 Iango/00 INDEX.md>) | — | Company policies, reporting hierarchy, decision queue rules, and client projects. | 2026-11-20 |',
     '| `90 Noise/` | [00 INDEX — 90 Noise](<90 Noise/00 INDEX.md>) | — | Miscellaneous scratch drafts. | 2026-11-20 |',
     '| `00 Home/` | [00 INDEX — 00 Home](<00 Home/00 INDEX.md>) | — | Excluded personal home folder. | 2026-11-20 |',
+  ].join('\n'));
+
+  // Staging / draft / promoted index filenames (must never be indexed raw or leaked)
+  await mkdir(path.join(dir, 'Grok', 'Claude 886', '_staging', '2026-11-20'), { recursive: true });
+  await writeFile(path.join(dir, 'Grok', 'Claude 886', '_staging', '2026-11-20', 'DRAFT 00 MAP.md'), [
+    '---',
+    'type: index',
+    'aliases: [STAGINGFMPRIVCANARY]',
+    '---',
+    '# DRAFT 00 MAP',
+    '| [Secret Private Note](<../../../../Secret Private Note.md>) | — | STAGINGPRIVCANARY draft leak | active | 2026-11-20 | — |',
+  ].join('\n'));
+  await writeFile(path.join(dir, 'Grok', 'Claude 886', '_staging', '2026-11-20', 'DRAFT 00 INDEX - BrainLink.md'), [
+    '# DRAFT 00 INDEX - BrainLink',
+    'Bare STAGINGIDXPRIVCANARY leak in draft index.',
+  ].join('\n'));
+  await writeFile(path.join(dir, 'PROMOTED 00 MAP.md'), [
+    '---',
+    'type: index',
+    'related: [PROMOTEDFMPRIVCANARY]',
+    '---',
+    '# PROMOTED 00 MAP',
+    'Bare PROMOTEDPRIVCANARY leak in promoted map copy.',
   ].join('\n'));
 
   await writeFile(path.join(dir, 'Vault Access Rule.md'), [
@@ -205,13 +238,25 @@ test('S2: privacy & exclusion gate — MAP and top-level/nested INDEX chunks nev
     'EXCLWIKICANARY',
     'NESTEDPRIVCANARY',
     'NESTEDEXCLCANARY',
+    'CELL2PRIVCANARY',
+    'BAREPRIVCANARY',
+    'CODEBLOCKPRIVCANARY',
+    'FMALIASPRIVCANARY',
+    'FMRELPRIVCANARY',
+    'STAGINGPRIVCANARY',
+    'STAGINGFMPRIVCANARY',
+    'STAGINGIDXPRIVCANARY',
+    'PROMOTEDPRIVCANARY',
+    'PROMOTEDFMPRIVCANARY',
   ];
-  const anyWikiIndexRe = /^(?:00 MAP\.md|(?:.+\/)?00 INDEX\.md)$/i;
+  const anyWikiIndexRe = /\b00\s+(?:MAP|INDEX)\b/i;
 
-  // 1. No indexed chunk may come from 00 MAP.md or any 00 INDEX.md (at any depth) or carry restricted titles/canaries.
+  assert.ok(DEFAULT_EXCLUDED_FOLDERS.includes('_staging/'), 'DEFAULT_EXCLUDED_FOLDERS must include _staging/');
+
+  // 1. No indexed chunk may come from any 00 MAP / 00 INDEX note (including DRAFT/PROMOTED/nested) or carry restricted titles/canaries.
   for (const chunk of index.chunks) {
     const note = index.notes[chunk.noteIdx];
-    assert.ok(!anyWikiIndexRe.test(note.rel), `MAP/INDEX chunk should not be indexed: ${note.rel}`);
+    assert.ok(!anyWikiIndexRe.test(path.posix.basename(note.rel)), `MAP/INDEX chunk should not be indexed: ${note.rel}`);
     for (const marker of forbidden) {
       assert.ok(!chunk.text.includes(marker), `indexed chunk leaked ${marker} via ${note.rel}`);
     }
@@ -227,6 +272,11 @@ test('S2: privacy & exclusion gate — MAP and top-level/nested INDEX chunks nev
       'EXCLWIKICANARY personal diary',
       'NESTEDPRIVCANARY secret token',
       'NESTEDEXCLCANARY excluded diary',
+      'CELL2PRIVCANARY',
+      'BAREPRIVCANARY',
+      'CODEBLOCKPRIVCANARY',
+      'STAGINGPRIVCANARY',
+      'PROMOTEDPRIVCANARY',
       'Secret Private Note',
       'Home Excluded Note',
     ]) {
@@ -270,18 +320,37 @@ test('S2: privacy & exclusion gate — MAP and top-level/nested INDEX chunks nev
       for (const marker of forbidden) assert.ok(!askSerialized.includes(marker), `POST /api/ask leaked ${marker}`);
     }
 
-    // 2. Explicit-path readNote, vault_read_note, and connector fetch on 00 MAP.md and any 00 INDEX.md
-    // must filter out restricted rows/links while preserving visible rows.
-    for (const indexPath of ['00 MAP.md', '20 Iango/00 INDEX.md', '20 Iango/Policies/00 INDEX.md']) {
+    // 2. Explicit-path readNote, vault_read_note, connector fetch, and POST /api/note on 00 MAP.md,
+    // any 00 INDEX.md (including nested and backslash paths), and DRAFT/PROMOTED copies must return
+    // ONLY an allowlist-regenerated listing + safe frontmatter keys (never raw body/frontmatter).
+    for (const indexPath of [
+      '00 MAP.md',
+      '20 Iango/00 INDEX.md',
+      '20 Iango/Policies/00 INDEX.md',
+      '20 Iango\\Policies\\00 INDEX.md',
+      'PROMOTED 00 MAP.md',
+    ]) {
       const direct = await readNote(ctx, 'Brain', indexPath);
-      for (const marker of forbidden) assert.ok(!direct.body.includes(marker), `readNote(${indexPath}) leaked ${marker}`);
+      const directJson = JSON.stringify(direct);
+      for (const marker of forbidden) assert.ok(!directJson.includes(marker), `readNote(${indexPath}) leaked ${marker}`);
       assert.ok(!direct.body.includes('00 Home/'), `readNote(${indexPath}) leaked excluded folder 00 Home/`);
+      assert.equal(direct.meta.aliases, undefined, `readNote(${indexPath}) must strip raw frontmatter aliases`);
+      assert.equal(direct.meta.related, undefined, `readNote(${indexPath}) must strip raw frontmatter related`);
 
       const vr = await mcp.handle({ jsonrpc: '2.0', id: 4, method: 'tools/call', params: { name: 'vault_read_note', arguments: { vault: 'Brain', path: indexPath } } });
       for (const marker of forbidden) assert.ok(!vr.result.content[0].text.includes(marker), `vault_read_note(${indexPath}) leaked ${marker}`);
 
       const cf = await mcp.handle({ jsonrpc: '2.0', id: 5, method: 'tools/call', params: { name: 'fetch', arguments: { id: `Brain::${indexPath}` } } });
       for (const marker of forbidden) assert.ok(!cf.result.content[0].text.includes(marker), `connector fetch(${indexPath}) leaked ${marker}`);
+
+      const noteRes = await fetch(`http://127.0.0.1:${setup.port}/api/note`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'X-BrainLink-Token': setup.token },
+        body: JSON.stringify({ vault: 'Brain', path: indexPath }),
+      });
+      assert.equal(noteRes.status, 200);
+      const noteText = await noteRes.text();
+      for (const marker of forbidden) assert.ok(!noteText.includes(marker), `POST /api/note(${indexPath}) leaked ${marker}`);
     }
     const sanitizedMap = await readNote(ctx, 'Brain', '00 MAP.md');
     assert.match(sanitizedMap.body, /Vault Access Rule/);

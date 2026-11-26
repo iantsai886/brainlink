@@ -510,7 +510,7 @@ export function createMcp(ctx, { onCall = () => {}, onProposal = null } = {}) {
         const [v, p] = String(a.id).split('::');
         if (!connectorVaults().includes(v)) throw new Error(`fetch is limited to ${connectorVaults().join(', ')}; use vault_read_note`);
         const n = await readNote(ctx, v, p);
-        return { id: a.id, vault: v, path: p, title: p.replace(/\.md$/, ''), text: n.body, url: obsidianUrl(v, p), metadata: n.meta };
+        return { id: a.id, vault: v, path: n.path, title: n.path.replace(/\.md$/, ''), text: n.body, url: obsidianUrl(v, n.path), metadata: n.meta };
       } },
   ].filter((t) => !(ctx.readOnly && t.annotations === WR));
 

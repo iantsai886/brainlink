@@ -11,7 +11,7 @@ import { deriveTypedRelations } from './typed-graph.mjs';
 import { appHome } from './config.mjs';
 import { rerankResults } from './rerank.mjs';
 import { detectEmbedder, VectorStore, fillVectors, embedTexts, nearest, PREFERRED_EMBED_MODEL } from './embed.mjs';
-import { buildWikiLayer, queryWikiLayer, isWikiIndexPath, sanitizeWikiIndexBody } from './wiki-layer.mjs';
+import { buildWikiLayer, queryWikiLayer, isWikiIndexPath, renderAllowlistedWikiIndex } from './wiki-layer.mjs';
 import { findAgentByToken, publicAgent } from './mcp-agents.mjs';
 import { resolveTwinAgentScope, twinNoteMemoryAllowed } from './twin-profiles.mjs';
 
@@ -177,7 +177,7 @@ async function ignoreRules(dir) {
 // Shipped in every newly connected real vault's root .brainlinkignore (never overwrites one
 // already there). These folders are never read, chunked, searched, answered from, graphed,
 // surfaced in sessions or synced — same as the rest of .brainlinkignore (see walk(), below).
-export const DEFAULT_EXCLUDED_FOLDERS = ['.obsidian/', '.trash/', '.git/', 'node_modules/', '00 Home/'];
+export const DEFAULT_EXCLUDED_FOLDERS = ['.obsidian/', '.trash/', '.git/', 'node_modules/', '00 Home/', '_staging/'];
 // Common personal folders people keep out of an AI-connected vault; shipped as commented-out
 // suggestions so the user opts in rather than losing folders silently.
 export const SUGGESTED_EXCLUDED_FOLDERS = ['finance/', 'personal/', 'home/'];
@@ -895,10 +895,11 @@ export async function readNote(ctx, name, rel, { readBody = readFile } = {}) {
   const raw = await readBody(full, 'utf8');
   const { meta, body, frontmatter } = parseFrontmatter(raw);
   if (isPrivateMeta(meta) || fmSaysPrivate(frontmatter) || !twinNoteMemoryAllowed(ctx, name, relNorm, meta)) throw new Error(PRIVATE_NOTE_ERROR);
-  const safeBody = isWikiIndexPath(relNorm)
-    ? sanitizeWikiIndexBody(relNorm, body, await loadVault(ctx, name))
-    : body;
-  return { path: rel, meta, body: safeBody, historical: isHistorical(rel, meta) };
+  if (isWikiIndexPath(relNorm)) {
+    const safe = renderAllowlistedWikiIndex(relNorm, body, meta, await loadVault(ctx, name));
+    return { path: relNorm, meta: safe.meta, body: safe.body, historical: isHistorical(relNorm, safe.meta) };
+  }
+  return { path: rel, meta, body, historical: isHistorical(rel, meta) };
 }
 
 // Fails closed on n.private: every caller (vault_related's own "suggested" list below, and

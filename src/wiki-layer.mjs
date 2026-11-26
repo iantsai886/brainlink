@@ -5,8 +5,19 @@ import path from 'node:path';
 import { terms } from './graph.mjs';
 
 const RETIRED_STATUS = /^(archived|historical|superseded)$/i;
-const INDEX_NOTE_RE = /^(?:00 MAP\.md|(?:.+\/)?00 INDEX\.md)$/i;
-export const isWikiIndexPath = (rel) => INDEX_NOTE_RE.test(String(rel || ''));
+const SAFE_STATUS_ENUM = new Set(['active', 'draft', 'proposed', 'verified', 'historical', 'archived']);
+const WIKI_INDEX_BASENAME_RE = /\b00\s+(?:MAP|INDEX)\b/i;
+const PROMOTED_MAP_RE = /^00 MAP\.md$/i;
+const PROMOTED_INDEX_RE = /^(?:.+\/)?00 INDEX\.md$/i;
+const STAGING_PATH_RE = /(?:^|\/)_staging\//i;
+
+export const normalizeWikiPath = (rel) => String(rel || '').replace(/\\/g, '/').replace(/^\/+/, '');
+
+export const isWikiIndexPath = (rel) => {
+  const norm = normalizeWikiPath(rel);
+  if (!norm.toLowerCase().endsWith('.md')) return false;
+  return WIKI_INDEX_BASENAME_RE.test(path.posix.basename(norm));
+};
 
 function splitTableRow(line) {
   const trimmed = line.trim();
@@ -135,8 +146,14 @@ function parseIndexNote(note) {
 }
 
 export function buildWikiLayer(notes, byRel, byTitle) {
-  const mapNote = notes.find((n) => /^00 MAP\.md$/i.test(n.rel)) || null;
-  const indexNotes = notes.filter((n) => /^(?:.+\/)?00 INDEX\.md$/i.test(n.rel));
+  const mapNote = notes.find((n) => {
+    const norm = normalizeWikiPath(n.rel);
+    return !STAGING_PATH_RE.test(norm) && PROMOTED_MAP_RE.test(norm);
+  }) || null;
+  const indexNotes = notes.filter((n) => {
+    const norm = normalizeWikiPath(n.rel);
+    return !STAGING_PATH_RE.test(norm) && PROMOTED_INDEX_RE.test(norm);
+  });
   if (!mapNote && !indexNotes.length) {
     return { present: false, mapPath: null, indexCount: 0, folders: [], entries: [] };
   }
@@ -152,15 +169,23 @@ export function buildWikiLayer(notes, byRel, byTitle) {
     rawEntries.push(...parseIndexNote(idxNote));
   }
 
-  // Only keep folders that still have at least one visible indexed note (so excluded folders
+  // Only keep folders that still have at least one visible non-index note (so excluded folders
   // such as 00 Home/ never appear as matched folders).
-  const visibleFolders = new Set(notes.map((n) => n.rel.includes('/') ? n.rel.split('/')[0] : '').filter(Boolean));
+  const visibleFolders = new Set(
+    notes
+      .filter((n) => !n.private && !isWikiIndexPath(n.rel))
+      .map((n) => {
+        const norm = normalizeWikiPath(n.rel);
+        return norm.includes('/') ? norm.split('/')[0] : '';
+      })
+      .filter(Boolean),
+  );
   const activeFolders = folders.filter((f) => visibleFolders.has(f.folder));
 
   const entries = [];
   for (const raw of rawEntries) {
     if (!raw.targetRel) continue;
-    if (INDEX_NOTE_RE.test(raw.targetRel)) continue;
+    if (isWikiIndexPath(raw.targetRel)) continue;
     const targetIdx = byRel.get(raw.targetRel);
     if (targetIdx === undefined) continue; // never invent notes; drops private/excluded/missing targets
     const targetNote = notes[targetIdx];
@@ -181,6 +206,22 @@ export function buildWikiLayer(notes, byRel, byTitle) {
     }
 
     const effectiveNote = notes[effectiveIdx];
+    // Strip any Markdown link or [[wikilink]] inside the summary cell whose target is not a
+    // visible indexed note so restricted titles in non-first cells never contribute wiki terms.
+    const cleanSummary = String(raw.summary || '')
+      .replace(/\[([^\]]+)\]\((?:<([^>]+)>|([^)\s]+))\)/g, (m, _label, t1, t2) => {
+        const target = (t1 || t2 || '').trim();
+        if (/^https?:\/\//i.test(target) || !target.toLowerCase().endsWith('.md')) return m;
+        const resolved = resolveRel(raw.baseDir, target);
+        const idx = resolved ? byRel.get(resolved) : undefined;
+        return idx !== undefined && !notes[idx]?.private ? m : ' ';
+      })
+      .replace(/\[\[([^\]|#]+)(?:[|#][^\]]*)?\]\]/g, (m, title) => {
+        const key = String(title || '').replace(/\.md$/i, '').trim();
+        const hits = byTitle.get(key);
+        const ok = byRel.has(`${key}.md`) || Boolean(hits?.length && hits.some((idx) => !notes[idx]?.private));
+        return ok ? m : ' ';
+      });
     entries.push({
       noteIdx: effectiveIdx,
       path: effectiveNote.rel,
@@ -188,7 +229,7 @@ export function buildWikiLayer(notes, byRel, byTitle) {
       source: raw.source,
       section: raw.section,
       title: raw.title,
-      terms: terms(`${raw.title} ${raw.section} ${raw.summary}`),
+      terms: terms(`${raw.title} ${raw.section} ${cleanSummary}`),
       titleTerms: terms(raw.title),
       redirected: effectiveIdx !== targetIdx,
     });
@@ -282,76 +323,71 @@ export function queryWikiLayer(index, queries, keep = () => true) {
   };
 }
 
-// Filter a 00 MAP.md or 00 INDEX.md body for explicit reads (readNote / vault_read_note / fetch)
-// so rows or links referencing private, excluded, ignored, or inaccessible notes/folders are
-// stripped before the body leaves BrainLink.
-export function sanitizeWikiIndexBody(rel, body, index) {
-  const baseDir = rel.includes('/') ? path.posix.dirname(rel) : '';
-  const visibleFolders = new Set(
-    (index?.notes || [])
-      .map((n) => (n.rel.includes('/') ? n.rel.split('/')[0] : ''))
-      .filter(Boolean),
-  );
-  const isVisibleNote = (targetRel) => {
-    if (!targetRel) return false;
-    const idx = index?.byRel?.get(targetRel);
-    return idx !== undefined && !index.notes[idx]?.private;
-  };
-  const isVisibleWikiTitle = (title) => {
-    const key = String(title || '').replace(/\.md$/i, '').trim();
-    if (!key) return false;
-    if (isVisibleNote(`${key}.md`)) return true;
-    const hits = index?.byTitle?.get(key);
-    return Boolean(hits?.length && hits.some((idx) => !index.notes[idx]?.private));
-  };
+// Regenerate an allowlist-only view of any 00 MAP / 00 INDEX note on explicit reads
+// (readNote, vault_read_note, connector fetch, POST /api/note). Never returns raw body prose,
+// code blocks, non-first table cells, or raw frontmatter keys (such as aliases/related).
+export function renderAllowlistedWikiIndex(rel, rawBody, rawMeta, index) {
+  const norm = normalizeWikiPath(rel);
+  const baseName = path.posix.basename(norm).replace(/\.md$/i, '');
+  const isMap = /\b00\s+MAP\b/i.test(baseName);
 
-  let section = '';
-  const kept = [];
-  for (const line of String(body || '').split(/\r?\n/)) {
-    const h = line.match(/^#{2,4}\s+(.+)$/);
-    if (h) {
-      section = h[1].trim();
-      kept.push(line);
-      continue;
-    }
-    const cells = splitTableRow(line);
-    if (cells && !/^(folder|title)$/i.test(cells[0])) {
-      if (/^folders$/i.test(section) || (cells.length === 5 && /00 INDEX\.md/i.test(cells[1] || ''))) {
-        const folder = cells[0].replace(/`/g, '').replace(/\/+$/, '').trim();
-        const topFolder = folder.split('/')[0];
-        if (folder && !visibleFolders.has(topFolder)) continue;
-        kept.push(line);
-        continue;
-      }
-      const primaryLink = extractLink(cells[0]);
-      if (primaryLink) {
-        const ok = primaryLink.wikilink
-          ? isVisibleWikiTitle(primaryLink.label)
-          : isVisibleNote(resolveRel(baseDir, primaryLink.target));
-        if (!ok) continue;
-      }
-      kept.push(line);
-      continue;
-    }
-    // Non-table lines containing a local Markdown note link or wikilink
-    let dropLine = false;
-    for (const m of line.matchAll(/\[[^\]]+\]\((?:<([^>]+)>|([^)\s]+))\)/g)) {
-      const target = (m[1] || m[2] || '').trim();
-      if (/^https?:\/\//i.test(target) || !target.toLowerCase().endsWith('.md')) continue;
-      if (!isVisibleNote(resolveRel(baseDir, target))) {
-        dropLine = true;
-        break;
-      }
-    }
-    if (!dropLine) {
-      for (const m of line.matchAll(/\[\[([^\]|#]+)(?:[|#][^\]]*)?\]\]/g)) {
-        if (!isVisibleWikiTitle(m[1])) {
-          dropLine = true;
-          break;
-        }
-      }
-    }
-    if (!dropLine) kept.push(line);
+  // Strict frontmatter allowlist: only safe structural metadata.
+  const safeMeta = { title: baseName, type: 'index' };
+  const rawStatus = String(rawMeta?.status || '').trim().toLowerCase();
+  if (SAFE_STATUS_ENUM.has(rawStatus)) safeMeta.status = rawStatus;
+
+  const syntheticNote = { rel: norm, body: String(rawBody || '') };
+  const parsedEntries = isMap ? parseMapNote(syntheticNote).rawEntries : parseIndexNote(syntheticNote);
+
+  const visibleNotes = [];
+  const seen = new Set();
+  for (const entry of parsedEntries) {
+    const targetRel = entry.targetRel ? normalizeWikiPath(entry.targetRel) : null;
+    if (!targetRel || isWikiIndexPath(targetRel) || seen.has(targetRel)) continue;
+    const idx = index?.byRel?.get(targetRel);
+    if (idx === undefined) continue;
+    const note = index.notes[idx];
+    if (!note || note.private || isWikiIndexPath(note.rel)) continue;
+    seen.add(targetRel);
+    visibleNotes.push(note);
   }
-  return kept.join('\n');
+  visibleNotes.sort((a, b) => a.rel.localeCompare(b.rel));
+
+  const lines = [
+    `# ${baseName}`,
+    '',
+    '> Allowlisted routing view generated strictly from visible vault notes. Raw index text and frontmatter are omitted.',
+  ];
+
+  if (isMap) {
+    const folderCounts = new Map();
+    for (const n of index?.notes || []) {
+      if (!n || n.private || isWikiIndexPath(n.rel)) continue;
+      const nNorm = normalizeWikiPath(n.rel);
+      if (!nNorm.includes('/')) continue;
+      const top = nNorm.split('/')[0];
+      folderCounts.set(top, (folderCounts.get(top) || 0) + 1);
+    }
+    if (folderCounts.size) {
+      lines.push('', '## Folders', '', '| Folder | Visible notes |', '|---|---|');
+      for (const [folder, count] of [...folderCounts.entries()].sort((a, b) => a[0].localeCompare(b[0]))) {
+        lines.push(`| \`${folder}/\` | ${count} |`);
+      }
+    }
+  }
+
+  lines.push('', '## Visible notes', '');
+  if (!visibleNotes.length) {
+    lines.push('_No visible notes listed._');
+  } else {
+    lines.push('| Title | Path | Status | Updated |', '|---|---|---|---|');
+    for (const note of visibleNotes) {
+      const status = SAFE_STATUS_ENUM.has(String(note.meta?.status || '').toLowerCase())
+        ? String(note.meta.status).toLowerCase()
+        : '—';
+      lines.push(`| [${note.title}](<${note.rel}>) | \`${note.rel}\` | ${status} | ${note.date || '—'} |`);
+    }
+  }
+
+  return { meta: safeMeta, body: lines.join('\n') };
 }
