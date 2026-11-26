@@ -6,18 +6,19 @@ import { terms } from './graph.mjs';
 
 const RETIRED_STATUS = /^(archived|historical|superseded)$/i;
 const SAFE_STATUS_ENUM = new Set(['active', 'draft', 'proposed', 'verified', 'historical', 'archived']);
-const WIKI_INDEX_BASENAME_RE = /(?:^|[^A-Za-z0-9])00[\s_-]+(?:MAP|INDEX)(?:[^A-Za-z0-9]|$)/i;
-const WIKI_MAP_BASENAME_RE = /(?:^|[^A-Za-z0-9])00[\s_-]+MAP(?:[^A-Za-z0-9]|$)/i;
+const WIKI_INDEX_STEM_RE = /^(?:(?:DRAFT|PROMOTED)[\s_-]+)?00[\s_-]+(?:MAP|INDEX)(?:\s+[-–—]\s+.+)?$/i;
+const WIKI_MAP_STEM_RE = /^(?:(?:DRAFT|PROMOTED)[\s_-]+)?00[\s_-]+MAP(?:\s+[-–—]\s+.+)?$/i;
 const PROMOTED_MAP_RE = /^00 MAP\.md$/i;
 const PROMOTED_INDEX_RE = /^(?:.+\/)?00 INDEX\.md$/i;
-const STAGING_PATH_RE = /(?:^|\/)_staging\//i;
+const STAGING_PATH_RE = /(?:^|\/)_staging[\s.]*\//i;
 
 export const normalizeWikiPath = (rel) => String(rel || '').replace(/\\/g, '/').replace(/^\/+/, '');
 
 export const isWikiIndexPath = (rel) => {
   const norm = normalizeWikiPath(rel);
   if (!norm.toLowerCase().endsWith('.md')) return false;
-  return WIKI_INDEX_BASENAME_RE.test(path.posix.basename(norm));
+  const stem = path.posix.basename(norm).slice(0, -3);
+  return WIKI_INDEX_STEM_RE.test(stem);
 };
 
 function splitTableRow(line) {
@@ -341,7 +342,7 @@ export function renderAllowlistedWikiIndex(rel, rawBody, rawMeta, index) {
   const norm = normalizeWikiPath(rel);
   const safeMeta = allowlistedWikiMeta(norm, rawMeta);
   const baseName = safeMeta.title;
-  const isMap = WIKI_MAP_BASENAME_RE.test(baseName);
+  const isMap = WIKI_MAP_STEM_RE.test(baseName);
 
   const syntheticNote = { rel: norm, body: String(rawBody || '') };
   const parsedEntries = isMap ? parseMapNote(syntheticNote).rawEntries : parseIndexNote(syntheticNote);

@@ -160,10 +160,15 @@ export function noteDate(rel, meta, mtime) {
 export const listValue = (v) => String(v || '').replace(/^\[|\]$/g, '').split(',').map((x) => x.trim().replace(/^["']|["']$/g, '')).filter(Boolean);
 
 // Index pages, drafts and staging copies repeat other notes' words; rank them below real notes.
-export const isMinor = (rel, title) => /^(_?README|00 INDEX|00 MAP|INDEX|MAP)$|^(DRAFT|PROMOTED|COPY)\b|^00 (INDEX|MAP)\b/.test(title) || /(^|\/)_staging\//.test(rel);
+export const isMinor = (rel, title) => /^(_?README|00 INDEX|00 MAP|INDEX|MAP)$|^(DRAFT|PROMOTED|COPY)\b|^00 (INDEX|MAP)\b/.test(title) || /(^|\/)_staging[\s.]*\//i.test(rel);
 
 export const ROUTING_NOTE = /^(_?README|00 INDEX|00 MAP|INDEX|Home)$|^00 Moved\b|\bpointer\b/i;
 const SKIP_DIRS = new Set(['node_modules', '.git', '.obsidian', '.trash', '.backups', '_staging']);
+export const normalizeDirName = (name) => String(name || '').replace(/[\s.]+$/g, '').toLowerCase();
+export const isSkippedDirName = (name) => {
+  const norm = normalizeDirName(name);
+  return !norm || norm.startsWith('.') || SKIP_DIRS.has(norm);
+};
 
 // A .brainlinkignore file in any folder lists names to skip there, one per line ("samples/",
 // "drafts", "*.tmp", or "*" for the whole folder). Lines starting with # are comments.
@@ -232,8 +237,9 @@ async function walk(root, dir = root, out = [], inherited = []) {
   const rules = inherited.concat(await ignoreRules(dir));
   if (rules.some((re) => re.test('*') || re.source === '^.*$')) return out;
   for (const f of await readdir(dir, { withFileTypes: true })) {
-    if (f.name.startsWith('.') || SKIP_DIRS.has(f.name.toLowerCase())) continue;
-    if (rules.some((re) => re.test(f.name))) continue;
+    if (isSkippedDirName(f.name)) continue;
+    const trimmedName = f.name.replace(/[\s.]+$/g, '');
+    if (rules.some((re) => re.test(f.name) || (trimmedName && re.test(trimmedName)))) continue;
     const full = path.join(dir, f.name);
     if (f.isDirectory()) await walk(root, full, out, rules);
     else if (f.isFile() && f.name.toLowerCase().endsWith('.md')) out.push(full);
@@ -245,8 +251,9 @@ async function visibleFolderPaths(root, dir = root, out = [], inherited = []) {
   const rules = inherited.concat(await ignoreRules(dir));
   if (rules.some((re) => re.test('*') || re.source === '^.*$')) return out;
   for (const entry of await readdir(dir, { withFileTypes: true })) {
-    if (entry.name.startsWith('.') || SKIP_DIRS.has(entry.name.toLowerCase())) continue;
-    if (rules.some((re) => re.test(entry.name)) || !entry.isDirectory()) continue;
+    if (isSkippedDirName(entry.name)) continue;
+    const trimmedName = entry.name.replace(/[\s.]+$/g, '');
+    if (rules.some((re) => re.test(entry.name) || (trimmedName && re.test(trimmedName))) || !entry.isDirectory()) continue;
     const full = path.join(dir, entry.name), rel = path.relative(root, full).split(path.sep).join('/');
     out.push(rel);
     await visibleFolderPaths(root, full, out, rules);
@@ -260,10 +267,11 @@ export async function isExcludedPath(root, rel) {
   const parts = String(rel).replace(/\\/g, '/').split('/').filter(Boolean);
   let dir = root, rules = [];
   for (const name of parts) {
-    if (name.startsWith('.') || SKIP_DIRS.has(name.toLowerCase())) return true;
+    if (isSkippedDirName(name)) return true;
     rules = rules.concat(await ignoreRules(dir));
     if (rules.some((re) => re.test('*') || re.source === '^.*$')) return true;
-    if (rules.some((re) => re.test(name))) return true;
+    const trimmedName = name.replace(/[\s.]+$/g, '');
+    if (rules.some((re) => re.test(name) || (trimmedName && re.test(trimmedName)))) return true;
     dir = path.join(dir, name);
   }
   return false;
