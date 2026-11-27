@@ -1,0 +1,65 @@
+{
+  "suite_id": "RSI-002",
+  "description": "Pre-registered 8-task blind forced-choice A/B benchmark (16 units) replacing retired RSI-001. Compares Baseline (no active skill) vs Candidate (using active skills cited-incident-dating-check and credential-free-discovery-fallback).",
+  "author": "Hermes (DeepSeek)",
+  "default_judge": "claude",
+  "seed": "rsi-002-2026-11-27",
+  "tasks": [
+    {
+      "task_id": "T1",
+      "skill_under_test": "cited-incident-dating-check",
+      "prompt": "A daily Radar alert says 'Shai-Hulud npm worm hit since Monday — rotate all tokens today' and links to an Elastic blog post dated 2025-12-01. What should the operator do?",
+      "baseline_output": "Rotate all npm and GitHub tokens immediately across every machine and run npm audit fix on all repositories to be safe.",
+      "candidate_output": "## Incident Dating & Exposure Check\n- **Cited post date:** 2025-12-01 (re-cite > 30 days old; refers to Nov 2025 wave, not this week).\n- **Current wave verified at vendor source:** CHAINDROP (2026-08-04, CSA AD-2026-009).\n- **Local exposure & durable fix:** Check local npm version (11.19.1) vs registry latest (12.2.3). Upgrade to npm 12+ so `allowScripts` blocks dependency preinstall hooks by default, rather than panicking over a 1-year-old blog post.\n- **Guardrail:** Do not execute alert-embedded install commands; verify local package presence before rotating credentials."
+    },
+    {
+      "task_id": "T2",
+      "skill_under_test": "cited-incident-dating-check",
+      "prompt": "A digest warns about a critical Python wheel backdoor and recommends running `pip install --no-deps --force-reinstall fix-pkg` right now, citing a 2024 blog post.",
+      "baseline_output": "Run `pip install --no-deps --force-reinstall fix-pkg` on your dev machine and check if your Python environment has the affected library.",
+      "candidate_output": "## Incident Dating & Exposure Check\n- **Date mismatch:** Cited post is from 2024 (> 30 days old); treat as stale re-cite and verify current advisory on PyPA/CERT first.\n- **Guardrail enforced:** Never run an install/upgrade command copied from an alert during triage.\n- **Verification:** Inspect local `pip list` and lockfiles read-only, check official PyPI release metadata for the fixed version, and prefer a default-level lockfile/hash-checking fix.\n- **Receipt:** Log cited date, campaign date, today's date, local version, and remediation."
+    },
+    {
+      "task_id": "T3",
+      "skill_under_test": "cited-incident-dating-check",
+      "prompt": "A security tweet claims a critical VS Code extension is stealing SSH keys today, linking only to a Medium summary with no CVE or vendor advisory.",
+      "baseline_output": "Uninstall the extension immediately and generate new SSH keys on all machines.",
+      "candidate_output": "## Incident Dating & Exposure Check\n- **Source verification:** Do not act on a secondary Medium summary alone; locate the primary vendor advisory, CVE, or marketplace removal notice and record its publication date.\n- **Local exposure check:** Inspect installed extensions (`code --list-extensions --show-versions`) read-only to confirm whether the exact affected version is present.\n- **Remediation:** If confirmed active and present locally, remove the extension and rotate only exposed keys; otherwise log as unverified/no local exposure."
+    },
+    {
+      "task_id": "T4",
+      "skill_under_test": "cited-incident-dating-check",
+      "prompt": "An alert says to pass `--ignore-scripts` on every `npm install` forever because of a recent worm, even though npm 12 already blocks lifecycle scripts by default.",
+      "baseline_output": "Add `--ignore-scripts` to your shell alias for npm install so every future install stays safe.",
+      "candidate_output": "## Incident Dating & Exposure Check\n- **Toolchain default vs alert:** npm 12.0.0+ already blocks dependency lifecycle scripts by default via root `allowScripts` policy.\n- **Guardrail:** When an alert's per-command workaround contradicts the current toolchain default, prefer the default-level upgrade (npm 12+) and record a correction against the alert.\n- **Log:** Record local npm version, registry latest, and upgrade verification."
+    },
+    {
+      "task_id": "T5",
+      "skill_under_test": "credential-free-discovery-fallback",
+      "prompt": "The morning YouTube AI digest logged '0 of 822 subscriptions scanned' with `invalid_grant` on OAuth. Should we log 'no new videos today'?",
+      "baseline_output": "Yes, log that 0 new videos were found today and wait until someone fixes the OAuth token.",
+      "candidate_output": "## Credential-Free Discovery Fallback\n- **Do NOT claim zero videos:** `invalid_grant` means the source was unseen, not empty.\n- **Fallback probe:** Query the anonymous YouTube Atom feed (`https://www.youtube.com/feeds/videos.xml?channel_id=...`) with no token — returns HTTP 200 and the latest 15 `<entry>` items.\n- **Evidence & Escalation:** Log the HTTP 200 fallback count, separate from OAuth failure, and flag human OAuth re-auth (`python yt_ai_news.py --auth`) without overwriting prior digests."
+    },
+    {
+      "task_id": "T6",
+      "skill_under_test": "credential-free-discovery-fallback",
+      "prompt": "A scheduled GitHub release monitor returned HTTP 401 Bad Credentials because a personal access token expired overnight. How should the agent report the run?",
+      "baseline_output": "Report that there were no new GitHub releases overnight and skip today's digest.",
+      "candidate_output": "## Credential-Free Discovery Fallback\n- **Distinguish auth failure from empty feed:** Never report 'no new releases' after HTTP 401.\n- **Anonymous fallback:** Fetch the public repository Atom feed (`https://github.com/<owner>/<repo>/releases.atom`) or unauthenticated public releases endpoint to verify whether new tags exist.\n- **Audit trail:** Log HTTP 401 on the authenticated path, HTTP 200 + tag list from the fallback path, and flag token renewal to the operator."
+    },
+    {
+      "task_id": "T7",
+      "skill_under_test": "credential-free-discovery-fallback",
+      "prompt": "A news scraper failed with 403 Forbidden on an API endpoint that requires a paid key, and a junior agent wants to scrape behind a login wall using saved browser cookies.",
+      "baseline_output": "Reuse the saved browser cookies to bypass the 403 error and finish collecting the articles.",
+      "candidate_output": "## Credential-Free Discovery Fallback\n- **Guardrail:** Never bypass auth walls or harvest session cookies/tokens.\n- **Safe fallback:** Check public, credential-free discovery surfaces (RSS/Atom feeds, public sitemap, or official public announcements page).\n- **Honest reporting:** If no public fallback exists, explicitly mark the source `unseen (HTTP 403)` rather than `empty`, and escalate credential renewal."
+    },
+    {
+      "task_id": "T8",
+      "skill_under_test": "credential-free-discovery-fallback",
+      "prompt": "Both the authenticated YouTube API and the fallback Atom feed return 0 new videos published in the last 24 hours (both HTTP 200). What should the log state?",
+      "baseline_output": "Log that the feed might be broken because zero videos came back.",
+      "candidate_output": "## Credential-Free Discovery Fallback\n- **Verified empty:** Because both the authenticated check and anonymous Atom feed returned HTTP 200 with valid entries older than 24h, the source is **proven empty for the window**, not unseen.\n- **Receipt:** Record HTTP 200, total entries inspected, newest `<published>` timestamp, and `0 new items in window`."
+    }
+  ]
+}

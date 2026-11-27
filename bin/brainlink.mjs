@@ -28,6 +28,8 @@ import { evaluateRetrieval, RETRIEVAL_EVALUATOR_VERSION } from '../src/retrieval
 import { createRsiWeekly, taipeiWeek } from '../src/rsi-weekly.mjs';
 import { evaluateSessionFiling } from '../src/sessions/filing-eval.mjs';
 import { evaluateTypedGraphDiscovery, TYPED_GRAPH_EVALUATOR_VERSION } from '../src/typed-graph-eval.mjs';
+import { runRsiGateCli } from './rsi-gate.mjs';
+import { RsiGateError } from '../src/rsi-gate.mjs';
 
 // `brainlink brief | head` closes the pipe early: exit quietly instead of crashing.
 process.stdout.on('error', (e) => { if (e.code === 'EPIPE') process.exit(0); throw e; });
@@ -384,6 +386,18 @@ async function main() {
       const s = await startSetup({ env: demoEnv, port: 0, openUrl: flag('no-open') ? null : (u) => openInBrowser(u) });
       out(`BrainLink demo (sample notes; local AI session-history import disabled): ${maskUrl(s.url)}\nVault copied to: ${demoPath}\nPress Control-C when done.`);
       return;
+    }
+    case 'rsi': {
+      try {
+        const code = await runRsiGateCli(argv.slice(1));
+        process.exit(code);
+      } catch (err) {
+        if (err instanceof RsiGateError) {
+          process.stderr.write(err.message + '\n');
+          process.exit(err.exitCode);
+        }
+        throw err;
+      }
     }
     case 'version': case '--version': out(VERSION); return;
     default: out(HELP);

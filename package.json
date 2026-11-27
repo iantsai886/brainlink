@@ -5,7 +5,8 @@
   "private": true,
   "type": "module",
   "bin": {
-    "brainlink": "bin/brainlink.mjs"
+    "brainlink": "bin/brainlink.mjs",
+    "rsi-gate": "bin/rsi-gate.mjs"
   },
   "dependencies": {
     "brainlink-store": "file:./vendor/brainlink-store",
