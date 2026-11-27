@@ -20,6 +20,9 @@ import {
   syncActiveSkills,
   extractDemandCandidates,
   runBlindAbEval,
+  runBlindAbSuite,
+  recordSkillUse,
+  skillDecayAndMetaReport,
   rsiHealthReport,
 } from '../src/rsi-gate.mjs';
 
@@ -367,4 +370,64 @@ test('rsiHealthReport summarizes skill states, circuit breaker, and open demand 
   assert.equal(health.counts.draft, 0);
   assert.equal(health.circuit_breaker, 'OPEN');
   assert.equal(health.status, 'OPERATIONAL');
+});
+
+test('recordSkillUse and skillDecayAndMetaReport track 30-day utility, flag stale/regressing skills, and compute meta-RSI yield', async () => {
+  const env = await makeEnv();
+  const usageFile = path.join(env.stateDir, 'rsi-skill-usage.jsonl');
+  await makeSkill(env.skillsDir, 'used-skill', { status: 'active', ai_platform: 'Hermes (DeepSeek)' });
+  await makeSkill(env.skillsDir, 'stale-skill', { status: 'active', ai_platform: 'Hermes (DeepSeek)' });
+  await makeSkill(env.skillsDir, 'killed-skill', { status: 'killed', ai_platform: 'Hermes (DeepSeek)' });
+
+  // Backdate stale-skill status_changed_at by 45 days so decay watch triggers
+  const stalePath = path.join(env.skillsDir, 'stale-skill', 'SKILL.md');
+  const staleRaw = (await readFile(stalePath, 'utf8')).replace('written_at:', 'status_changed_at: "2026-10-01T10:00:00+08:00"\nwritten_at:');
+  await writeFile(stalePath, staleRaw, 'utf8');
+
+  await recordSkillUse({ skill: 'used-skill', client: 'antigravity', outcome: 'success', usageFile, stateDir: env.stateDir });
+  await recordSkillUse({ skill: 'used-skill', client: 'claude-code', outcome: 'success', usageFile, stateDir: env.stateDir });
+
+  const meta = await skillDecayAndMetaReport({ skillsDir: env.skillsDir, usageFile, windowDays: 30, now: new Date('2026-11-27T17:45:00+08:00') });
+  assert.equal(meta.active_utility.length, 2);
+  const used = meta.active_utility.find((u) => u.skill === 'used-skill');
+  const stale = meta.active_utility.find((u) => u.skill === 'stale-skill');
+  assert.equal(used.invocations, 2);
+  assert.equal(used.success_rate, 1);
+  assert.equal(used.decay_flag, false);
+  assert.equal(stale.invocations, 0);
+  assert.equal(stale.decay_flag, true);
+  assert.equal(meta.by_author['Hermes (DeepSeek)'].total, 3);
+  assert.equal(meta.by_author['Hermes (DeepSeek)'].active, 2);
+});
+
+test('runBlindAbSuite executes multi-task blind forced-choice suite and summarizes win/loss/tie', async () => {
+  const env = await makeEnv();
+  const tasks = [
+    {
+      task_id: 'T1',
+      prompt: 'Check supply chain alert date.',
+      baseline_output: 'Just upgrade npm.',
+      candidate_output: '## Audit\n- Cited blog 2025-12-01 vs 2026-08-04 wave\n- Verified local npm 11.19.1 vs 12.2.3\n- Rollback plan ready.',
+    },
+    {
+      task_id: 'T2',
+      prompt: 'Handle YouTube OAuth invalid_grant.',
+      baseline_output: 'No videos today.',
+      candidate_output: '## Fallback\n- Checked anonymous Atom feed [[https://www.youtube.com/feeds/videos.xml]] (2026-11-24)\n- Verified HTTP 200 evidence.',
+    },
+  ];
+  const suite = await runBlindAbSuite({
+    suiteId: 'RSI-002-UNIT',
+    tasks,
+    author: 'Hermes (DeepSeek)',
+    judge: 'deterministic',
+    evidenceDir: env.evidenceDir,
+    stateDir: env.stateDir,
+    seed: 'unit-seed',
+  });
+  assert.equal(suite.total_tasks, 2);
+  assert.equal(suite.candidate_wins, 2);
+  assert.equal(suite.baseline_wins, 0);
+  assert.equal(suite.verdict, 'CANDIDATE_SUPERIOR');
+  assert.ok(suite.evidence_path);
 });
