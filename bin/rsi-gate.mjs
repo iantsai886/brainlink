@@ -17,6 +17,9 @@ import {
   syncActiveSkills,
   extractDemandCandidates,
   runBlindAbEval,
+  runBlindAbSuite,
+  recordSkillUse,
+  skillDecayAndMetaReport,
   rsiHealthReport,
   RsiGateError,
   usageError,
@@ -209,6 +212,41 @@ export async function runRsiGateCli(argv) {
       const res = await rsiHealthReport({ skillsDir, missLogFile, auditFile, maxDrafts });
       process.stdout.write(JSON.stringify(res, null, 2) + '\n');
       return res.status === 'OPERATIONAL' ? 0 : 1;
+    }
+    case 'use': {
+      const skill = positional(1);
+      if (!skill) throw usageError('use requires <skill>.');
+      const client = opt('client', 'unknown');
+      const outcome = opt('outcome', 'success');
+      const usageFile = path.resolve(opt('usage-file', path.join(stateDir, 'rsi-skill-usage.jsonl')));
+      const res = await recordSkillUse({ skill, client, outcome, usageFile, stateDir });
+      process.stdout.write(JSON.stringify(res, null, 2) + '\n');
+      return 0;
+    }
+    case 'meta': {
+      const windowDays = Number(opt('days', '30'));
+      const usageFile = path.resolve(opt('usage-file', path.join(stateDir, 'rsi-skill-usage.jsonl')));
+      const res = await skillDecayAndMetaReport({ skillsDir, usageFile, windowDays });
+      process.stdout.write(JSON.stringify(res, null, 2) + '\n');
+      return 0;
+    }
+    case 'ab-suite': {
+      const manifestPath = opt('manifest', '');
+      if (!manifestPath) throw usageError('ab-suite requires --manifest <file.json>.');
+      const manifest = JSON.parse(await readFile(path.resolve(manifestPath), 'utf8'));
+      const judge = opt('judge', manifest.default_judge || 'deterministic');
+      const seed = opt('seed', manifest.seed || 'rsi-002');
+      const res = await runBlindAbSuite({
+        suiteId: manifest.suite_id,
+        tasks: manifest.tasks,
+        author: manifest.author,
+        judge,
+        evidenceDir,
+        stateDir,
+        seed,
+      });
+      process.stdout.write(JSON.stringify(res, null, 2) + '\n');
+      return 0;
     }
     default:
       throw usageError(`Unknown command "${cmd}". Run "rsi-gate help" for usage.`);

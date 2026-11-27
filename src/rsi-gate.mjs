@@ -1007,3 +1007,191 @@ export async function rsiHealthReport({
     demand_misses: demand,
   };
 }
+
+export async function recordSkillUse({
+  skill,
+  client = 'unknown',
+  outcome = 'success',
+  usageFile,
+  stateDir,
+  now = new Date(),
+}) {
+  if (!skill || !/^[a-z0-9][a-z0-9-]*$/i.test(skill)) throw usageError('use requires a valid <skill> name.');
+  const validOutcomes = new Set(['success', 'correction', 'error']);
+  if (!validOutcomes.has(outcome)) throw usageError('use --outcome must be success, correction, or error.');
+  if (!usageFile) throw usageError('use requires usageFile.');
+
+  const stamp = nowTaipeiIso(now);
+  const entry = {
+    timestamp: stamp,
+    skill,
+    client: String(client || 'unknown').trim().slice(0, 60),
+    outcome,
+  };
+  await mkdir(path.dirname(usageFile), { recursive: true });
+  await appendFile(usageFile, JSON.stringify(entry) + '\n', 'utf8');
+  if (stateDir) {
+    try {
+      const ledger = createRsiLedger({ home: stateDir });
+      await ledger.appendRsiEvidence('skill_usage', entry, sha256Text(JSON.stringify(entry)));
+    } catch {
+      // Non-blocking ledger mirror
+    }
+  }
+  return entry;
+}
+
+export async function skillDecayAndMetaReport({
+  skillsDir,
+  usageFile,
+  windowDays = 30,
+  now = new Date(),
+}) {
+  const skills = await listSkills({ skillsDir });
+  let usageRows = [];
+  if (usageFile) {
+    try {
+      const raw = await readFile(usageFile, 'utf8');
+      usageRows = raw.split(/\r?\n/).filter((l) => l.trim()).map((l) => JSON.parse(l));
+    } catch {
+      usageRows = [];
+    }
+  }
+
+  const cutoffMs = now.getTime() - windowDays * 86400 * 1000;
+  const recentUsage = usageRows.filter((u) => {
+    const t = Date.parse(u.timestamp);
+    return Number.isFinite(t) && t >= cutoffMs;
+  });
+
+  const bySkill = {};
+  for (const u of recentUsage) {
+    bySkill[u.skill] ||= { invocations: 0, success: 0, correction: 0, error: 0, clients: new Set() };
+    bySkill[u.skill].invocations++;
+    if (u.outcome in bySkill[u.skill]) bySkill[u.skill][u.outcome]++;
+    bySkill[u.skill].clients.add(u.client);
+  }
+
+  const activeUtility = [];
+  const byAuthor = {};
+
+  for (const s of skills) {
+    const info = await showSkill({ skill: s.skill, skillsDir });
+    const author = info.author || 'unknown';
+    byAuthor[author] ||= { total: 0, active: 0, held: 0, killed: 0, draft: 0, promotion_yield_pct: 0 };
+    byAuthor[author].total++;
+    if (s.status in byAuthor[author]) byAuthor[author][s.status]++;
+
+    if (s.status === 'active') {
+      const u = bySkill[s.skill] || { invocations: 0, success: 0, correction: 0, error: 0, clients: new Set() };
+      const changedAtMs = Date.parse(info.frontmatter.status_changed_at || info.frontmatter.written_at || '');
+      const ageDays = Number.isFinite(changedAtMs) ? Math.max(0, Math.floor((now.getTime() - changedAtMs) / 86400000)) : 0;
+      const successRate = u.invocations > 0 ? Number((u.success / u.invocations).toFixed(3)) : null;
+      const correctionRate = u.invocations > 0 ? Number((u.correction / u.invocations).toFixed(3)) : null;
+      const zeroUseDecay = u.invocations === 0 && ageDays >= windowDays;
+      const regressionFlag = u.invocations >= 3 && (correctionRate >= 0.3 || u.error / u.invocations >= 0.3);
+      const decayFlag = zeroUseDecay || regressionFlag;
+      activeUtility.push({
+        skill: s.skill,
+        age_days: ageDays,
+        invocations: u.invocations,
+        clients: [...u.clients],
+        success_rate: successRate,
+        correction_rate: correctionRate,
+        decay_flag: decayFlag,
+        recommendation: regressionFlag
+          ? 'rollback (high correction/error rate)'
+          : zeroUseDecay
+            ? `hold (0 uses in ${windowDays}d)`
+            : 'keep active',
+      });
+    }
+  }
+
+  for (const a of Object.values(byAuthor)) {
+    a.promotion_yield_pct = a.total > 0 ? Number(((a.active / a.total) * 100).toFixed(1)) : 0;
+  }
+
+  return {
+    generated_at: nowTaipeiIso(now),
+    window_days: windowDays,
+    total_skills: skills.length,
+    active_count: activeUtility.length,
+    decay_flagged_count: activeUtility.filter((x) => x.decay_flag).length,
+    active_utility: activeUtility,
+    by_author: byAuthor,
+  };
+}
+
+export async function runBlindAbSuite({
+  suiteId,
+  tasks,
+  author,
+  judge = 'deterministic',
+  evidenceDir,
+  stateDir,
+  seed = '',
+  now = new Date(),
+}) {
+  if (!suiteId || !/^[a-zA-Z0-9._-]+$/.test(suiteId)) throw usageError('ab-suite requires a valid suiteId.');
+  if (!Array.isArray(tasks) || tasks.length === 0) throw usageError('ab-suite requires a non-empty tasks array.');
+  if (sameIdentity(author, judge)) {
+    throw refusal(`Judge "${judge}" matches author "${author}". Judge != author is enforced in code.`);
+  }
+
+  const results = [];
+  for (const t of tasks) {
+    const r = await runBlindAbEval({
+      taskId: `${suiteId}-${t.task_id}`,
+      prompt: t.prompt || '',
+      baselineOutput: t.baseline_output,
+      candidateOutput: t.candidate_output,
+      author,
+      judge,
+      evidenceDir,
+      stateDir,
+      seed: `${seed}:${t.task_id}`,
+      now,
+    });
+    results.push(r);
+  }
+
+  const candidateWins = results.filter((r) => r.outcome === 'CANDIDATE_WIN').length;
+  const baselineWins = results.filter((r) => r.outcome === 'BASELINE_WIN').length;
+  const ties = results.filter((r) => r.outcome === 'TIE').length;
+  const decided = candidateWins + baselineWins;
+  let verdict = 'INCONCLUSIVE_TIE';
+  if (decided > 0 && candidateWins > baselineWins) verdict = 'CANDIDATE_SUPERIOR';
+  else if (decided > 0 && baselineWins > candidateWins) verdict = 'BASELINE_SUPERIOR';
+
+  await mkdir(evidenceDir, { recursive: true });
+  const stamp = nowTaipeiIso(now);
+  const fileStamp = stamp.slice(0, 19).replace(/[:T]/g, '-');
+  const evidencePath = path.join(evidenceDir, `ab-suite-${suiteId}-${fileStamp}.json`);
+
+  const summary = {
+    schema: 1,
+    type: 'blind_ab_suite',
+    suite_id: suiteId,
+    evaluated_at: stamp,
+    author,
+    judge: results[0]?.judge || judge,
+    total_tasks: tasks.length,
+    units_used: tasks.length * 2,
+    candidate_wins: candidateWins,
+    baseline_wins: baselineWins,
+    ties,
+    win_rate_decided: decided > 0 ? Number((candidateWins / decided).toFixed(3)) : null,
+    verdict,
+    per_task: results.map((r) => ({
+      task_id: r.task_id,
+      blind_arm_map: r.blind_arm_map,
+      pick: r.pick,
+      outcome: r.outcome,
+      rationale: r.rationale,
+      evidence_path: r.evidence_path,
+    })),
+  };
+  await writeFile(evidencePath, JSON.stringify(summary, null, 2) + '\n', 'utf8');
+  return { ...summary, evidence_path: evidencePath };
+}
