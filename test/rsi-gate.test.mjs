@@ -18,6 +18,9 @@ import {
   precheckCaps,
   sameIdentity,
   syncActiveSkills,
+  extractDemandCandidates,
+  runBlindAbEval,
+  rsiHealthReport,
 } from '../src/rsi-gate.mjs';
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
@@ -294,4 +297,74 @@ test('CLI exit codes: 0 ok, 1 refusal, 2 usage error', async () => {
   const okRes = spawnSync(process.execPath, [CLI, 'list', '--state', 'draft', '--skills-dir', env.skillsDir], { encoding: 'utf8' });
   assert.equal(okRes.status, 0);
   assert.match(okRes.stdout, /cli-skill/);
+});
+
+test('extractDemandCandidates parses Miss Log into open demand signals and fixed regression cases', async () => {
+  const env = await makeEnv();
+  const missFile = path.join(env.base, 'Brain Miss Log.md');
+  await writeFile(missFile, [
+    '# Brain Miss Log',
+    '',
+    '| date | agent | question | result (found/not found/stale) | seconds | fix needed | fixed by |',
+    '|---|---|---|---|---|---|---|',
+    '| 2026-11-13 | Paulo | Brain-bench case 05 | not found | n/a | add 00 INDEX entry |  |',
+    '| 2026-11-13 | Paulo | Brain-bench case 06 | not found | n/a | add link | fixed by Anna Bridge 2026-11-18 |',
+    '| 2026-11-20 | Anna | Where is billing policy? | stale | 4 | replace stale note |  |',
+  ].join('\n'), 'utf8');
+
+  const demand = await extractDemandCandidates({ missLogFile: missFile });
+  assert.equal(demand.total_rows, 3);
+  assert.equal(demand.open_count, 2);
+  assert.equal(demand.fixed_count, 1);
+  assert.equal(demand.candidates.length, 2);
+  assert.equal(demand.candidates[0].demand_signal, true);
+});
+
+test('runBlindAbEval enforces judge != author, randomizes blind arms, and writes evidence receipt', async () => {
+  const env = await makeEnv();
+
+  // Refuses when judge == author
+  await assert.rejects(
+    () => runBlindAbEval({
+      taskId: 'RSI-002-T1',
+      prompt: 'Summarize findings with citations.',
+      baselineOutput: 'Short unverified answer.',
+      candidateOutput: 'Grounded answer citing [[Source A]] with verified timestamp 2026-11-27 and rollback steps.',
+      author: 'Hermes (DeepSeek)',
+      judge: 'hermes',
+      evidenceDir: env.evidenceDir,
+      stateDir: env.stateDir,
+    }),
+    (err) => err.code === 'RSI_REFUSAL' && /judge.*author/i.test(err.message),
+  );
+
+  // Passes with independent deterministic judge and strips arm labels
+  const res = await runBlindAbEval({
+    taskId: 'RSI-002-T1',
+    prompt: 'Summarize findings with citations.',
+    baselineOutput: 'Short unverified answer.',
+    candidateOutput: '## Summary\n- Grounded answer citing [[Source A]] (2026-11-27)\n- Verified rollback plan included.',
+    author: 'Hermes (DeepSeek)',
+    judge: 'deterministic',
+    evidenceDir: env.evidenceDir,
+    stateDir: env.stateDir,
+    seed: 'fixed-seed-1',
+  });
+  assert.equal(res.task_id, 'RSI-002-T1');
+  assert.equal(res.judge, 'deterministic-ab-v1');
+  assert.ok(['CANDIDATE_WIN', 'BASELINE_WIN', 'TIE'].includes(res.outcome));
+  assert.equal(res.outcome, 'CANDIDATE_WIN');
+  assert.ok(res.evidence_path);
+});
+
+test('rsiHealthReport summarizes skill states, circuit breaker, and open demand misses', async () => {
+  const env = await makeEnv();
+  await makeSkill(env.skillsDir, 'active-one', { status: 'active' });
+  await makeSkill(env.skillsDir, 'held-one', { status: 'held' });
+  const health = await rsiHealthReport({ skillsDir: env.skillsDir, auditFile: env.auditFile, maxDrafts: 20 });
+  assert.equal(health.counts.active, 1);
+  assert.equal(health.counts.held, 1);
+  assert.equal(health.counts.draft, 0);
+  assert.equal(health.circuit_breaker, 'OPEN');
+  assert.equal(health.status, 'OPERATIONAL');
 });
