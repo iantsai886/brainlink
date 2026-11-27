@@ -15,12 +15,17 @@ import {
   checkCapsFromLogs,
   precheckCaps,
   syncActiveSkills,
+  extractDemandCandidates,
+  runBlindAbEval,
+  rsiHealthReport,
   RsiGateError,
   usageError,
 } from '../src/rsi-gate.mjs';
+import { readFile } from 'node:fs/promises';
 
 const DEFAULT_SKILLS_DIR = process.env.RSI_SKILLS_DIR || 'G:\\My Drive\\Obsidian\\Brain\\60 Skills';
 const DEFAULT_LOGS_DIR = process.env.RSI_LOGS_DIR || 'G:\\My Drive\\Obsidian\\Brain\\50 Knowledge\\_log';
+const DEFAULT_MISS_LOG = process.env.RSI_MISS_LOG || 'G:\\My Drive\\Obsidian\\Brain\\Grok\\Paulo\\RSI\\Brain Miss Log.md';
 
 const HELP = `rsi-gate — BrainLink RSI promotion gate & skill lifecycle CLI
 
@@ -176,6 +181,34 @@ export async function runRsiGateCli(argv) {
       const res = await syncActiveSkills({ skillsDir, clients, stateDir });
       process.stdout.write(JSON.stringify(res, null, 2) + '\n');
       return 0;
+    }
+    case 'demand': {
+      const missLogFile = path.resolve(opt('miss-log', DEFAULT_MISS_LOG));
+      const res = await extractDemandCandidates({ missLogFile });
+      process.stdout.write(JSON.stringify(res, null, 2) + '\n');
+      return 0;
+    }
+    case 'ab-eval': {
+      const taskId = opt('task-id', '');
+      const baselineFile = opt('baseline-file', '');
+      const candidateFile = opt('candidate-file', '');
+      const author = opt('author', '');
+      const judge = opt('judge', 'deterministic');
+      const prompt = opt('prompt', '');
+      const seed = opt('seed', '');
+      if (!baselineFile || !candidateFile) throw usageError('ab-eval requires --baseline-file and --candidate-file.');
+      const baselineOutput = await readFile(path.resolve(baselineFile), 'utf8');
+      const candidateOutput = await readFile(path.resolve(candidateFile), 'utf8');
+      const res = await runBlindAbEval({ taskId, prompt, baselineOutput, candidateOutput, author, judge, evidenceDir, stateDir, seed });
+      process.stdout.write(JSON.stringify(res, null, 2) + '\n');
+      return 0;
+    }
+    case 'health': {
+      const missLogFile = path.resolve(opt('miss-log', DEFAULT_MISS_LOG));
+      const maxDrafts = Number(opt('max-drafts', '20'));
+      const res = await rsiHealthReport({ skillsDir, missLogFile, auditFile, maxDrafts });
+      process.stdout.write(JSON.stringify(res, null, 2) + '\n');
+      return res.status === 'OPERATIONAL' ? 0 : 1;
     }
     default:
       throw usageError(`Unknown command "${cmd}". Run "rsi-gate help" for usage.`);

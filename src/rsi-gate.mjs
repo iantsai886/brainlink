@@ -785,3 +785,225 @@ export async function syncActiveSkills({ skillsDir, clients = ['antigravity'], s
     await rm(stageRoot, { recursive: true, force: true }).catch(() => {});
   }
 }
+
+export async function extractDemandCandidates({ missLogFile }) {
+  if (!missLogFile) throw usageError('demand requires --miss-log <file>.');
+  let raw;
+  try {
+    raw = await readFile(missLogFile, 'utf8');
+  } catch {
+    throw refusal(`Miss log file not found: ${missLogFile}`);
+  }
+  const tableLines = raw.split(/\r?\n/).filter((l) => /^\|/.test(l.trim()));
+  if (tableLines.length < 2) {
+    return { miss_log_file: missLogFile, total_rows: 0, open_count: 0, fixed_count: 0, candidates: [], regression_cases: [] };
+  }
+
+  const headerCells = tableLines[0].split('|').slice(1, -1).map((s) => s.trim().toLowerCase());
+  const idx = (pred) => headerCells.findIndex(pred);
+  const iDate = idx((h) => h === 'date');
+  const iAgent = idx((h) => h === 'agent');
+  const iQuestion = idx((h) => h === 'question');
+  const iResult = idx((h) => h.startsWith('result'));
+  const iFix = idx((h) => h.includes('fix needed'));
+  const iFixed = idx((h) => h.includes('fixed by'));
+
+  const candidates = [];
+  const regressionCases = [];
+  let totalRows = 0;
+
+  for (const line of tableLines.slice(1)) {
+    const cells = line.split('|').slice(1, -1).map((s) => s.trim());
+    if (!cells.length || cells.every((c) => /^:?-+:?$/.test(c))) continue;
+    totalRows++;
+    const date = iDate >= 0 ? cells[iDate] || '' : '';
+    const agent = iAgent >= 0 ? cells[iAgent] || '' : '';
+    const question = iQuestion >= 0 ? cells[iQuestion] || '' : '';
+    const result = iResult >= 0 ? cells[iResult] || '' : '';
+    const fixNeeded = iFix >= 0 ? cells[iFix] || '' : '';
+    const fixedBy = iFixed >= 0 ? cells[iFixed] || '' : '';
+
+    if (!fixedBy) {
+      candidates.push({
+        date,
+        agent,
+        question_sha256: sha256Text(question.toLowerCase().trim()),
+        question_preview: findSecrets(question).length ? '[REDACTED_SECRET]' : question.slice(0, 120),
+        result,
+        fix_needed: fixNeeded,
+        demand_signal: true,
+        priority: result === 'not found' ? 'high' : 'medium',
+      });
+    } else {
+      regressionCases.push({
+        date,
+        question_sha256: sha256Text(question.toLowerCase().trim()),
+        question_preview: findSecrets(question).length ? '[REDACTED_SECRET]' : question.slice(0, 120),
+        fixed_by: fixedBy.slice(0, 120),
+      });
+    }
+  }
+
+  return {
+    miss_log_file: missLogFile,
+    total_rows: totalRows,
+    open_count: candidates.length,
+    fixed_count: regressionCases.length,
+    candidates,
+    regression_cases: regressionCases,
+  };
+}
+
+function scoreBlindArmDeterministic(text) {
+  let score = 0;
+  const s = String(text || '');
+  if (s.trim().length >= 40) score += 1;
+  if (findSecrets(s).length === 0) score += 2;
+  if (/\[\[.+?\]\]|https?:\/\/|\b20\d{2}-\d{2}-\d{2}\b/.test(s)) score += 2; // grounded citations/dates
+  if (/(?:^|\n)\s*(?:##|-|\*|1\.)\s+/.test(s)) score += 1; // structured output
+  if (/\b(rollback|verify|verified|evidence|guardrail|receipt)\b/i.test(s)) score += 1;
+  return score;
+}
+
+export async function runBlindAbEval({
+  taskId,
+  prompt = '',
+  baselineOutput,
+  candidateOutput,
+  author,
+  judge = 'deterministic',
+  evidenceDir,
+  stateDir,
+  seed = '',
+  now = new Date(),
+}) {
+  if (!taskId || !/^[a-zA-Z0-9._-]+$/.test(taskId)) throw usageError('ab-eval requires a valid --task-id.');
+  if (!baselineOutput || !candidateOutput) throw usageError('ab-eval requires both baseline and candidate outputs.');
+  if (!author) throw usageError('ab-eval requires --author <identity>.');
+  if (sameIdentity(author, judge)) {
+    throw refusal(`Judge "${judge}" matches author "${author}". Judge != author is enforced in code.`);
+  }
+
+  // Deterministic blind arm randomization (labels stripped before judging)
+  const flipBit = parseInt(sha256Text(`${taskId}:${seed}`).slice(0, 2), 16) % 2;
+  const armA = flipBit === 0 ? { role: 'baseline', text: baselineOutput } : { role: 'candidate', text: candidateOutput };
+  const armB = flipBit === 0 ? { role: 'candidate', text: candidateOutput } : { role: 'baseline', text: baselineOutput };
+
+  let pick; // 'A' | 'B' | 'TIE'
+  let judgeId;
+  let rationale;
+
+  if (judge === 'deterministic') {
+    judgeId = 'deterministic-ab-v1';
+    const scoreA = scoreBlindArmDeterministic(armA.text);
+    const scoreB = scoreBlindArmDeterministic(armB.text);
+    if (scoreA > scoreB) { pick = 'A'; rationale = `Arm A scored ${scoreA} vs Arm B ${scoreB} on groundedness/structure/safety.`; }
+    else if (scoreB > scoreA) { pick = 'B'; rationale = `Arm B scored ${scoreB} vs Arm A ${scoreA} on groundedness/structure/safety.`; }
+    else { pick = 'TIE'; rationale = `Both arms tied at score ${scoreA}.`; }
+  } else if (['claude', 'codex', 'gemini'].includes(judge)) {
+    const cli = findAvailableCrossModelCli([author], judge);
+    if (!cli) throw refusal(`Cross-model judge "${judge}" not available on PATH.`);
+    judgeId = `${cli}-cli`;
+    const blindPrompt = [
+      'You are a blind forced-choice evaluator. You do NOT know which arm is baseline vs candidate.',
+      'Pick the strictly better output (A, B, or TIE if genuinely indistinguishable). Reply ONLY with JSON:',
+      '{"pick":"A"|"B"|"TIE","rationale":"one concise sentence"}',
+      `Task: ${prompt}`,
+      '=== ARM A ===',
+      armA.text.slice(0, 3500),
+      '=== ARM B ===',
+      armB.text.slice(0, 3500),
+    ].join('\n');
+    const args = cli === 'codex' ? ['exec', blindPrompt] : ['-p', blindPrompt];
+    const res = spawnSync(cli, args, { encoding: 'utf8', timeout: 60000, shell: process.platform === 'win32' });
+    if (res.error || res.status !== 0) {
+      throw refusal(`Cross-model blind judge "${cli}" failed (exit ${res.status ?? 'error'}).`);
+    }
+    const m = (res.stdout || '').match(/\{[\s\S]*\}/);
+    if (!m) throw refusal(`Cross-model blind judge "${cli}" returned non-JSON output.`);
+    const parsed = JSON.parse(m[0]);
+    pick = String(parsed.pick || '').toUpperCase();
+    if (!['A', 'B', 'TIE'].includes(pick)) throw refusal(`Invalid blind A/B pick "${parsed.pick}".`);
+    rationale = String(parsed.rationale || '');
+  } else {
+    throw usageError(`Unknown --judge "${judge}". Allowed: deterministic, claude, codex, gemini.`);
+  }
+
+  let outcome = 'TIE';
+  if (pick === 'A') outcome = armA.role === 'candidate' ? 'CANDIDATE_WIN' : 'BASELINE_WIN';
+  else if (pick === 'B') outcome = armB.role === 'candidate' ? 'CANDIDATE_WIN' : 'BASELINE_WIN';
+
+  await mkdir(evidenceDir, { recursive: true });
+  const stamp = nowTaipeiIso(now);
+  const fileStamp = stamp.slice(0, 19).replace(/[:T]/g, '-');
+  const evidencePath = path.join(evidenceDir, `ab-${taskId}-${fileStamp}.json`);
+
+  const record = {
+    schema: 1,
+    type: 'blind_ab_eval',
+    task_id: taskId,
+    evaluated_at: stamp,
+    author,
+    judge: judgeId,
+    blind_arm_map: { A: armA.role, B: armB.role },
+    pick,
+    outcome,
+    rationale,
+    baseline_sha256: sha256Text(baselineOutput),
+    candidate_sha256: sha256Text(candidateOutput),
+  };
+  await writeFile(evidencePath, JSON.stringify(record, null, 2) + '\n', 'utf8');
+
+  if (stateDir) {
+    try {
+      const ledger = createRsiLedger({ home: stateDir });
+      await ledger.appendRsiEvidence('blind_ab_eval', {
+        task_id: taskId,
+        outcome,
+        judge: judgeId,
+        evaluated_at: stamp,
+      }, sha256Text(JSON.stringify(record)));
+    } catch {
+      // Non-blocking ledger mirror
+    }
+  }
+  return { ...record, evidence_path: evidencePath };
+}
+
+export async function rsiHealthReport({
+  skillsDir,
+  missLogFile,
+  auditFile,
+  maxDrafts = DEFAULT_MAX_DRAFTS,
+}) {
+  const skills = await listSkills({ skillsDir });
+  const counts = { active: 0, held: 0, killed: 0, draft: 0, total: skills.length };
+  const activeSkills = [];
+  for (const s of skills) {
+    if (s.status in counts) counts[s.status]++;
+    if (s.status === 'active') activeSkills.push(s.skill);
+  }
+  const circuitBreaker = counts.draft > maxDrafts ? 'TRIPPED' : 'OPEN';
+  const auditRows = auditFile ? await readAuditLog({ auditFile }) : [];
+  let demand = null;
+  if (missLogFile) {
+    try {
+      const d = await extractDemandCandidates({ missLogFile });
+      demand = { total_rows: d.total_rows, open_count: d.open_count, fixed_count: d.fixed_count };
+    } catch {
+      demand = null;
+    }
+  }
+  const operational = counts.active >= 1 && circuitBreaker === 'OPEN';
+  return {
+    checked_at: nowTaipeiIso(),
+    status: operational ? 'OPERATIONAL' : 'BLOCKED',
+    counts,
+    active_skills: activeSkills,
+    circuit_breaker: circuitBreaker,
+    max_drafts: maxDrafts,
+    audit_transitions: auditRows.length,
+    last_transition_at: auditRows.length ? auditRows[auditRows.length - 1].timestamp : null,
+    demand_misses: demand,
+  };
+}
