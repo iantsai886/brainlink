@@ -933,6 +933,7 @@ test('agent_connect loads role notes, newest captures and stale warnings', async
   assert.ok(r.role_notes.some((n) => /Operating coordinator/.test(n.excerpt)));
   assert.equal(r.recent_captures[0].heading, '2026-10-10 09:30 — Weekly planning');
   assert.ok(r.warnings.some((w) => /Current Goal/.test(w)));
+  assert.match(r.instructions, /compact 4-bullet briefing.*Scope.*Sources.*New since last session.*Open items/i);
   assert.match(r.instructions, /Chief of Staff close loop/);
 });
 
