@@ -312,7 +312,7 @@ export function createMcp(ctx, { onCall = () => {}, onProposal = null } = {}) {
   const tools = [
     { name: 'brainlink_guide', title: 'How to read and write this second brain', annotations: RO,
       description: 'Call first. Enabled vaults with purpose, read order, folders and rules; agents with activation and close phrases; identity and write rules.',
-      inputSchema: { type: 'object', properties: {} }, run: async () => { const sem = await semanticStatus(ctx); return { ...await safeGuide(), search: sem.available ? `keyword + meaning (local model ${sem.model})` : `keyword (meaning-based search off: ${sem.reason})` }; } },
+      inputSchema: { type: 'object', properties: {} }, run: async () => { const sem = await semanticStatus(ctx); return { ...await safeGuide(), search: sem.available ? `keyword + meaning (local model ${sem.model})` : `keyword (meaning-based search off: ${sem.reason})`, semantic: sem }; } },
     { name: 'vault_search', title: 'Search a vault', annotations: RO,
       description: 'Ranked search in one vault. Returns {status, results, receipt}: "hits", "weak" (partial matches), or "not_in_brain" (no confident match in this search; do not assume the information is absent or guess). The receipt names only selected visible results and reports basis, search mode and missing words. Compact citation/context is the default: every selected result keeps its path, title, date/status, match type, heading and full snippet, while internal ranking diagnostics are omitted. Set detail="full" to include those diagnostics. [[Note]] and #tag match exactly; superseded notes are demoted and flagged.',
     inputSchema: { type: 'object', properties: {
@@ -492,11 +492,15 @@ export function createMcp(ctx, { onCall = () => {}, onProposal = null } = {}) {
     ] : []),
     // ChatGPT connector / deep-research compatibility: id = "vault::path".
     { name: 'search', title: 'Search (connector-compatible)', annotations: RO,
-      description: `Search ${connectorVaults().join(', ') || 'no public vaults'}. Returns {results:[{id,title,url}]}; pass an id to fetch. Private vaults are excluded unless BRAINLINK_CONNECTOR_PRIVATE=1.`,
+      description: `Search ${connectorVaults().join(', ') || 'no public vaults'}. Returns {results:[{id,vault,path,title,url,heading?}]}; pass an id to fetch. Private vaults are excluded unless BRAINLINK_CONNECTOR_PRIVATE=1.`,
       inputSchema: { type: 'object', properties: { query: { type: 'string' } }, required: ['query'] },
       run: async (a) => {
         const results = [];
-        for (const v of connectorVaults()) for (const r of await search(ctx, v, a.query, 5)) results.push({ id: `${v}::${r.path}`, title: `${r.title} (${v})`, url: obsidianUrl(v, r.path), _score: r.score });
+        for (const v of connectorVaults()) {
+          for (const r of await search(ctx, v, a.query, { limit: 5 })) {
+            results.push({ id: `${v}::${r.path}`, vault: v, path: r.path, title: `${r.title} (${v})`, ...(r.heading ? { heading: r.heading } : {}), url: obsidianUrl(v, r.path), _score: r.score });
+          }
+        }
         return { results: results.sort((x, y) => y._score - x._score).slice(0, 10).map(({ _score, ...r }) => r) };
       } },
     { name: 'fetch', title: 'Fetch (connector-compatible)', annotations: RO,
@@ -506,7 +510,7 @@ export function createMcp(ctx, { onCall = () => {}, onProposal = null } = {}) {
         const [v, p] = String(a.id).split('::');
         if (!connectorVaults().includes(v)) throw new Error(`fetch is limited to ${connectorVaults().join(', ')}; use vault_read_note`);
         const n = await readNote(ctx, v, p);
-        return { id: a.id, title: p.replace(/\.md$/, ''), text: n.body, url: obsidianUrl(v, p), metadata: n.meta };
+        return { id: a.id, vault: v, path: n.path, title: n.path.replace(/\.md$/, ''), text: n.body, url: obsidianUrl(v, n.path), metadata: n.meta };
       } },
   ].filter((t) => !(ctx.readOnly && t.annotations === WR));
 

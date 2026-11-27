@@ -10,7 +10,8 @@ import { termFrequencies, terms, linkGraph, collection, suggestRelated, extractT
 import { deriveTypedRelations } from './typed-graph.mjs';
 import { appHome } from './config.mjs';
 import { rerankResults } from './rerank.mjs';
-import { detectEmbedder, VectorStore, fillVectors, embedTexts, nearest } from './embed.mjs';
+import { detectEmbedder, VectorStore, fillVectors, embedTexts, nearest, PREFERRED_EMBED_MODEL } from './embed.mjs';
+import { buildWikiLayer, queryWikiLayer, isWikiIndexPath, renderAllowlistedWikiIndex, allowlistedWikiMeta, normalizeWikiPath } from './wiki-layer.mjs';
 import { findAgentByToken, publicAgent } from './mcp-agents.mjs';
 import { resolveTwinAgentScope, twinNoteMemoryAllowed } from './twin-profiles.mjs';
 
@@ -159,10 +160,15 @@ export function noteDate(rel, meta, mtime) {
 export const listValue = (v) => String(v || '').replace(/^\[|\]$/g, '').split(',').map((x) => x.trim().replace(/^["']|["']$/g, '')).filter(Boolean);
 
 // Index pages, drafts and staging copies repeat other notes' words; rank them below real notes.
-export const isMinor = (rel, title) => /^(_?README|00 INDEX|00 MAP|INDEX|MAP)$|^(DRAFT|PROMOTED|COPY)\b|^00 (INDEX|MAP)\b/.test(title) || /(^|\/)_staging\//.test(rel);
+export const isMinor = (rel, title) => /^(_?README|00 INDEX|00 MAP|INDEX|MAP)$|^(DRAFT|PROMOTED|COPY)\b|^00 (INDEX|MAP)\b/.test(title) || /(^|\/)_staging[\s.]*\//i.test(rel);
 
 export const ROUTING_NOTE = /^(_?README|00 INDEX|00 MAP|INDEX|Home)$|^00 Moved\b|\bpointer\b/i;
-const SKIP_DIRS = new Set(['node_modules', '.git', '.obsidian', '.trash', '.backups']);
+const SKIP_DIRS = new Set(['node_modules', '.git', '.obsidian', '.trash', '.backups', '_staging']);
+export const normalizeDirName = (name) => String(name || '').replace(/[\s.]+$/g, '').toLowerCase();
+export const isSkippedDirName = (name) => {
+  const norm = normalizeDirName(name);
+  return !norm || norm.startsWith('.') || SKIP_DIRS.has(norm);
+};
 
 // A .brainlinkignore file in any folder lists names to skip there, one per line ("samples/",
 // "drafts", "*.tmp", or "*" for the whole folder). Lines starting with # are comments.
@@ -176,7 +182,7 @@ async function ignoreRules(dir) {
 // Shipped in every newly connected real vault's root .brainlinkignore (never overwrites one
 // already there). These folders are never read, chunked, searched, answered from, graphed,
 // surfaced in sessions or synced — same as the rest of .brainlinkignore (see walk(), below).
-export const DEFAULT_EXCLUDED_FOLDERS = ['.obsidian/', '.trash/', '.git/', 'node_modules/', '00 Home/'];
+export const DEFAULT_EXCLUDED_FOLDERS = ['.obsidian/', '.trash/', '.git/', 'node_modules/', '00 Home/', '_staging/'];
 // Common personal folders people keep out of an AI-connected vault; shipped as commented-out
 // suggestions so the user opts in rather than losing folders silently.
 export const SUGGESTED_EXCLUDED_FOLDERS = ['finance/', 'personal/', 'home/'];
@@ -231,8 +237,9 @@ async function walk(root, dir = root, out = [], inherited = []) {
   const rules = inherited.concat(await ignoreRules(dir));
   if (rules.some((re) => re.test('*') || re.source === '^.*$')) return out;
   for (const f of await readdir(dir, { withFileTypes: true })) {
-    if (f.name.startsWith('.') || SKIP_DIRS.has(f.name)) continue;
-    if (rules.some((re) => re.test(f.name))) continue;
+    if (isSkippedDirName(f.name)) continue;
+    const trimmedName = f.name.replace(/[\s.]+$/g, '');
+    if (rules.some((re) => re.test(f.name) || (trimmedName && re.test(trimmedName)))) continue;
     const full = path.join(dir, f.name);
     if (f.isDirectory()) await walk(root, full, out, rules);
     else if (f.isFile() && f.name.toLowerCase().endsWith('.md')) out.push(full);
@@ -244,8 +251,9 @@ async function visibleFolderPaths(root, dir = root, out = [], inherited = []) {
   const rules = inherited.concat(await ignoreRules(dir));
   if (rules.some((re) => re.test('*') || re.source === '^.*$')) return out;
   for (const entry of await readdir(dir, { withFileTypes: true })) {
-    if (entry.name.startsWith('.') || SKIP_DIRS.has(entry.name)) continue;
-    if (rules.some((re) => re.test(entry.name)) || !entry.isDirectory()) continue;
+    if (isSkippedDirName(entry.name)) continue;
+    const trimmedName = entry.name.replace(/[\s.]+$/g, '');
+    if (rules.some((re) => re.test(entry.name) || (trimmedName && re.test(trimmedName))) || !entry.isDirectory()) continue;
     const full = path.join(dir, entry.name), rel = path.relative(root, full).split(path.sep).join('/');
     out.push(rel);
     await visibleFolderPaths(root, full, out, rules);
@@ -256,13 +264,14 @@ async function visibleFolderPaths(root, dir = root, out = [], inherited = []) {
 // Same accumulated-rule logic as walk(), for a single already-known relative path (readNote()):
 // true if any ancestor folder, or the file itself, is excluded at any depth.
 export async function isExcludedPath(root, rel) {
-  const parts = String(rel).split('/');
+  const parts = String(rel).replace(/\\/g, '/').split('/').filter(Boolean);
   let dir = root, rules = [];
   for (const name of parts) {
-    if (name.startsWith('.') || SKIP_DIRS.has(name)) return true;
+    if (isSkippedDirName(name)) return true;
     rules = rules.concat(await ignoreRules(dir));
     if (rules.some((re) => re.test('*') || re.source === '^.*$')) return true;
-    if (rules.some((re) => re.test(name))) return true;
+    const trimmedName = name.replace(/[\s.]+$/g, '');
+    if (rules.some((re) => re.test(name) || (trimmedName && re.test(trimmedName)))) return true;
     dir = path.join(dir, name);
   }
   return false;
@@ -534,7 +543,12 @@ export function buildIndex(notes) {
   }
   const backlinks = notes.map(() => new Set()), outlinks = notes.map(() => new Set());
   for (const [a, b] of edges) { backlinks[b].add(a); outlinks[a].add(b); }
-  const chunks = notes.flatMap((n, noteIdx) => n.chunks.map((c) => ({ ...c, noteIdx, len: [...c.tokens.values()].reduce((s, x) => s + x, 0) })));
+  // Addendum A 00 MAP.md and folder 00 INDEX.md notes are used strictly as the parsed,
+  // privacy-filtered wiki prior (buildWikiLayer), never as searchable/embeddable chunks,
+  // so stale index rows referencing private or excluded titles can never leak into hits.
+  const chunks = notes.flatMap((n, noteIdx) => (isWikiIndexPath(n.rel)
+    ? []
+    : n.chunks.map((c) => ({ ...c, noteIdx, len: [...c.tokens.values()].reduce((s, x) => s + x, 0) }))));
   const df = new Map();
   for (const c of chunks) for (const t of c.tokens.keys()) df.set(t, (df.get(t) || 0) + 1);
   const avgLen = chunks.reduce((s, c) => s + c.len, 0) / Math.max(1, chunks.length);
@@ -545,7 +559,8 @@ export function buildIndex(notes) {
   notes.forEach((n, i) => { for (const a of n.aliases || []) if (!byAlias.has(a.toLowerCase())) byAlias.set(a.toLowerCase(), i); });
   const byTag = new Map();
   notes.forEach((n, i) => { for (const t of n.tags) { if (!byTag.has(t)) byTag.set(t, []); byTag.get(t).push(i); } });
-  return { notes, chunks, df, avgLen, backlinks, outlinks, byRel, byTitle, byAlias, byTag, edges, noteEdges, broken, typedRelations, termSets: null };
+  const wiki = buildWikiLayer(notes, byRel, byTitle);
+  return { notes, chunks, df, avgLen, backlinks, outlinks, byRel, byTitle, byAlias, byTag, edges, noteEdges, broken, typedRelations, wiki, termSets: null };
 }
 
 // Note-level term sets and document frequencies, built lazily (used by related and linking).
@@ -572,6 +587,10 @@ function bm25(index, qTerms, c, k1 = 1.2, b = 0.75) {
 
 export function summarize(index, i, extra = {}) {
   const n = index.notes[i];
+  if (isWikiIndexPath(n.rel)) {
+    const safeMeta = allowlistedWikiMeta(n.rel, n.meta);
+    return { path: n.rel, title: safeMeta.title, date: n.date, status: safeMeta.status || '', collection: collection(n.rel), historical: isHistorical(n.rel, safeMeta), ...extra };
+  }
   const confidence = ['verified', 'reported', 'inferred', 'unknown'].includes(String(n.meta.confidence || '').toLowerCase())
     ? String(n.meta.confidence).toLowerCase() : undefined;
   return { path: n.rel, title: n.title, date: n.date, status: n.meta.status || '', ...(confidence ? { confidence } : {}), collection: collection(n.rel), ...(n.tags.size ? { tags: [...n.tags] } : {}), historical: n.historical, ...(n.meta.superseded_by ? { superseded_by: n.meta.superseded_by } : {}), ...extra };
@@ -583,7 +602,7 @@ export function noteFilter(index, { folder, tag, since, until, exclude } = {}) {
   const t = tag ? String(tag).replace(/^#/, '').toLowerCase() : null;
   return (i) => {
     const n = index.notes[i];
-    if (n.private) return false; // frontmatter private: true — never surfaced outside readNote's own check
+    if (n.private || isWikiIndexPath(n.rel)) return false; // frontmatter private: true or wiki routing index — never surfaced as a search hit
     if (f && !n.rel.toLowerCase().startsWith(f)) return false;
     if (t && !n.tags.has(t)) return false;
     if (since && n.date < since) return false;
@@ -646,6 +665,10 @@ export function searchIndex(index, query, opts = {}) {
     add(tl.filter((x) => x.i >= 0).sort((a, b) => b.v - a.v).slice(0, 20), 'title');
   }
   for (const sem of opts.semantic || []) add(sem.filter((x) => !guaranteed.has(index.chunks[x.chunkIdx].noteIdx) && keep(index.chunks[x.chunkIdx].noteIdx)).map((x) => ({ i: x.chunkIdx, v: x.sim })), 'sim');
+  if (opts.wiki !== false && index.wiki?.present) {
+    const wikiHit = queryWikiLayer(index, queries, (i) => !guaranteed.has(i) && keep(i));
+    if (wikiHit.chunkCandidates.length) add(wikiHit.chunkCandidates, 'wiki', 1.25);
+  }
   if (!fused.size) return results.slice(0, limit);
 
   const top = [...fused.entries()].map(([i, e]) => ({ c: index.chunks[i], ...e })).sort((a, b) => b.rrf - a.rrf).slice(0, 40);
@@ -677,6 +700,7 @@ export function searchIndex(index, query, opts = {}) {
       x.s *= 1 + 0.5 * qShare + (hit.length >= 2 ? 0.6 * qShare * (hit.length / titleTerms.size) : 0);
     }
     if (recent) x.s *= 1 + 0.3 * (x.recency || 0);
+    if (x.wiki) x.s *= 1 + Math.min(0.45, 0.35 * x.wiki);
     if (/(^|› )Changelog$/i.test(x.c.heading)) x.s *= 0.5;
     if (note.historical) x.s *= 0.3;
     if (note.generated) x.s *= 0.2;
@@ -768,10 +792,15 @@ export function verdict(index, query, results, queries = []) {
   const needsTranslation = CJK_CHAR.test(query) && cjkShare(index) < 0.5 && !variants.some((q) => !CJK_CHAR.test(q));
   let status = best < NOT_IN_BRAIN_COVERAGE && !vocab.length ? 'not_in_brain' : best < 0.4 && !vocab.length ? 'weak' : 'hits';
   if (needsTranslation && status !== 'hits') status = 'weak';
-  // Specific words of the question that appear nowhere in the vault ("cholesterol"): the notes
+// Specific words of the question that appear nowhere in the vault ("cholesterol"): the notes
   // probably don't cover it, so never present near-misses as an answer.
   const missing = [...new Set(variants.filter((q) => !CJK_CHAR.test(q)).flatMap((q) => [...terms(q)]))].filter((t) => t.length >= 5 && !index.df.get(t) && !/\d/.test(t));
   if (missing.length && status === 'hits' && !vocab.length) status = 'weak';
+  // Never return confident "hits" for queries asking for credentials/passwords or personal
+  // account balances: BrainLink notes do not store secrets or private balances, so adjacent
+  // topic notes (e.g. a release audit or move log) must trigger abstention rather than an answer.
+  const sensitiveQuery = variants.some((q) => /\b(password|passcode|credential|credentials|api[_ -]?key|access[_ -]?key|secret[_ -]?key|private[_ -]?key|account\s+balance|bank\s+balance|current\s+balance)\b/i.test(q));
+  if (sensitiveQuery && status === 'hits') status = 'not_in_brain';
   return { status, coverage: +best.toFixed(2), ...(vocab.length ? { vault_words: [...new Set(vocab)].slice(0, 5) } : {}), ...(missing.length ? { missing_words: missing.slice(0, 5) } : {}), ...(needsTranslation ? { needs_translation: true } : {}) };
 }
 
@@ -779,11 +808,27 @@ export function verdict(index, query, results, queries = []) {
 export async function searchWithVerdict(ctx, name, query, opts = {}) {
   const results = await search(ctx, name, query, opts);
   const index = await loadVault(ctx, name);
+  const emb = opts.semantic === false
+    ? { available: false, preferred_model: PREFERRED_EMBED_MODEL, reason: 'disabled for this search' }
+    : await semanticStatus(ctx);
+  const semantic = emb.available
+    ? { available: true, model: emb.model, preferred_model: emb.preferred_model || PREFERRED_EMBED_MODEL }
+    : { available: false, preferred_model: emb.preferred_model || PREFERRED_EMBED_MODEL, reason: emb.reason, ...(emb.setup_hint ? { setup_hint: emb.setup_hint } : {}) };
   const v = verdict(index, String(query || ''), results, opts.queries || []);
+  const wikiLayer = !index.wiki?.present
+    ? { present: false, consulted: false }
+    : opts.wiki === false
+      ? { present: true, consulted: false }
+      : (() => {
+          const strip = (q) => String(q || '').replace(/\[\[[^\]]*\]\]/g, ' ').replace(/(?:^|\s)#[\p{L}\p{N}_/-]+/gu, ' ');
+          const qs = [query, ...(opts.queries || [])].map(strip);
+          const hit = queryWikiLayer(index, qs, noteFilter(index, opts));
+          return { present: true, consulted: true, matched_folders: hit.matched_folders, matched_entries: hit.matched_entries };
+        })();
   const note = v.status === 'not_in_brain' ? 'This search did not find a sufficiently strong match. Do not infer that the information is absent from the vault; suggest a rephrasing or another permitted source rather than guessing.'
     : v.needs_translation ? 'Most notes here are not in the language of this question. Search again with an English (or the notes\' language) translation in queries before answering or saying it is not in the notes.'
     : v.status === 'weak' ? `Only partial matches${v.missing_words ? ` (these words were not found in the indexed notes: ${v.missing_words.join(', ')})` : ''}. Answer only if a snippet clearly answers; otherwise explain that this search did not find a reliable answer, and suggest another search.` : null;
-  return { status: v.status, coverage: v.coverage, ...(v.vault_words ? { vault_words: v.vault_words } : {}), ...(v.missing_words ? { missing_words: v.missing_words } : {}), ...(v.needs_translation ? { needs_translation: true } : {}), ...(note ? { note } : {}), results };
+  return { status: v.status, coverage: v.coverage, semantic, wiki_layer: wikiLayer, ...(v.vault_words ? { vault_words: v.vault_words } : {}), ...(v.missing_words ? { missing_words: v.missing_words } : {}), ...(v.needs_translation ? { needs_translation: true } : {}), ...(note ? { note } : {}), results };
 }
 
 // Semantic layer: detect a local embedder once per context; embed a slice of missing chunks
@@ -836,7 +881,8 @@ const PRIVATE_NOTE_ERROR = 'This note is private.';
 
 export async function readNote(ctx, name, rel, { readBody = readFile } = {}) {
   const root = vaultRoot(ctx, name);
-  const full = safeJoin(root, rel);
+  const relInput = String(rel || '').replace(/\\/g, '/');
+  const full = safeJoin(root, relInput);
   if (!full.toLowerCase().endsWith('.md')) throw new Error('Only Markdown notes can be read');
   const relNorm = path.relative(root, full).split(path.sep).join('/');
   if (await isExcludedPath(root, relNorm)) throw new Error(PRIVATE_NOTE_ERROR);
@@ -862,6 +908,10 @@ export async function readNote(ctx, name, rel, { readBody = readFile } = {}) {
   const raw = await readBody(full, 'utf8');
   const { meta, body, frontmatter } = parseFrontmatter(raw);
   if (isPrivateMeta(meta) || fmSaysPrivate(frontmatter) || !twinNoteMemoryAllowed(ctx, name, relNorm, meta)) throw new Error(PRIVATE_NOTE_ERROR);
+  if (isWikiIndexPath(relNorm)) {
+    const safe = renderAllowlistedWikiIndex(relNorm, body, meta, await loadVault(ctx, name));
+    return { path: relNorm, meta: safe.meta, body: safe.body, historical: isHistorical(relNorm, safe.meta) };
+  }
   return { path: rel, meta, body, historical: isHistorical(rel, meta) };
 }
 
@@ -869,20 +919,21 @@ export async function readNote(ctx, name, rel, { readBody = readFile } = {}) {
 // links.mjs's suggestLinks/buildHomeMap) must never surface a private note's title, whether as a
 // suggested link, an auto-linked [[mention]] in a newly written note, or an entry in the
 // generated Home map.
-const eligibleFor = (index) => (j) => { const n = index.notes[j]; return !(n.historical || n.generated || n.private || ROUTING_NOTE.test(n.title) || n.body.trim().length < 120); };
+const eligibleFor = (index) => (j) => { const n = index.notes[j]; return !(n.historical || n.generated || n.private || isWikiIndexPath(n.rel) || ROUTING_NOTE.test(n.title) || n.body.trim().length < 120); };
 
 export async function related(ctx, name, rel) {
   const index = await loadVault(ctx, name);
-  const i = index.byRel.get(rel);
+  const relNorm = normalizeWikiPath(rel);
+  const i = index.byRel.get(relNorm);
   if (i === undefined || index.notes[i].private) throw new Error(`Note not found in ${name}: ${rel}`);
   const { termSets, df } = noteTerms(index);
   const exclude = new Set([i, ...index.outlinks[i], ...index.backlinks[i]]);
-  const notPrivate = (j) => !index.notes[j].private;
+  const visible = (j) => !index.notes[j].private && !isWikiIndexPath(index.notes[j].rel);
   return {
     note: summarize(index, i),
-    links_to: [...index.outlinks[i]].filter(notPrivate).map((j) => summarize(index, j)),
-    linked_from: [...index.backlinks[i]].filter(notPrivate).map((j) => summarize(index, j)),
-    suggested: suggestRelated(termSets[i], termSets, df, { exclude, eligible: (j) => eligibleFor(index)(j) && notPrivate(j) }).map((s) => ({ ...summarize(index, s.j), score: +s.score.toFixed(3), shared_terms: s.shared })),
+    links_to: [...index.outlinks[i]].filter(visible).map((j) => summarize(index, j)),
+    linked_from: [...index.backlinks[i]].filter(visible).map((j) => summarize(index, j)),
+    suggested: suggestRelated(termSets[i], termSets, df, { exclude, eligible: (j) => eligibleFor(index)(j) && visible(j) }).map((s) => ({ ...summarize(index, s.j), score: +s.score.toFixed(3), shared_terms: s.shared })),
   };
 }
 
@@ -893,16 +944,17 @@ export async function relatedText(ctx, name, text, { excludePath = '' } = {}) {
   const index = await loadVault(ctx, name);
   const { termSets, df } = noteTerms(index);
   const exclude = new Set();
-  const sourceIndex = excludePath ? index.byRel.get(excludePath) : undefined;
+  const excludeNorm = excludePath ? normalizeWikiPath(excludePath) : '';
+  const sourceIndex = excludeNorm ? index.byRel.get(excludeNorm) : undefined;
   if (sourceIndex !== undefined) {
     if (index.notes[sourceIndex].private) throw new Error(`Note not found in ${name}: ${excludePath}`);
     exclude.add(sourceIndex);
     for (const j of index.outlinks[sourceIndex] || []) exclude.add(j);
     for (const j of index.backlinks[sourceIndex] || []) exclude.add(j);
   }
-  const notPrivate = (j) => !index.notes[j].private;
+  const visible = (j) => !index.notes[j].private && !isWikiIndexPath(index.notes[j].rel);
   return {
-    suggested: suggestRelated(terms(text), termSets, df, { exclude, eligible: (j) => eligibleFor(index)(j) && notPrivate(j) })
+    suggested: suggestRelated(terms(text), termSets, df, { exclude, eligible: (j) => eligibleFor(index)(j) && visible(j) })
       .map((s) => ({ ...summarize(index, s.j), score: +s.score.toFixed(3), shared_terms: s.shared })),
   };
 }

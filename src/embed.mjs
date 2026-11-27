@@ -6,7 +6,10 @@ import { createHash } from 'node:crypto';
 import path from 'node:path';
 
 export const DEFAULT_URL = 'http://127.0.0.1:11434';
-const PREFERRED = ['nomic-embed-text', 'mxbai-embed-large', 'bge-m3', 'all-minilm', 'snowflake-arctic-embed'];
+export const PREFERRED_EMBED_MODEL = 'nomic-embed-text';
+const PREFERRED = [PREFERRED_EMBED_MODEL, 'mxbai-embed-large', 'bge-m3', 'all-minilm', 'snowflake-arctic-embed'];
+const PULL_HINT = `Run: ollama pull ${PREFERRED_EMBED_MODEL}`;
+const INSTALL_HINT = `Install Ollama from https://ollama.com, start it locally, then run: ollama pull ${PREFERRED_EMBED_MODEL}`;
 
 async function getJson(url, body, timeoutMs) {
   const ctl = new AbortController();
@@ -18,19 +21,37 @@ async function getJson(url, body, timeoutMs) {
   } finally { clearTimeout(t); }
 }
 
-// { available, url, model, reason }. Model: configured, else the first installed embedding model.
+// { available, url, model, preferred_model, reason, setup_hint }. Model: configured, else the first installed embedding model.
 export async function detectEmbedder(cfg = {}, env = process.env) {
   const sem = cfg.semantic || {};
-  if (sem.enabled === false || /^(0|false|off)$/i.test(env.BRAINLINK_SEMANTIC || '')) return { available: false, reason: 'turned off in settings' };
+  if (sem.enabled === false || /^(0|false|off)$/i.test(env.BRAINLINK_SEMANTIC || '')) {
+    return { available: false, preferred_model: PREFERRED_EMBED_MODEL, reason: 'turned off in settings', setup_hint: `Enable semantic search in settings and ${PULL_HINT.toLowerCase()}` };
+  }
   const url = (env.BRAINLINK_EMBED_URL || sem.url || DEFAULT_URL).replace(/\/+$/, '');
   try {
-    const tags = await getJson(`${url}/api/tags`, null, 800);
+    const tags = await getJson(`${url}/api/tags`, null, 2500);
     const names = (tags.models || []).map((m) => m.name || m.model).filter(Boolean);
     const want = env.BRAINLINK_EMBED_MODEL || sem.model;
     const model = want ? names.find((n) => n === want || n.startsWith(want + ':')) : PREFERRED.map((p) => names.find((n) => n.startsWith(p))).find(Boolean) || names.find((n) => /embed/i.test(n));
-    if (!model) return { available: false, url, reason: names.length ? 'no embedding model installed (run: ollama pull nomic-embed-text)' : 'Ollama has no models (run: ollama pull nomic-embed-text)' };
-    return { available: true, url, model };
-  } catch { return { available: false, url, reason: 'Ollama is not running (install it from ollama.com for meaning-based search)' }; }
+    if (!model) {
+      return {
+        available: false,
+        url,
+        preferred_model: PREFERRED_EMBED_MODEL,
+        reason: names.length ? `no embedding model installed (${PULL_HINT.toLowerCase()})` : `Ollama has no models (${PULL_HINT.toLowerCase()})`,
+        setup_hint: PULL_HINT,
+      };
+    }
+    return { available: true, url, model, preferred_model: PREFERRED_EMBED_MODEL };
+  } catch {
+    return {
+      available: false,
+      url,
+      preferred_model: PREFERRED_EMBED_MODEL,
+      reason: 'Ollama is not running (install it from ollama.com for meaning-based search)',
+      setup_hint: INSTALL_HINT,
+    };
+  }
 }
 
 export function normalizeVec(v) {

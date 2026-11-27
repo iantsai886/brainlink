@@ -37,6 +37,8 @@ export function buildContextPacket(result, { vault, maxSources = 4, excerptChars
     vault,
     status: result?.status || 'not_in_brain',
     ...(Number.isFinite(result?.coverage) ? { coverage: result.coverage } : {}),
+    ...(result?.semantic ? { semantic: result.semantic } : {}),
+    ...(result?.wiki_layer ? { wiki_layer: result.wiki_layer } : {}),
     ...(Array.isArray(result?.missing_words) && result.missing_words.length ? { missing_words: result.missing_words.slice(0, 20) } : {}),
     ...(result?.needs_translation ? { needs_translation: true } : {}),
     receipt: buildAnswerReceipt(result, { vault, sources }),

@@ -13,7 +13,7 @@ import { createLiveMcp } from '../src/live-mcp.mjs';
 import { createProposalInbox } from '../src/proposal-inbox.mjs';
 import { openContext, launchSpec, logActivity, readActivity, refreshMap, ROOT } from '../src/runtime.mjs';
 import { readGitSourceState } from '../src/git-source-state.mjs';
-import { createContext, warmSemantic } from '../src/core.mjs';
+import { createContext, warmSemantic, semanticStatus } from '../src/core.mjs';
 import { brief } from '../src/insights.mjs';
 import { runSelfTest } from '../src/self-test.mjs';
 import { createReplayMisses } from '../src/replay-misses.mjs';
@@ -215,7 +215,8 @@ async function main() {
     }
     case 'status': {
       const { cfg, ctx } = await openContext(process.env, { trustedLocal: true });
-      out(`BrainLink ${VERSION}\nconfig: ${configPath()}\ndata:   ${appHome()}\ntimezone: ${ctx.tz}`);
+      const sem = await semanticStatus(ctx);
+      out(`BrainLink ${VERSION}\nconfig: ${configPath()}\ndata:   ${appHome()}\ntimezone: ${ctx.tz}\nsemantic: ${sem.available ? `ready (${sem.model})` : `unavailable — ${sem.reason}${sem.setup_hint ? ` (${sem.setup_hint})` : ''}`}`);
       for (const v of cfg.vaults) out(`vault  ${v.name}: ${v.path}${await stat(v.path).then(() => '', () => '  ← MISSING')}`);
       for (const a of ctx.agents) out(`agent  ${a.name} @ ${a.vault}: "${a.activation[0]}" / "${a.close[0]}"`);
       return;
@@ -237,10 +238,10 @@ async function main() {
       if (!v) fail('no vault configured; run brainlink setup');
       const b = await brief(ctx, v, { days: Number(opt('days', 7)) });
       out(`${b.vault} · last ${b.period_days} days · ${b.health.notes} notes, ${b.health.links} links, ${b.health.not_linked} not linked`);
-      out(`\nChanged (${b.changed.length}):${b.changed.map((c) => `\n  ${c.changed}  ${c.title}`).join('') || ' none'}`);
+      out(`\nChanged (${b.changed.length}):${b.changed.map((c) => `\n  ${c.changed}  ${c.title} (${c.path})`).join('') || ' none'}`);
       const l = b.open_loops;
       out(`\nOpen: ${l.counts.tasks} tasks, ${l.counts.next_actions} next actions, ${l.counts.decisions_waiting} decisions waiting, ${l.counts.unresolved_questions} questions`);
-      for (const x of [...l.decisions_waiting.map((d) => `decision: ${d.decision}`), ...l.next_actions.map((n) => `next: ${n.action}`)].slice(0, 8)) out(`  · ${x}`);
+      for (const x of [...l.decisions_waiting.map((d) => `decision: ${d.decision}${d.path ? ` (${d.path})` : ''}`), ...l.next_actions.map((n) => `next: ${n.action}${n.path ? ` (${n.path})` : ''}`)].slice(0, 8)) out(`  · ${x}`);
       return;
     }
     case 'miss': {
