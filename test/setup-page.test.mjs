@@ -12,3 +12,10 @@ test('Setup assembles destination panels without leaving include markers', async
     'handoffs-panel', 's-ingestion',
   ]) assert.match(html, new RegExp(`id=["']${id}["']`), `${id} is present in the assembled Setup page`);
 });
+
+test('Setup loads ES-module permissions.js with type="module" and consistent access-profile wording', async () => {
+  const html = await renderSetupPage(ROOT);
+  assert.match(html, /<script\s+type="module"\s+src="permissions\.js"><\/script>/);
+  assert.doesNotMatch(html, /<script\s+src="permissions\.js"><\/script>/);
+  assert.doesNotMatch(html, /Select every Twin this AI app should access/);
+});

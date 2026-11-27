@@ -650,7 +650,7 @@ main #ready, main #ask-panel, main #brain-panel, main #sessions-panel, main #s-c
   <div class="modal" role="dialog" aria-modal="true" aria-labelledby="preset-connect-title">
     <b id="preset-connect-title"></b>
     <p class="hint" style="margin-top:6px" data-i18n="connect.profileHint"></p>
-    <p class="muted" style="margin-top:10px">Select every Twin this AI app should access. Each profile keeps its own vault permissions.</p>
+    <p class="muted" style="margin-top:10px">Select every access profile this AI app should use. Each profile keeps its own vault permissions.</p>
     <div id="preset-profile-list" class="cards"></div>
     <p id="preset-connect-summary" class="notice" style="margin-top:10px"></p>
     <div id="preset-connect-review" class="card" role="status" aria-live="polite" style="margin-top:8px"></div>
@@ -664,7 +664,7 @@ main #ready, main #ask-panel, main #brain-panel, main #sessions-panel, main #s-c
 <div id="app-error" class="error-box" role="alert" aria-live="assertive" hidden style="position:sticky;top:0;z-index:1000"><span id="app-error-message"></span> <button type="button" id="app-error-dismiss" class="link">Dismiss</button></div>
 <button type="button" id="cancel-requests" hidden data-i18n="system.cancelRequests" style="position:fixed;right:18px;bottom:18px;z-index:999">Cancel current requests</button>
 <dialog id="confirm-dialog" aria-labelledby="confirm-dialog-message"><p id="confirm-dialog-message" style="white-space:pre-wrap"></p><div class="row"><button type="button" id="confirm-dialog-cancel" data-i18n="system.cancel"></button><button type="button" id="confirm-dialog-accept" class="primary" data-i18n="system.confirm"></button></div></dialog>
-<script src="permissions.js"></script>
+<script type="module" src="permissions.js"></script>
 <script>
 const T = new URLSearchParams(location.search).get('t') || '';
 const latestVaultNoteCounts = new Map();
