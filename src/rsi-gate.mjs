@@ -215,9 +215,10 @@ function runDeterministicRubric(info) {
   check('guardrails_present', guardSec.length >= 15, `length=${guardSec.length}`);
   check('test_card_present', testSec.length >= 15, `length=${testSec.length}`);
 
-  // Check if test card describes an actual executed run or concrete verifiable probe
-  const hasRealRunOrProbe = /\b(hand-run|ran|verified|tested|observed|reproduced|output|probe|exit\s+code|http\s+\d{3}|pass|fail|fixture|command)\b/i.test(testSec);
-  check('test_card_exercised_or_probe', hasRealRunOrProbe, hasRealRunOrProbe ? 'test card names executed run or concrete probe' : 'test card lacks executed run or concrete probe');
+  // Check if test card describes an actual executed run (not merely "Not yet run" or future-tense "How it will be tested")
+  const explicitlyNotRun = /\bnot\s+yet\s+run\b/i.test(testSec);
+  const hasExecutedRun = !explicitlyNotRun && /\b(hand-run|run\s+by\s+hand|ran\s+(?:once|on|against|steps)|verified\s+(?:on|expected|against|with)|observed|reproduced|returned\s+http\s+\d{3}|exit\s+code\s+\d+)\b/i.test(testSec);
+  check('test_card_exercised', hasExecutedRun, hasExecutedRun ? 'test card records an actual executed run' : 'test card has no executed run yet (future-tense or not yet run)');
 
   // Optional machine-checkable command in frontmatter (`test_command`)
   if (typeof fm.test_command === 'string' && fm.test_command.trim()) {

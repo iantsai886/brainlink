@@ -125,6 +125,18 @@ test('evaluate -> promote -> audit -> rollback preserves body, appends JSONL, an
   assert.equal(evalResult.verdict, 'PASS');
   assert.equal(evalResult.judge, 'deterministic-rubric-v1');
 
+  // Unexecuted "Not yet run" test card must FAIL deterministic rubric (prevents 10/10 ceiling effect)
+  await makeSkill(env.skillsDir, 'untested-prose', {
+    body: `\n# untested-prose\n\n## When to use\n\nWhen testing unexecuted drafts.\n\n## Steps\n\n1. Do step one.\n2. Do step two.\n\n## Guardrails\n\n- Never store secrets.\n\n## Test card\n\nNot yet run. How it will be tested: run someday on a sample.\n`,
+  });
+  const untestedEval = await evaluateSkill({
+    skill: 'untested-prose',
+    skillsDir: env.skillsDir,
+    evidenceDir: env.evidenceDir,
+    judge: 'deterministic',
+  });
+  assert.equal(untestedEval.verdict, 'FAIL');
+
   // Promote with passing evidence
   const promo = await promoteSkill({
     skill: 'beta-guard',
