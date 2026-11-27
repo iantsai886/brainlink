@@ -5,7 +5,7 @@ import { tmpdir } from 'node:os';
 import path from 'node:path';
 
 import { normalize, saveConfig } from '../src/config.mjs';
-import { createContext, DEFAULT_EXCLUDED_FOLDERS, isExcludedPath, loadVault, readNote, related, relatedText, searchWithVerdict } from '../src/core.mjs';
+import { createContext, DEFAULT_EXCLUDED_FOLDERS, inspectVaultStructure, isExcludedPath, isSkippedDirName, loadVault, readNote, related, relatedText, searchWithVerdict } from '../src/core.mjs';
 import { isWikiIndexPath } from '../src/wiki-layer.mjs';
 import { buildAnswerReceipt } from '../src/answer-receipt.mjs';
 import { buildContextPacket } from '../src/context-packet.mjs';
@@ -485,21 +485,28 @@ test('S2: fail-closed _staging trailing space/dot exclusion and tightened MAP/IN
   await writeFile(path.join(dir, '.brainlinkignore'), '.obsidian/\n');
   await writeFile(path.join(dir, '00-MAP-of-ideas.md'), '# Ideas Map\n\nOrdinary brainstorm note with IDEAMAPTOKEN.\n');
   await writeFile(path.join(dir, '20 Iango', 'notes-00-INDEX-copy.md'), '# Notes Index Copy\n\nOrdinary notes copy with NOTESCOPYTOKEN.\n');
+  await writeFile(path.join(dir, '00 MAP (1).md'), '---\naliases: [DRIVECOPYMAPPRIVCANARY]\n---\n# Map Copy\n\nRaw conflict copy leaking DRIVECOPYMAPPRIVCANARY.\n');
+  await writeFile(path.join(dir, '20 Iango', '00 INDEX (1).md'), '---\nrelated: [DRIVECOPYIDXPRIVCANARY]\n---\n# Index Copy\n\nRaw conflict copy leaking DRIVECOPYIDXPRIVCANARY.\n');
 
-  // On POSIX filesystems, create literal trailing-space and trailing-dot _staging directories.
-  // (Win32 silently strips trailing spaces/dots on mkdir, so we test on-disk walk/list/graph on POSIX
-  // and always test isExcludedPath + readNote on every platform.)
-  if (process.platform !== 'win32') {
-    await mkdir(path.join(dir, '_staging '), { recursive: true });
-    await writeFile(path.join(dir, '_staging ', 'Space Staging Secret.md'), '# Secret\n\nSPACESTAGINGCANARY\n');
-    await mkdir(path.join(dir, '_staging.'), { recursive: true });
-    await writeFile(path.join(dir, '_staging.', 'Dot Staging Secret.md'), '# Secret\n\nDOTSTAGINGCANARY\n');
-  }
+  // Create _staging trailing-space and trailing-dot directories.
+  // On POSIX these remain distinct literal dirs ("_staging " and "_staging."); on Win32,
+  // Win32 silently strips trailing space/dot to "_staging". Either way, all assertions below run
+  // unconditionally on every platform (no platform-gated assertion loops).
+  await mkdir(path.join(dir, '_staging '), { recursive: true });
+  await writeFile(path.join(dir, '_staging ', 'Space Staging Secret.md'), '# Secret\n\nSPACESTAGINGCANARY\n');
+  await mkdir(path.join(dir, '_staging.'), { recursive: true });
+  await writeFile(path.join(dir, '_staging.', 'Dot Staging Secret.md'), '# Secret\n\nDOTSTAGINGCANARY\n');
 
   const cfg = normalize({ vaults: [{ name: 'Brain', path: dir }] });
   const ctx = createContext(cfg, { env: { BRAINLINK_HOME: home }, trustedLocal: true });
 
   // 1. Fail-closed folder-name comparison: trailing spaces/dots and mixed case must all be excluded.
+  for (const dirVariant of ['_staging', '_staging ', '_staging.', '_STAGING . ', '   ', '...']) {
+    assert.equal(isSkippedDirName(dirVariant), true, `isSkippedDirName must reject "${dirVariant}"`);
+  }
+  assert.equal(isSkippedDirName('20 Iango'), false);
+  assert.equal(isSkippedDirName('00-MAP-of-ideas.md'), false);
+
   for (const variant of [
     '_staging /Space Staging Secret.md',
     '_staging./Dot Staging Secret.md',
@@ -514,23 +521,26 @@ test('S2: fail-closed _staging trailing space/dot exclusion and tightened MAP/IN
   assert.equal(await isExcludedPath(dir, '20 Iango/notes-00-INDEX-copy.md'), false);
 
   const index = await loadVault(ctx, 'Brain');
-  if (process.platform !== 'win32') {
-    for (const n of index.notes) {
-      assert.ok(!/_staging[\s.]*\//i.test(n.rel), `walk must never index trailing space/dot _staging: ${n.rel}`);
-    }
-    for (const folder of index.folders) {
-      assert.ok(!/(?:^|\/)_staging[\s.]*$/i.test(folder), `visibleFolderPaths must never list trailing space/dot _staging: ${folder}`);
-    }
-    for (const canary of ['SPACESTAGINGCANARY', 'DOTSTAGINGCANARY']) {
-      const res = await searchWithVerdict(ctx, 'Brain', canary, { limit: 5, semantic: false, wiki: true });
-      assert.equal(res.results.length, 0, `search must return 0 hits for ${canary}`);
-    }
+  const structure = await inspectVaultStructure(dir);
+  for (const n of index.notes) {
+    assert.ok(!/(?:^|\/)_staging[\s.]*\//i.test(n.rel), `walk must never index trailing space/dot _staging: ${n.rel}`);
+  }
+  for (const folder of structure.folders) {
+    assert.ok(!/(?:^|\/)_staging[\s.]*$/i.test(folder), `visibleFolderPaths must never list trailing space/dot _staging: ${folder}`);
+  }
+  assert.ok(structure.folders.includes('20 Iango'), 'inspectVaultStructure should still list normal folders');
+  for (const canary of ['SPACESTAGINGCANARY', 'DOTSTAGINGCANARY', 'DRIVECOPYMAPPRIVCANARY', 'DRIVECOPYIDXPRIVCANARY']) {
+    const res = await searchWithVerdict(ctx, 'Brain', canary, { limit: 5, semantic: false, wiki: true });
+    assert.equal(res.results.length, 0, `search must return 0 hits for ${canary}`);
   }
 
-  // 2. Tightened MAP/INDEX filename pattern: ordinary notes containing 00-MAP / 00-INDEX are NOT wiki indexes.
+  // 2. Tightened MAP/INDEX filename pattern: ordinary notes containing 00-MAP / 00-INDEX are NOT wiki indexes,
+  // while Drive sync-conflict copies like "00 MAP (1).md" and "00 INDEX (1).md" ARE classified as wiki indexes.
   for (const ordinary of [
     '00-MAP-of-ideas.md',
+    '00-MAP-of-ideas (1).md',
     'notes-00-INDEX-copy.md',
+    'notes-00-INDEX-copy (1).md',
     '20 Iango/00-MAP-of-ideas.md',
     '20 Iango/notes-00-INDEX-copy.md',
   ]) {
@@ -538,14 +548,28 @@ test('S2: fail-closed _staging trailing space/dot exclusion and tightened MAP/IN
   }
   for (const wikiIdx of [
     '00 MAP.md',
+    '00 MAP (1).md',
     '00 INDEX.md',
+    '00 INDEX (1).md',
+    '20 Iango/00 INDEX (2).md',
     '00-MAP.md',
+    '00-MAP (1).md',
     '20 Iango/00_INDEX.md',
+    '20 Iango/00_INDEX (1).md',
     'DRAFT 00 MAP.md',
     'PROMOTED 00 MAP.md',
     'DRAFT 00 INDEX - BrainLink.md',
+    'DRAFT 00 INDEX - BrainLink (1).md',
   ]) {
     assert.equal(isWikiIndexPath(wikiIdx), true, `wiki index must match isWikiIndexPath: ${wikiIdx}`);
+  }
+
+  // Drive sync-conflict copies must never return raw body or frontmatter on explicit readNote.
+  for (const copyPath of ['00 MAP (1).md', '20 Iango/00 INDEX (1).md']) {
+    const direct = await readNote(ctx, 'Brain', copyPath);
+    const serialized = JSON.stringify(direct);
+    assert.ok(!serialized.includes('DRIVECOPYMAPPRIVCANARY'), `readNote(${copyPath}) leaked raw MAP copy`);
+    assert.ok(!serialized.includes('DRIVECOPYIDXPRIVCANARY'), `readNote(${copyPath}) leaked raw INDEX copy`);
   }
 
   // Ordinary notes must remain searchable and readable raw.

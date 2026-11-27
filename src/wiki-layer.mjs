@@ -6,8 +6,8 @@ import { terms } from './graph.mjs';
 
 const RETIRED_STATUS = /^(archived|historical|superseded)$/i;
 const SAFE_STATUS_ENUM = new Set(['active', 'draft', 'proposed', 'verified', 'historical', 'archived']);
-const WIKI_INDEX_STEM_RE = /^(?:(?:DRAFT|PROMOTED)[\s_-]+)?00[\s_-]+(?:MAP|INDEX)(?:\s+[-–—]\s+.+)?$/i;
-const WIKI_MAP_STEM_RE = /^(?:(?:DRAFT|PROMOTED)[\s_-]+)?00[\s_-]+MAP(?:\s+[-–—]\s+.+)?$/i;
+const WIKI_INDEX_STEM_RE = /^(?:(?:DRAFT|PROMOTED)[\s_-]+)?00[\s_-]+(?:MAP|INDEX)(?:\s+[-–—]\s+.+?)?(?:[\s_-]*\(\d+\))*$/i;
+const WIKI_MAP_STEM_RE = /^(?:(?:DRAFT|PROMOTED)[\s_-]+)?00[\s_-]+MAP(?:\s+[-–—]\s+.+?)?(?:[\s_-]*\(\d+\))*$/i;
 const PROMOTED_MAP_RE = /^00 MAP\.md$/i;
 const PROMOTED_INDEX_RE = /^(?:.+\/)?00 INDEX\.md$/i;
 const STAGING_PATH_RE = /(?:^|\/)_staging[\s.]*\//i;
