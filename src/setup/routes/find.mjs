@@ -1,5 +1,7 @@
 // Read-only routes used by the Find destinations in the local setup app.
 // Dependencies are explicit so the HTTP route layer can be maintained by destination.
+import { execFile, spawn } from 'node:child_process';
+import { setTimeout as delay } from 'node:timers/promises';
 import { buildAnswerReceipt } from '../../answer-receipt.mjs';
 import {
   EMBED_PROVIDERS,
@@ -8,13 +10,93 @@ import {
   DEFAULT_LOCAL_COMPAT_URL,
   PREFERRED_EMBED_MODEL,
   DEFAULT_OPENAI_EMBED_MODEL,
+  detectOllamaBinary,
+  pullOllamaModel,
   publicEmbedStatus,
   readEmbedApiKey,
   saveEmbedApiKey,
 } from '../../embed.mjs';
 
+function runExec(cmd, args, timeout = 300_000) {
+  return new Promise((resolve) => {
+    execFile(cmd, args, { timeout, windowsHide: true }, (err, stdout, stderr) => {
+      resolve({ ok: !err, code: err?.code ?? 0, stdout: String(stdout || ''), stderr: String(stderr || ''), error: err?.message || '' });
+    });
+  });
+}
+
+async function defaultOllamaAction({ action, url, model, os, env, openUrl }) {
+  const downloadUrl = os === 'win32'
+    ? 'https://ollama.com/download/windows'
+    : os === 'darwin'
+      ? 'https://ollama.com/download/mac'
+      : 'https://ollama.com/download/linux';
+
+  if (action === 'pull') {
+    await pullOllamaModel(url, model);
+    return { ok: true, method: 'api', message: `Downloaded ${model}. Meaning search is ready.` };
+  }
+
+  if (action === 'start') {
+    const bin = await detectOllamaBinary(os, env);
+    if (!bin) {
+      return { ok: false, method: 'missing', install_url: downloadUrl, message: 'Ollama binary was not found. Click Install Ollama first.' };
+    }
+    try {
+      const child = spawn(bin, ['serve'], { detached: true, stdio: 'ignore', windowsHide: true });
+      child.unref();
+    } catch (e) {
+      return { ok: false, method: 'spawn', message: `Could not start Ollama: ${e.message}` };
+    }
+    for (let i = 0; i < 8; i++) {
+      await delay(500);
+      try {
+        const r = await fetch(`${url.replace(/\/+$/, '')}/api/tags`);
+        if (r.ok) return { ok: true, method: 'started', message: 'Ollama started!' };
+      } catch {}
+    }
+    return { ok: true, method: 'starting', message: 'Ollama is starting in the background. Click Re-check in a few seconds.' };
+  }
+
+  if (action === 'install') {
+    if (os === 'win32') {
+      const wg = await runExec('winget', ['install', '-e', '--id', 'Ollama.Ollama', '--accept-package-agreements', '--accept-source-agreements'], 300_000);
+      if (wg.ok) {
+        const bin = await detectOllamaBinary(os, env);
+        if (bin) {
+          try {
+            const child = spawn(bin, ['serve'], { detached: true, stdio: 'ignore', windowsHide: true });
+            child.unref();
+            await delay(1500);
+          } catch {}
+        }
+        return { ok: true, method: 'winget', message: 'Ollama installed! Now click Download nomic-embed-text (or Re-check).' };
+      }
+      if (typeof openUrl === 'function') openUrl(downloadUrl);
+      return { ok: true, method: 'download', install_url: downloadUrl, message: 'Opened the official Ollama installer page. Run the installer, then click Re-check.' };
+    }
+    if (os === 'darwin') {
+      const br = await runExec('brew', ['install', '--cask', 'ollama'], 300_000);
+      if (br.ok) return { ok: true, method: 'brew', message: 'Ollama installed via Homebrew! Launch Ollama, then click Re-check.' };
+      if (typeof openUrl === 'function') openUrl(downloadUrl);
+      return { ok: true, method: 'download', install_url: downloadUrl, message: 'Opened the official Ollama macOS download page. Install Ollama, then click Re-check.' };
+    }
+    if (typeof openUrl === 'function') openUrl(downloadUrl);
+    return {
+      ok: true,
+      method: 'command',
+      install_url: downloadUrl,
+      command: 'curl -fsSL https://ollama.com/install.sh | sh',
+      message: 'Run `curl -fsSL https://ollama.com/install.sh | sh` in a terminal, then click Re-check.',
+    };
+  }
+
+  throw new Error(`Unsupported Ollama action "${action}".`);
+}
+
 export function createFindRoutes({
-  file, env, normalize, loadConfig, saveConfig, localContext, searchWithVerdict,
+  file, env, os = process.platform, openUrl = null, ollamaRunner = null,
+  normalize, loadConfig, saveConfig, localContext, searchWithVerdict,
   createReplayMisses, semanticStatus, plainText, readNote, loadVault,
   resolveNoteWikilinks,
 }) {
@@ -76,6 +158,28 @@ export function createFindRoutes({
           model: cfg.semantic.model || '',
           has_api_key: Boolean(savedKey || env.BRAINLINK_EMBED_API_KEY),
         },
+      };
+    },
+    'POST /api/rag-ollama-action': async (b) => {
+      const action = String(b?.action || '').trim().toLowerCase();
+      if (!['install', 'start', 'pull'].includes(action)) {
+        throw new Error('Action must be install, start, or pull.');
+      }
+      const cfg = normalize(await loadConfig(file));
+      const url = String(cfg.semantic?.url || env.BRAINLINK_EMBED_URL || DEFAULT_URL).trim().replace(/\/+$/, '');
+      const model = String(b?.model || cfg.semantic?.model || PREFERRED_EMBED_MODEL).trim();
+      const runner = typeof ollamaRunner === 'function' ? ollamaRunner : defaultOllamaAction;
+      const outcome = await runner({ action, url, model, os, env, openUrl });
+      const ctx = localContext(cfg, { ...env, BRAINLINK_AI_PLATFORM: '' });
+      const rawSem = await semanticStatus(ctx).catch(() => ({ available: false, provider: 'ollama', reason: 'unavailable' }));
+      return {
+        ok: outcome?.ok !== false,
+        action,
+        method: outcome?.method || '',
+        message: outcome?.message || '',
+        ...(outcome?.install_url ? { install_url: outcome.install_url } : {}),
+        ...(outcome?.command ? { command: outcome.command } : {}),
+        semantic: publicEmbedStatus(rawSem),
       };
     },
     // Cited local search for the owner. Vaults are searched separately; private vaults

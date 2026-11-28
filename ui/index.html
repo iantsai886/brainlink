@@ -2040,14 +2040,41 @@ function renderRagStatus(semantic, wikiLayer, ragConfig) {
   detail.textContent = parts.join(' · ');
 
   if (promptEl) {
-    if (!hasEmbed && !isLexical && (semantic.action === 'install_ollama' || semantic.action === 'pull_model' || semantic.action === 'set_api_key' || semantic.action === 'start_local_server')) {
+    if (!hasEmbed && !isLexical && (semantic.action === 'install_ollama' || semantic.action === 'start_ollama' || semantic.action === 'pull_model' || semantic.action === 'set_api_key' || semantic.action === 'start_local_server')) {
       promptEl.hidden = false;
       if (semantic.action === 'install_ollama') {
-        promptEl.innerHTML = `Ollama is not installed or running. <a href="https://ollama.com" target="_blank" rel="noopener noreferrer">Install Ollama (free, 100% local)</a> and run <code>ollama pull nomic-embed-text</code> — or click <b>Configure RAG</b> to choose LM Studio, Cloud API, or Smart Lexical mode.`;
+        promptEl.innerHTML = `<div style="display:grid;gap:8px">
+          <div><b>Ollama not detected.</b> Install Ollama (free, 100% local) for meaning-based search, or pick another RAG option.</div>
+          <div class="row" style="gap:8px;align-items:center;flex-wrap:wrap">
+            <button type="button" class="primary" id="rag-ollama-install">Install Ollama</button>
+            <button type="button" class="link" id="rag-open-config">Choose API / Smart Lexical</button>
+            <button type="button" class="link" id="rag-recheck">Re-check</button>
+            <span id="rag-action-msg" class="muted" style="font-size:13px"></span>
+          </div>
+        </div>`;
+      } else if (semantic.action === 'start_ollama') {
+        promptEl.innerHTML = `<div style="display:grid;gap:8px">
+          <div><b>Ollama is installed, but not running yet.</b></div>
+          <div class="row" style="gap:8px;align-items:center;flex-wrap:wrap">
+            <button type="button" class="primary" id="rag-ollama-start">Start Ollama</button>
+            <button type="button" class="link" id="rag-open-config">Choose API / Smart Lexical</button>
+            <button type="button" class="link" id="rag-recheck">Re-check</button>
+            <span id="rag-action-msg" class="muted" style="font-size:13px"></span>
+          </div>
+        </div>`;
       } else if (semantic.action === 'pull_model') {
-        promptEl.innerHTML = `Ollama is running, but no embedding model is installed yet. Run <code>ollama pull nomic-embed-text</code> — or click <b>Configure RAG</b> to pick another option.`;
+        const targetModel = semantic.preferred_model || 'nomic-embed-text';
+        promptEl.innerHTML = `<div style="display:grid;gap:8px">
+          <div><b>Ollama is running!</b> Download the local embedding model (<code>${esc(targetModel)}</code>, ~274 MB one-time) to turn on meaning search.</div>
+          <div class="row" style="gap:8px;align-items:center;flex-wrap:wrap">
+            <button type="button" class="primary" id="rag-ollama-pull">Download ${esc(targetModel)}</button>
+            <button type="button" class="link" id="rag-open-config">Choose API / Smart Lexical</button>
+            <button type="button" class="link" id="rag-recheck">Re-check</button>
+            <span id="rag-action-msg" class="muted" style="font-size:13px"></span>
+          </div>
+        </div>`;
       } else {
-        promptEl.innerHTML = `${esc(semantic.setup_hint || semantic.reason || 'Configure your embedding provider.')} Click <b>Configure RAG</b> to update.`;
+        promptEl.innerHTML = `${esc(semantic.setup_hint || semantic.reason || 'Configure your embedding provider.')} <button type="button" class="link" id="rag-open-config">Configure RAG</button> <button type="button" class="link" id="rag-recheck">Re-check</button>`;
       }
     } else {
       promptEl.hidden = true;
@@ -2063,6 +2090,54 @@ async function refreshRagStatus() {
     renderRagStatus(null, null, null);
   }
 }
+if ($('ask-rag-prompt')) $('ask-rag-prompt').addEventListener('click', (event) => {
+  const openBtn = event.target.closest('#rag-open-config');
+  if (openBtn) {
+    const el = $('ask-rag-config');
+    if (el) { el.hidden = false; syncRagFormFields(); }
+    return;
+  }
+  const recheckBtn = event.target.closest('#rag-recheck');
+  if (recheckBtn) {
+    recheckBtn.disabled = true;
+    refreshRagStatus().finally(() => { recheckBtn.disabled = false; });
+    return;
+  }
+  const installBtn = event.target.closest('#rag-ollama-install');
+  const startBtn = event.target.closest('#rag-ollama-start');
+  const pullBtn = event.target.closest('#rag-ollama-pull');
+  const actionBtn = installBtn || startBtn || pullBtn;
+  if (!actionBtn) return;
+  const action = installBtn ? 'install' : startBtn ? 'start' : 'pull';
+  const busyText = action === 'install'
+    ? 'Installing Ollama… (this may take a minute)'
+    : action === 'start'
+      ? 'Starting Ollama…'
+      : 'Downloading nomic-embed-text… (~274 MB, one-time)';
+  act(async () => {
+    actionBtn.disabled = true;
+    const msgEl = $('rag-action-msg');
+    if (msgEl) msgEl.textContent = busyText;
+    try {
+      const res = await api('POST', '/api/rag-ollama-action', { action });
+      if (res.semantic) renderRagStatus(res.semantic, null, null);
+      const nextMsg = $('rag-action-msg');
+      if (nextMsg && res.message) {
+        nextMsg.innerHTML = res.install_url
+          ? `${esc(res.message)} <a href="${esc(res.install_url)}" target="_blank" rel="noopener noreferrer">Download page</a>`
+          : esc(res.message);
+      } else if (res.message) {
+        toast(res.message);
+      }
+    } catch (err) {
+      const nextMsg = $('rag-action-msg');
+      if (nextMsg) nextMsg.textContent = err.message;
+      else toast(err.message, true);
+    } finally {
+      actionBtn.disabled = false;
+    }
+  });
+});
 if ($('ask-rag-toggle')) $('ask-rag-toggle').onclick = () => {
   const el = $('ask-rag-config');
   if (el) { el.hidden = !el.hidden; syncRagFormFields(); }

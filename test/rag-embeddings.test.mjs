@@ -254,3 +254,53 @@ test('S1: flexible RAG supports Ollama install prompt, OpenAI-compatible local s
     fakeCompat.close();
   }
 });
+
+test('S1: POST /api/rag-ollama-action supports one-click install, start, and pull with auto-recheck', async () => {
+  const dir = await tmp('s1-ollama-action-vault');
+  const home = await tmp('s1-ollama-action-home');
+  await mkdir(dir, { recursive: true });
+  await mkdir(home, { recursive: true });
+  await writeFile(path.join(dir, 'Note.md'), '# Note\nTest content.\n');
+  const cfg = normalize({ vaults: [{ name: 'Brain', path: dir }] });
+  await saveConfig(cfg, path.join(home, 'config.json'));
+
+  const seenActions = [];
+  const setup = await startSetup({
+    env: { BRAINLINK_HOME: home, BRAINLINK_EMBED_URL: 'http://127.0.0.1:1' },
+    home: await tmp('s1-ollama-action-user'),
+    os: 'win32',
+    port: 0,
+    openUrl: null,
+    useCli: false,
+    ollamaRunner: async ({ action, model }) => {
+      seenActions.push({ action, model });
+      return { ok: true, method: 'mock', message: `Ran ${action} for ${model}` };
+    },
+  });
+
+  try {
+    for (const action of ['install', 'start', 'pull']) {
+      const res = await fetch(`http://127.0.0.1:${setup.port}/api/rag-ollama-action`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'X-BrainLink-Token': setup.token },
+        body: JSON.stringify({ action }),
+      });
+      assert.equal(res.status, 200);
+      const body = await res.json();
+      assert.equal(body.ok, true);
+      assert.equal(body.action, action);
+      assert.equal(body.method, 'mock');
+      assert.ok(body.semantic && typeof body.semantic === 'object');
+    }
+    assert.deepEqual(seenActions.map((x) => x.action), ['install', 'start', 'pull']);
+
+    const bad = await fetch(`http://127.0.0.1:${setup.port}/api/rag-ollama-action`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'X-BrainLink-Token': setup.token },
+      body: JSON.stringify({ action: 'delete-everything' }),
+    });
+    assert.equal(bad.status, 400);
+  } finally {
+    setup.server.close();
+  }
+});

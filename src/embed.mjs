@@ -7,9 +7,41 @@
 // Chunks are embedded once per content hash and cached on disk; search uses whatever
 // vectors are ready and falls back to keyword + MAP/INDEX ranking for the rest.
 import { readFile, writeFile, mkdir, rename, unlink } from 'node:fs/promises';
+import { existsSync } from 'node:fs';
+import { execFile } from 'node:child_process';
 import { createHash } from 'node:crypto';
 import path from 'node:path';
 import { appHome } from './app-home.mjs';
+
+export function detectOllamaBinary(os = process.platform, env = process.env) {
+  const candidates = os === 'win32'
+    ? [
+        env.LOCALAPPDATA ? path.join(env.LOCALAPPDATA, 'Programs', 'Ollama', 'ollama.exe') : '',
+        env.ProgramFiles ? path.join(env.ProgramFiles, 'Ollama', 'ollama.exe') : '',
+      ].filter(Boolean)
+    : os === 'darwin'
+      ? ['/usr/local/bin/ollama', '/opt/homebrew/bin/ollama', '/Applications/Ollama.app/Contents/Resources/ollama']
+      : ['/usr/local/bin/ollama', '/usr/bin/ollama'];
+  for (const p of candidates) {
+    if (existsSync(p)) return p;
+  }
+  return new Promise((resolve) => {
+    execFile(os === 'win32' ? 'where' : 'which', ['ollama'], { timeout: 2000, windowsHide: true }, (err, stdout) => {
+      if (err || !stdout) return resolve(null);
+      const first = String(stdout).split(/\r?\n/).map((l) => l.trim()).find(Boolean);
+      resolve(first || null);
+    });
+  });
+}
+
+export async function pullOllamaModel(url = DEFAULT_URL, model = PREFERRED_EMBED_MODEL, timeoutMs = 300_000) {
+  const base = String(url || DEFAULT_URL).trim().replace(/\/+$/, '');
+  const cleanModel = String(model || PREFERRED_EMBED_MODEL).trim();
+  if (!cleanModel || !/^[a-zA-Z0-9._:/-]+$/.test(cleanModel)) {
+    throw new Error('Invalid Ollama model name.');
+  }
+  return getJson(`${base}/api/pull`, { name: cleanModel, stream: false }, timeoutMs);
+}
 
 export const DEFAULT_URL = 'http://127.0.0.1:11434';
 export const DEFAULT_OPENAI_URL = 'https://api.openai.com/v1';
@@ -148,11 +180,27 @@ export async function detectEmbedder(cfg = {}, env = process.env) {
     }
     return { available: true, provider: 'ollama', url, model, preferred_model: PREFERRED_EMBED_MODEL, action: 'ready' };
   } catch {
+    const isDefaultLocal = url === DEFAULT_URL;
+    const bin = isDefaultLocal ? await detectOllamaBinary(process.platform, env) : null;
+    if (bin) {
+      return {
+        available: false,
+        provider: 'ollama',
+        url,
+        preferred_model: PREFERRED_EMBED_MODEL,
+        installed: true,
+        action: 'start_ollama',
+        install_url: 'https://ollama.com',
+        reason: 'Ollama is installed, but not running yet',
+        setup_hint: 'Start Ollama locally (or click Start Ollama in RAG settings)',
+      };
+    }
     return {
       available: false,
       provider: 'ollama',
       url,
       preferred_model: PREFERRED_EMBED_MODEL,
+      installed: false,
       action: 'install_ollama',
       install_url: 'https://ollama.com',
       reason: 'Ollama is not running (install it from ollama.com, or choose API / Smart Lexical mode)',
