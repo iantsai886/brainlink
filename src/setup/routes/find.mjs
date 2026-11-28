@@ -119,6 +119,7 @@ export function createFindRoutes({
           url: cfg.semantic?.url || '',
           model: cfg.semantic?.model || '',
           remote_consent: Boolean(cfg.semantic?.remote_consent),
+          remote_consent_host: cfg.semantic?.remote_consent_host || '',
           has_api_key: Boolean(savedKey || env.BRAINLINK_EMBED_API_KEY),
         },
         defaults: {
@@ -142,21 +143,30 @@ export function createFindRoutes({
       const defaultUrl = provider === 'openai' ? DEFAULT_OPENAI_URL : provider === 'openai-compatible' ? DEFAULT_LOCAL_COMPAT_URL : DEFAULT_URL;
       const effectiveUrl = provider === 'lexical' ? '' : (url || defaultUrl);
       let isRemote = false;
+      let targetHost = '';
       if (provider !== 'lexical') {
         const check = validateEmbedUrl(effectiveUrl);
         if (!check.ok) throw new Error(check.error);
         isRemote = !check.local;
+        targetHost = String(check.host || '').toLowerCase();
       }
       const model = String(b?.model || '').trim().slice(0, 120);
       const cfg = normalize(await loadConfig(file));
-      const sameRemoteTarget = isRemote && cfg.semantic?.remote_consent === true && (cfg.semantic?.url || defaultUrl) === effectiveUrl && cfg.semantic?.provider === provider;
-      const remoteConsent = isRemote ? (b?.remote_consent === true || (b?.remote_consent === undefined && sameRemoteTarget)) : false;
+      const approvedHost = String(cfg.semantic?.remote_consent_host || '').trim().toLowerCase();
+      const sameRemoteHost = isRemote
+        && cfg.semantic?.remote_consent === true
+        && Boolean(approvedHost)
+        && approvedHost === targetHost
+        && cfg.semantic?.provider === provider;
+      const requestedHost = typeof b?.remote_consent_host === 'string' ? b.remote_consent_host.trim().toLowerCase() : '';
+      const explicitConsentMatches = b?.remote_consent === true && (!requestedHost || requestedHost === targetHost);
+      const remoteConsent = isRemote ? (explicitConsentMatches || (b?.remote_consent === undefined && sameRemoteHost)) : false;
       cfg.semantic = {
         enabled: provider !== 'lexical',
         provider,
         ...(url ? { url } : {}),
         ...(model ? { model } : {}),
-        ...(isRemote ? { remote_consent: remoteConsent } : {}),
+        ...(isRemote && remoteConsent ? { remote_consent: true, remote_consent_host: targetHost } : isRemote ? { remote_consent: false } : {}),
       };
       await saveConfig(cfg, file);
       const ctx = localContext(cfg, { ...env, BRAINLINK_AI_PLATFORM: '' });
@@ -173,6 +183,7 @@ export function createFindRoutes({
           url: cfg.semantic.url || '',
           model: cfg.semantic.model || '',
           remote_consent: Boolean(cfg.semantic.remote_consent),
+          remote_consent_host: cfg.semantic.remote_consent_host || '',
           has_api_key: Boolean(savedKey || env.BRAINLINK_EMBED_API_KEY),
         },
       };
@@ -213,6 +224,7 @@ export function createFindRoutes({
           url: cfg.semantic?.url || '',
           model: cfg.semantic?.model || '',
           remote_consent: Boolean(cfg.semantic?.remote_consent),
+          remote_consent_host: cfg.semantic?.remote_consent_host || '',
           has_api_key: Boolean(savedKey || env.BRAINLINK_EMBED_API_KEY),
         },
       };

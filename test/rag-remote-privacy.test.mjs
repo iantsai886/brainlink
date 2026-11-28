@@ -4,8 +4,8 @@ import { mkdtemp, mkdir, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { normalize, saveConfig } from '../src/config.mjs';
-import { createContext, searchWithVerdict, warmSemantic } from '../src/core.mjs';
-import { isLocalEmbedder, saveEmbedApiKey } from '../src/embed.mjs';
+import { createContext, searchWithVerdict, warmSemantic, findRemoteSensitive } from '../src/core.mjs';
+import { isLocalEmbedder, detectEmbedder, saveEmbedApiKey } from '../src/embed.mjs';
 import { createMcp } from '../src/server.mjs';
 import { startSetup } from '../src/setup.mjs';
 import { runDoctor } from '../src/doctor.mjs';
@@ -90,13 +90,13 @@ test('remote embedder privacy canaries: consent gate, private-vault block, secre
     await searchWithVerdict(ctxNoConsent, 'PrivateVault', privateQueryCanary);
     assert.equal(sentInputs.length, 0, 'Without remote_consent, zero texts may be sent to remote embedder');
 
-    // 2. With remote_consent: true, warmSemantic + searches across both vaults.
+    // 2. With remote_consent: true + matching remote_consent_host, warmSemantic + searches across both vaults.
     const cfgConsent = normalize({
       vaults: [
         { name: 'Shared', path: sharedDir, private: false },
         { name: 'PrivateVault', path: privateDir, private: true },
       ],
-      semantic: { enabled: true, provider: 'openai', url: remoteUrl, model: 'text-embedding-3-small', remote_consent: true },
+      semantic: { enabled: true, provider: 'openai', url: remoteUrl, model: 'text-embedding-3-small', remote_consent: true, remote_consent_host: 'api.example.test' },
     });
     const ctxConsent = createContext(cfgConsent, { env: { BRAINLINK_HOME: home }, trustedLocal: true });
     await warmSemantic(ctxConsent, 'Shared');
@@ -174,5 +174,154 @@ test('remote embedder privacy canaries: consent gate, private-vault block, secre
     }
   } finally {
     globalThis.fetch = origFetch;
+  }
+});
+
+test('R1: findRemoteSensitive blocks plain-text credentials, headers, credential URLs, JWTs, Taiwan IDs, without over-blocking prose', async () => {
+  const root = await tmp('r1');
+  const vaultDir = path.join(root, 'shared');
+  const home = path.join(root, 'home');
+  await mkdir(vaultDir, { recursive: true });
+  await mkdir(home, { recursive: true });
+  await saveEmbedApiKey(home, 'sk-proj-R1TESTKEY12345678901234567890');
+
+  const blockedNotes = [
+    ['cred-password.md', 'Login password: hunter2Hunter2!'],
+    ['cred-passwd.md', 'DB passwd=AlphaPass99'],
+    ['cred-pwd.md', 'Shell pwd: BetaPass88'],
+    ['cred-pin.md', 'Door pin: 4921'],
+    ['cred-passcode.md', 'Lock passcode=778899'],
+    ['cred-secret.md', 'App secret: mySharedSecretVal'],
+    ['cred-token.md', 'Service token=tok_plain_9911'],
+    ['cred-apikey.md', 'Vendor api_key: plainKey123'],
+    ['cred-apikey2.md', 'Vendor apikey=plainKey456'],
+    ['cred-client-secret.md', 'OAuth client_secret: cs_plain_789'],
+    ['cred-cjk-trad.md', '帳號 密碼：myCjkPass1'],
+    ['cred-cjk-simp.md', '账号 密码: myCjkPass2'],
+    ['header-bearer.md', 'Authorization: Bearer fakeHeaderToken99'],
+    ['header-basic.md', 'Authorization: Basic dXNlcjpwYXNz'],
+    ['cred-url.md', 'Endpoint https://alice:secretpass@db.example.test/app'],
+    ['cred-jwt.md', 'Session eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiIxMjM0NTY3ODkwIn0.dozjgNryP4J3jVmNHl0w5N_XgL0n3I9PlFUP0THsR8U'],
+    ['tw-id-1.md', 'Applicant ID A123456789'],
+    ['tw-id-2.md', 'Applicant ID F298765432'],
+  ];
+  const allowedProse = [
+    ['prose-policy.md', 'We need a password policy for onboarding new teammates.'],
+    ['prose-pin.md', 'Remember to reset your PIN in settings after the first login.'],
+  ];
+
+  for (const [name, text] of blockedNotes) {
+    assert.ok(findRemoteSensitive(text).length > 0, `Expected findRemoteSensitive to flag ${name}`);
+    await writeFile(path.join(vaultDir, name), `# ${name}\n${text}\n`);
+  }
+  for (const [name, text] of allowedProse) {
+    assert.equal(findRemoteSensitive(text).length, 0, `Expected findRemoteSensitive NOT to over-block prose in ${name}`);
+    await writeFile(path.join(vaultDir, name), `# ${name}\n${text}\n`);
+  }
+
+  const remoteUrl = 'https://api.example.test/v1';
+  const sent = [];
+  const origFetch = globalThis.fetch;
+  globalThis.fetch = async (url, init) => {
+    if (String(url).startsWith(remoteUrl)) {
+      const parsed = init?.body ? JSON.parse(String(init.body)) : {};
+      const items = Array.isArray(parsed.input) ? parsed.input : [parsed.input];
+      sent.push(...items.map(String));
+      return new Response(JSON.stringify({ data: items.map((_, index) => ({ index, embedding: [0.5, 0.5] })) }), {
+        status: 200, headers: { 'Content-Type': 'application/json' },
+      });
+    }
+    return origFetch(url, init);
+  };
+
+  try {
+    const cfg = normalize({
+      vaults: [{ name: 'Shared', path: vaultDir, private: false }],
+      semantic: { enabled: true, provider: 'openai', url: remoteUrl, model: 'text-embedding-3-small', remote_consent: true, remote_consent_host: 'api.example.test' },
+    });
+    const ctx = createContext(cfg, { env: { BRAINLINK_HOME: home }, trustedLocal: true });
+    await warmSemantic(ctx, 'Shared');
+    await searchWithVerdict(ctx, 'Shared', 'password: hunter2Hunter2!');
+
+    const joined = sent.join('\n');
+    for (const [name, text] of blockedNotes) {
+      assert.ok(!joined.includes(text), `Blocked credential note ${name} must NEVER be sent to remote embedder`);
+    }
+    for (const [name, text] of allowedProse) {
+      assert.ok(joined.includes(text), `Safe prose note ${name} MUST still be sent to remote embedder`);
+    }
+  } finally {
+    globalThis.fetch = origFetch;
+  }
+});
+
+test('R2: remote consent is strictly bound to approved host (match, env override, legacy no-host, URL change clears consent)', async () => {
+  const root = await tmp('r2');
+  const vaultDir = path.join(root, 'shared');
+  const home = path.join(root, 'home');
+  const userHome = path.join(root, 'user-home');
+  await mkdir(vaultDir, { recursive: true });
+  await mkdir(home, { recursive: true });
+  await mkdir(userHome, { recursive: true });
+  await saveEmbedApiKey(home, 'sk-proj-R2TESTKEY12345678901234567890');
+
+  const cfg = normalize({
+    vaults: [{ name: 'Shared', path: vaultDir, private: false }],
+    semantic: {
+      enabled: true,
+      provider: 'openai',
+      url: 'https://api.openai.com/v1',
+      model: 'text-embedding-3-small',
+      remote_consent: true,
+      remote_consent_host: 'api.openai.com',
+    },
+  });
+
+  // 1. Exact host match -> available
+  const match = await detectEmbedder(cfg, { BRAINLINK_HOME: home });
+  assert.equal(match.available, true);
+  assert.equal(match.action, 'ready');
+
+  // 2. Env override to another host -> consent_required naming new host
+  const envOverride = await detectEmbedder(cfg, { BRAINLINK_HOME: home, BRAINLINK_EMBED_URL: 'https://other.example/v1' });
+  assert.equal(envOverride.available, false);
+  assert.equal(envOverride.action, 'consent_required');
+  assert.match(envOverride.reason, /other\.example/);
+
+  // 3. Legacy consent (remote_consent: true without remote_consent_host) -> fail closed
+  const legacyCfg = normalize({
+    vaults: [{ name: 'Shared', path: vaultDir, private: false }],
+    semantic: { enabled: true, provider: 'openai', url: 'https://api.openai.com/v1', model: 'text-embedding-3-small', remote_consent: true },
+  });
+  const legacyRes = await detectEmbedder(legacyCfg, { BRAINLINK_HOME: home });
+  assert.equal(legacyRes.available, false);
+  assert.equal(legacyRes.action, 'consent_required');
+
+  // 4. Changing provider URL in Setup without confirming new host clears consent
+  const cfgFile = path.join(home, 'config.json');
+  await saveConfig(cfg, cfgFile);
+  const setup = await startSetup({
+    env: { BRAINLINK_HOME: home },
+    home: userHome,
+    os: 'win32',
+    port: 0,
+    openUrl: null,
+    useCli: false,
+  });
+  try {
+    const res = await fetch(`http://127.0.0.1:${setup.port}/api/rag-config`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'X-BrainLink-Token': setup.token },
+      body: JSON.stringify({ provider: 'openai', url: 'https://other.example/v1', model: 'text-embedding-3-small' }),
+    });
+    assert.equal(res.status, 200);
+    const body = await res.json();
+    assert.equal(body.config.remote_consent, false);
+    assert.equal(body.config.remote_consent_host, '');
+    assert.equal(body.semantic.available, false);
+    assert.equal(body.semantic.action, 'consent_required');
+    assert.match(body.semantic.reason, /other\.example/);
+  } finally {
+    setup.server.close();
   }
 });

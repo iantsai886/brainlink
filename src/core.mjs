@@ -873,12 +873,12 @@ async function semanticLists(ctx, name, index, queries) {
   const remote = !isLocalEmbedder(emb);
   const isPrivateVault = Boolean(ctx.byName.get(name)?.private);
   if (remote && isPrivateVault) return [];
-  const safeQueries = remote ? queries.filter((q) => findSecrets(q).length === 0) : queries;
+  const safeQueries = remote ? queries.filter((q) => findRemoteSensitive(q).length === 0) : queries;
   if (!safeQueries.length) return [];
   try {
     if (!ctx.stores.has(name)) ctx.stores.set(name, new VectorStore(ctx.dataDir, vaultRoot(ctx, name), emb.model));
     const store = ctx.stores.get(name);
-    await fillVectors(emb, store, index, 64, { isPrivateVault, hasSecrets: (t) => findSecrets(t).length > 0 });
+    await fillVectors(emb, store, index, 64, { isPrivateVault, hasSecrets: (t) => findRemoteSensitive(t).length > 0 });
     const qvecs = await embedTexts(emb, safeQueries);
     return qvecs.map((qv) => nearest(index, store, qv));
   } catch { return []; }
@@ -895,7 +895,7 @@ export async function warmSemantic(ctx, name) {
   if (!ctx.stores.has(name)) ctx.stores.set(name, new VectorStore(ctx.dataDir, vaultRoot(ctx, name), emb.model));
   let r;
   do {
-    r = await fillVectors(emb, ctx.stores.get(name), index, 256, { isPrivateVault, hasSecrets: (t) => findSecrets(t).length > 0 });
+    r = await fillVectors(emb, ctx.stores.get(name), index, 256, { isPrivateVault, hasSecrets: (t) => findRemoteSensitive(t).length > 0 });
   } while (r.processed > 0 && r.ready + (r.skipped || 0) < r.total);
   return r;
 }
@@ -1029,4 +1029,22 @@ export function findSecrets(text) {
     },
   );
   return SECRET_PATTERNS.filter(([re]) => re.test(scanText)).map(([, label]) => label);
+}
+
+// Stricter sensitivity check used exclusively before sending chunks or queries to a remote
+// embedding provider. Does not alter findSecrets() for local note writes or ingestion.
+const REMOTE_SENSITIVE_PATTERNS = [
+  [/(?:^|[\s,;`"'(\[{])(?:password|passwd|pwd|pin|passcode|secret|token|api[_-]?key|apikey|client[_-]?secret)\s*[:=]\s*["']?[^\s"'`,;)\]}]+/i, 'credential key-value'],
+  [/(?:密碼|密码)\s*[:=：]\s*["']?[^\s"'`,;)\]}]+/, 'credential key-value (CJK)'],
+  [/\bAuthorization\s*:\s*(?:Bearer|Basic)\s+[A-Za-z0-9._~+/=-]{4,}/i, 'authorization header'],
+  [/\b[a-z][a-z0-9+.-]*:\/\/[^/\s:@]+:[^/\s@]+@[^\s/]+/i, 'URL with embedded credentials'],
+  [/\beyJ[A-Za-z0-9_-]{6,}\.[A-Za-z0-9_-]{6,}\.[A-Za-z0-9_-]{6,}\b/, 'JWT token'],
+  [/(?<![A-Za-z0-9])[A-Z][12]\d{8}(?![A-Za-z0-9])/, 'Taiwan national ID'],
+];
+
+export function findRemoteSensitive(text) {
+  const s = String(text ?? '');
+  const base = findSecrets(s);
+  const extra = REMOTE_SENSITIVE_PATTERNS.filter(([re]) => re.test(s)).map(([, label]) => label);
+  return [...base, ...extra];
 }

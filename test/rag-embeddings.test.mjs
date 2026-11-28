@@ -192,7 +192,7 @@ test('S1: flexible RAG supports Ollama install prompt, OpenAI-compatible local s
   assert.equal(noConsentRes.provider, 'openai');
   assert.equal(noConsentRes.action, 'consent_required');
 
-  const noKeyRes = await detectEmbedder({ semantic: { provider: 'openai', remote_consent: true } }, { BRAINLINK_HOME: home });
+  const noKeyRes = await detectEmbedder({ semantic: { provider: 'openai', remote_consent: true, remote_consent_host: 'api.openai.com' } }, { BRAINLINK_HOME: home });
   assert.equal(noKeyRes.available, false);
   assert.equal(noKeyRes.provider, 'openai');
   assert.equal(noKeyRes.action, 'set_api_key');

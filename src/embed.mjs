@@ -84,6 +84,13 @@ export function validateEmbedUrl(url) {
   return { ok: true, local, host: parsed.host, url: parsed.toString().replace(/\/+$/, '') };
 }
 
+export function remoteConsentValid(sem, host) {
+  if (!sem || sem.remote_consent !== true) return false;
+  const approved = String(sem.remote_consent_host || '').trim().toLowerCase();
+  const target = String(host || '').trim().toLowerCase();
+  return Boolean(approved && target && approved === target);
+}
+
 const PREFERRED = [PREFERRED_EMBED_MODEL, 'mxbai-embed-large', 'bge-m3', 'all-minilm', 'snowflake-arctic-embed'];
 const PULL_HINT = `Run: ollama pull ${PREFERRED_EMBED_MODEL}`;
 const INSTALL_HINT = `Install Ollama from https://ollama.com, start it locally, then run: ollama pull ${PREFERRED_EMBED_MODEL}`;
@@ -162,7 +169,7 @@ export async function detectEmbedder(cfg = {}, env = process.env) {
     }
     const url = urlCheck.url;
     const remote = !urlCheck.local;
-    if (remote && sem.remote_consent !== true) {
+    if (remote && !remoteConsentValid(sem, urlCheck.host)) {
       return {
         available: false,
         provider,
@@ -241,7 +248,7 @@ export async function detectEmbedder(cfg = {}, env = process.env) {
   }
   const url = urlCheck.url;
   const remote = !urlCheck.local;
-  if (remote && sem.remote_consent !== true) {
+  if (remote && !remoteConsentValid(sem, urlCheck.host)) {
     return {
       available: false,
       provider: 'ollama',

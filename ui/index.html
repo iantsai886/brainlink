@@ -2241,7 +2241,7 @@ if ($('rag-save')) $('rag-save').onclick = () => act(async () => {
     provider,
     url: rawUrl,
     model: $('rag-model').value.trim(),
-    ...(remoteHost ? { remote_consent: remoteConsent } : {}),
+    ...(remoteHost ? { remote_consent: remoteConsent, remote_consent_host: remoteHost } : {}),
   };
   const keyVal = $('rag-api-key').value.trim();
   if (keyVal) payload.api_key = keyVal;
