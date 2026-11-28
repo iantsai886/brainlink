@@ -58,6 +58,32 @@ export const RECOMMENDED_OLLAMA_EMBED_MODELS = Object.freeze([
 ]);
 const PROVIDER_SET = new Set(EMBED_PROVIDERS);
 
+export function isLocalEmbedder(emb) {
+  const raw = typeof emb === 'string' ? emb : emb?.url;
+  if (!raw || typeof raw !== 'string') return false;
+  try {
+    const parsed = new URL(raw);
+    const host = parsed.hostname.replace(/^\[|\]$/g, '').toLowerCase();
+    return host === 'localhost' || host === '127.0.0.1' || host === '::1';
+  } catch {
+    return false;
+  }
+}
+
+export function validateEmbedUrl(url) {
+  let parsed;
+  try { parsed = new URL(String(url || '').trim()); }
+  catch { return { ok: false, error: 'Embedding endpoint URL is not a valid URL.' }; }
+  if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') {
+    return { ok: false, error: 'Embedding endpoint URL must use http:// or https://.' };
+  }
+  const local = isLocalEmbedder({ url: parsed.toString() });
+  if (parsed.protocol === 'http:' && !local) {
+    return { ok: false, error: 'Remote embedding endpoints must use https:// (plaintext http:// is allowed only for loopback hosts).' };
+  }
+  return { ok: true, local, host: parsed.host, url: parsed.toString().replace(/\/+$/, '') };
+}
+
 const PREFERRED = [PREFERRED_EMBED_MODEL, 'mxbai-embed-large', 'bge-m3', 'all-minilm', 'snowflake-arctic-embed'];
 const PULL_HINT = `Run: ollama pull ${PREFERRED_EMBED_MODEL}`;
 const INSTALL_HINT = `Install Ollama from https://ollama.com, start it locally, then run: ollama pull ${PREFERRED_EMBED_MODEL}`;
@@ -118,8 +144,37 @@ export async function detectEmbedder(cfg = {}, env = process.env) {
 
   if (provider === 'openai' || provider === 'openai-compatible') {
     const defaultBase = provider === 'openai' ? DEFAULT_OPENAI_URL : DEFAULT_LOCAL_COMPAT_URL;
-    const url = String(env.BRAINLINK_EMBED_URL || sem.url || defaultBase).trim().replace(/\/+$/, '');
+    const rawUrl = String(env.BRAINLINK_EMBED_URL || sem.url || defaultBase).trim().replace(/\/+$/, '');
     const model = String(env.BRAINLINK_EMBED_MODEL || sem.model || (provider === 'openai' ? DEFAULT_OPENAI_EMBED_MODEL : PREFERRED_EMBED_MODEL)).trim();
+    const urlCheck = validateEmbedUrl(rawUrl);
+    if (!urlCheck.ok) {
+      return {
+        available: false,
+        provider,
+        url: rawUrl,
+        model,
+        remote: !isLocalEmbedder({ url: rawUrl }),
+        preferred_model: provider === 'openai' ? DEFAULT_OPENAI_EMBED_MODEL : model,
+        action: 'invalid_url',
+        reason: urlCheck.error,
+        setup_hint: 'Use https:// for remote embedding servers or a loopback address (127.0.0.1 / localhost / [::1])',
+      };
+    }
+    const url = urlCheck.url;
+    const remote = !urlCheck.local;
+    if (remote && sem.remote_consent !== true) {
+      return {
+        available: false,
+        provider,
+        url,
+        model,
+        remote: true,
+        preferred_model: provider === 'openai' ? DEFAULT_OPENAI_EMBED_MODEL : model,
+        action: 'consent_required',
+        reason: `Remote embeddings require explicit owner consent before sending shared-vault text to ${urlCheck.host}`,
+        setup_hint: 'Confirm remote embedding consent in RAG settings, or switch to local Ollama / Smart Lexical',
+      };
+    }
     const homeDir = appHome(env);
     const savedKey = await readEmbedApiKey(homeDir);
     const apiKey = String(env.BRAINLINK_EMBED_API_KEY || (provider === 'openai' ? env.OPENAI_API_KEY : '') || savedKey || '').trim();
@@ -130,6 +185,7 @@ export async function detectEmbedder(cfg = {}, env = process.env) {
         provider,
         url,
         model,
+        remote,
         preferred_model: DEFAULT_OPENAI_EMBED_MODEL,
         action: 'set_api_key',
         reason: 'API key required for cloud embeddings',
@@ -146,6 +202,7 @@ export async function detectEmbedder(cfg = {}, env = process.env) {
           provider,
           url,
           model,
+          remote,
           preferred_model: model,
           action: 'start_local_server',
           reason: `OpenAI-compatible server not reachable at ${url}`,
@@ -159,6 +216,7 @@ export async function detectEmbedder(cfg = {}, env = process.env) {
       provider,
       url,
       model,
+      remote,
       preferred_model: model,
       action: 'ready',
       has_api_key: Boolean(apiKey),
@@ -166,8 +224,35 @@ export async function detectEmbedder(cfg = {}, env = process.env) {
     };
   }
 
-  // Default: local Ollama
-  const url = (env.BRAINLINK_EMBED_URL || sem.url || DEFAULT_URL).replace(/\/+$/, '');
+  // Default: local Ollama (also enforces HTTPS + remote_consent if pointed at a non-loopback host)
+  const rawUrl = (env.BRAINLINK_EMBED_URL || sem.url || DEFAULT_URL).replace(/\/+$/, '');
+  const urlCheck = validateEmbedUrl(rawUrl);
+  if (!urlCheck.ok) {
+    return {
+      available: false,
+      provider: 'ollama',
+      url: rawUrl,
+      remote: !isLocalEmbedder({ url: rawUrl }),
+      preferred_model: PREFERRED_EMBED_MODEL,
+      action: 'invalid_url',
+      reason: urlCheck.error,
+      setup_hint: 'Use https:// for remote Ollama hosts or a loopback address (127.0.0.1 / localhost / [::1])',
+    };
+  }
+  const url = urlCheck.url;
+  const remote = !urlCheck.local;
+  if (remote && sem.remote_consent !== true) {
+    return {
+      available: false,
+      provider: 'ollama',
+      url,
+      remote: true,
+      preferred_model: PREFERRED_EMBED_MODEL,
+      action: 'consent_required',
+      reason: `Remote Ollama at ${urlCheck.host} requires explicit owner consent before sending shared-vault text`,
+      setup_hint: 'Confirm remote embedding consent in RAG settings, or use local Ollama on 127.0.0.1',
+    };
+  }
   try {
     const tags = await getJson(`${url}/api/tags`, null, 2500);
     const names = (tags.models || []).map((m) => m.name || m.model).filter(Boolean);
@@ -183,6 +268,7 @@ export async function detectEmbedder(cfg = {}, env = process.env) {
         available: false,
         provider: 'ollama',
         url,
+        remote,
         preferred_model: PREFERRED_EMBED_MODEL,
         installed_models: names,
         running_models: runningModels,
@@ -197,6 +283,7 @@ export async function detectEmbedder(cfg = {}, env = process.env) {
       provider: 'ollama',
       url,
       model,
+      remote,
       preferred_model: PREFERRED_EMBED_MODEL,
       installed_models: names,
       running_models: runningModels,
@@ -290,28 +377,40 @@ export class VectorStore {
 export const chunkText = (note, c) => `${note.title}${c.heading ? ' › ' + c.heading : ''}\n${c.text}`.slice(0, 2000);
 
 // Embed chunks that have no vector yet, up to `budget` per call. Returns how many are done.
-export async function fillVectors(emb, store, index, budget = 256) {
+export async function fillVectors(emb, store, index, budget = 256, { isPrivateVault = false, hasSecrets = null } = {}) {
+  const remote = !isLocalEmbedder(emb);
+  if (remote && isPrivateVault) {
+    return { ready: 0, total: index.chunks.length, skipped: index.chunks.length, processed: 0, skipped_private: true };
+  }
   await store.load();
   // Old builds could have embedded private notes before the output filter ran. Keep only keys
   // belonging to the current permission-filtered index, even when no new embedding is needed.
   const visibleKeys = new Set(index.chunks.map((c) => c.vkey ||= chunkKey(chunkText(index.notes[c.noteIdx], c))));
   for (const key of store.vectors.keys()) if (!visibleKeys.has(key)) { store.vectors.delete(key); store.dirty = true; }
   const missing = [], queued = new Set();
+  let skippedSecrets = 0;
   for (const c of index.chunks) {
-    const key = c.vkey ||= chunkKey(chunkText(index.notes[c.noteIdx], c));
-    if (!store.vectors.has(key) && !queued.has(key)) { queued.add(key); missing.push(c); }
+    const text = chunkText(index.notes[c.noteIdx], c);
+    const key = c.vkey ||= chunkKey(text);
+    if (store.vectors.has(key) || queued.has(key)) continue;
+    if (remote && typeof hasSecrets === 'function' && hasSecrets(text)) {
+      skippedSecrets++;
+      continue;
+    }
+    queued.add(key);
+    missing.push({ c, text });
     if (missing.length >= budget) break;
   }
   for (let i = 0; i < missing.length; i += 32) {
     const batch = missing.slice(i, i + 32);
-    const vecs = await embedTexts(emb, batch.map((c) => chunkText(index.notes[c.noteIdx], c)));
-    batch.forEach((c, j) => store.vectors.set(c.vkey, vecs[j]));
+    const vecs = await embedTexts(emb, batch.map((x) => x.text));
+    batch.forEach((x, j) => store.vectors.set(x.c.vkey, vecs[j]));
     store.dirty = true;
   }
   if (store.dirty) await store.save();
   const total = index.chunks.length;
   const ready = index.chunks.filter((c) => store.vectors.has(c.vkey)).length;
-  return { ready, total };
+  return { ready, total, skipped: skippedSecrets, processed: missing.length };
 }
 
 // Nearest chunks to the query vector: [{chunkIdx, sim}].

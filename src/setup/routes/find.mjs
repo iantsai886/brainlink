@@ -12,6 +12,8 @@ import {
   PREFERRED_EMBED_MODEL,
   DEFAULT_OPENAI_EMBED_MODEL,
   RECOMMENDED_OLLAMA_EMBED_MODELS,
+  isLocalEmbedder,
+  validateEmbedUrl,
   detectOllamaBinary,
   pullOllamaModel,
   publicEmbedStatus,
@@ -116,6 +118,7 @@ export function createFindRoutes({
           provider: cfg.semantic?.provider || 'ollama',
           url: cfg.semantic?.url || '',
           model: cfg.semantic?.model || '',
+          remote_consent: Boolean(cfg.semantic?.remote_consent),
           has_api_key: Boolean(savedKey || env.BRAINLINK_EMBED_API_KEY),
         },
         defaults: {
@@ -136,15 +139,24 @@ export function createFindRoutes({
         throw new Error(`Unsupported RAG provider "${provider}". Choose: ${EMBED_PROVIDERS.join(', ')}.`);
       }
       const url = String(b?.url || '').trim();
-      if (url && !/^https?:\/\//i.test(url)) throw new Error('Embedding endpoint URL must start with http:// or https://.');
-      if (provider === 'openai' && url && !/^https:\/\//i.test(url)) throw new Error('Cloud API embedding URL must use https://.');
+      const defaultUrl = provider === 'openai' ? DEFAULT_OPENAI_URL : provider === 'openai-compatible' ? DEFAULT_LOCAL_COMPAT_URL : DEFAULT_URL;
+      const effectiveUrl = provider === 'lexical' ? '' : (url || defaultUrl);
+      let isRemote = false;
+      if (provider !== 'lexical') {
+        const check = validateEmbedUrl(effectiveUrl);
+        if (!check.ok) throw new Error(check.error);
+        isRemote = !check.local;
+      }
       const model = String(b?.model || '').trim().slice(0, 120);
       const cfg = normalize(await loadConfig(file));
+      const sameRemoteTarget = isRemote && cfg.semantic?.remote_consent === true && (cfg.semantic?.url || defaultUrl) === effectiveUrl && cfg.semantic?.provider === provider;
+      const remoteConsent = isRemote ? (b?.remote_consent === true || (b?.remote_consent === undefined && sameRemoteTarget)) : false;
       cfg.semantic = {
         enabled: provider !== 'lexical',
         provider,
         ...(url ? { url } : {}),
         ...(model ? { model } : {}),
+        ...(isRemote ? { remote_consent: remoteConsent } : {}),
       };
       await saveConfig(cfg, file);
       const ctx = localContext(cfg, { ...env, BRAINLINK_AI_PLATFORM: '' });
@@ -160,6 +172,7 @@ export function createFindRoutes({
           provider: cfg.semantic.provider,
           url: cfg.semantic.url || '',
           model: cfg.semantic.model || '',
+          remote_consent: Boolean(cfg.semantic.remote_consent),
           has_api_key: Boolean(savedKey || env.BRAINLINK_EMBED_API_KEY),
         },
       };
@@ -199,6 +212,7 @@ export function createFindRoutes({
           provider: cfg.semantic?.provider || 'ollama',
           url: cfg.semantic?.url || '',
           model: cfg.semantic?.model || '',
+          remote_consent: Boolean(cfg.semantic?.remote_consent),
           has_api_key: Boolean(savedKey || env.BRAINLINK_EMBED_API_KEY),
         },
       };

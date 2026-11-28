@@ -10,7 +10,7 @@ import { termFrequencies, terms, linkGraph, collection, suggestRelated, extractT
 import { deriveTypedRelations } from './typed-graph.mjs';
 import { appHome } from './config.mjs';
 import { rerankResults } from './rerank.mjs';
-import { detectEmbedder, publicEmbedStatus, VectorStore, fillVectors, embedTexts, nearest, PREFERRED_EMBED_MODEL } from './embed.mjs';
+import { detectEmbedder, publicEmbedStatus, isLocalEmbedder, VectorStore, fillVectors, embedTexts, nearest, PREFERRED_EMBED_MODEL } from './embed.mjs';
 import { buildWikiLayer, queryWikiLayer, isWikiIndexPath, renderAllowlistedWikiIndex, allowlistedWikiMeta, normalizeWikiPath } from './wiki-layer.mjs';
 import { findAgentByToken, publicAgent } from './mcp-agents.mjs';
 import { resolveTwinAgentScope, twinNoteMemoryAllowed } from './twin-profiles.mjs';
@@ -825,12 +825,16 @@ export function verdict(index, query, results, queries = []) {
 export async function searchWithVerdict(ctx, name, query, opts = {}) {
   const results = await search(ctx, name, query, opts);
   const index = await loadVault(ctx, name);
-  const emb = opts.semantic === false
+  const rawEmb = opts.semantic === false
     ? { available: false, preferred_model: PREFERRED_EMBED_MODEL, reason: 'disabled for this search' }
     : await semanticStatus(ctx);
+  const isPrivateVault = Boolean(ctx.byName.get(name)?.private);
+  const emb = (rawEmb.available && isPrivateVault && !isLocalEmbedder(rawEmb))
+    ? { available: false, provider: rawEmb.provider, remote: true, preferred_model: rawEmb.preferred_model || PREFERRED_EMBED_MODEL, reason: 'private vault stays keyword-only when using a remote embedding provider' }
+    : rawEmb;
   const semantic = emb.available
-    ? { available: true, provider: emb.provider || 'ollama', model: emb.model, preferred_model: emb.preferred_model || PREFERRED_EMBED_MODEL, ...(emb.action ? { action: emb.action } : {}) }
-    : { available: false, ...(emb.provider ? { provider: emb.provider } : {}), preferred_model: emb.preferred_model || PREFERRED_EMBED_MODEL, reason: emb.reason, ...(emb.action ? { action: emb.action } : {}), ...(emb.install_url ? { install_url: emb.install_url } : {}), ...(emb.setup_hint ? { setup_hint: emb.setup_hint } : {}) };
+    ? { available: true, provider: emb.provider || 'ollama', model: emb.model, preferred_model: emb.preferred_model || PREFERRED_EMBED_MODEL, ...(emb.remote ? { remote: true } : {}), ...(emb.action ? { action: emb.action } : {}) }
+    : { available: false, ...(emb.provider ? { provider: emb.provider } : {}), ...(emb.remote ? { remote: true } : {}), preferred_model: emb.preferred_model || PREFERRED_EMBED_MODEL, reason: emb.reason, ...(emb.action ? { action: emb.action } : {}), ...(emb.install_url ? { install_url: emb.install_url } : {}), ...(emb.setup_hint ? { setup_hint: emb.setup_hint } : {}) };
   const v = verdict(index, String(query || ''), results, opts.queries || []);
   const wikiLayer = !index.wiki?.present
     ? { present: false, consulted: false }
@@ -866,11 +870,16 @@ export async function semanticStatus(ctx) {
 async function semanticLists(ctx, name, index, queries) {
   const emb = await getEmbedder(ctx);
   if (!emb.available) return [];
+  const remote = !isLocalEmbedder(emb);
+  const isPrivateVault = Boolean(ctx.byName.get(name)?.private);
+  if (remote && isPrivateVault) return [];
+  const safeQueries = remote ? queries.filter((q) => findSecrets(q).length === 0) : queries;
+  if (!safeQueries.length) return [];
   try {
     if (!ctx.stores.has(name)) ctx.stores.set(name, new VectorStore(ctx.dataDir, vaultRoot(ctx, name), emb.model));
     const store = ctx.stores.get(name);
-    await fillVectors(emb, store, index, 64);
-    const qvecs = await embedTexts(emb, queries);
+    await fillVectors(emb, store, index, 64, { isPrivateVault, hasSecrets: (t) => findSecrets(t).length > 0 });
+    const qvecs = await embedTexts(emb, safeQueries);
     return qvecs.map((qv) => nearest(index, store, qv));
   } catch { return []; }
 }
@@ -879,10 +888,15 @@ async function semanticLists(ctx, name, index, queries) {
 export async function warmSemantic(ctx, name) {
   const emb = await getEmbedder(ctx);
   if (!emb.available) return null;
+  const remote = !isLocalEmbedder(emb);
+  const isPrivateVault = Boolean(ctx.byName.get(name)?.private);
+  if (remote && isPrivateVault) return null;
   const index = await loadVault(ctx, name);
   if (!ctx.stores.has(name)) ctx.stores.set(name, new VectorStore(ctx.dataDir, vaultRoot(ctx, name), emb.model));
   let r;
-  do { r = await fillVectors(emb, ctx.stores.get(name), index, 256); } while (r.ready < r.total);
+  do {
+    r = await fillVectors(emb, ctx.stores.get(name), index, 256, { isPrivateVault, hasSecrets: (t) => findSecrets(t).length > 0 });
+  } while (r.processed > 0 && r.ready + (r.skipped || 0) < r.total);
   return r;
 }
 

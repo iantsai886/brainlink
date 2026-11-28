@@ -2,6 +2,37 @@
 
 This log covers the development branch. Entries marked **unreleased** are not published product releases. See [release readiness](docs/RELEASE-READINESS.md) for the current evidence and remaining release gates.
 
+## 1.5.1 — Development, unreleased
+
+- Privacy & ranking fix order (2026-11-28, `fix/v1.5.1-rag-privacy`):
+  - **B1 (remote embedding private-vault block & explicit consent):** Exported `isLocalEmbedder(emb)` in `src/embed.mjs` (loopback `127.0.0.1`, `localhost`, `::1` only). Remote embedders (including remote Ollama) now require explicit `semantic.remote_consent: true` confirmed in Setup with the target host named, and never embed chunks or search queries from `private: true` vaults (`warmSemantic`, `semanticLists`, `fillVectors`); private vaults stay keyword-only and report the reason. Updated `ui/destinations/find/ask.html` to state plainly what cloud/remote mode sends and that private vaults stay keyword-only.
+  - **B2 (secret scan before remote embedding):** Remote embed calls now fail closed via `findSecrets` (`src/core.mjs`), skipping any chunk or query that matches secret patterns rather than sending raw or redacted text.
+  - **B3 (API key exposure in `/api/state`):** Wrapped `detectEmbedder(cfg, env)` in `publicEmbedStatus()` at `src/setup.mjs:1337` and audited all `detectEmbedder`/`getEmbedder`/`semanticStatus` outputs across HTTP, MCP, CLI, and `brainlink doctor`.
+  - **M4 (HTTPS enforcement for remote embedders):** Rejected plaintext `http://` for non-loopback hosts in both `POST /api/rag-config` and `detectEmbedder` (fail-closed against edited `config.json` or `BRAINLINK_EMBED_URL`).
+  - **M5 (memory-type ranking regression):** Removed bare `policy` / `rule(s)` / `規則` / `規範` triggers from `PROCEDURAL_INTENT`, capped the intent boost at ×1.10, and withheld intent and canonical boosts from `proposed`/`draft` notes (`src/memory-ranking.mjs`). `test/brainlink.test.mjs:1431` ("care plan discount rules" → `Pricing and Packages.md`) passes unchanged; added positive/negative intent regression tests and verified frozen retrieval-eval fixtures before/after (`retrieval-rsi-v1` hit@k 13 / MRR 0.619 unchanged; `retrieval-independent-v1` task success 17/30 / source recall 1.0 / MRR 0.735 unchanged; 0 privacy violations).
+  - **T1 (fake Ollama fixture):** Updated `test/brainlink.test.mjs:1695` fake Ollama server to answer `GET /api/ps` without changing assertions. Added `test/rag-remote-privacy.test.mjs` covering consent gate, private-vault/frontmatter/ignored/secret canaries, key non-leakage across all surfaces, HTTPS enforcement, and `isLocalEmbedder` unit cases.
+- Verification (2026-11-28, Windows, Node v24.22.1): `npm test` 759 passed, 0 failed, 10 skipped (769 total; 188.1s); `npm run test:ui` 48/48. Not verified: macOS/Linux hosts, browser-rendered visual QA of the remote-consent confirmation dialog, and hosted GitHub Actions CI.
+
+## 1.5.0 — Development, unreleased
+
+- Memory-type-aware RAG scoring, decay, and filters (2026-11-28, commit `2ebc610`). Added `src/memory-ranking.mjs` to classify notes into the four CoALA memory types (`working`, `semantic`, `procedural`, `episodic`), apply type-specific lifecycle decay and deterministic query-intent routing in `src/core.mjs`, expose optional `memory_type` filtering in MCP (`vault_search`, `context_packet`), `POST /api/ask`, and Setup Find → Ask, and display plain-language labels on Ask sources.
+- Verification (2026-11-28, Windows, Node v24.22.1): focused memory-ranking/RAG/Setup tests 24/24 and `npm run test:ui` 48/48; full `npm test` was not run on `2ebc610` (subsequently audited and fixed in `1.5.1`).
+
+## 1.4.2 — Development, unreleased
+
+- Ollama model status, switcher, and installer in Setup (2026-11-28, commit `a7f94fc`). `detectEmbedder` queries Ollama `/api/ps` and `/api/tags` to report running and installed models; Find → Ask displays the active RAG model and running Ollama models and lets users switch installed models or pull curated/custom embedding models via `POST /api/rag-ollama-action`.
+- Verification (2026-11-28, Windows, Node v24.22.1): focused RAG/Setup tests 20/20 and `npm run test:ui` 48/48; Windows installer `BrainLink-Setup-1.4.2.exe` built locally. Full `npm test` and macOS/Linux hosts were not run.
+
+## 1.4.1 — Development, unreleased
+
+- Automatic Ollama detection and one-click install/start/pull actions (2026-11-28, commit `e5fa4b8`). Added `detectOllamaBinary` and `pullOllamaModel` in `src/embed.mjs`, `POST /api/rag-ollama-action` in `src/setup/routes/find.mjs`, and inline Install/Start/Download buttons in Find → Ask.
+- Verification (2026-11-28, Windows, Node v24.22.1): focused RAG/Setup tests 20/20 and `npm run test:ui` 48/48; Windows installer `BrainLink-Setup-1.4.1.exe` built locally. Full `npm test` and macOS/Linux hosts were not run.
+
+## 1.4.0 — Development, unreleased
+
+- Built-in RAG, multi-provider embeddings, and six operational upgrades (2026-11-28, commits `9550ecd`–`6e9a70c`). Merged Built-in Local RAG (hybrid BM25 + embeddings + `00 MAP`/`00 INDEX` wiki routing + vault-relative citations + abstention guard), added flexible embedding providers (`ollama`, `openai-compatible`, `openai`, `lexical`) with `0600` local API key storage and Find → Ask configuration UI, moved `install-settings.mjs` into `src/` for packaged builds, and merged the six operational upgrades (4-tier RSI verification gate, verbatim Errata ledger + budgeted HillClimb, Amber Ledger pre-capture store, `brainlink doctor` with `declined`/`UNMEASURED` states, read-only Hermes trace diagnostics, and `INSTALL.md` + additive settings merger).
+- Verification (2026-11-28, Windows, Node v24.22.1): focused RAG/Setup tests 19/19 and `npm run test:ui` 48/48; Windows installer `BrainLink-Setup-1.4.0.exe` built locally. Full `npm test` was not run on `6e9a70c` (privacy blockers and test regressions were caught in independent review and fixed in `1.5.1`).
+
 ## 1.3.8 — Development, unreleased
 
 - P3-3 (2026-11-17). Extracted Setup destination panels for Find, Review and Handoffs into `ui/destinations/`; the server assembles them through `src/setup-page.mjs`. Ask/citation, proposal/decision/conflict/tidy, and handoff APIs now live in destination route modules with dependencies passed explicitly. Setup tests render the assembled page, and macOS ZIP checks require every fragment and route module. `ui/app/` remains a separate desktop client with its own host bridge and tests.

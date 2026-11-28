@@ -29,8 +29,19 @@ test('memory-ranking classifies notes across all 4 CoALA memory types determinis
 });
 
 test('memory-ranking detects deterministic query intent in English and Chinese', () => {
+  // Positive procedural cases
+  assert.equal(detectQueryMemoryIntent('How do I deploy'), 'procedural');
+  assert.equal(detectQueryMemoryIntent('SOP for onboarding'), 'procedural');
+  assert.equal(detectQueryMemoryIntent('如何報帳'), 'procedural');
   assert.equal(detectQueryMemoryIntent('How do we deploy the release checklist?'), 'procedural');
-  assert.equal(detectQueryMemoryIntent('部署流程和規範怎麼做'), 'procedural');
+  assert.equal(detectQueryMemoryIntent('部署流程怎麼做'), 'procedural');
+
+  // Negative procedural regression cases (must NOT route to procedural)
+  assert.notEqual(detectQueryMemoryIntent('care plan discount rules'), 'procedural');
+  assert.notEqual(detectQueryMemoryIntent('what is our refund policy'), 'procedural');
+  assert.notEqual(detectQueryMemoryIntent('pricing policy for clinics'), 'procedural');
+  assert.notEqual(detectQueryMemoryIntent('我們的折扣規則'), 'procedural');
+
   assert.equal(detectQueryMemoryIntent('What happened in last week meeting notes?'), 'episodic');
   assert.equal(detectQueryMemoryIntent('昨天會議記錄發生了什麼'), 'episodic');
   assert.equal(detectQueryMemoryIntent('What pending handoff tasks are open?'), 'working');
@@ -39,10 +50,17 @@ test('memory-ranking detects deterministic query intent in English and Chinese',
   assert.equal(detectQueryMemoryIntent('zephyr'), null);
 });
 
-test('memory-ranking applies type-specific decay: procedural never decays, closed working decays fast', () => {
+test('memory-ranking applies type-specific decay and withholds boosts from proposed/draft notes', () => {
   const oldSop = memoryTypeScoreMultiplier({ memoryType: 'procedural', intent: 'procedural', ageDays: 730, status: 'canonical' });
   const oldEpisode = memoryTypeScoreMultiplier({ memoryType: 'episodic', intent: 'procedural', ageDays: 365 });
-  assert.ok(oldSop > oldEpisode * 1.4, `expected old SOP (${oldSop}) to significantly outrank old episode (${oldEpisode})`);
+  assert.ok(oldSop > oldEpisode * 1.3, `expected old SOP (${oldSop}) to significantly outrank old episode (${oldEpisode})`);
+
+  // Intent boost capped at x1.10 and never granted to proposed or draft notes
+  const plainProcedural = memoryTypeScoreMultiplier({ memoryType: 'procedural', intent: 'procedural', ageDays: 10, status: '' });
+  assert.ok(plainProcedural <= 1.10, `expected intent boost <= 1.10, got ${plainProcedural}`);
+  assert.equal(memoryTypeScoreMultiplier({ memoryType: 'procedural', intent: 'procedural', ageDays: 10, status: 'proposed' }), 1);
+  assert.equal(memoryTypeScoreMultiplier({ memoryType: 'procedural', intent: 'procedural', ageDays: 10, status: 'draft' }), 1);
+  assert.equal(memoryTypeScoreMultiplier({ memoryType: 'semantic', intent: 'semantic', ageDays: 10, status: 'proposed' }), 1);
 
   const activeWork = memoryTypeScoreMultiplier({ memoryType: 'working', intent: 'working', ageDays: 2, status: 'open' });
   const closedWork = memoryTypeScoreMultiplier({ memoryType: 'working', intent: 'working', ageDays: 2, status: 'done' });

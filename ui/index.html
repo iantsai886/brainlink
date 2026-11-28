@@ -2221,10 +2221,27 @@ if ($('ask-rag-toggle')) $('ask-rag-toggle').onclick = () => {
 if ($('rag-provider')) $('rag-provider').onchange = syncRagFormFields;
 if ($('rag-save')) $('rag-save').onclick = () => act(async () => {
   const provider = $('rag-provider').value;
+  const rawUrl = $('rag-url').value.trim();
+  const effectiveUrl = rawUrl || (RAG_DEFAULTS[provider]?.url || '');
+  let remoteHost = '';
+  if (provider !== 'lexical' && effectiveUrl) {
+    try {
+      const parsed = new URL(effectiveUrl);
+      const h = parsed.hostname.replace(/^\[|\]$/g, '').toLowerCase();
+      if (h !== 'localhost' && h !== '127.0.0.1' && h !== '::1') remoteHost = parsed.host;
+    } catch {}
+  }
+  let remoteConsent = false;
+  if (remoteHost) {
+    const ok = await confirmInPage(`Send shared-vault note text and your search questions to ${remoteHost} for embeddings? Private vaults, private notes, ignored folders, and secret-matching chunks will never be sent and will stay keyword-only.`);
+    if (!ok) return;
+    remoteConsent = true;
+  }
   const payload = {
     provider,
-    url: $('rag-url').value.trim(),
+    url: rawUrl,
     model: $('rag-model').value.trim(),
+    ...(remoteHost ? { remote_consent: remoteConsent } : {}),
   };
   const keyVal = $('rag-api-key').value.trim();
   if (keyVal) payload.api_key = keyVal;
