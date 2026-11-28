@@ -15,6 +15,221 @@ import { installAgentSkills } from './agent-skills.mjs';
 export const STATES = Object.freeze(['draft', 'active', 'held', 'killed']);
 const STATE_SET = new Set(STATES);
 
+// 4-Tier Verification Contract: code -> classifier -> judge -> human.
+// Only `code` tier assertions are allowed on a blocking promotion path.
+export const VERIFICATION_TIERS = Object.freeze(['code', 'classifier', 'judge', 'human']);
+export const BLOCKING_TIERS = Object.freeze(['code']);
+export const VERDICT_STATUSES = Object.freeze(['PASS', 'FAIL', 'UNMEASURED']);
+
+export function classifyVerificationTier(judge, judgeType = '') {
+  const jt = String(judgeType || '').trim().toLowerCase();
+  const j = String(judge || '').trim().toLowerCase();
+  if (jt === 'code' || jt === 'deterministic' || j === 'deterministic' || /deterministic|rubric/.test(j)) return 'code';
+  if (jt === 'classifier' || j === 'classifier') return 'classifier';
+  if (jt === 'human' || j === 'human') return 'human';
+  if (jt === 'judge' || jt === 'cross-model-cli' || /^(claude|codex|gemini)(-cli)?$/.test(j) || j === 'judge') return 'judge';
+  return 'judge';
+}
+
+export function validateVerificationContract(evidence, { blocking = false } = {}) {
+  if (!evidence || typeof evidence !== 'object') {
+    throw refusal('Verification evidence must be an object.');
+  }
+  const rawVerdict = String(evidence.verdict || '').trim().toUpperCase();
+  const verdict = VERDICT_STATUSES.includes(rawVerdict) ? rawVerdict : 'UNMEASURED';
+  const tier = VERIFICATION_TIERS.includes(String(evidence.verification_tier || '').toLowerCase())
+    ? String(evidence.verification_tier).toLowerCase()
+    : classifyVerificationTier(evidence.judge, evidence.judge_type);
+  const calibrated = tier === 'code' || tier === 'human' || evidence.calibrated_against_human === true;
+  const calibrationStatus = tier === 'judge' ? (calibrated ? 'CALIBRATED' : 'PROVISIONAL') : 'CALIBRATED';
+
+  if (evidence.suite_valid === false || evidence.adversarial_check?.passed_adversarial === true) {
+    throw refusal(`Verification suite invalidated: ${evidence.invalidated_reason || 'judge passed a known-bad adversarial fixture.'}`);
+  }
+  if (blocking && !BLOCKING_TIERS.includes(tier)) {
+    throw refusal(`Blocking promotion gate requires tier "code"; evidence tier is "${tier}" (${calibrationStatus}).`);
+  }
+  if (verdict === 'UNMEASURED') {
+    throw refusal(`Evidence verdict is UNMEASURED (${evidence.unmeasured_reason || 'check was not measured'}); promotion gates refuse to treat UNMEASURED as PASS.`);
+  }
+  if (blocking && verdict !== 'PASS') {
+    throw refusal(`Evidence verdict is "${verdict}"; promote requires verdict PASS.`);
+  }
+  return {
+    verdict,
+    verification_tier: tier,
+    calibration_status: calibrationStatus,
+    provisional: calibrationStatus === 'PROVISIONAL',
+    blocking_eligible: BLOCKING_TIERS.includes(tier) && verdict === 'PASS' && evidence.suite_valid !== false,
+  };
+}
+
+export async function runVerificationSuite({
+  suiteId,
+  assertions = [],
+  adversarialFixtures = [],
+  judgeRunner = null,
+  blocking = false,
+  calibratedAgainstHuman = false,
+  now = new Date(),
+}) {
+  if (!suiteId || !/^[a-zA-Z0-9._-]+$/.test(suiteId)) {
+    throw usageError('runVerificationSuite requires a valid suiteId.');
+  }
+  if (!Array.isArray(assertions) || assertions.length === 0) {
+    throw usageError('runVerificationSuite requires a non-empty assertions array.');
+  }
+
+  for (const a of assertions) {
+    const tier = String(a?.tier || 'code').toLowerCase();
+    if (!VERIFICATION_TIERS.includes(tier)) {
+      throw usageError(`Invalid verification tier "${tier}". Allowed: ${VERIFICATION_TIERS.join(', ')}.`);
+    }
+    if (blocking && !BLOCKING_TIERS.includes(tier)) {
+      throw refusal(`Blocking verification path allows only "code" tier assertions; assertion "${a.id || 'unnamed'}" is tier "${tier}".`);
+    }
+  }
+
+  const hasJudgeTier = assertions.some((a) => String(a?.tier || 'code').toLowerCase() === 'judge');
+  if (hasJudgeTier && (!Array.isArray(adversarialFixtures) || adversarialFixtures.length === 0)) {
+    throw refusal('Judge-tier verification suites require at least one adversarial fixture (known-bad case the judge must FAIL).');
+  }
+
+  let suiteValid = true;
+  let invalidatedReason = null;
+  const adversarialResults = [];
+
+  if (hasJudgeTier) {
+    for (const fix of adversarialFixtures) {
+      let status = 'UNMEASURED';
+      let reason = '';
+      try {
+        if (typeof judgeRunner !== 'function') {
+          status = 'UNMEASURED';
+          reason = 'no judgeRunner provided';
+        } else {
+          const raw = await judgeRunner(fix);
+          const v = String(raw?.verdict || '').trim().toUpperCase();
+          if (v === 'PASS' || v === 'FAIL') {
+            status = v;
+            reason = String(raw?.reason || '');
+          } else {
+            status = 'UNMEASURED';
+            reason = `malformed judge verdict "${raw?.verdict ?? ''}"`;
+          }
+        }
+      } catch (err) {
+        status = 'UNMEASURED';
+        reason = err?.message || 'judge transport error';
+      }
+
+      const caughtBadCase = status === 'FAIL';
+      if (status === 'PASS') {
+        suiteValid = false;
+        invalidatedReason = `Adversarial fixture "${fix.id || 'unknown'}" was marked PASS by judge (expected FAIL); suite invalidated.`;
+      }
+      adversarialResults.push({
+        id: fix.id || 'adversarial',
+        expected: 'FAIL',
+        actual: status,
+        caught: caughtBadCase,
+        reason,
+      });
+    }
+  }
+
+  const results = [];
+  for (const a of assertions) {
+    const tier = String(a?.tier || 'code').toLowerCase();
+    let status = 'UNMEASURED';
+    let detail = '';
+
+    if (a.skipped === true) {
+      status = 'UNMEASURED';
+      detail = a.skip_reason || 'skipped';
+    } else if (tier === 'code' || tier === 'classifier') {
+      try {
+        if (typeof a.run !== 'function') {
+          status = 'UNMEASURED';
+          detail = 'no executable check provided';
+        } else {
+          const out = await a.run();
+          if (out === true) status = 'PASS';
+          else if (out === false) status = 'FAIL';
+          else if (out && typeof out === 'object') {
+            const v = String(out.verdict || (out.pass === true ? 'PASS' : out.pass === false ? 'FAIL' : '')).toUpperCase();
+            status = VERDICT_STATUSES.includes(v) ? v : 'UNMEASURED';
+            detail = String(out.detail || out.reason || '');
+          } else {
+            status = 'UNMEASURED';
+            detail = 'malformed assertion result';
+          }
+        }
+      } catch (err) {
+        status = 'UNMEASURED';
+        detail = err?.message || 'check threw transport/runtime error';
+      }
+    } else if (tier === 'judge') {
+      try {
+        if (typeof judgeRunner !== 'function') {
+          status = 'UNMEASURED';
+          detail = 'no judgeRunner provided';
+        } else {
+          const raw = await judgeRunner(a);
+          const v = String(raw?.verdict || '').trim().toUpperCase();
+          if (v === 'PASS' || v === 'FAIL') {
+            status = v;
+            detail = String(raw?.reason || '');
+          } else {
+            status = 'UNMEASURED';
+            detail = `malformed judge verdict "${raw?.verdict ?? ''}"`;
+          }
+        }
+      } catch (err) {
+        status = 'UNMEASURED';
+        detail = err?.message || 'judge transport/timeout error';
+      }
+    } else {
+      // human tier
+      const v = String(a.human_verdict || '').trim().toUpperCase();
+      status = v === 'PASS' || v === 'FAIL' ? v : 'UNMEASURED';
+      detail = status === 'UNMEASURED' ? 'awaiting human review' : String(a.detail || '');
+    }
+
+    results.push({ id: a.id || 'assertion', tier, status, detail });
+  }
+
+  const anyAdversarialUnmeasured = adversarialResults.some((r) => r.actual === 'UNMEASURED');
+  let verdict;
+  if (!suiteValid) verdict = 'FAIL';
+  else if (results.some((r) => r.status === 'FAIL')) verdict = 'FAIL';
+  else if (results.some((r) => r.status === 'UNMEASURED') || anyAdversarialUnmeasured) verdict = 'UNMEASURED';
+  else verdict = 'PASS';
+
+  const calibrationStatus = hasJudgeTier ? (calibratedAgainstHuman ? 'CALIBRATED' : 'PROVISIONAL') : 'CALIBRATED';
+
+  return {
+    schema: 2,
+    suite_id: suiteId,
+    evaluated_at: nowTaipeiIso(now),
+    blocking,
+    tiers_present: [...new Set(results.map((r) => r.tier))],
+    calibration_status: calibrationStatus,
+    provisional: calibrationStatus === 'PROVISIONAL',
+    suite_valid: suiteValid,
+    ...(invalidatedReason ? { invalidated_reason: invalidatedReason } : {}),
+    verdict,
+    adversarial_check: hasJudgeTier
+      ? {
+          total: adversarialResults.length,
+          passed_adversarial: adversarialResults.some((r) => r.actual === 'PASS'),
+          results: adversarialResults,
+        }
+      : null,
+    results,
+  };
+}
+
 export const LEGAL_TRANSITIONS = Object.freeze({
   draft: new Set(['active', 'held', 'killed']),
   held: new Set(['active', 'draft', 'killed']),
@@ -294,9 +509,22 @@ function runCrossModelJudge(info, cliName) {
   };
 }
 
-export async function evaluateSkill({ skill, skillsDir, evidenceDir, judge = 'auto', now = new Date() }) {
+export async function evaluateSkill({
+  skill,
+  skillsDir,
+  evidenceDir,
+  judge = 'auto',
+  judgeRunner = null,
+  adversarialFixtures = null,
+  calibratedAgainstHuman = false,
+  emitUnmeasuredOnError = false,
+  now = new Date(),
+}) {
   const info = await showSkill({ skill, skillsDir });
   let result;
+  let adversarialCheck = null;
+  let suiteValid = true;
+  let invalidatedReason = null;
 
   if (judge === 'deterministic') {
     result = runDeterministicRubric(info);
@@ -304,11 +532,111 @@ export async function evaluateSkill({ skill, skillsDir, evidenceDir, judge = 'au
     if (info.authors.some((a) => sameIdentity(a, judge))) {
       throw refusal(`Judge "${judge}" matches skill author (${info.authors.join(', ')}). Judge != author is enforced in code.`);
     }
-    const cli = findAvailableCrossModelCli(info.authors, judge);
-    if (!cli) {
-      throw refusal(`Requested cross-model judge "${judge}" is not available on PATH. Unjudged draft stays draft.`);
+    if (typeof judgeRunner === 'function') {
+      if (Array.isArray(adversarialFixtures) && adversarialFixtures.length === 0) {
+        throw refusal('Judge-tier evaluation requires at least one adversarial fixture when adversarialFixtures is supplied.');
+      }
+      if (Array.isArray(adversarialFixtures)) {
+        const advResults = [];
+        for (const fix of adversarialFixtures) {
+          let advVerdict = 'UNMEASURED';
+          let advReason = '';
+          try {
+            const raw = await judgeRunner(fix);
+            const v = String(raw?.verdict || '').trim().toUpperCase();
+            if (v === 'PASS' || v === 'FAIL') { advVerdict = v; advReason = String(raw?.reason || ''); }
+            else advReason = `malformed verdict "${raw?.verdict ?? ''}"`;
+          } catch (err) {
+            advReason = err?.message || 'transport error';
+          }
+          if (advVerdict === 'PASS') {
+            suiteValid = false;
+            invalidatedReason = `Judge passed known-bad adversarial fixture "${fix.id || 'unknown'}"; evaluation invalidated.`;
+          }
+          advResults.push({ id: fix.id || 'adversarial', expected: 'FAIL', actual: advVerdict, reason: advReason });
+        }
+        adversarialCheck = {
+          total: advResults.length,
+          passed_adversarial: advResults.some((r) => r.actual === 'PASS'),
+          results: advResults,
+        };
+      }
+      try {
+        const raw = await judgeRunner(info);
+        const v = String(raw?.verdict || '').trim().toUpperCase();
+        if (!suiteValid) {
+          result = {
+            verdict: 'FAIL',
+            judge: `${judge}-cli`,
+            judge_type: 'cross-model-cli',
+            checks: [],
+            what_judge_ran: raw?.what_was_tested || `Cross-model judge (${judge}) invalidated by adversarial fixture`,
+            summary: invalidatedReason,
+          };
+        } else if (v === 'PASS' || v === 'FAIL') {
+          result = {
+            verdict: v,
+            judge: `${judge}-cli`,
+            judge_type: 'cross-model-cli',
+            checks: [],
+            what_judge_ran: raw?.what_was_tested || `Cross-model evaluation via ${judge}`,
+            summary: raw?.reason || `${judge} returned ${v}`,
+          };
+        } else {
+          result = {
+            verdict: 'UNMEASURED',
+            unmeasured_reason: `Malformed judge verdict "${raw?.verdict ?? ''}"`,
+            judge: `${judge}-cli`,
+            judge_type: 'cross-model-cli',
+            checks: [],
+            what_judge_ran: `Cross-model evaluation via ${judge} returned malformed verdict`,
+            summary: `UNMEASURED: malformed judge verdict "${raw?.verdict ?? ''}"`,
+          };
+        }
+      } catch (err) {
+        result = {
+          verdict: 'UNMEASURED',
+          unmeasured_reason: err?.message || 'judge transport/timeout error',
+          judge: `${judge}-cli`,
+          judge_type: 'cross-model-cli',
+          checks: [],
+          what_judge_ran: `Cross-model evaluation via ${judge} failed with transport/timeout error`,
+          summary: `UNMEASURED: ${err?.message || 'judge transport/timeout error'}`,
+        };
+      }
+    } else {
+      const cli = findAvailableCrossModelCli(info.authors, judge);
+      if (!cli) {
+        if (emitUnmeasuredOnError) {
+          result = {
+            verdict: 'UNMEASURED',
+            unmeasured_reason: `Cross-model judge "${judge}" not available on PATH`,
+            judge: `${judge}-cli`,
+            judge_type: 'cross-model-cli',
+            checks: [],
+            what_judge_ran: `Cross-model judge "${judge}" unavailable`,
+            summary: `UNMEASURED: requested judge "${judge}" is not available on PATH.`,
+          };
+        } else {
+          throw refusal(`Requested cross-model judge "${judge}" is not available on PATH. Unjudged draft stays draft.`);
+        }
+      } else {
+        try {
+          result = runCrossModelJudge(info, cli);
+        } catch (err) {
+          if (!emitUnmeasuredOnError) throw err;
+          result = {
+            verdict: 'UNMEASURED',
+            unmeasured_reason: err?.message || 'judge execution failed',
+            judge: `${cli}-cli`,
+            judge_type: 'cross-model-cli',
+            checks: [],
+            what_judge_ran: `Cross-model judge "${cli}" errored`,
+            summary: `UNMEASURED: ${err?.message || 'judge execution failed'}`,
+          };
+        }
+      }
     }
-    result = runCrossModelJudge(info, cli);
   } else if (judge === 'auto') {
     // Run deterministic rubric first; if it passes and a cross-model CLI is requested explicitly, caller uses --judge <cli>.
     result = runDeterministicRubric(info);
@@ -321,13 +649,18 @@ export async function evaluateSkill({ skill, skillsDir, evidenceDir, judge = 'au
     throw refusal(`Judge "${result.judge}" matches skill author (${info.authors.join(', ')}). Judge != author is enforced in code.`);
   }
 
+  const verificationTier = classifyVerificationTier(result.judge, result.judge_type);
+  const calibrationStatus = verificationTier === 'judge'
+    ? (calibratedAgainstHuman ? 'CALIBRATED' : 'PROVISIONAL')
+    : 'CALIBRATED';
+
   await mkdir(evidenceDir, { recursive: true });
   const stamp = nowTaipeiIso(now);
   const fileStamp = stamp.slice(0, 19).replace(/[:T]/g, '-');
   const evidencePath = path.join(evidenceDir, `${skill}-${fileStamp}.json`);
 
   const record = {
-    schema: 1,
+    schema: 2,
     skill,
     skill_sha256: info.sha256,
     skill_author: info.author,
@@ -335,6 +668,14 @@ export async function evaluateSkill({ skill, skillsDir, evidenceDir, judge = 'au
     evaluated_at: stamp,
     judge: result.judge,
     judge_type: result.judge_type,
+    verification_tier: verificationTier,
+    calibration_status: calibrationStatus,
+    provisional: calibrationStatus === 'PROVISIONAL',
+    calibrated_against_human: verificationTier === 'judge' ? Boolean(calibratedAgainstHuman) : true,
+    suite_valid: suiteValid,
+    ...(invalidatedReason ? { invalidated_reason: invalidatedReason } : {}),
+    ...(adversarialCheck ? { adversarial_check: adversarialCheck } : {}),
+    ...(result.unmeasured_reason ? { unmeasured_reason: result.unmeasured_reason } : {}),
     verdict: result.verdict,
     summary: result.summary,
     what_judge_ran: result.what_judge_ran,
@@ -406,15 +747,20 @@ export async function promoteSkill({
   if (ev.skill && ev.skill !== skill) {
     throw refusal(`Evidence file is for skill "${ev.skill}", not "${skill}".`);
   }
-  if (String(ev.verdict || '').toUpperCase() !== 'PASS') {
-    throw refusal(`Evidence verdict is "${ev.verdict || 'MISSING'}"; promote requires verdict PASS.`);
-  }
   if (!ev.judge || typeof ev.judge !== 'string' || !ev.judge.trim()) {
     throw refusal('Evidence file is missing judge identity.');
   }
   if (info.authors.some((a) => sameIdentity(a, ev.judge))) {
     throw refusal(`Judge "${ev.judge}" matches author (${info.authors.join(', ')}). Judge != author is enforced in code.`);
   }
+  const rawVerdict = String(ev.verdict || '').toUpperCase();
+  if (rawVerdict === 'UNMEASURED') {
+    throw refusal(`Evidence verdict is UNMEASURED (${ev.unmeasured_reason || 'not measured'}); promote refuses to treat UNMEASURED as PASS.`);
+  }
+  if (rawVerdict !== 'PASS') {
+    throw refusal(`Evidence verdict is "${ev.verdict || 'MISSING'}"; promote requires verdict PASS.`);
+  }
+  validateVerificationContract(ev, { blocking: true });
 
   const rawBefore = await readFile(info.path, 'utf8');
   const { data, body, eol } = splitFrontmatter(rawBefore);
@@ -938,13 +1284,19 @@ export async function runBlindAbEval({
   const fileStamp = stamp.slice(0, 19).replace(/[:T]/g, '-');
   const evidencePath = path.join(evidenceDir, `ab-${taskId}-${fileStamp}.json`);
 
+  const abTier = classifyVerificationTier(judgeId, judge === 'deterministic' ? 'deterministic' : 'cross-model-cli');
+  const abCalibration = abTier === 'judge' ? 'PROVISIONAL' : 'CALIBRATED';
+
   const record = {
-    schema: 1,
+    schema: 2,
     type: 'blind_ab_eval',
     task_id: taskId,
     evaluated_at: stamp,
     author,
     judge: judgeId,
+    verification_tier: abTier,
+    calibration_status: abCalibration,
+    provisional: abCalibration === 'PROVISIONAL',
     blind_arm_map: { A: armA.role, B: armB.role },
     pick,
     outcome,
@@ -1169,13 +1521,19 @@ export async function runBlindAbSuite({
   const fileStamp = stamp.slice(0, 19).replace(/[:T]/g, '-');
   const evidencePath = path.join(evidenceDir, `ab-suite-${suiteId}-${fileStamp}.json`);
 
+  const suiteTier = results[0]?.verification_tier || classifyVerificationTier(judge);
+  const suiteCalibration = suiteTier === 'judge' ? 'PROVISIONAL' : 'CALIBRATED';
+
   const summary = {
-    schema: 1,
+    schema: 2,
     type: 'blind_ab_suite',
     suite_id: suiteId,
     evaluated_at: stamp,
     author,
     judge: results[0]?.judge || judge,
+    verification_tier: suiteTier,
+    calibration_status: suiteCalibration,
+    provisional: suiteCalibration === 'PROVISIONAL',
     total_tasks: tasks.length,
     units_used: tasks.length * 2,
     candidate_wins: candidateWins,
