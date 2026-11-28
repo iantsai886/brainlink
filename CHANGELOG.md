@@ -2,6 +2,16 @@
 
 This log covers the development branch. Entries marked **unreleased** are not published product releases. See [release readiness](docs/RELEASE-READINESS.md) for the current evidence and remaining release gates.
 
+## 1.5.2 — Development, unreleased
+
+- Remote embedding hardening & 3-commit retrieval comparison (2026-11-28, `fix/v1.5.2-remote-embed-hardening`):
+  - **R1 (remote-only plain-text credential scanner):** Added `findRemoteSensitive(text)` in `src/core.mjs` (used exclusively before remote embedding in `semanticLists` and `warmSemantic`; `findSecrets()` is unchanged for local writes/ingestion). Fails closed (skips the whole chunk or query without redaction) on key-value credentials (`password`/`passwd`/`pwd`/`pin`/`passcode`/`secret`/`token`/`api_key`/`apikey`/`client_secret`/`密碼`/`密码` with `:`/`=` and non-empty value), `Authorization: Bearer`/`Basic` headers, credential-bearing URLs (`scheme://user:pass@host`), JWTs (`eyJ...`), and Taiwan national IDs (`[A-Z][12]\d{8}`), without over-blocking prose (*"We need a password policy"*, *"reset your PIN in settings"*). Skipped-chunk count on existing fictional fixture vaults: `0/14` (`samples/acme-studio`) and `0/14` (`samples/evaluation/independent-vault`).
+  - **R2 (host-bound remote consent):** Bound remote embedding consent to `semantic.remote_consent_host` (`src/embed.mjs`, `src/setup/routes/find.mjs`, `ui/index.html`). `detectEmbedder` now requires the effective URL host (after `BRAINLINK_EMBED_URL` overrides) to equal `remote_consent_host`; legacy configs with `remote_consent: true` and no host fail closed (`consent_required`); changing the provider URL in Setup clears prior consent.
+  - **R3 (3-commit retrieval benchmark — `1.4.2` `a7f94fc` vs `1.5.0` `2ebc610` vs `1.5.2`):**
+    - `retrieval-rsi-v1.json` (21 answerable, `topK=1`): `1.4.2` hit@1 `13` / hit@3 `19` / hit@k `13` / MRR `0.6190` → `1.5.0` `13` / `18` / `13` / `0.6190` → `1.5.2` `13` / `19` / `13` / `0.6190` (0 aggregate regression; per-query shifts documented in PR).
+    - `retrieval-independent-v1.json` (22 answerable, `topK=5`): `1.4.2` hit@1 `11` / hit@3 `22` / hit@k `22` / MRR `0.7121` → `1.5.0` `12` / `22` / `22` / `0.7348` → `1.5.2` `12` / `22` / `22` / `0.7348` (+1 hit@1, +0.0227 MRR).
+- Verification (2026-11-28, Windows, Node v24.22.1): `npm test` 761 passed, 0 failed, 10 skipped (771 total; 185.4s); `npm run test:ui` 48/48. Not verified: macOS/Linux hosts, browser-rendered visual QA of the Setup consent modal, Windows installer build for `1.5.2` (deferred until owner review/merge), and hosted GitHub Actions CI.
+
 ## 1.5.1 — Development, unreleased
 
 - Privacy & ranking fix order (2026-11-28, `fix/v1.5.1-rag-privacy`):
