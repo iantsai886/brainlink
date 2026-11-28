@@ -2676,7 +2676,7 @@ export async function startSetup(opts = {}) {
       const draft = await saveLocalSummaryDraft(path.join(appHome(env), 'sessions', 'auto-summary'), id, generated);
       return { ok: true, draft: { summary: draft.summary, model: draft.model, generated_at: draft.generated_at, source: draft.source }, session: { id: session.id } };
     },
-    ...createFindRoutes({ file, env, normalize, loadConfig, localContext, searchWithVerdict, createReplayMisses, semanticStatus, plainText, readNote, loadVault, resolveNoteWikilinks }),
+    ...createFindRoutes({ file, env, normalize, loadConfig, saveConfig, localContext, searchWithVerdict, createReplayMisses, semanticStatus, plainText, readNote, loadVault, resolveNoteWikilinks }),
   };
 
   const server = createServer(async (req, res) => {

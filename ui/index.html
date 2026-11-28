@@ -1982,39 +1982,106 @@ async function drawGraph() {
   });
 }
 
-// ---- Ask your brain: cited instant answer + Built-in Local RAG status ----
-function renderRagStatus(semantic, wikiLayer) {
+// ---- Ask your brain: cited instant answer + Built-in Local RAG status & flexible provider config ----
+const RAG_DEFAULTS = {
+  ollama: { url: 'http://127.0.0.1:11434', model: 'nomic-embed-text' },
+  'openai-compatible': { url: 'http://127.0.0.1:1234/v1', model: 'nomic-embed-text' },
+  openai: { url: 'https://api.openai.com/v1', model: 'text-embedding-3-small' },
+  lexical: { url: '', model: '' },
+};
+function syncRagFormFields() {
+  const p = $('rag-provider')?.value || 'ollama';
+  const showEndpoint = p !== 'lexical';
+  const showKey = p === 'openai' || p === 'openai-compatible';
+  if ($('rag-endpoint-fields')) $('rag-endpoint-fields').hidden = !showEndpoint;
+  if ($('rag-key-wrap')) $('rag-key-wrap').hidden = !showKey;
+  if ($('rag-url') && RAG_DEFAULTS[p]) $('rag-url').placeholder = RAG_DEFAULTS[p].url;
+  if ($('rag-model') && RAG_DEFAULTS[p]) $('rag-model').placeholder = RAG_DEFAULTS[p].model;
+}
+function renderRagStatus(semantic, wikiLayer, ragConfig) {
   const pill = $('ask-rag-pill');
   const detail = $('ask-rag-detail');
+  const promptEl = $('ask-rag-prompt');
   if (!pill || !detail) return;
+  if (ragConfig && $('rag-provider')) {
+    $('rag-provider').value = ragConfig.provider || 'ollama';
+    if ($('rag-url') && !document.activeElement?.isSameNode($('rag-url'))) $('rag-url').value = ragConfig.url || '';
+    if ($('rag-model') && !document.activeElement?.isSameNode($('rag-model'))) $('rag-model').value = ragConfig.model || '';
+    if ($('rag-api-key')) $('rag-api-key').placeholder = ragConfig.has_api_key ? 'Key saved locally (leave blank to keep)' : 'Enter API key';
+    syncRagFormFields();
+  }
   if (!semantic) {
     pill.className = 'pill';
     pill.textContent = 'UNMEASURED';
     detail.textContent = 'Local RAG status could not be checked yet. Ask a question to run retrieval.';
+    if (promptEl) promptEl.hidden = true;
     return;
   }
   const hasEmbed = Boolean(semantic.available);
-  pill.className = hasEmbed ? 'pill on' : 'pill';
-  pill.textContent = hasEmbed ? `Active · ${semantic.model || 'local embeddings'}` : 'Keyword + MAP/INDEX (no local embeddings)';
+  const provider = semantic.provider || 'ollama';
+  const isLexical = provider === 'lexical';
+  pill.className = (hasEmbed || isLexical) ? 'pill on' : 'pill';
+  pill.textContent = hasEmbed
+    ? `Active · ${provider}: ${semantic.model || 'embeddings'}`
+    : isLexical
+      ? 'Smart Lexical + MAP/INDEX'
+      : 'Keyword + MAP/INDEX (embeddings unavailable)';
   const parts = [
     hasEmbed
-      ? `Embeddings: ${semantic.model || 'ready'} (local Ollama)`
-      : `Embeddings: off${semantic.setup_hint ? ` — run ${semantic.setup_hint}` : ''}`,
+      ? `Embeddings: ${semantic.model || 'ready'} (${provider})`
+      : isLexical
+        ? 'Embeddings: Smart Lexical mode (no Ollama or API needed)'
+        : `Embeddings: off — ${semantic.reason || 'not available'}`,
     wikiLayer?.present
       ? `MAP/INDEX: ${wikiLayer.consulted ? `consulted (${(wikiLayer.matched_entries || []).length} matched)` : 'ready'}`
       : 'MAP/INDEX: automatic when 00 MAP / 00 INDEX exist',
     'Private & excluded notes never indexed · vault-relative citations',
   ];
   detail.textContent = parts.join(' · ');
+
+  if (promptEl) {
+    if (!hasEmbed && !isLexical && (semantic.action === 'install_ollama' || semantic.action === 'pull_model' || semantic.action === 'set_api_key' || semantic.action === 'start_local_server')) {
+      promptEl.hidden = false;
+      if (semantic.action === 'install_ollama') {
+        promptEl.innerHTML = `Ollama is not installed or running. <a href="https://ollama.com" target="_blank" rel="noopener noreferrer">Install Ollama (free, 100% local)</a> and run <code>ollama pull nomic-embed-text</code> — or click <b>Configure RAG</b> to choose LM Studio, Cloud API, or Smart Lexical mode.`;
+      } else if (semantic.action === 'pull_model') {
+        promptEl.innerHTML = `Ollama is running, but no embedding model is installed yet. Run <code>ollama pull nomic-embed-text</code> — or click <b>Configure RAG</b> to pick another option.`;
+      } else {
+        promptEl.innerHTML = `${esc(semantic.setup_hint || semantic.reason || 'Configure your embedding provider.')} Click <b>Configure RAG</b> to update.`;
+      }
+    } else {
+      promptEl.hidden = true;
+      promptEl.innerHTML = '';
+    }
+  }
 }
 async function refreshRagStatus() {
   try {
     const r = await api('GET', '/api/rag-status');
-    renderRagStatus(r.semantic, null);
+    renderRagStatus(r.semantic, null, r.config);
   } catch {
-    renderRagStatus(null, null);
+    renderRagStatus(null, null, null);
   }
 }
+if ($('ask-rag-toggle')) $('ask-rag-toggle').onclick = () => {
+  const el = $('ask-rag-config');
+  if (el) { el.hidden = !el.hidden; syncRagFormFields(); }
+};
+if ($('rag-provider')) $('rag-provider').onchange = syncRagFormFields;
+if ($('rag-save')) $('rag-save').onclick = () => act(async () => {
+  const provider = $('rag-provider').value;
+  const payload = {
+    provider,
+    url: $('rag-url').value.trim(),
+    model: $('rag-model').value.trim(),
+  };
+  const keyVal = $('rag-api-key').value.trim();
+  if (keyVal) payload.api_key = keyVal;
+  const res = await api('POST', '/api/rag-config', payload);
+  $('rag-api-key').value = '';
+  renderRagStatus(res.semantic, null, res.config);
+  if ($('rag-save-msg')) $('rag-save-msg').textContent = 'Saved.';
+});
 function renderAskEmpty() { $('ask-out').innerHTML = `<p class="muted">${esc(t('ask.empty'))}</p>`; }
 function renderAskError(msg) { $('ask-out').innerHTML = `<p class="error-box">${esc(msg)}</p>`; }
 // One card per searched vault: vaults are searched separately and never merged, so each keeps

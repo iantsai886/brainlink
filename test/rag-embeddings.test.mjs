@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import http from 'node:http';
-import { mkdtemp, writeFile, mkdir } from 'node:fs/promises';
+import { mkdtemp, writeFile, readFile, mkdir } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 
@@ -170,8 +170,87 @@ test('S1: brainlink_guide and POST /api/ask surface semantic status and setup gu
     const body = await res.json();
     assert.equal(body.search_mode, 'keyword');
     assert.equal(body.semantic?.available, false);
+    assert.equal(body.semantic?.action, 'install_ollama');
     assert.match(body.semantic?.setup_hint || '', /ollama pull nomic-embed-text/);
   } finally {
     setup.server.close();
+  }
+});
+
+test('S1: flexible RAG supports Ollama install prompt, OpenAI-compatible local server, cloud API (0600 key), and Smart Lexical mode', async () => {
+  const { dir, home } = await makeFixtureVault();
+
+  // 1. Smart Lexical mode (no Ollama, no API needed)
+  const lexRes = await detectEmbedder({ semantic: { provider: 'lexical' } }, { BRAINLINK_HOME: home });
+  assert.equal(lexRes.available, false);
+  assert.equal(lexRes.provider, 'lexical');
+  assert.equal(lexRes.action, 'lexical_active');
+
+  // 2. Cloud API without key asks for key
+  const noKeyRes = await detectEmbedder({ semantic: { provider: 'openai' } }, { BRAINLINK_HOME: home });
+  assert.equal(noKeyRes.available, false);
+  assert.equal(noKeyRes.provider, 'openai');
+  assert.equal(noKeyRes.action, 'set_api_key');
+
+  // 3. Fake OpenAI-compatible /v1/models + /v1/embeddings server works end-to-end
+  let seenAuth = '';
+  const fakeCompat = http.createServer((req, res) => {
+    seenAuth = req.headers.authorization || '';
+    if (req.url === '/v1/models') {
+      res.writeHead(200, { 'Content-Type': 'application/json' }).end(JSON.stringify({ data: [{ id: 'local-embed-v1' }] }));
+      return;
+    }
+    if (req.url === '/v1/embeddings') {
+      let raw = '';
+      req.on('data', (c) => { raw += c; });
+      req.on('end', () => {
+        const body = JSON.parse(raw);
+        const data = body.input.map((txt, index) => ({
+          index,
+          embedding: /invoice|payment/i.test(txt) ? [1, 0, 0] : [0, 1, 0],
+        }));
+        res.writeHead(200, { 'Content-Type': 'application/json' }).end(JSON.stringify({ data }));
+      });
+      return;
+    }
+    res.writeHead(404).end();
+  });
+  await new Promise((r) => fakeCompat.listen(0, '127.0.0.1', r));
+  const compatUrl = `http://127.0.0.1:${fakeCompat.address().port}/v1`;
+
+  await mkdir(home, { recursive: true });
+  const cfg = normalize({ vaults: [{ name: 'Brain', path: dir }] });
+  const cfgFile = path.join(home, 'config.json');
+  await saveConfig(cfg, cfgFile);
+  const setup = await startSetup({ env: { BRAINLINK_HOME: home }, home: await tmp('s1-flex-userhome'), os: 'win32', port: 0, openUrl: null, useCli: false });
+
+  try {
+    const secretKey = 'sk-test-embed-secret-never-in-config-json';
+    const saveRes = await fetch(`http://127.0.0.1:${setup.port}/api/rag-config`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'X-BrainLink-Token': setup.token },
+      body: JSON.stringify({ provider: 'openai-compatible', url: compatUrl, model: 'local-embed-v1', api_key: secretKey }),
+    });
+    assert.equal(saveRes.status, 200);
+    const savedBody = await saveRes.json();
+    assert.equal(savedBody.ok, true);
+    assert.equal(savedBody.semantic?.available, true);
+    assert.equal(savedBody.semantic?.provider, 'openai-compatible');
+    assert.equal(savedBody.config?.has_api_key, true);
+    // Secret key must NEVER be echoed in HTTP responses or stored in config.json!
+    assert.ok(!JSON.stringify(savedBody).includes(secretKey), 'API key must never be echoed in /api/rag-config response');
+    const cfgRaw = await readFile(cfgFile, 'utf8');
+    assert.ok(!cfgRaw.includes(secretKey), 'API key must never be saved in config.json');
+
+    // Run semantic search through the configured OpenAI-compatible server
+    const loadedCfg = normalize(JSON.parse(cfgRaw));
+    const ctx = createContext(loadedCfg, { env: { BRAINLINK_HOME: home }, trustedLocal: true });
+    const searchRes = await searchWithVerdict(ctx, 'Brain', 'payment billing', { limit: 3 });
+    assert.equal(searchRes.semantic?.available, true);
+    assert.equal(searchRes.semantic?.provider, 'openai-compatible');
+    assert.equal(seenAuth, `Bearer ${secretKey}`);
+  } finally {
+    setup.server.close();
+    fakeCompat.close();
   }
 });

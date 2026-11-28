@@ -10,7 +10,7 @@ import { termFrequencies, terms, linkGraph, collection, suggestRelated, extractT
 import { deriveTypedRelations } from './typed-graph.mjs';
 import { appHome } from './config.mjs';
 import { rerankResults } from './rerank.mjs';
-import { detectEmbedder, VectorStore, fillVectors, embedTexts, nearest, PREFERRED_EMBED_MODEL } from './embed.mjs';
+import { detectEmbedder, publicEmbedStatus, VectorStore, fillVectors, embedTexts, nearest, PREFERRED_EMBED_MODEL } from './embed.mjs';
 import { buildWikiLayer, queryWikiLayer, isWikiIndexPath, renderAllowlistedWikiIndex, allowlistedWikiMeta, normalizeWikiPath } from './wiki-layer.mjs';
 import { findAgentByToken, publicAgent } from './mcp-agents.mjs';
 import { resolveTwinAgentScope, twinNoteMemoryAllowed } from './twin-profiles.mjs';
@@ -812,8 +812,8 @@ export async function searchWithVerdict(ctx, name, query, opts = {}) {
     ? { available: false, preferred_model: PREFERRED_EMBED_MODEL, reason: 'disabled for this search' }
     : await semanticStatus(ctx);
   const semantic = emb.available
-    ? { available: true, model: emb.model, preferred_model: emb.preferred_model || PREFERRED_EMBED_MODEL }
-    : { available: false, preferred_model: emb.preferred_model || PREFERRED_EMBED_MODEL, reason: emb.reason, ...(emb.setup_hint ? { setup_hint: emb.setup_hint } : {}) };
+    ? { available: true, provider: emb.provider || 'ollama', model: emb.model, preferred_model: emb.preferred_model || PREFERRED_EMBED_MODEL, ...(emb.action ? { action: emb.action } : {}) }
+    : { available: false, ...(emb.provider ? { provider: emb.provider } : {}), preferred_model: emb.preferred_model || PREFERRED_EMBED_MODEL, reason: emb.reason, ...(emb.action ? { action: emb.action } : {}), ...(emb.install_url ? { install_url: emb.install_url } : {}), ...(emb.setup_hint ? { setup_hint: emb.setup_hint } : {}) };
   const v = verdict(index, String(query || ''), results, opts.queries || []);
   const wikiLayer = !index.wiki?.present
     ? { present: false, consulted: false }
@@ -831,15 +831,19 @@ export async function searchWithVerdict(ctx, name, query, opts = {}) {
   return { status: v.status, coverage: v.coverage, semantic, wiki_layer: wikiLayer, ...(v.vault_words ? { vault_words: v.vault_words } : {}), ...(v.missing_words ? { missing_words: v.missing_words } : {}), ...(v.needs_translation ? { needs_translation: true } : {}), ...(note ? { note } : {}), results };
 }
 
-// Semantic layer: detect a local embedder once per context; embed a slice of missing chunks
+// Semantic layer: detect an embedder once per context; embed a slice of missing chunks
 // per search so large vaults fill in gradually.
-export async function semanticStatus(ctx) {
+async function getEmbedder(ctx) {
   ctx.embedder ||= detectEmbedder(ctx.cfg, ctx.env);
   return ctx.embedder;
 }
 
+export async function semanticStatus(ctx) {
+  return publicEmbedStatus(await getEmbedder(ctx));
+}
+
 async function semanticLists(ctx, name, index, queries) {
-  const emb = await semanticStatus(ctx);
+  const emb = await getEmbedder(ctx);
   if (!emb.available) return [];
   try {
     if (!ctx.stores.has(name)) ctx.stores.set(name, new VectorStore(ctx.dataDir, vaultRoot(ctx, name), emb.model));
@@ -852,7 +856,7 @@ async function semanticLists(ctx, name, index, queries) {
 
 // Pre-embed a whole vault in the background (called when the server starts).
 export async function warmSemantic(ctx, name) {
-  const emb = await semanticStatus(ctx);
+  const emb = await getEmbedder(ctx);
   if (!emb.available) return null;
   const index = await loadVault(ctx, name);
   if (!ctx.stores.has(name)) ctx.stores.set(name, new VectorStore(ctx.dataDir, vaultRoot(ctx, name), emb.model));

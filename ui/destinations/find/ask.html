@@ -4,9 +4,35 @@
     <div id="ask-rag-card" class="card" style="margin:10px 0 12px">
       <div class="row" style="justify-content:space-between;align-items:center">
         <b>Built-in Local RAG</b>
-        <span id="ask-rag-pill" class="pill">Checking…</span>
+        <div class="row" style="gap:8px;align-items:center">
+          <span id="ask-rag-pill" class="pill">Checking…</span>
+          <button type="button" class="link" id="ask-rag-toggle">Configure RAG</button>
+        </div>
       </div>
       <div id="ask-rag-detail" class="muted" style="font-size:13px">Hybrid retrieval: keyword + local embeddings + 00 MAP / 00 INDEX wiki routing. Private and excluded notes are never indexed.</div>
+      <div id="ask-rag-prompt" class="notice" hidden style="margin-top:8px"></div>
+      <div id="ask-rag-config" hidden style="margin-top:10px;padding-top:10px;border-top:1px solid var(--line);display:grid;gap:10px">
+        <label>Embedding provider
+          <select id="rag-provider">
+            <option value="ollama">Local Ollama (Recommended · 100% private, free)</option>
+            <option value="openai-compatible">Local OpenAI-compatible server (LM Studio / vLLM / LocalAI)</option>
+            <option value="openai">Cloud Embeddings API (OpenAI / HTTPS compatible)</option>
+            <option value="lexical">Smart Lexical + MAP/INDEX only (No Ollama, no API)</option>
+          </select>
+        </label>
+        <div id="rag-endpoint-fields" class="grid2">
+          <label>Endpoint URL<input id="rag-url" class="mono" placeholder="http://127.0.0.1:11434"></label>
+          <label>Embedding model<input id="rag-model" class="mono" placeholder="nomic-embed-text"></label>
+        </div>
+        <div id="rag-key-wrap" hidden>
+          <label>API key (stored locally with 0600 permissions, never in config.json)<input id="rag-api-key" type="password" autocomplete="off" placeholder="Leave blank to keep existing key"></label>
+          <p class="muted" style="font-size:12px;margin:4px 0 0">Cloud API mode sends only non-private, non-excluded note chunks for embedding. Private and ignored folders are never sent.</p>
+        </div>
+        <div class="row" style="justify-content:space-between;align-items:center">
+          <span id="rag-save-msg" class="muted" style="font-size:13px"></span>
+          <button type="button" class="primary" id="rag-save">Save RAG settings</button>
+        </div>
+      </div>
     </div>
     <div class="row" id="ask-vault-row" hidden><label><span data-i18n="ask.vaultLabel"></span><select id="ask-vault"></select></label></div>
     <div class="row"><input id="ask-q" aria-labelledby="ask-title" data-i18n-placeholder="ask.placeholder" style="flex:1;min-width:240px"><button class="primary" id="ask-go" data-i18n="ask.go"></button></div>

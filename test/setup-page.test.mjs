@@ -20,4 +20,9 @@ test('Setup loads ES-module permissions.js with type="module" and consistent acc
   assert.doesNotMatch(html, /Select every Twin this AI app should access/);
   assert.match(html, /id="ask-rag-card"/);
   assert.match(html, /Built-in Local RAG/);
+  assert.match(html, /id="ask-rag-config"/);
+  assert.match(html, /id="rag-provider"/);
+  assert.match(html, /value="openai-compatible"/);
+  assert.match(html, /value="openai"/);
+  assert.match(html, /value="lexical"/);
 });

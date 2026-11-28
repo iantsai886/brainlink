@@ -1,9 +1,20 @@
 // Read-only routes used by the Find destinations in the local setup app.
 // Dependencies are explicit so the HTTP route layer can be maintained by destination.
 import { buildAnswerReceipt } from '../../answer-receipt.mjs';
+import {
+  EMBED_PROVIDERS,
+  DEFAULT_URL,
+  DEFAULT_OPENAI_URL,
+  DEFAULT_LOCAL_COMPAT_URL,
+  PREFERRED_EMBED_MODEL,
+  DEFAULT_OPENAI_EMBED_MODEL,
+  publicEmbedStatus,
+  readEmbedApiKey,
+  saveEmbedApiKey,
+} from '../../embed.mjs';
 
 export function createFindRoutes({
-  file, env, normalize, loadConfig, localContext, searchWithVerdict,
+  file, env, normalize, loadConfig, saveConfig, localContext, searchWithVerdict,
   createReplayMisses, semanticStatus, plainText, readNote, loadVault,
   resolveNoteWikilinks,
 }) {
@@ -12,10 +23,59 @@ export function createFindRoutes({
     'GET /api/rag-status': async () => {
       const cfg = normalize(await loadConfig(file));
       const ctx = localContext(cfg, { ...env, BRAINLINK_AI_PLATFORM: '' });
-      const semantic = await semanticStatus(ctx).catch(() => ({ available: false, reason: 'unavailable' }));
+      const rawSem = await semanticStatus(ctx).catch(() => ({ available: false, provider: 'ollama', reason: 'unavailable' }));
+      const sem = publicEmbedStatus(rawSem);
+      const savedKey = await readEmbedApiKey(ctx.dataDir);
       return {
-        semantic,
+        semantic: sem,
+        config: {
+          provider: cfg.semantic?.provider || 'ollama',
+          url: cfg.semantic?.url || '',
+          model: cfg.semantic?.model || '',
+          has_api_key: Boolean(savedKey || env.BRAINLINK_EMBED_API_KEY),
+        },
+        defaults: {
+          ollama: { url: DEFAULT_URL, model: PREFERRED_EMBED_MODEL },
+          'openai-compatible': { url: DEFAULT_LOCAL_COMPAT_URL, model: PREFERRED_EMBED_MODEL },
+          openai: { url: DEFAULT_OPENAI_URL, model: DEFAULT_OPENAI_EMBED_MODEL },
+          lexical: { url: '', model: '' },
+        },
+        providers: EMBED_PROVIDERS,
         stages: ['lexical', 'local-embeddings', 'map-index'],
+      };
+    },
+    'POST /api/rag-config': async (b) => {
+      const provider = String(b?.provider || 'ollama').trim().toLowerCase();
+      if (!EMBED_PROVIDERS.includes(provider)) {
+        throw new Error(`Unsupported RAG provider "${provider}". Choose: ${EMBED_PROVIDERS.join(', ')}.`);
+      }
+      const url = String(b?.url || '').trim();
+      if (url && !/^https?:\/\//i.test(url)) throw new Error('Embedding endpoint URL must start with http:// or https://.');
+      if (provider === 'openai' && url && !/^https:\/\//i.test(url)) throw new Error('Cloud API embedding URL must use https://.');
+      const model = String(b?.model || '').trim().slice(0, 120);
+      const cfg = normalize(await loadConfig(file));
+      cfg.semantic = {
+        enabled: provider !== 'lexical',
+        provider,
+        ...(url ? { url } : {}),
+        ...(model ? { model } : {}),
+      };
+      await saveConfig(cfg, file);
+      const ctx = localContext(cfg, { ...env, BRAINLINK_AI_PLATFORM: '' });
+      if (typeof b?.api_key === 'string') {
+        await saveEmbedApiKey(ctx.dataDir, b.api_key);
+      }
+      const rawSem = await semanticStatus(ctx).catch(() => ({ available: false, provider, reason: 'unavailable' }));
+      const savedKey = await readEmbedApiKey(ctx.dataDir);
+      return {
+        ok: true,
+        semantic: publicEmbedStatus(rawSem),
+        config: {
+          provider: cfg.semantic.provider,
+          url: cfg.semantic.url || '',
+          model: cfg.semantic.model || '',
+          has_api_key: Boolean(savedKey || env.BRAINLINK_EMBED_API_KEY),
+        },
       };
     },
     // Cited local search for the owner. Vaults are searched separately; private vaults
