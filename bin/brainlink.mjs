@@ -31,7 +31,7 @@ import { evaluateTypedGraphDiscovery, TYPED_GRAPH_EVALUATOR_VERSION } from '../s
 import { appendErrata, listErrata, triageErrata, defaultErrataPath } from '../src/errata.mjs';
 import { runDoctor, declineCapability, undeclineCapability, formatDoctorReport } from '../src/doctor.mjs';
 import { inspectHermesTraces, formatHermesReport, defaultHermesHome } from '../src/hermes-observe.mjs';
-import { installSettings } from '../scripts/install-settings.mjs';
+import { installSettings } from '../src/install-settings.mjs';
 import { runRsiGateCli } from './rsi-gate.mjs';
 import { RsiGateError } from '../src/rsi-gate.mjs';
 
