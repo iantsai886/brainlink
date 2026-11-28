@@ -28,6 +28,7 @@ import { evaluateRetrieval, RETRIEVAL_EVALUATOR_VERSION } from '../src/retrieval
 import { createRsiWeekly, taipeiWeek } from '../src/rsi-weekly.mjs';
 import { evaluateSessionFiling } from '../src/sessions/filing-eval.mjs';
 import { evaluateTypedGraphDiscovery, TYPED_GRAPH_EVALUATOR_VERSION } from '../src/typed-graph-eval.mjs';
+import { appendErrata, listErrata, triageErrata, defaultErrataPath } from '../src/errata.mjs';
 import { runRsiGateCli } from './rsi-gate.mjs';
 import { RsiGateError } from '../src/rsi-gate.mjs';
 
@@ -245,6 +246,34 @@ async function main() {
       out(`\nOpen: ${l.counts.tasks} tasks, ${l.counts.next_actions} next actions, ${l.counts.decisions_waiting} decisions waiting, ${l.counts.unresolved_questions} questions`);
       for (const x of [...l.decisions_waiting.map((d) => `decision: ${d.decision}${d.path ? ` (${d.path})` : ''}`), ...l.next_actions.map((n) => `next: ${n.action}${n.path ? ` (${n.path})` : ''}`)].slice(0, 8)) out(`  · ${x}`);
       return;
+    }
+    case 'errata': {
+      const sub = argv[1];
+      const file = opt('file', defaultErrataPath());
+      if (sub === 'add') {
+        const entry = await appendErrata({
+          session_id: opt('session', ''),
+          ai_platform: opt('platform', process.env.BRAINLINK_AI_PLATFORM || 'unknown'),
+          agent: opt('agent', process.env.BRAINLINK_AGENT_ROLE || 'unknown'),
+          kind: opt('kind', ''),
+          verbatim_text: opt('text', ''),
+          context_refs: opt('context-ref', '') ? opt('context-ref', '').split(',').map((s) => s.trim()).filter(Boolean) : [],
+        }, { file });
+        out(JSON.stringify(entry, null, 2));
+        return;
+      }
+      if (sub === 'list') {
+        const rows = await listErrata({ file, status: opt('status', undefined), kind: opt('kind', undefined) });
+        out(JSON.stringify(rows, null, 2));
+        return;
+      }
+      if (sub === 'triage') {
+        const id = argv[2] && !argv[2].startsWith('--') ? argv[2] : opt('id', '');
+        const res = await triageErrata({ id, status: opt('status', ''), note: opt('note', ''), file });
+        out(JSON.stringify(res, null, 2));
+        return;
+      }
+      fail('use errata add, list, or triage');
     }
     case 'miss': {
       const rsi = createRsiWeekly({ home: appHome() });
