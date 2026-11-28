@@ -1,6 +1,13 @@
 <section id="ask-panel" hidden>
     <h2 id="ask-title" data-i18n="ask.title"></h2>
     <p class="hint" data-i18n="ask.hint"></p>
+    <div id="ask-rag-card" class="card" style="margin:10px 0 12px">
+      <div class="row" style="justify-content:space-between;align-items:center">
+        <b>Built-in Local RAG</b>
+        <span id="ask-rag-pill" class="pill">Checking…</span>
+      </div>
+      <div id="ask-rag-detail" class="muted" style="font-size:13px">Hybrid retrieval: keyword + local embeddings + 00 MAP / 00 INDEX wiki routing. Private and excluded notes are never indexed.</div>
+    </div>
     <div class="row" id="ask-vault-row" hidden><label><span data-i18n="ask.vaultLabel"></span><select id="ask-vault"></select></label></div>
     <div class="row"><input id="ask-q" aria-labelledby="ask-title" data-i18n-placeholder="ask.placeholder" style="flex:1;min-width:240px"><button class="primary" id="ask-go" data-i18n="ask.go"></button></div>
     <div id="ask-out" role="status" aria-live="polite" style="margin-top:14px"></div>

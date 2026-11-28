@@ -8,6 +8,16 @@ export function createFindRoutes({
   resolveNoteWikilinks,
 }) {
   return {
+    // Lightweight local RAG status for the Find -> Ask banner (no vault indexing required).
+    'GET /api/rag-status': async () => {
+      const cfg = normalize(await loadConfig(file));
+      const ctx = localContext(cfg, { ...env, BRAINLINK_AI_PLATFORM: '' });
+      const semantic = await semanticStatus(ctx).catch(() => ({ available: false, reason: 'unavailable' }));
+      return {
+        semantic,
+        stages: ['lexical', 'local-embeddings', 'map-index'],
+      };
+    },
     // Cited local search for the owner. Vaults are searched separately; private vaults
     // are never included in the wildcard shared-vault scope.
     'POST /api/ask': async (b) => {

@@ -1982,7 +1982,39 @@ async function drawGraph() {
   });
 }
 
-// ---- Ask your brain: cited instant answer ----
+// ---- Ask your brain: cited instant answer + Built-in Local RAG status ----
+function renderRagStatus(semantic, wikiLayer) {
+  const pill = $('ask-rag-pill');
+  const detail = $('ask-rag-detail');
+  if (!pill || !detail) return;
+  if (!semantic) {
+    pill.className = 'pill';
+    pill.textContent = 'UNMEASURED';
+    detail.textContent = 'Local RAG status could not be checked yet. Ask a question to run retrieval.';
+    return;
+  }
+  const hasEmbed = Boolean(semantic.available);
+  pill.className = hasEmbed ? 'pill on' : 'pill';
+  pill.textContent = hasEmbed ? `Active · ${semantic.model || 'local embeddings'}` : 'Keyword + MAP/INDEX (no local embeddings)';
+  const parts = [
+    hasEmbed
+      ? `Embeddings: ${semantic.model || 'ready'} (local Ollama)`
+      : `Embeddings: off${semantic.setup_hint ? ` — run ${semantic.setup_hint}` : ''}`,
+    wikiLayer?.present
+      ? `MAP/INDEX: ${wikiLayer.consulted ? `consulted (${(wikiLayer.matched_entries || []).length} matched)` : 'ready'}`
+      : 'MAP/INDEX: automatic when 00 MAP / 00 INDEX exist',
+    'Private & excluded notes never indexed · vault-relative citations',
+  ];
+  detail.textContent = parts.join(' · ');
+}
+async function refreshRagStatus() {
+  try {
+    const r = await api('GET', '/api/rag-status');
+    renderRagStatus(r.semantic, null);
+  } catch {
+    renderRagStatus(null, null);
+  }
+}
 function renderAskEmpty() { $('ask-out').innerHTML = `<p class="muted">${esc(t('ask.empty'))}</p>`; }
 function renderAskError(msg) { $('ask-out').innerHTML = `<p class="error-box">${esc(msg)}</p>`; }
 // One card per searched vault: vaults are searched separately and never merged, so each keeps
@@ -2019,7 +2051,11 @@ async function ask() {
   const query = $('ask-q').value.trim();
   if (!query) return;
   $('ask-out').innerHTML = `<p class="skeleton">${esc(t('ask.searching'))}</p>`;
-  try { renderAsk(await api('POST', '/api/ask', { query, vault: $('ask-vault').value || '*' })); }
+  try {
+    const res = await api('POST', '/api/ask', { query, vault: $('ask-vault').value || '*' });
+    if (res.semantic || res.wiki_layer) renderRagStatus(res.semantic, res.wiki_layer);
+    renderAsk(res);
+  }
   catch (e) { renderAskError(e.message); }
 }
 // Setup self-test and replayable misses. Both only read; the self-test changes nothing, and
@@ -2383,6 +2419,7 @@ async function load() {
   if (hasVault && !onboardingSync) loadWeeklyBenchmark().catch(e => { $('rsi-weekly-status').textContent = e.message; });
   if (hasVault && !onboardingSync) loadDiscovery().catch(e => { $('rsi-discovery-status').textContent = e.message; });
   if (hasVault && !onboardingSync) loadObservations().catch(e => { $('rsi-observe-status').textContent = e.message; });
+  if (hasVault && !guidedFirstRun) refreshRagStatus().catch(() => {});
   if (guidedFirstRun) {
     for (const id of ['ready','brain-panel','memory-review-panel','proposal-review-panel','decision-reviews-panel','conflicts-panel','tidy-panel','twin-profiles-panel','ask-panel','sessions-panel','handoffs-panel','rsi-panel','sync-onboarding']) $(id).hidden = true;
   }

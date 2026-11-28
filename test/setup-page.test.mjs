@@ -18,4 +18,6 @@ test('Setup loads ES-module permissions.js with type="module" and consistent acc
   assert.match(html, /<script\s+type="module"\s+src="permissions\.js"><\/script>/);
   assert.doesNotMatch(html, /<script\s+src="permissions\.js"><\/script>/);
   assert.doesNotMatch(html, /Select every Twin this AI app should access/);
+  assert.match(html, /id="ask-rag-card"/);
+  assert.match(html, /Built-in Local RAG/);
 });
