@@ -31,6 +31,7 @@ import { evaluateTypedGraphDiscovery, TYPED_GRAPH_EVALUATOR_VERSION } from '../s
 import { appendErrata, listErrata, triageErrata, defaultErrataPath } from '../src/errata.mjs';
 import { runDoctor, declineCapability, undeclineCapability, formatDoctorReport } from '../src/doctor.mjs';
 import { inspectHermesTraces, formatHermesReport, defaultHermesHome } from '../src/hermes-observe.mjs';
+import { installSettings } from '../scripts/install-settings.mjs';
 import { runRsiGateCli } from './rsi-gate.mjs';
 import { RsiGateError } from '../src/rsi-gate.mjs';
 
@@ -224,6 +225,23 @@ async function main() {
       out(`BrainLink ${VERSION}\nconfig: ${configPath()}\ndata:   ${appHome()}\ntimezone: ${ctx.tz}\nsemantic: ${sem.available ? `ready (${sem.model})` : `unavailable — ${sem.reason}${sem.setup_hint ? ` (${sem.setup_hint})` : ''}`}`);
       for (const v of cfg.vaults) out(`vault  ${v.name}: ${v.path}${await stat(v.path).then(() => '', () => '  ← MISSING')}`);
       for (const a of ctx.agents) out(`agent  ${a.name} @ ${a.vault}: "${a.activation[0]}" / "${a.close[0]}"`);
+      return;
+    }
+    case 'install': {
+      const target = opt('target', '');
+      if (!target) fail('install requires --target <config.json> (dry-run by default; pass --apply to write)');
+      const launch = launchSpec();
+      const incoming = {
+        mcpServers: {
+          brainlink: {
+            command: opt('server-cmd', launch.command),
+            args: launch.args,
+            env: { BRAINLINK_HOME: appHome() },
+          },
+        },
+      };
+      const res = await installSettings({ targetPath: target, incoming, apply: flag('apply') });
+      out(JSON.stringify(res, null, 2));
       return;
     }
     case 'hermes': {
