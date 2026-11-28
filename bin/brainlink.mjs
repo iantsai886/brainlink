@@ -30,6 +30,7 @@ import { evaluateSessionFiling } from '../src/sessions/filing-eval.mjs';
 import { evaluateTypedGraphDiscovery, TYPED_GRAPH_EVALUATOR_VERSION } from '../src/typed-graph-eval.mjs';
 import { appendErrata, listErrata, triageErrata, defaultErrataPath } from '../src/errata.mjs';
 import { runDoctor, declineCapability, undeclineCapability, formatDoctorReport } from '../src/doctor.mjs';
+import { inspectHermesTraces, formatHermesReport, defaultHermesHome } from '../src/hermes-observe.mjs';
 import { runRsiGateCli } from './rsi-gate.mjs';
 import { RsiGateError } from '../src/rsi-gate.mjs';
 
@@ -223,6 +224,19 @@ async function main() {
       out(`BrainLink ${VERSION}\nconfig: ${configPath()}\ndata:   ${appHome()}\ntimezone: ${ctx.tz}\nsemantic: ${sem.available ? `ready (${sem.model})` : `unavailable — ${sem.reason}${sem.setup_hint ? ` (${sem.setup_hint})` : ''}`}`);
       for (const v of cfg.vaults) out(`vault  ${v.name}: ${v.path}${await stat(v.path).then(() => '', () => '  ← MISSING')}`);
       for (const a of ctx.agents) out(`agent  ${a.name} @ ${a.vault}: "${a.activation[0]}" / "${a.close[0]}"`);
+      return;
+    }
+    case 'hermes': {
+      const sub = argv[1] || 'status';
+      if (!['status', 'triage', 'trace'].includes(sub)) fail('use hermes status, triage, or trace');
+      const report = await inspectHermesTraces({
+        hermesHome: opt('hermes-home', defaultHermesHome()),
+        traceDir: opt('trace-dir', ''),
+        expectedPersona: opt('persona', ''),
+        limit: Number(opt('limit', '20')),
+      });
+      out(flag('json') ? JSON.stringify(report, null, 2) : formatHermesReport(report, sub));
+      if (report.overall_health === 'FAILED') process.exitCode = 1;
       return;
     }
     case 'doctor': {
