@@ -24,6 +24,7 @@ import {
   RsiGateError,
   usageError,
 } from '../src/rsi-gate.mjs';
+import { defaultErrataPath, runHillClimbFromErrata } from '../src/errata.mjs';
 import { readFile } from 'node:fs/promises';
 
 const DEFAULT_SKILLS_DIR = process.env.RSI_SKILLS_DIR || 'G:\\My Drive\\Obsidian\\Brain\\60 Skills';
@@ -65,6 +66,16 @@ export async function runRsiGateCli(argv) {
     const val = argv[idx];
     return !val || val.startsWith('--') ? '' : val;
   };
+
+  if (cmd === 'hillclimb' || flag('from-errata')) {
+    const errataFile = path.resolve(opt('errata-file', defaultErrataPath()));
+    const budget = Number(opt('budget', '3'));
+    const maxNoImprove = Number(opt('max-no-improve', '2'));
+    const stateDir = path.resolve(opt('state-dir', path.join(appHome(), 'rsi-gate')));
+    const res = await runHillClimbFromErrata({ errataFile, budget, maxNoImprove, stateDir });
+    process.stdout.write(JSON.stringify(res, null, 2) + '\n');
+    return 0;
+  }
 
   const skillsDir = path.resolve(opt('skills-dir', DEFAULT_SKILLS_DIR));
   const logsDir = path.resolve(opt('logs-dir', DEFAULT_LOGS_DIR));
