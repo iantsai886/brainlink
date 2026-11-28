@@ -29,6 +29,7 @@ import { createRsiWeekly, taipeiWeek } from '../src/rsi-weekly.mjs';
 import { evaluateSessionFiling } from '../src/sessions/filing-eval.mjs';
 import { evaluateTypedGraphDiscovery, TYPED_GRAPH_EVALUATOR_VERSION } from '../src/typed-graph-eval.mjs';
 import { appendErrata, listErrata, triageErrata, defaultErrataPath } from '../src/errata.mjs';
+import { runDoctor, declineCapability, undeclineCapability, formatDoctorReport } from '../src/doctor.mjs';
 import { runRsiGateCli } from './rsi-gate.mjs';
 import { RsiGateError } from '../src/rsi-gate.mjs';
 
@@ -222,6 +223,32 @@ async function main() {
       out(`BrainLink ${VERSION}\nconfig: ${configPath()}\ndata:   ${appHome()}\ntimezone: ${ctx.tz}\nsemantic: ${sem.available ? `ready (${sem.model})` : `unavailable — ${sem.reason}${sem.setup_hint ? ` (${sem.setup_hint})` : ''}`}`);
       for (const v of cfg.vaults) out(`vault  ${v.name}: ${v.path}${await stat(v.path).then(() => '', () => '  ← MISSING')}`);
       for (const a of ctx.agents) out(`agent  ${a.name} @ ${a.vault}: "${a.activation[0]}" / "${a.close[0]}"`);
+      return;
+    }
+    case 'doctor': {
+      if (argv[1] === 'decline') {
+        const cap = argv[2];
+        if (!cap || cap.startsWith('--')) fail('doctor decline requires <capability>');
+        const res = await declineCapability(cap, { reason: opt('reason', ''), env: process.env });
+        out(flag('json') ? JSON.stringify(res, null, 2) : `${res.label} ${res.capability} (${res.reason})`);
+        return;
+      }
+      if (argv[1] === 'undecline') {
+        const cap = argv[2];
+        if (!cap || cap.startsWith('--')) fail('doctor undecline requires <capability>');
+        const res = await undeclineCapability(cap, { env: process.env });
+        out(flag('json') ? JSON.stringify(res, null, 2) : `re-enabled ${res.capability}`);
+        return;
+      }
+      const report = await runDoctor({
+        env: process.env,
+        repoRoot: ROOT,
+        reconcile: flag('reconcile'),
+        network: flag('network'),
+        clientOpts: clientOpts(),
+      });
+      out(flag('json') ? JSON.stringify(report, null, 2) : formatDoctorReport(report));
+      if (report.counts.broken > 0) process.exitCode = 1;
       return;
     }
     case 'selftest': {
