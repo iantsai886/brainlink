@@ -1,4 +1,4 @@
-// Read-only, trace-first observability for Iango's Hermes sidecar.
+// Read-only, trace-first observability for the Hermes sidecar.
 // NEVER mutates Hermes config, schedules, or state (uses only readFile/readdir/stat).
 // Judges run health from actual execution traces — never exit codes alone — and
 // verifies persona/soul loading FIRST at the top of every report.
