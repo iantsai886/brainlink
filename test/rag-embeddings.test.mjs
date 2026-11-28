@@ -283,7 +283,7 @@ test('S1: POST /api/rag-ollama-action supports one-click install, start, and pul
       const res = await fetch(`http://127.0.0.1:${setup.port}/api/rag-ollama-action`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', 'X-BrainLink-Token': setup.token },
-        body: JSON.stringify({ action }),
+        body: JSON.stringify(action === 'pull' ? { action, model: 'bge-m3', activate: true } : { action }),
       });
       assert.equal(res.status, 200);
       const body = await res.json();
@@ -291,8 +291,10 @@ test('S1: POST /api/rag-ollama-action supports one-click install, start, and pul
       assert.equal(body.action, action);
       assert.equal(body.method, 'mock');
       assert.ok(body.semantic && typeof body.semantic === 'object');
+      if (action === 'pull') assert.equal(body.config?.model, 'bge-m3');
     }
     assert.deepEqual(seenActions.map((x) => x.action), ['install', 'start', 'pull']);
+    assert.equal(seenActions[2].model, 'bge-m3');
 
     const bad = await fetch(`http://127.0.0.1:${setup.port}/api/rag-ollama-action`, {
       method: 'POST',

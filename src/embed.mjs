@@ -49,6 +49,13 @@ export const DEFAULT_LOCAL_COMPAT_URL = 'http://127.0.0.1:1234/v1';
 export const PREFERRED_EMBED_MODEL = 'nomic-embed-text';
 export const DEFAULT_OPENAI_EMBED_MODEL = 'text-embedding-3-small';
 export const EMBED_PROVIDERS = Object.freeze(['ollama', 'openai-compatible', 'openai', 'lexical']);
+export const RECOMMENDED_OLLAMA_EMBED_MODELS = Object.freeze([
+  { name: 'nomic-embed-text', note: 'Fast, lightweight (~274 MB, recommended)' },
+  { name: 'mxbai-embed-large', note: 'Higher accuracy English (~670 MB)' },
+  { name: 'bge-m3', note: 'Best multilingual / Chinese + English (~1.2 GB)' },
+  { name: 'all-minilm', note: 'Ultra-tiny & fast (~45 MB)' },
+  { name: 'snowflake-arctic-embed', note: 'Strong retrieval (~670 MB)' },
+]);
 const PROVIDER_SET = new Set(EMBED_PROVIDERS);
 
 const PREFERRED = [PREFERRED_EMBED_MODEL, 'mxbai-embed-large', 'bge-m3', 'all-minilm', 'snowflake-arctic-embed'];
@@ -164,6 +171,11 @@ export async function detectEmbedder(cfg = {}, env = process.env) {
   try {
     const tags = await getJson(`${url}/api/tags`, null, 2500);
     const names = (tags.models || []).map((m) => m.name || m.model).filter(Boolean);
+    let runningModels = [];
+    try {
+      const ps = await getJson(`${url}/api/ps`, null, 1000);
+      runningModels = (ps.models || []).map((m) => m.name || m.model).filter(Boolean);
+    } catch {}
     const want = env.BRAINLINK_EMBED_MODEL || sem.model;
     const model = want ? names.find((n) => n === want || n.startsWith(want + ':')) : PREFERRED.map((p) => names.find((n) => n.startsWith(p))).find(Boolean) || names.find((n) => /embed/i.test(n));
     if (!model) {
@@ -172,13 +184,24 @@ export async function detectEmbedder(cfg = {}, env = process.env) {
         provider: 'ollama',
         url,
         preferred_model: PREFERRED_EMBED_MODEL,
+        installed_models: names,
+        running_models: runningModels,
         action: 'pull_model',
         install_url: 'https://ollama.com',
         reason: names.length ? `no embedding model installed (${PULL_HINT.toLowerCase()})` : `Ollama has no models (${PULL_HINT.toLowerCase()})`,
         setup_hint: PULL_HINT,
       };
     }
-    return { available: true, provider: 'ollama', url, model, preferred_model: PREFERRED_EMBED_MODEL, action: 'ready' };
+    return {
+      available: true,
+      provider: 'ollama',
+      url,
+      model,
+      preferred_model: PREFERRED_EMBED_MODEL,
+      installed_models: names,
+      running_models: runningModels,
+      action: 'ready',
+    };
   } catch {
     const isDefaultLocal = url === DEFAULT_URL;
     const bin = isDefaultLocal ? await detectOllamaBinary(process.platform, env) : null;

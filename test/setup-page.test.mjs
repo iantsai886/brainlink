@@ -21,6 +21,10 @@ test('Setup loads ES-module permissions.js with type="module" and consistent acc
   assert.match(html, /id="ask-rag-card"/);
   assert.match(html, /Built-in Local RAG/);
   assert.match(html, /id="ask-rag-config"/);
+  assert.match(html, /id="ask-rag-models-bar"/);
+  assert.match(html, /id="rag-ollama-installed-select"/);
+  assert.match(html, /id="rag-ollama-install-select"/);
+  assert.match(html, /id="rag-ollama-pull-selected"/);
   assert.match(html, /id="rag-provider"/);
   assert.match(html, /value="openai-compatible"/);
   assert.match(html, /value="openai"/);

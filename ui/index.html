@@ -1995,12 +1995,14 @@ function syncRagFormFields() {
   const showKey = p === 'openai' || p === 'openai-compatible';
   if ($('rag-endpoint-fields')) $('rag-endpoint-fields').hidden = !showEndpoint;
   if ($('rag-key-wrap')) $('rag-key-wrap').hidden = !showKey;
+  if ($('rag-ollama-models-wrap')) $('rag-ollama-models-wrap').hidden = p !== 'ollama';
   if ($('rag-url') && RAG_DEFAULTS[p]) $('rag-url').placeholder = RAG_DEFAULTS[p].url;
   if ($('rag-model') && RAG_DEFAULTS[p]) $('rag-model').placeholder = RAG_DEFAULTS[p].model;
 }
 function renderRagStatus(semantic, wikiLayer, ragConfig) {
   const pill = $('ask-rag-pill');
   const detail = $('ask-rag-detail');
+  const modelsBar = $('ask-rag-models-bar');
   const promptEl = $('ask-rag-prompt');
   if (!pill || !detail) return;
   if (ragConfig && $('rag-provider')) {
@@ -2014,6 +2016,7 @@ function renderRagStatus(semantic, wikiLayer, ragConfig) {
     pill.className = 'pill';
     pill.textContent = 'UNMEASURED';
     detail.textContent = 'Local RAG status could not be checked yet. Ask a question to run retrieval.';
+    if (modelsBar) modelsBar.hidden = true;
     if (promptEl) promptEl.hidden = true;
     return;
   }
@@ -2038,6 +2041,39 @@ function renderRagStatus(semantic, wikiLayer, ragConfig) {
     'Private & excluded notes never indexed · vault-relative citations',
   ];
   detail.textContent = parts.join(' · ');
+
+  const installedModels = Array.isArray(semantic.installed_models) ? semantic.installed_models : [];
+  const runningModels = Array.isArray(semantic.running_models) ? semantic.running_models : [];
+  if (modelsBar) {
+    if (provider === 'ollama' && (hasEmbed || installedModels.length || runningModels.length)) {
+      modelsBar.hidden = false;
+      const activeText = semantic.model ? `<span><b>RAG model:</b> <code>${esc(semantic.model)}</code></span>` : '';
+      const runningText = runningModels.length
+        ? `<span><b>Running in Ollama:</b> ${runningModels.map((m) => `<code>${esc(m)}</code>`).join(', ')}</span>`
+        : `<span><b>Running in Ollama:</b> idle (loads automatically on search)</span>`;
+      const installedText = installedModels.length
+        ? `<span><b>Installed:</b> ${installedModels.length}</span>`
+        : '';
+      modelsBar.innerHTML = [activeText, runningText, installedText, '<button type="button" class="link" id="rag-models-manage">Change / install model</button>'].filter(Boolean).join(' · ');
+    } else {
+      modelsBar.hidden = true;
+      modelsBar.innerHTML = '';
+    }
+  }
+  const installedSelect = $('rag-ollama-installed-select');
+  const useBtn = $('rag-ollama-use-model');
+  if (installedSelect) {
+    if (installedModels.length) {
+      installedSelect.innerHTML = installedModels.map((m) => `<option value="${esc(m)}">${esc(m)}${m === semantic.model ? ' (active)' : ''}</option>`).join('');
+      if (semantic.model && installedModels.includes(semantic.model)) installedSelect.value = semantic.model;
+      installedSelect.disabled = false;
+      if (useBtn) useBtn.disabled = false;
+    } else {
+      installedSelect.innerHTML = '<option value="">No Ollama models installed yet</option>';
+      installedSelect.disabled = true;
+      if (useBtn) useBtn.disabled = true;
+    }
+  }
 
   if (promptEl) {
     if (!hasEmbed && !isLexical && (semantic.action === 'install_ollama' || semantic.action === 'start_ollama' || semantic.action === 'pull_model' || semantic.action === 'set_api_key' || semantic.action === 'start_local_server')) {
@@ -2137,6 +2173,46 @@ if ($('ask-rag-prompt')) $('ask-rag-prompt').addEventListener('click', (event) =
       actionBtn.disabled = false;
     }
   });
+});
+if ($('ask-rag-models-bar')) $('ask-rag-models-bar').addEventListener('click', (event) => {
+  if (!event.target.closest('#rag-models-manage')) return;
+  const el = $('ask-rag-config');
+  if (el) { el.hidden = false; syncRagFormFields(); }
+});
+if ($('rag-ollama-install-select')) $('rag-ollama-install-select').onchange = () => {
+  const custom = $('rag-ollama-custom-model');
+  if (custom) custom.hidden = $('rag-ollama-install-select').value !== '__custom__';
+};
+if ($('rag-ollama-use-model')) $('rag-ollama-use-model').onclick = () => act(async () => {
+  const model = $('rag-ollama-installed-select')?.value?.trim();
+  if (!model) return;
+  const msg = $('rag-ollama-model-msg');
+  if (msg) msg.textContent = `Switching to ${model}…`;
+  const res = await api('POST', '/api/rag-config', {
+    provider: 'ollama',
+    url: $('rag-url')?.value?.trim() || '',
+    model,
+  });
+  renderRagStatus(res.semantic, null, res.config);
+  if (msg) msg.textContent = `Active model set to ${model}.`;
+});
+if ($('rag-ollama-pull-selected')) $('rag-ollama-pull-selected').onclick = () => act(async () => {
+  const sel = $('rag-ollama-install-select')?.value;
+  const model = sel === '__custom__' ? ($('rag-ollama-custom-model')?.value?.trim() || '') : sel;
+  const msg = $('rag-ollama-model-msg');
+  if (!model) { if (msg) msg.textContent = 'Enter a model name first (e.g. nomic-embed-text).'; return; }
+  const btn = $('rag-ollama-pull-selected');
+  btn.disabled = true;
+  if (msg) msg.textContent = `Installing ${model} via Ollama… (first download may take a minute)`;
+  try {
+    const res = await api('POST', '/api/rag-ollama-action', { action: 'pull', model, activate: true });
+    renderRagStatus(res.semantic, null, res.config || null);
+    if (msg) msg.textContent = res.message || `Installed and activated ${model}.`;
+  } catch (err) {
+    if (msg) msg.textContent = err.message;
+  } finally {
+    btn.disabled = false;
+  }
 });
 if ($('ask-rag-toggle')) $('ask-rag-toggle').onclick = () => {
   const el = $('ask-rag-config');

@@ -10,6 +10,7 @@ import {
   DEFAULT_LOCAL_COMPAT_URL,
   PREFERRED_EMBED_MODEL,
   DEFAULT_OPENAI_EMBED_MODEL,
+  RECOMMENDED_OLLAMA_EMBED_MODELS,
   detectOllamaBinary,
   pullOllamaModel,
   publicEmbedStatus,
@@ -123,6 +124,7 @@ export function createFindRoutes({
           lexical: { url: '', model: '' },
         },
         providers: EMBED_PROVIDERS,
+        recommended_ollama_models: RECOMMENDED_OLLAMA_EMBED_MODELS,
         stages: ['lexical', 'local-embeddings', 'map-index'],
       };
     },
@@ -170,16 +172,33 @@ export function createFindRoutes({
       const model = String(b?.model || cfg.semantic?.model || PREFERRED_EMBED_MODEL).trim();
       const runner = typeof ollamaRunner === 'function' ? ollamaRunner : defaultOllamaAction;
       const outcome = await runner({ action, url, model, os, env, openUrl });
+      if (action === 'pull' && outcome?.ok !== false && b?.activate !== false && (!cfg.semantic?.provider || cfg.semantic.provider === 'ollama')) {
+        cfg.semantic = {
+          enabled: true,
+          provider: 'ollama',
+          ...(cfg.semantic?.url ? { url: cfg.semantic.url } : {}),
+          model,
+        };
+        await saveConfig(cfg, file);
+      }
       const ctx = localContext(cfg, { ...env, BRAINLINK_AI_PLATFORM: '' });
       const rawSem = await semanticStatus(ctx).catch(() => ({ available: false, provider: 'ollama', reason: 'unavailable' }));
+      const savedKey = await readEmbedApiKey(ctx.dataDir);
       return {
         ok: outcome?.ok !== false,
         action,
+        model,
         method: outcome?.method || '',
         message: outcome?.message || '',
         ...(outcome?.install_url ? { install_url: outcome.install_url } : {}),
         ...(outcome?.command ? { command: outcome.command } : {}),
         semantic: publicEmbedStatus(rawSem),
+        config: {
+          provider: cfg.semantic?.provider || 'ollama',
+          url: cfg.semantic?.url || '',
+          model: cfg.semantic?.model || '',
+          has_api_key: Boolean(savedKey || env.BRAINLINK_EMBED_API_KEY),
+        },
       };
     },
     // Cited local search for the owner. Vaults are searched separately; private vaults
