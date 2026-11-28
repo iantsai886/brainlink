@@ -3,6 +3,7 @@
 import { execFile, spawn } from 'node:child_process';
 import { setTimeout as delay } from 'node:timers/promises';
 import { buildAnswerReceipt } from '../../answer-receipt.mjs';
+import { MEMORY_TYPES, MEMORY_TYPE_LABELS } from '../../memory-ranking.mjs';
 import {
   EMBED_PROVIDERS,
   DEFAULT_URL,
@@ -125,6 +126,7 @@ export function createFindRoutes({
         },
         providers: EMBED_PROVIDERS,
         recommended_ollama_models: RECOMMENDED_OLLAMA_EMBED_MODELS,
+        memory_types: MEMORY_TYPE_LABELS,
         stages: ['lexical', 'local-embeddings', 'map-index'],
       };
     },
@@ -211,23 +213,27 @@ export function createFindRoutes({
       if (!query) throw new Error('Ask a question first.');
       const requested = typeof b.vault === 'string' ? b.vault : '';
       if (requested && requested !== '*' && !ctx.enabled.includes(requested)) throw new Error('Unknown vault.');
+      const reqMemoryType = typeof b.memory_type === 'string' ? b.memory_type.trim().toLowerCase() : '';
+      if (reqMemoryType && !MEMORY_TYPES.includes(reqMemoryType)) throw new Error(`Unknown memory_type "${reqMemoryType}".`);
       const shared = ctx.enabled.filter((name) => !ctx.byName.get(name).private);
       const scope = requested === '*' ? (shared.length ? shared : [ctx.enabled[0]]) : [requested || ctx.enabled[0]];
       const skippedPrivate = requested === '*' ? ctx.enabled.filter((name) => !scope.includes(name)) : [];
       const groups = [];
       for (const v of scope) {
-        const r = await searchWithVerdict(ctx, v, query, { limit: 5 });
+        const r = await searchWithVerdict(ctx, v, query, { limit: 5, ...(reqMemoryType ? { memory_type: reqMemoryType } : {}) });
         if (cfg.replay_misses?.enabled === true) await createReplayMisses({ home: ctx.dataDir }).record({ vault: v, query, status: r.status, source: 'ask', isPrivate: Boolean(ctx.byName.get(v).private) }).catch(() => {});
         const lessTrusted = (x) => (/^(proposed|draft)$/i.test(x.status || '') ? 1 : 0);
         const top = r.results.slice(0, 3).map((x, i) => ({ x, i })).sort((a, b) => lessTrusted(a.x) - lessTrusted(b.x) || a.i - b.i).map(({ x }) => x);
         groups.push({
           vault: v, private: Boolean(ctx.byName.get(v).private), status: r.status, coverage: r.coverage, note: r.note || null,
           wiki_layer: r.wiki_layer || null,
+          memory_intent: r.memory_intent || null,
+          memory_type_filter: r.memory_type_filter || null,
           receipt: buildAnswerReceipt(r, { vault: v, sources: top }),
           answer: r.status === 'not_in_brain' ? null : plainText(top[0]?.snippet) || null,
           sources: top.map((x) => ({
             vault: v, path: x.path, title: x.title, heading: x.heading || '', score: x.score,
-            date: x.date || '', status: x.status || '', confidence: x.confidence || '', historical: Boolean(x.historical),
+            date: x.date || '', status: x.status || '', confidence: x.confidence || '', memory_type: x.memory_type || 'semantic', historical: Boolean(x.historical),
             match: x.match || '', snippet: (plainText(x.snippet) || '').slice(0, 320),
           })),
         });

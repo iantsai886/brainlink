@@ -14,6 +14,7 @@ import { detectEmbedder, publicEmbedStatus, VectorStore, fillVectors, embedTexts
 import { buildWikiLayer, queryWikiLayer, isWikiIndexPath, renderAllowlistedWikiIndex, allowlistedWikiMeta, normalizeWikiPath } from './wiki-layer.mjs';
 import { findAgentByToken, publicAgent } from './mcp-agents.mjs';
 import { resolveTwinAgentScope, twinNoteMemoryAllowed } from './twin-profiles.mjs';
+import { MEMORY_TYPES, classifyNoteMemoryType, detectQueryMemoryIntent, memoryTypeScoreMultiplier } from './memory-ranking.mjs';
 
 const truthy = (v) => /^(1|true|yes|on)$/i.test(String(v || ''));
 
@@ -434,7 +435,8 @@ async function loadVaultFresh(ctx, name) {
       state.files.set(rel, { hash: null, mtime, bytes, ctime, note: null });
       return;
     }
-    state.files.set(rel, { hash, mtime, bytes, ctime, note: { rel, title, aliases, raw, meta, body, chunks, mtime, minor: isMinor(rel, title), date: noteDate(rel, meta, mtime), tags: extractTags(body, meta), generated: meta.generated_by === 'brainlink' || /^BrainLink\/Commands\//i.test(rel), historical: isHistorical(rel, meta), private: false } });
+    const noteTags = extractTags(body, meta);
+    state.files.set(rel, { hash, mtime, bytes, ctime, note: { rel, title, aliases, raw, meta, body, chunks, mtime, minor: isMinor(rel, title), date: noteDate(rel, meta, mtime), tags: noteTags, memory_type: classifyNoteMemoryType(rel, meta, noteTags), generated: meta.generated_by === 'brainlink' || /^BrainLink\/Commands\//i.test(rel), historical: isHistorical(rel, meta), private: false } });
   };
   for (let start = 0; start < fileStates.length; start += readBatchSize) {
     await Promise.all(fileStates.slice(start, start + readBatchSize).map(processFile));
@@ -593,18 +595,20 @@ export function summarize(index, i, extra = {}) {
   }
   const confidence = ['verified', 'reported', 'inferred', 'unknown'].includes(String(n.meta.confidence || '').toLowerCase())
     ? String(n.meta.confidence).toLowerCase() : undefined;
-  return { path: n.rel, title: n.title, date: n.date, status: n.meta.status || '', ...(confidence ? { confidence } : {}), collection: collection(n.rel), ...(n.tags.size ? { tags: [...n.tags] } : {}), historical: n.historical, ...(n.meta.superseded_by ? { superseded_by: n.meta.superseded_by } : {}), ...extra };
+  return { path: n.rel, title: n.title, date: n.date, status: n.meta.status || '', ...(confidence ? { confidence } : {}), memory_type: n.memory_type || classifyNoteMemoryType(n.rel, n.meta, n.tags), collection: collection(n.rel), ...(n.tags.size ? { tags: [...n.tags] } : {}), historical: n.historical, ...(n.meta.superseded_by ? { superseded_by: n.meta.superseded_by } : {}), ...extra };
 }
 
-// Filter predicate from {folder, tag, since, until}.
-export function noteFilter(index, { folder, tag, since, until, exclude } = {}) {
+// Filter predicate from {folder, tag, since, until, memory_type}.
+export function noteFilter(index, { folder, tag, since, until, memory_type, exclude } = {}) {
   const f = folder ? String(folder).replace(/^\/+|\/+$/g, '').toLowerCase() + '/' : null;
   const t = tag ? String(tag).replace(/^#/, '').toLowerCase() : null;
+  const mt = memory_type ? String(memory_type).trim().toLowerCase() : null;
   return (i) => {
     const n = index.notes[i];
     if (n.private || isWikiIndexPath(n.rel)) return false; // frontmatter private: true or wiki routing index — never surfaced as a search hit
     if (f && !n.rel.toLowerCase().startsWith(f)) return false;
     if (t && !n.tags.has(t)) return false;
+    if (mt && MEMORY_TYPES.includes(mt) && (n.memory_type || classifyNoteMemoryType(n.rel, n.meta, n.tags)) !== mt) return false;
     if (since && n.date < since) return false;
     if (until && n.date > until) return false;
     if (exclude && exclude.test(n.rel)) return false; // internal: e.g. evaluation notes
@@ -680,6 +684,8 @@ export function searchIndex(index, query, opts = {}) {
   }
   const candidates = new Set(top.map((x) => x.c.noteIdx));
   const qList = [...allTerms];
+  const memoryIntent = opts.memory_type ? null : detectQueryMemoryIntent(query);
+  const nowMs = Date.now();
   for (const x of top) {
     const i = x.c.noteIdx, note = index.notes[i];
     // Graph boost among candidates only: links 1.0, co-citations 0.5, shared tags 0.3; capped at ×1.2.
@@ -701,6 +707,17 @@ export function searchIndex(index, query, opts = {}) {
     }
     if (recent) x.s *= 1 + 0.3 * (x.recency || 0);
     if (x.wiki) x.s *= 1 + Math.min(0.45, 0.35 * x.wiki);
+    const noteDateMs = note.date ? Date.parse(note.date) : NaN;
+    const ageDays = Number.isFinite(noteDateMs) ? Math.max(0, (nowMs - noteDateMs) / 86400e3) : 0;
+    const mType = note.memory_type || classifyNoteMemoryType(note.rel, note.meta, note.tags);
+    x.s *= memoryTypeScoreMultiplier({
+      memoryType: mType,
+      intent: memoryIntent,
+      ageDays,
+      status: note.meta?.status || '',
+      superseded: Boolean(note.meta?.superseded_by),
+      recentQuery: recent,
+    });
     if (/(^|› )Changelog$/i.test(x.c.heading)) x.s *= 0.5;
     if (note.historical) x.s *= 0.3;
     if (note.generated) x.s *= 0.2;
@@ -828,7 +845,11 @@ export async function searchWithVerdict(ctx, name, query, opts = {}) {
   const note = v.status === 'not_in_brain' ? 'This search did not find a sufficiently strong match. Do not infer that the information is absent from the vault; suggest a rephrasing or another permitted source rather than guessing.'
     : v.needs_translation ? 'Most notes here are not in the language of this question. Search again with an English (or the notes\' language) translation in queries before answering or saying it is not in the notes.'
     : v.status === 'weak' ? `Only partial matches${v.missing_words ? ` (these words were not found in the indexed notes: ${v.missing_words.join(', ')})` : ''}. Answer only if a snippet clearly answers; otherwise explain that this search did not find a reliable answer, and suggest another search.` : null;
-  return { status: v.status, coverage: v.coverage, semantic, wiki_layer: wikiLayer, ...(v.vault_words ? { vault_words: v.vault_words } : {}), ...(v.missing_words ? { missing_words: v.missing_words } : {}), ...(v.needs_translation ? { needs_translation: true } : {}), ...(note ? { note } : {}), results };
+  const memoryIntent = opts.memory_type ? null : detectQueryMemoryIntent(query);
+  const memoryTypeFilter = opts.memory_type && MEMORY_TYPES.includes(String(opts.memory_type).toLowerCase())
+    ? String(opts.memory_type).toLowerCase()
+    : null;
+  return { status: v.status, coverage: v.coverage, semantic, wiki_layer: wikiLayer, ...(memoryIntent ? { memory_intent: memoryIntent } : {}), ...(memoryTypeFilter ? { memory_type_filter: memoryTypeFilter } : {}), ...(v.vault_words ? { vault_words: v.vault_words } : {}), ...(v.missing_words ? { missing_words: v.missing_words } : {}), ...(v.needs_translation ? { needs_translation: true } : {}), ...(note ? { note } : {}), results };
 }
 
 // Semantic layer: detect an embedder once per context; embed a slice of missing chunks

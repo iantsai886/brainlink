@@ -1,6 +1,6 @@
 {
   "name": "brainlink-mcp",
-  "version": "1.4.2",
+  "version": "1.5.0",
   "description": "BrainLink MCP: one Obsidian / Markdown second brain that every AI can search and write to safely.",
   "private": true,
   "type": "module",

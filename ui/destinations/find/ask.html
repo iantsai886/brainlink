@@ -58,7 +58,18 @@
         </div>
       </div>
     </div>
-    <div class="row" id="ask-vault-row" hidden><label><span data-i18n="ask.vaultLabel"></span><select id="ask-vault"></select></label></div>
+    <div class="row" id="ask-vault-row" hidden style="gap:12px;flex-wrap:wrap;align-items:flex-end">
+      <label><span data-i18n="ask.vaultLabel"></span><select id="ask-vault"></select></label>
+      <label>Memory type
+        <select id="ask-memory-type">
+          <option value="">All memory types (auto-routed)</option>
+          <option value="semantic">Knowledge &amp; Facts (semantic)</option>
+          <option value="procedural">Rules &amp; How-Tos (procedural)</option>
+          <option value="working">Active Work (working)</option>
+          <option value="episodic">History &amp; Sessions (episodic)</option>
+        </select>
+      </label>
+    </div>
     <div class="row"><input id="ask-q" aria-labelledby="ask-title" data-i18n-placeholder="ask.placeholder" style="flex:1;min-width:240px"><button class="primary" id="ask-go" data-i18n="ask.go"></button></div>
     <div id="ask-out" role="status" aria-live="polite" style="margin-top:14px"></div>
   </section>

@@ -25,6 +25,7 @@ test('Setup loads ES-module permissions.js with type="module" and consistent acc
   assert.match(html, /id="rag-ollama-installed-select"/);
   assert.match(html, /id="rag-ollama-install-select"/);
   assert.match(html, /id="rag-ollama-pull-selected"/);
+  assert.match(html, /id="ask-memory-type"/);
   assert.match(html, /id="rag-provider"/);
   assert.match(html, /value="openai-compatible"/);
   assert.match(html, /value="openai"/);

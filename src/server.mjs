@@ -319,9 +319,10 @@ export function createMcp(ctx, { onCall = () => {}, onProposal = null } = {}) {
         vault: vaultProp, query: { type: 'string', description: 'Words or a question. [[Note]] and #tag in the query are matched exactly.' },
         queries: { type: 'array', items: { type: 'string' }, maxItems: 4, description: 'Up to 4 rephrasings, synonyms or translations. Always add an English translation when the question is in another language (notes are often in a different language than the question).' },
         folder: { type: 'string' }, tag: { type: 'string' }, since: { type: 'string', description: 'YYYY-MM-DD' }, until: { type: 'string', description: 'YYYY-MM-DD' },
+        memory_type: { type: 'string', enum: ['working', 'semantic', 'procedural', 'episodic'], description: 'Optional filter by memory type: working (active work), semantic (knowledge & facts), procedural (rules & how-tos), episodic (history & sessions).' },
         limit: { type: 'integer', minimum: 1, maximum: 25, default: 4 }, detail: { type: 'string', enum: ['compact', 'full'], default: 'compact', description: 'Compact keeps all selected source content and omits internal ranking diagnostics; full includes those diagnostics.' } }, required: ['vault', 'query'] },
       run: async (a) => {
-        const result = await searchWithVerdict(ctx, a.vault, a.query, { limit: a.limit ?? 4, queries: a.queries, folder: a.folder, tag: a.tag, since: a.since, until: a.until });
+        const result = await searchWithVerdict(ctx, a.vault, a.query, { limit: a.limit ?? 4, queries: a.queries, folder: a.folder, tag: a.tag, since: a.since, until: a.until, memory_type: a.memory_type });
         const projected = a.detail === 'full' ? result : compactSearchResponse(result);
         return { ...projected, receipt: buildAnswerReceipt(result, { vault: a.vault }) };
       } },
@@ -329,6 +330,7 @@ export function createMcp(ctx, { onCall = () => {}, onProposal = null } = {}) {
       description: 'Question-focused retrieval for token efficiency. Returns ranked excerpts with exact vault paths, titles, dates and status plus a compact receipt for those visible sources. The receipt includes search mode, missing words and a trust basis; coverage and missing-word signals are heuristics, not proof that the answer is complete or absent. Defaults to 4 sources and at most 1200 excerpt characters total (300 per source); use max_total_chars to lower the whole-packet character budget. Character count is a size limit, not an exact token count. If an excerpt is marked truncated or is insufficient, use vault_read_note on its exact path. If status is not_in_brain, do not guess. Respects the same vault, privacy, Twin memory-type and scope filters as vault_search. A packet is not proof that omitted sources do not exist.',
       inputSchema: { type: 'object', properties: {
         vault: vaultProp, query: { type: 'string' }, queries: { type: 'array', items: { type: 'string' }, maxItems: 4 },
+        memory_type: { type: 'string', enum: ['working', 'semantic', 'procedural', 'episodic'], description: 'Optional filter by memory type.' },
         max_sources: { type: 'integer', minimum: 1, maximum: 8, default: 4 }, excerpt_chars: { type: 'integer', minimum: 80, maximum: 300, default: 300 },
         max_total_chars: { type: 'integer', minimum: 80, maximum: 2400, description: 'Maximum combined excerpt characters. Defaults to max_sources × excerpt_chars.' },
       }, required: ['vault', 'query'] },
@@ -336,7 +338,7 @@ export function createMcp(ctx, { onCall = () => {}, onProposal = null } = {}) {
         const maxSources = Number.isInteger(a.max_sources) ? Math.max(1, Math.min(8, a.max_sources)) : 4;
         const excerptChars = Number.isInteger(a.excerpt_chars) ? Math.max(80, Math.min(300, a.excerpt_chars)) : 300;
         const maxTotalChars = Number.isInteger(a.max_total_chars) ? Math.max(80, Math.min(2400, a.max_total_chars)) : maxSources * excerptChars;
-        const result = await searchWithVerdict(ctx, a.vault, a.query, { limit: maxSources, queries: a.queries });
+        const result = await searchWithVerdict(ctx, a.vault, a.query, { limit: maxSources, queries: a.queries, memory_type: a.memory_type });
         return buildContextPacket(result, { vault: a.vault, maxSources, excerptChars, maxTotalChars });
       } },
     { name: 'vault_recent', title: 'What changed recently', annotations: RO,

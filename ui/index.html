@@ -2238,7 +2238,13 @@ function renderAskError(msg) { $('ask-out').innerHTML = `<p class="error-box">${
 // One card per searched vault: vaults are searched separately and never merged, so each keeps
 // its own verdict. Each source shows the note's own date, status and confidence, and flags
 // older or superseded notes, so the owner can judge trust before opening it.
-function askSourceMeta(x) { return [x.date, x.status, x.confidence].filter(Boolean).join(' · '); }
+const MEMORY_TYPE_LABEL = {
+  working: 'Active Work',
+  semantic: 'Knowledge & Facts',
+  procedural: 'Rules & How-Tos',
+  episodic: 'History & Sessions',
+};
+function askSourceMeta(x) { return [x.memory_type ? (MEMORY_TYPE_LABEL[x.memory_type] || x.memory_type) : '', x.date, x.status, x.confidence].filter(Boolean).join(' · '); }
 function renderAskGroup(g, showVault) {
   const vaultLabel = showVault ? `<b>${esc(g.private ? t('ask.privateVault', { vault: g.vault }) : g.vault)}</b>` : '';
   if (g.status === 'not_in_brain') {
@@ -2270,7 +2276,8 @@ async function ask() {
   if (!query) return;
   $('ask-out').innerHTML = `<p class="skeleton">${esc(t('ask.searching'))}</p>`;
   try {
-    const res = await api('POST', '/api/ask', { query, vault: $('ask-vault').value || '*' });
+    const memoryType = $('ask-memory-type')?.value || '';
+    const res = await api('POST', '/api/ask', { query, vault: $('ask-vault').value || '*', ...(memoryType ? { memory_type: memoryType } : {}) });
     if (res.semantic || res.wiki_layer) renderRagStatus(res.semantic, res.wiki_layer);
     renderAsk(res);
   }
