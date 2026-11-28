@@ -186,8 +186,13 @@ test('S1: flexible RAG supports Ollama install prompt, OpenAI-compatible local s
   assert.equal(lexRes.provider, 'lexical');
   assert.equal(lexRes.action, 'lexical_active');
 
-  // 2. Cloud API without key asks for key
-  const noKeyRes = await detectEmbedder({ semantic: { provider: 'openai' } }, { BRAINLINK_HOME: home });
+  // 2. Cloud API without consent requires consent first; with consent and no key asks for key
+  const noConsentRes = await detectEmbedder({ semantic: { provider: 'openai' } }, { BRAINLINK_HOME: home });
+  assert.equal(noConsentRes.available, false);
+  assert.equal(noConsentRes.provider, 'openai');
+  assert.equal(noConsentRes.action, 'consent_required');
+
+  const noKeyRes = await detectEmbedder({ semantic: { provider: 'openai', remote_consent: true } }, { BRAINLINK_HOME: home });
   assert.equal(noKeyRes.available, false);
   assert.equal(noKeyRes.provider, 'openai');
   assert.equal(noKeyRes.action, 'set_api_key');

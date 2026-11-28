@@ -18,7 +18,7 @@ import { CLIENTS, resolveClient, detect, connectClient, disconnectClient, readCl
 import { createContext, search, searchWithVerdict, semanticStatus, readNote, related as relatedNotes, relatedText, ensureDefaultIgnore, readExcludedFolders, writeExcludedFolders, DEFAULT_EXCLUDED_FOLDERS, SUGGESTED_EXCLUDED_FOLDERS, safeJoin, vaultRoot, countVisibleNotes, parseFrontmatter, inspectVaultStructure, findSecrets } from './core.mjs';
 import { extractTags } from './graph.mjs';
 import { ROOT, launchSpec, readActivity, refreshMap, logActivity } from './runtime.mjs';
-import { detectEmbedder } from './embed.mjs';
+import { detectEmbedder, publicEmbedStatus } from './embed.mjs';
 import { validateRerankerSettings, testReranker } from './rerank.mjs';
 import { vaultHealth, brief as createBrief } from './insights.mjs';
 import { loadVault } from './core.mjs';
@@ -1334,7 +1334,7 @@ export async function startSetup(opts = {}) {
       agent_skills: Object.fromEntries(await Promise.all(['claude-code', 'codex', 'gemini', 'antigravity', 'antigravity-cli', 'hermes', 'deepseek-harness'].map(async (client) => [client, await inspectAgentSkills({ client, sourceRoot: path.join(ROOT, 'skills'), stateDir: appHome(env), home, env }).catch((error) => ({ supported: true, root: skillClientRoot(client, { home, env }), skills: [], error: error.message || String(error) }))]))),
       http: { port: cfg.http.port, token_set: Boolean(cfg.http.token) },
       activity: await readActivity(env, 15),
-      semantic: await detectEmbedder(cfg, env),
+      semantic: publicEmbedStatus(await detectEmbedder(cfg, env)),
       reranker: cfg.reranker,
       obsidian_vaults: (await findObsidianVaults({ home, os, env })).filter((o) => !cfg.vaults.some((v) => path.resolve(v.path) === path.resolve(o.path))),
       sync: (() => {

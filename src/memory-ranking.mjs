@@ -69,7 +69,7 @@ export function classifyNoteMemoryType(rel = '', meta = {}, tags = null) {
   return 'semantic';
 }
 
-const PROCEDURAL_INTENT = /\b(how\s+(do|to|should|can)|sop|runbook|procedure|checklist|workflow|playbook|policy|rule|rules|guideline|skill|steps?\s+to|protocol)\b|怎麼做|怎么做|如何|流程|規則|规则|規範|规范|步驟|步骤|指南/i;
+const PROCEDURAL_INTENT = /\b(how\s+(do|to|should|can)|sop|runbook|procedure|checklist|workflow|playbook|guideline|skill|steps?\s+to|protocol)\b|怎麼做|怎么做|如何|流程|步驟|步骤|指南/i;
 const EPISODIC_INTENT = /\b(yesterday|last\s+(week|month|session|meeting|time)|what\s+happened|meeting\s+notes?|session\s+(log|summary)|transcript|timeline|when\s+did\s+we|on\s+(monday|tuesday|wednesday|thursday|friday|saturday|sunday))\b|昨天|上週|上周|上次|會議記錄|会议记录|發生了什麼|发生了什么|工作階段|会话/i;
 const WORKING_INTENT = /\b(todo|to-do|pending|open\s+loops?|handoff|hand-off|next\s+steps?|in\s+progress|action\s+items?|follow[- ]?up|blocked|current\s+task)\b|待辦|待办|未完成|交接|下一步|進行中|进行中/i;
 const SEMANTIC_INTENT = /\b(what\s+is|who\s+(is|owns)|definition|decision|decided|architecture|spec|specification|preference|pricing|profile|overview)\b|是什麼|是什么|決定|决定|架構|架构|偏好|規格|规格/i;
@@ -86,6 +86,7 @@ export function detectQueryMemoryIntent(query) {
 
 const CLOSED_WORKING_STATUS = /^(done|closed|completed|resolved|archived|cancelled|canceled)$/i;
 const CANONICAL_STATUS = /^(canonical|verified|active|final|approved)$/i;
+const UNREVIEWED_STATUS = /^(proposed|draft|unverified_draft)$/i;
 
 export function memoryTypeScoreMultiplier({
   memoryType = 'semantic',
@@ -98,20 +99,21 @@ export function memoryTypeScoreMultiplier({
   const type = MEMORY_TYPE_SET.has(memoryType) ? memoryType : 'semantic';
   const days = Number.isFinite(ageDays) && ageDays > 0 ? ageDays : 0;
   const st = String(status || '').trim();
+  const isUnreviewed = UNREVIEWED_STATUS.test(st);
   let mult = 1;
 
-  // Deterministic query-intent alignment boost (bounded so relevance still dominates).
-  if (intent && MEMORY_TYPE_SET.has(intent) && type === intent) {
-    mult *= 1.22;
+  // Deterministic query-intent alignment boost (capped at x1.10; never applied to proposed/draft notes).
+  if (!isUnreviewed && intent && MEMORY_TYPE_SET.has(intent) && type === intent) {
+    mult *= 1.10;
   }
 
   // Memory-type-specific lifecycle & decay curve.
   if (type === 'procedural') {
     // Authoritative rules/SOPs do not decay with age; only supersession demotes them.
-    if (CANONICAL_STATUS.test(st)) mult *= 1.05;
+    if (!isUnreviewed && CANONICAL_STATUS.test(st)) mult *= 1.05;
   } else if (type === 'semantic') {
     // Durable knowledge decays very slowly; canonical facts get a mild boost.
-    if (CANONICAL_STATUS.test(st)) mult *= 1.06;
+    if (!isUnreviewed && CANONICAL_STATUS.test(st)) mult *= 1.06;
     if (days > 365) mult *= Math.max(0.92, 1 - Math.min(0.08, ((days - 365) / 1825) * 0.08));
   } else if (type === 'episodic') {
     // Session logs & daily notes favor recency unless explicitly queried for history.
@@ -122,7 +124,7 @@ export function memoryTypeScoreMultiplier({
     // Working handoffs/tasks decay rapidly once stale or closed.
     if (CLOSED_WORKING_STATUS.test(st)) {
       mult *= 0.55;
-    } else if (days <= 14) {
+    } else if (!isUnreviewed && days <= 14) {
       mult *= 1.08;
     } else if (days > 30) {
       mult *= Math.max(0.72, 1 - Math.min(0.28, ((days - 30) / 90) * 0.28));

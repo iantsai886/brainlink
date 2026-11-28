@@ -1693,6 +1693,7 @@ test('meaning-based search with a local embedding model (fake Ollama)', async ()
   const fake = httpServer(async (req, res) => {
     let body = ''; for await (const c of req) body += c;
     if (req.url === '/api/tags') return res.end(JSON.stringify({ models: [{ name: 'nomic-embed-text:latest' }] }));
+    if (req.url === '/api/ps') return res.end(JSON.stringify({ models: [] }));
     const { input } = JSON.parse(body);
     res.end(JSON.stringify({ embeddings: input.map(vec) }));
   });
